@@ -6,6 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.audit import log_event
+from app.contact_validation import ensure_organisation_trading_name
 from app.db import get_db
 from app.deps import get_current_user
 from app.models import Contact, User
@@ -60,6 +61,7 @@ def update_contact(
     data = payload.model_dump(exclude_unset=True)
     for key, value in data.items():
         setattr(contact, key, value)
+    ensure_organisation_trading_name(contact.type, contact.trading_name)
     contact.updated_at = datetime.utcnow()
 
     db.add(contact)

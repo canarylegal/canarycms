@@ -407,8 +407,15 @@ def webdav_get_file(
     if not str(abs_path).startswith(str(FILES_ROOT)) or not abs_path.exists():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
     data = abs_path.read_bytes()
-    total_len = len(data)
     media_type = _effective_webdav_media_type(frow)
+    if (
+        media_type.split(";", 1)[0].strip()
+        == "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    ):
+        from app.docx_util import ensure_docx_proofing_language_en_gb_bytes
+
+        data = ensure_docx_proofing_language_en_gb_bytes(data)
+    total_len = len(data)
     last_mod = frow.updated_at or frow.created_at
     if last_mod is not None:
         # Python 3.12 format_datetime(usegmt=True) requires tzinfo == datetime.timezone.utc exactly.

@@ -15,6 +15,8 @@ type OoConfig = {
   document_type: string
   document: Record<string, unknown>
   editor_config: Record<string, unknown>
+  /** Case compose-office: file is hidden until Save publishes it — closing should still confirm save. */
+  oo_compose_pending?: boolean
 }
 
 type EditorTarget =
@@ -122,11 +124,15 @@ export default function EditorPage() {
   const [err, setErr] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [closing, setClosing] = useState(false)
+  /** Save from the “unsaved changes” strip — separate from ``closing`` so Cancel stays enabled (no soft-lock). */
+  const [unsavedSaveBusy, setUnsavedSaveBusy] = useState(false)
   /**
    * Session has edits that are not committed via our Save path yet. Latched when ONLYOFFICE reports
    * active editing; not cleared on DS sync (`event.data === false` — that is not “saved to Canary”).
    */
   const [documentDirty, setDocumentDirty] = useState(false)
+  /** New compose document not yet published — treat like unsaved for Close even if OO reports no edits. */
+  const [composePublishPending, setComposePublishPending] = useState(false)
   const hasUncommittedOoEditsRef = useRef(false)
   const [unsavedCloseOpen, setUnsavedCloseOpen] = useState(false)
   const [pdfExportBusy, setPdfExportBusy] = useState(false)
@@ -137,25 +143,33 @@ export default function EditorPage() {
   const printTabRef = useRef<Window | null>(null)
   const token = localStorage.getItem('token') ?? undefined
 
-  // Fetch editor config on mount
+  // Fetch editor config on mount. AbortController avoids overlapping onlyoffice-config calls
+  // (React Strict Mode remount, fast tab switches) minting extra WebDAV sessions server-side.
   useEffect(() => {
     if (!params) {
       setErr('Invalid editor URL — expected /editor/{caseId}/{fileId} or /editor/precedent/{precedentId}')
       return
     }
+    const ac = new AbortController()
     const configUrl = params.mode === 'precedent'
       ? `/precedents/${params.precedentId}/onlyoffice-config`
       : `/cases/${params.caseId}/files/${params.fileId}/onlyoffice-config`
-    apiFetch<OoConfig>(configUrl, { token })
+    apiFetch<OoConfig>(configUrl, { token, signal: ac.signal })
       .then((data) => {
+        if (ac.signal.aborted) return
         setErr(null)
         setCfg(data)
         setFilename((data.document as { title?: string }).title ?? '')
+        setComposePublishPending(Boolean(data.oo_compose_pending))
       })
       .catch((e: unknown) => {
+        if (ac.signal.aborted) return
+        const name = e && typeof e === 'object' && 'name' in e ? String((e as { name: unknown }).name) : ''
+        if (name === 'AbortError') return
         const m = (e as { message?: string }).message?.trim()
         setErr(m || 'Could not load editor config')
       })
+    return () => ac.abort()
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
@@ -174,7 +188,7 @@ export default function EditorPage() {
       const isP = ev.key === 'p' || ev.key === 'P'
       if (!isP || ev.altKey) return
       if (!ev.ctrlKey && !ev.metaKey) return
-      if (!cfg || !apiRef.current?.downloadAs || pdfExportBusy || saving || closing) return
+      if (!cfg || !apiRef.current?.downloadAs || pdfExportBusy || saving || closing || unsavedSaveBusy) return
       ev.preventDefault()
       const w = window.open(
         'about:blank',
@@ -212,7 +226,7 @@ export default function EditorPage() {
     }
     window.addEventListener('keydown', onKey, true)
     return () => window.removeEventListener('keydown', onKey, true)
-  }, [cfg, pdfExportBusy, saving, closing])
+  }, [cfg, pdfExportBusy, saving, closing, unsavedSaveBusy])
 
   // Initialise OO DS editor once config is available
   useEffect(() => {
@@ -387,6 +401,7 @@ export default function EditorPage() {
       }
       hasUncommittedOoEditsRef.current = false
       setDocumentDirty(false)
+      setComposePublishPending(false)
       return true
     } catch (e: unknown) {
       setErr((e as { message?: string }).message ?? 'Save failed. Keep this window open and try again.')
@@ -450,14 +465,14 @@ export default function EditorPage() {
   }
 
   function handleCloseClick() {
-    if (!params || saving || closing || !cfg) return
-    if (!documentDirty) void performCloseClean()
+    if (!params || saving || closing || unsavedSaveBusy || !cfg) return
+    if (!documentDirty && !composePublishPending) void performCloseClean()
     else setUnsavedCloseOpen(true)
   }
 
   async function handleUnsavedCloseSave() {
-    if (!params || closing) return
-    setClosing(true)
+    if (!params || unsavedSaveBusy) return
+    setUnsavedSaveBusy(true)
     try {
       const ok = await performSave()
       if (!ok) return
@@ -466,11 +481,12 @@ export default function EditorPage() {
       notifyCaseFilesChangedIfCase()
       window.close()
     } finally {
-      setClosing(false)
+      setUnsavedSaveBusy(false)
     }
   }
 
   function handleUnsavedCloseDontSave() {
+    if (unsavedSaveBusy) return
     setUnsavedCloseOpen(false)
     void performCloseDiscardUnsaved()
   }
@@ -520,7 +536,8 @@ export default function EditorPage() {
           type="button"
           title="Opens a print dialog via HTML preview (works when the browser treats ONLYOFFICE PDFs as downloads)."
           onClick={() => {
-            if (pdfExportBusy || !apiRef.current?.downloadAs || !cfg || saving || closing) return
+            if (pdfExportBusy || !apiRef.current?.downloadAs || !cfg || saving || closing || unsavedSaveBusy)
+              return
             const w = window.open(
               'about:blank',
               'canary_oo_print',
@@ -555,17 +572,17 @@ export default function EditorPage() {
               }
             }
           }}
-          disabled={pdfExportBusy || saving || closing || !cfg}
+          disabled={pdfExportBusy || saving || closing || unsavedSaveBusy || !cfg}
           style={{
             background: 'rgba(15,23,42,0.06)',
             border: '1px solid rgba(15,23,42,0.15)',
             color: '#334155',
-            cursor: pdfExportBusy || saving || closing || !cfg ? 'default' : 'pointer',
+            cursor: pdfExportBusy || saving || closing || unsavedSaveBusy || !cfg ? 'default' : 'pointer',
             fontSize: 12,
             padding: '3px 10px',
             borderRadius: 4,
             flexShrink: 0,
-            opacity: pdfExportBusy || saving || closing || !cfg ? 0.5 : 1,
+            opacity: pdfExportBusy || saving || closing || unsavedSaveBusy || !cfg ? 0.5 : 1,
             whiteSpace: 'nowrap',
           }}
         >
@@ -575,7 +592,7 @@ export default function EditorPage() {
           type="button"
           title="Download ONLYOFFICE’s PDF in a new tab (browser PDF handler)."
           onClick={() => {
-            if (pdfExportBusy || !apiRef.current?.downloadAs || saving || closing) return
+            if (pdfExportBusy || !apiRef.current?.downloadAs || saving || closing || unsavedSaveBusy) return
             pendingDownloadAsRef.current = 'export'
             setPdfExportBusy(true)
             if (pdfExportTimeoutRef.current !== undefined) clearTimeout(pdfExportTimeoutRef.current)
@@ -593,17 +610,17 @@ export default function EditorPage() {
               setPdfExportBusy(false)
             }
           }}
-          disabled={pdfExportBusy || saving || closing || !cfg}
+          disabled={pdfExportBusy || saving || closing || unsavedSaveBusy || !cfg}
           style={{
             background: 'rgba(15,23,42,0.06)',
             border: '1px solid rgba(15,23,42,0.15)',
             color: '#334155',
-            cursor: pdfExportBusy || saving || closing || !cfg ? 'default' : 'pointer',
+            cursor: pdfExportBusy || saving || closing || unsavedSaveBusy || !cfg ? 'default' : 'pointer',
             fontSize: 12,
             padding: '3px 10px',
             borderRadius: 4,
             flexShrink: 0,
-            opacity: pdfExportBusy || saving || closing || !cfg ? 0.5 : 1,
+            opacity: pdfExportBusy || saving || closing || unsavedSaveBusy || !cfg ? 0.5 : 1,
             whiteSpace: 'nowrap',
           }}
         >
@@ -612,17 +629,17 @@ export default function EditorPage() {
         <button
           type="button"
           onClick={() => void handleSaveChanges()}
-          disabled={saving || closing || !cfg}
+          disabled={saving || closing || unsavedSaveBusy || !cfg}
           style={{
             background: 'rgba(37,99,235,0.12)',
             border: '1px solid rgba(37,99,235,0.45)',
             color: '#1d4ed8',
-            cursor: saving || closing || !cfg ? 'default' : 'pointer',
+            cursor: saving || closing || unsavedSaveBusy || !cfg ? 'default' : 'pointer',
             fontSize: 12,
             padding: '3px 10px',
             borderRadius: 4,
             flexShrink: 0,
-            opacity: saving || closing || !cfg ? 0.5 : 1,
+            opacity: saving || closing || unsavedSaveBusy || !cfg ? 0.5 : 1,
             whiteSpace: 'nowrap',
           }}
         >
@@ -636,36 +653,36 @@ export default function EditorPage() {
             <button
               type="button"
               onClick={() => void handleUnsavedCloseSave()}
-              disabled={closing}
+              disabled={unsavedSaveBusy}
               style={{
                 background: 'rgba(37,99,235,0.12)',
                 border: '1px solid rgba(37,99,235,0.45)',
                 color: '#1d4ed8',
-                cursor: closing ? 'default' : 'pointer',
+                cursor: unsavedSaveBusy ? 'default' : 'pointer',
                 fontSize: 12,
                 padding: '3px 10px',
                 borderRadius: 4,
                 flexShrink: 0,
-                opacity: closing ? 0.5 : 1,
+                opacity: unsavedSaveBusy ? 0.5 : 1,
                 whiteSpace: 'nowrap',
               }}
             >
-              {closing ? 'Working…' : 'Save'}
+              {unsavedSaveBusy ? 'Working…' : 'Save'}
             </button>
             <button
               type="button"
               onClick={() => handleUnsavedCloseDontSave()}
-              disabled={closing}
+              disabled={unsavedSaveBusy}
               style={{
                 background: 'rgba(255,77,77,0.15)',
                 border: '1px solid rgba(255,77,77,0.6)',
                 color: '#dc2626',
-                cursor: closing ? 'default' : 'pointer',
+                cursor: unsavedSaveBusy ? 'default' : 'pointer',
                 fontSize: 12,
                 padding: '3px 10px',
                 borderRadius: 4,
                 flexShrink: 0,
-                opacity: closing ? 0.5 : 1,
+                opacity: unsavedSaveBusy ? 0.5 : 1,
                 whiteSpace: 'nowrap',
               }}
             >
@@ -674,12 +691,11 @@ export default function EditorPage() {
             <button
               type="button"
               onClick={() => setUnsavedCloseOpen(false)}
-              disabled={closing}
               style={{
                 background: 'none',
                 border: '1px solid rgba(15,23,42,0.1)',
                 color: '#64748b',
-                cursor: closing ? 'default' : 'pointer',
+                cursor: 'pointer',
                 fontSize: 12,
                 padding: '3px 10px',
                 borderRadius: 4,
@@ -695,17 +711,17 @@ export default function EditorPage() {
             type="button"
             title="Close this editor. You will be prompted if there are unsaved changes."
             onClick={() => handleCloseClick()}
-            disabled={saving || closing || !cfg}
+            disabled={saving || closing || unsavedSaveBusy || !cfg}
             style={{
               background: 'none',
               border: '1px solid rgba(220,38,38,0.35)',
               color: '#dc2626',
-              cursor: saving || closing || !cfg ? 'default' : 'pointer',
+              cursor: saving || closing || unsavedSaveBusy || !cfg ? 'default' : 'pointer',
               fontSize: 12,
               padding: '3px 10px',
               borderRadius: 4,
               flexShrink: 0,
-              opacity: saving || closing || !cfg ? 0.5 : 1,
+              opacity: saving || closing || unsavedSaveBusy || !cfg ? 0.5 : 1,
               whiteSpace: 'nowrap',
             }}
           >

@@ -12,7 +12,9 @@ from app.routers import (
     admin_audit,
     admin_billing,
     admin_email_integration,
+    admin_firm_settings,
     admin_finance,
+    admin_merge_codes,
     admin_matter_contact_types,
     admin_permission_categories,
     admin_standard_tasks,
@@ -40,6 +42,7 @@ from app.routers import (
     outlook_plugin,
     precedents,
     users,
+    webauthn,
     webdav,
 )
 
@@ -50,6 +53,7 @@ async def lifespan(app: FastAPI):
 
     from app.db import SessionLocal
     from app.matter_type_bootstrap import sync_matter_types_from_seed
+    from app.merge_code_catalog_sync import sync_merge_code_catalog
     from app.precedent_bootstrap import apply_precedent_seed_if_empty
 
     _log = logging.getLogger("uvicorn.error")
@@ -66,6 +70,15 @@ async def lifespan(app: FastAPI):
         _log.warning("Precedent seed skipped: %s", e)
     finally:
         db.close()
+
+    db_merge = SessionLocal()
+    try:
+        sync_merge_code_catalog(db_merge)
+    except Exception as e:
+        db_merge.rollback()
+        _log.warning("Merge code catalog sync skipped: %s", e)
+    finally:
+        db_merge.close()
 
     start_event_tracked_task_job()
     yield
@@ -145,7 +158,10 @@ app.add_middleware(WebdavPublicCORSMiddleware)
 _install_proxy_headers_middleware(app)
 
 app.include_router(auth.router)
+app.include_router(webauthn.router)
 app.include_router(admin_users.router)
+app.include_router(admin_firm_settings.router)
+app.include_router(admin_merge_codes.router)
 app.include_router(admin_matter_contact_types.router)
 app.include_router(admin_permission_categories.router)
 app.include_router(admin_audit.router)

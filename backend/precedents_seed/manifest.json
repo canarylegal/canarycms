@@ -1,5 +1,17 @@
 {
   "version": 1,
+  "exported_at": "2026-05-10T19:40:04.791160+00:00",
   "categories": [],
-  "precedents": []
+  "precedents": [
+    {
+      "name": "Blank (no precedent)",
+      "reference": "BLANK_LETTER",
+      "kind": "letter",
+      "global": true,
+      "original_filename": "Universal-letter-precedent.docx",
+      "mime_type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "size_bytes": 27923,
+      "bundle_file": "bundle/g0_blank_letter.docx"
+    }
+  ]
 }

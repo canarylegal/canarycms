@@ -1,14 +1,17 @@
 import os
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.admin_access import user_effective_admin
 from app.db import get_db
-from app.deps import get_current_user
+from app.deps import _jwt_raw_from_request, get_current_user
 from app.email_integration_settings import build_user_public
 from app.models import User, UserRole
+from app.org_security import firm_mandates_second_factor, user_has_any_passkey, user_meets_second_factor_policy
 from app.schemas import (
     BootstrapAdminRequest,
     Cancel2FASetupRequest,
@@ -19,10 +22,12 @@ from app.schemas import (
     UserDisable2FARequest,
     UserPublic,
     Verify2FARequest,
+    Verify2FASessionResponse,
 )
 from app.security import (
     build_totp_uri,
     create_access_token,
+    decode_access_token,
     generate_totp_secret,
     hash_password,
     verify_password,
@@ -32,6 +37,8 @@ from app.audit import log_event
 
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+_me_bearer = HTTPBearer(auto_error=False)
 
 
 def _bootstrap_token() -> str:
@@ -80,27 +87,68 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)) -> TokenResponse
     if not verify_password(payload.password, user.password_hash):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
 
+    mandate = firm_mandates_second_factor(db)
+    effective_admin = user_effective_admin(user, db)
+
     if user.is_2fa_enabled:
         if not payload.totp_code or not user.totp_secret:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="2FA required")
         if not verify_totp(secret=user.totp_secret, code=payload.totp_code):
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid 2FA code")
 
-    token = create_access_token(user_id=str(user.id), role=user.role.value)
+    # Under mandate: password sign-in always proves MFA via TOTP when enabled. Users with no TOTP and no passkeys
+    # receive a restricted JWT (mfa_verified=False) so they can only reach second-factor enrolment routes until
+    # they register a passkey or enable authenticator 2FA. Passkey-only accounts cannot get a verified MFA JWT
+    # from password alone — they must use passkey sign-in or enable TOTP (e.g. after passkey login).
+    mfa_verified = True
+    if mandate and not effective_admin:
+        db_ok = user_meets_second_factor_policy(db, user.id, is_2fa_enabled=user.is_2fa_enabled)
+        if db_ok and not user.is_2fa_enabled:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=(
+                    "Your organisation requires a verified second factor at sign-in. "
+                    "This account has a passkey — use Sign in with passkey. "
+                    "Password sign-in requires an authenticator app enabled on your account."
+                ),
+            )
+        if not db_ok:
+            mfa_verified = False
+
+    token = create_access_token(user_id=str(user.id), role=user.role.value, mfa_verified=mfa_verified)
     log_event(
         db,
         actor_user_id=user.id,
         action="auth.login",
         entity_type="user",
         entity_id=str(user.id),
-        meta={"email": user.email},
+        meta={"email": user.email, "password_login_restricted": not mfa_verified},
     )
     return TokenResponse(access_token=token)
 
 
 @router.get("/me", response_model=UserPublic)
-def me(user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> UserPublic:
-    return build_user_public(user, db)
+def me(
+    request: Request,
+    creds: HTTPAuthorizationCredentials | None = Depends(_me_bearer),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> UserPublic:
+    pub = build_user_public(user, db)
+    mandate = firm_mandates_second_factor(db)
+    if user_effective_admin(user, db) or not mandate:
+        sf_ok = True
+    else:
+        raw = _jwt_raw_from_request(request, creds)
+        if raw is None:
+            sf_ok = False
+        else:
+            try:
+                tp = decode_access_token(raw)
+                sf_ok = tp.mfa_verified is True
+            except ValueError:
+                sf_ok = False
+    return pub.model_copy(update={"session_second_factor_verified": sf_ok})
 
 
 @router.post("/2fa/setup", response_model=Setup2FAResponse)
@@ -119,12 +167,12 @@ def setup_2fa(user: User = Depends(get_current_user), db: Session = Depends(get_
     return Setup2FAResponse(secret=user.totp_secret, otpauth_uri=uri)
 
 
-@router.post("/2fa/verify", response_model=UserPublic)
+@router.post("/2fa/verify", response_model=Verify2FASessionResponse)
 def verify_2fa(
     payload: Verify2FARequest,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
-) -> UserPublic:
+) -> Verify2FASessionResponse:
     if not user.totp_secret:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="2FA not set up")
     if not verify_totp(secret=user.totp_secret, code=payload.code):
@@ -141,7 +189,8 @@ def verify_2fa(
         entity_type="user",
         entity_id=str(user.id),
     )
-    return build_user_public(user, db)
+    access_token = create_access_token(user_id=str(user.id), role=user.role.value, mfa_verified=True)
+    return Verify2FASessionResponse(access_token=access_token, user=build_user_public(user, db))
 
 
 @router.post("/2fa/disable", status_code=status.HTTP_204_NO_CONTENT)
@@ -158,6 +207,15 @@ def disable_my_2fa(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Incorrect password")
     if not verify_totp(secret=user.totp_secret, code=payload.totp_code.strip()):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid authenticator code")
+
+    if firm_mandates_second_factor(db) and not user_has_any_passkey(db, user.id):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "Your organisation requires two-factor authentication or at least one passkey. "
+                "Register a passkey before disabling the authenticator app."
+            ),
+        )
 
     user.totp_secret = None
     user.is_2fa_enabled = False
@@ -189,6 +247,15 @@ def cancel_my_2fa_setup(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No 2FA setup in progress")
     if not verify_password(payload.password, user.password_hash):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Incorrect password")
+
+    if firm_mandates_second_factor(db) and not user_has_any_passkey(db, user.id):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "Your organisation requires two-factor authentication or a passkey. "
+                "Finish authenticator setup, register a passkey, or ask an admin to adjust the policy."
+            ),
+        )
 
     user.totp_secret = None
     user.updated_at = datetime.utcnow()

@@ -10,6 +10,9 @@ export type UserPublic = {
   role: 'admin' | 'user'
   is_active: boolean
   is_2fa_enabled: boolean
+  /** Organisation policy: user must enable TOTP or register at least one passkey (non-admin enforcement). */
+  organization_requires_second_factor?: boolean
+  has_passkeys?: boolean
   /** Top-bar E-mail: `mailto:` vs Outlook web URL */
   email_launch_preference?: 'desktop' | 'outlook_web'
   email_outlook_web_url?: string | null
@@ -19,11 +22,56 @@ export type UserPublic = {
   m365_graph_drafts_configured?: boolean
   /** From GET /auth/me — category Admin or built-in admin role. */
   admin_console_access?: boolean
+  /**
+   * From GET /auth/me — false when org mandates a second factor but this JWT did not verify one at sign-in
+   * (e.g. password-only session). Omitted on older APIs (treat as unrestricted).
+   */
+  session_second_factor_verified?: boolean
+}
+
+/** POST /auth/2fa/verify — new JWT after enrolment (org mandate / session upgrade). */
+export type Verify2FASessionResponse = TokenResponse & {
+  user: UserPublic
 }
 
 /** Admin-only user row (includes permission category). */
 export type AdminUserPublic = UserPublic & {
   permission_category_id?: string | null
+}
+
+export type LetterheadStyle = 'preprinted' | 'digital'
+
+export type MergeCodeCatalogOut = {
+  code: string
+  description: string
+  sort_order: number
+}
+
+export type MergeCodeCatalogImportResult = {
+  updated: number
+  skipped_unknown: number
+}
+
+export type FirmSettingsOut = {
+  id: number
+  trading_name: string
+  registered_company_name?: string | null
+  addr_line1?: string | null
+  addr_line2?: string | null
+  town_city?: string | null
+  county?: string | null
+  postcode?: string | null
+  letterhead_style: LetterheadStyle
+  letterhead_original_filename?: string | null
+  mandate_two_factor?: boolean
+}
+
+/** Registered passkey row from GET /auth/webauthn/credentials */
+export type WebAuthnCredentialOut = {
+  id: string
+  label: string | null
+  transports: string | null
+  created_at: string
 }
 
 export type UserPermissionCategoryOut = {

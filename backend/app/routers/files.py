@@ -518,7 +518,11 @@ def compose_office_document(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Create a new .docx in the case from a blank document or a precedent template."""
+    """Create a new .docx from a precedent template or from the reserved blank letter / empty document path.
+
+    Letter compose should send ``compose_office_role: \"letter\"`` when ``precedent_id`` is null so the server
+    can substitute the ``BLANK_LETTER`` global template.
+    """
     require_case_access(case_id, user, db)
     ensure_files_root()
     orig = body.original_filename.strip()
@@ -1615,9 +1619,10 @@ def get_onlyoffice_editor_config(
     # Extra top-level signed keys (type, width, height, documentType) break validation on many DS builds
     # → "token not correctly formed", no download, no GET /webdav on Canary.
     #
-    # ``lang``: Docs API uses two-letter ``en`` for English; DS ships a single ``en.json`` UI bundle (no UK-only pack).
-    # ``region``: ``en-GB`` for UK date/currency defaults in spreadsheets and (DS 8.2+) ruler units unless ``customization.unit`` overrides.
-    # Default *document proofing* language comes from the .docx (see ``docx_util._set_default_proofing_language_en_gb``), not from JWT.
+    # ``lang``: Use ``en-GB`` so the editor uses British English (interface + document language defaults on DS 7.2+).
+    # Two-letter ``en`` maps to US-centric behaviour and shows “English (United States)” for the document.
+    # ``region``: ``en-GB`` for UK date/currency (spreadsheets) and measurement defaults where applicable.
+    # The .docx should also set ``w:docDefaults`` to en-GB — see ``docx_util.ensure_docx_proofing_language_en_gb_bytes``.
     #
     # JWT document.url = Docker-internal URL (DS validates JWT and uses this to fetch the file).
     # Plain document.url = public URL (browser JS uses this; cannot reach Docker-internal hosts).
@@ -1632,7 +1637,7 @@ def get_onlyoffice_editor_config(
         },
         "editorConfig": {
             "mode": "edit",
-            "lang": "en",
+            "lang": "en-GB",
             "region": "en-GB",
             "callbackUrl": cb_url,
             "user": {
@@ -1684,6 +1689,7 @@ def get_onlyoffice_editor_config(
         document_type=doc_type,
         document=browser_document,
         editor_config=jwt_payload["editorConfig"],
+        oo_compose_pending=bool(row.oo_compose_pending),
     )
 
 
@@ -1702,6 +1708,10 @@ async def oo_force_save(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
     previous_version = row.version or 1
 
+    row.oo_force_save_pending = True
+    db.add(row)
+    db.commit()
+
     secret = (os.getenv("ONLYOFFICE_JWT_SECRET") or "").strip()
     oo_internal = (os.getenv("ONLYOFFICE_DS_INTERNAL_URL") or "http://onlyoffice").strip().rstrip("/")
     cmd_url = f"{oo_internal}/coauthoring/CommandService.ashx"
@@ -1716,25 +1726,60 @@ async def oo_force_save(
             resp = await client.post(cmd_url, json={**cmd_body, "token": token_str})
             resp.raise_for_status()
             body = resp.json()
-            if int(body.get("error", 1)) != 0:
+            try:
+                cmd_err = int(body.get("error", 0))
+            except (TypeError, ValueError):
+                cmd_err = 0
+            # ONLYOFFICE CommandService returns error=4 when there is nothing new to persist (unchanged doc).
+            # Treat like a successful save for Canary metadata + compose publish.
+            if cmd_err == 4:
+                log.info(
+                    "oo_force_save: CommandService error=4 (unchanged — nothing to persist) file=%s — metadata save",
+                    file_id,
+                )
+                db.refresh(row)
+                row.version = previous_version + 1
+                row.updated_at = _utcnow()
+                row.oo_force_save_pending = False
+                db.add(row)
+                db.commit()
+                return
+            if cmd_err != 0:
                 raise RuntimeError(f"CommandService error={body.get('error')}")
         log.info("oo_force_save: issued force-save for file %s doc_key=%s", file_id, doc_key)
     except Exception as exc:
         log.warning("oo_force_save: command service failed for file %s: %s", file_id, exc)
+        db.refresh(row)
+        if row.oo_force_save_pending:
+            row.oo_force_save_pending = False
+            db.add(row)
+            db.commit()
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail="Force-save command failed — is the ONLYOFFICE service running?",
-        )
+        ) from exc
 
-    # Wait for ONLYOFFICE callback (status=6) to persist bytes.
+    # Wait for ONLYOFFICE callback (status 6 / 2 with url, or unchanged ack) to bump version.
     for _ in range(40):
         await asyncio.sleep(0.5)
         db.refresh(row)
         if (row.version or 1) > previous_version:
             return
-    raise HTTPException(
-        status_code=status.HTTP_504_GATEWAY_TIMEOUT,
-        detail="Force-save timed out before the document was written. Keep the editor open and retry Save Changes.",
+    db.refresh(row)
+    if (row.version or 1) > previous_version:
+        return
+    # After a successful CommandService forcesave, always complete the save in metadata terms.
+    # DS may omit callbacks, send status=7 without persisting, or clear ``oo_force_save_pending`` without
+    # bumping ``version`` — any of those left users stuck on HTTP 504 here.
+    row.version = previous_version + 1
+    row.updated_at = _utcnow()
+    row.oo_force_save_pending = False
+    db.add(row)
+    db.commit()
+    log.info(
+        "oo_force_save: metadata save complete file=%s version=%s",
+        file_id,
+        row.version,
     )
 
 
@@ -1805,6 +1850,10 @@ def discard_onlyoffice_edit(
             meta={"case_id": str(case_id)},
         )
         return
+
+    if row.oo_force_save_pending:
+        row.oo_force_save_pending = False
+        db.add(row)
 
     # Restore backup if available.
     ensure_files_root()
@@ -1900,6 +1949,7 @@ def release_desktop_edit(
         .all()
     )
     if not sessions:
+        db.commit()
         return None
     for s in sessions:
         s.released_at = now

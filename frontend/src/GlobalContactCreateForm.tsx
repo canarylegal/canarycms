@@ -56,7 +56,7 @@ export function resolveContactNameFromParts(
   if (type === 'person') return buildPersonDisplayName(person)
   const c = org.company_name.trim()
   const tr = org.trading_name.trim()
-  return c || tr || ''
+  return tr || c || ''
 }
 
 /** When parts are empty (e.g. legacy card), fall back to existing stored name. */
@@ -238,19 +238,19 @@ export function ContactPersonOrgAddressFields({
       ) : (
         <>
           <label className="field">
-            <span>Registered company name</span>
+            <span>Trading name</span>
             <input
-              value={s.companyName}
-              onChange={(e) => patch({ companyName: e.target.value })}
+              value={s.tradingName}
+              onChange={(e) => patch({ tradingName: e.target.value })}
               disabled={busy}
             />
           </label>
           <label className="field">
-            <span>Trading name</span>
+            <span>Registered company name</span>
             <input
               placeholder="optional"
-              value={s.tradingName}
-              onChange={(e) => patch({ tradingName: e.target.value })}
+              value={s.companyName}
+              onChange={(e) => patch({ companyName: e.target.value })}
               disabled={busy}
             />
           </label>
@@ -346,6 +346,11 @@ export function GlobalContactCreateForm({
     [s.type, s.title, s.firstName, s.middleName, s.lastName, s.companyName, s.tradingName],
   )
 
+  const canSubmitContact =
+    s.type === 'person'
+      ? Boolean(resolvedName.trim())
+      : Boolean(s.tradingName.trim())
+
   async function handleSubmit() {
     const payload = contactFieldsModelToPayload(s)
     if (!payload) return
@@ -375,7 +380,7 @@ export function GlobalContactCreateForm({
         <button
           type="button"
           className="btn primary"
-          disabled={busy || !resolvedName}
+          disabled={busy || !canSubmitContact}
           onClick={() => void handleSubmit()}
         >
           {submitLabel}

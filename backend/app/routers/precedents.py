@@ -8,18 +8,20 @@ import secrets
 import shutil
 import asyncio
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, File as FastAPIFile, Form, HTTPException, Request, Response, UploadFile, status
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.audit import log_event
 from app.db import get_db
 from app.deps import get_current_user, require_admin
+from app.docx_util import validate_docx_package_bytes
 from app.file_storage import FILES_ROOT, ensure_files_root, precedent_file_paths
+from app.precedent_constants import BLANK_LETTER_PRECEDENT_REFERENCE
 
 from app.models import (
     File as DbFile,
@@ -38,6 +40,43 @@ router = APIRouter(prefix="/precedents", tags=["precedents"])
 
 # Form/API token: use this for "Global" in matter head, sub-type, or category dropdowns.
 GLOBAL_SCOPE = "__GLOBAL__"
+
+
+def _normalize_precedent_reference(ref: str) -> str:
+    t = (ref or "").strip()
+    if not t:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Reference is required.")
+    if len(t) > 200:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Reference must be at most 200 characters.",
+        )
+    return t
+
+
+def _ensure_precedent_reference_allowed(
+    db: Session,
+    ref: str,
+    *,
+    exclude_precedent_id: uuid.UUID | None = None,
+) -> str:
+    """Validate custom precedent reference: non-empty, not reserved, unique (case-insensitive)."""
+
+    t = _normalize_precedent_reference(ref)
+    if t.casefold() == BLANK_LETTER_PRECEDENT_REFERENCE.casefold():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f'Reference "{BLANK_LETTER_PRECEDENT_REFERENCE}" is reserved for system use.',
+        )
+    q = select(Precedent.id).where(func.lower(Precedent.reference) == func.lower(t))
+    if exclude_precedent_id is not None:
+        q = q.where(Precedent.id != exclude_precedent_id)
+    if db.execute(q.limit(1)).first() is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="That reference is already used by another precedent. Choose a different reference.",
+        )
+    return t
 
 
 def _scope_summary(
@@ -251,6 +290,8 @@ def list_precedents(
 
     if kind is not None:
         q = q.where(Precedent.kind == kind)
+        # Reserved for “Blank (no precedent)” letter slot — not shown as a duplicate row in pickers.
+        q = q.where(Precedent.reference != BLANK_LETTER_PRECEDENT_REFERENCE)
     q = q.order_by(Precedent.created_at.desc())
     rows = db.execute(q).scalars().all()
     out: list[PrecedentOut] = []
@@ -302,6 +343,16 @@ def upload_precedent(
         if g:
             mime = g
 
+    primary_mime = mime.split(";", 1)[0].strip().lower()
+    if primary_mime == "application/vnd.openxmlformats-officedocument.wordprocessingml.document" or original.lower().endswith(
+        ".docx"
+    ):
+        try:
+            validate_docx_package_bytes(paths.abs_path.read_bytes())
+        except ValueError as ve:
+            paths.abs_path.unlink(missing_ok=True)
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(ve)) from ve
+
     now = datetime.utcnow()
     frow = DbFile(
         id=file_id,
@@ -320,10 +371,11 @@ def upload_precedent(
         created_at=now,
         updated_at=now,
     )
+    ref_ok = _ensure_precedent_reference_allowed(db, reference, exclude_precedent_id=None)
     prow = Precedent(
         id=precedent_id,
         name=name.strip(),
-        reference=reference.strip(),
+        reference=ref_ok,
         kind=kind,
         file_id=file_id,
         matter_head_type_id=mh,
@@ -364,7 +416,11 @@ def update_precedent(
     if "name" in data:
         p.name = data["name"].strip()
     if "reference" in data:
-        p.reference = data["reference"].strip()
+        p.reference = _ensure_precedent_reference_allowed(
+            db,
+            data["reference"],
+            exclude_precedent_id=precedent_id,
+        )
     scope_keys = ("matter_head_type_id", "matter_sub_type_id", "category_id")
     if any(k in data for k in scope_keys):
         mh = data.get("matter_head_type_id", p.matter_head_type_id)
@@ -452,7 +508,7 @@ def get_precedent_onlyoffice_config(
         },
         "editorConfig": {
             "mode": "edit",
-            "lang": "en",
+            "lang": "en-GB",
             "region": "en-GB",
             "callbackUrl": cb_url,
             "user": {"id": str(user.id), "name": user.display_name or user.email, "group": "Canary"},
@@ -473,6 +529,7 @@ def get_precedent_onlyoffice_config(
         document_type=doc_type,
         document=browser_document,
         editor_config=jwt_payload["editorConfig"],
+        oo_compose_pending=False,
     )
 
 
@@ -491,6 +548,10 @@ async def oo_force_save_precedent(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Precedent file missing")
     previous_version = row.version or 1
 
+    row.oo_force_save_pending = True
+    db.add(row)
+    db.commit()
+
     import jwt as pyjwt
     import httpx
 
@@ -507,9 +568,34 @@ async def oo_force_save_precedent(
             resp = await client.post(cmd_url, json={**cmd_body, "token": token_str})
             resp.raise_for_status()
             body = resp.json()
-            if int(body.get("error", 1)) != 0:
+            try:
+                cmd_err = int(body.get("error", 0))
+            except (TypeError, ValueError):
+                cmd_err = 0
+            if cmd_err == 4:
+                db.refresh(row)
+                row.version = previous_version + 1
+                row.updated_at = datetime.now(timezone.utc)
+                row.oo_force_save_pending = False
+                db.add(row)
+                db.commit()
+                log_event(
+                    db,
+                    actor_user_id=user.id,
+                    action="precedent.onlyoffice_save_unchanged_cmd4",
+                    entity_type="file",
+                    entity_id=str(row.id),
+                    meta={"precedent_id": str(precedent_id), "version": row.version},
+                )
+                return
+            if cmd_err != 0:
                 raise RuntimeError(f"CommandService error={body.get('error')}")
     except Exception as exc:
+        db.refresh(row)
+        if row.oo_force_save_pending:
+            row.oo_force_save_pending = False
+            db.add(row)
+            db.commit()
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail="Force-save command failed — is the ONLYOFFICE service running?",
@@ -520,9 +606,21 @@ async def oo_force_save_precedent(
         db.refresh(row)
         if (row.version or 1) > previous_version:
             return
-    raise HTTPException(
-        status_code=status.HTTP_504_GATEWAY_TIMEOUT,
-        detail="Force-save timed out before the template was written. Keep the editor open and retry Save Changes.",
+    db.refresh(row)
+    if (row.version or 1) > previous_version:
+        return
+    row.version = previous_version + 1
+    row.updated_at = datetime.now(timezone.utc)
+    row.oo_force_save_pending = False
+    db.add(row)
+    db.commit()
+    log_event(
+        db,
+        actor_user_id=user.id,
+        action="precedent.onlyoffice_save_unchanged_timeout",
+        entity_type="file",
+        entity_id=str(row.id),
+        meta={"precedent_id": str(precedent_id), "version": row.version},
     )
 
 

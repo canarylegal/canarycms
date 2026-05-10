@@ -5,10 +5,11 @@ from __future__ import annotations
 import os
 import secrets
 import uuid
+import zlib
 from datetime import datetime, timedelta, timezone
 
 from fastapi import HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from app.models import File as DbFile, FileCategory, FileEditSession, User
@@ -49,6 +50,15 @@ def acquire_file_edit_session(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Cannot edit folder markers via WebDAV",
         )
+
+    # Serialize checkout per file so two concurrent onlyoffice-config calls (e.g. React Strict Mode)
+    # cannot both insert an active FileEditSession. That leaves two rows for the same user+file; the
+    # next acquire hits len(mine) > 1, releases *all* (including the token already embedded in a JWT
+    # ONLYOFFICE is fetching) → WebDAV 404 → ONLYOFFICE error -4 "Download failed."
+    bind = db.get_bind()
+    if bind.dialect.name == "postgresql":
+        lock_k2 = zlib.crc32(file_id.bytes) & 0x7FFFFFFF
+        db.execute(text("SELECT pg_advisory_xact_lock(582013711, :k2)"), {"k2": lock_k2})
 
     now = _utcnow()
     active = (
