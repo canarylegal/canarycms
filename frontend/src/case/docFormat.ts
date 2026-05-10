@@ -1,4 +1,5 @@
-import type { CaseOut } from '../types'
+import type { CaseOut, FileSummary } from '../types'
+import { isEmlLikeFileSummary } from './officeFiles'
 
 export function formatDocModified(s: string) {
   const d = new Date(s)
@@ -7,6 +8,13 @@ export function formatDocModified(s: string) {
   const sameDay =
     d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate()
   return sameDay ? d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : d.toLocaleDateString()
+}
+
+/** Canary ``created_at`` for sorting/display, or e-mail ``Date`` header when present (root .eml only). */
+export function docListPrimaryDate(f: FileSummary): string {
+  const mail = f.source_mail_date
+  if (mail && isEmlLikeFileSummary(f) && !f.parent_file_id) return mail
+  return f.created_at
 }
 
 /** Size column: KB under 1 MiB (same min 1 KB for tiny files as before), then MB / GB using 1024-based units. */

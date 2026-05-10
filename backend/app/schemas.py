@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import uuid
-from datetime import date, datetime
+from datetime import date, datetime, time
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator, model_validator
 
 from app.models import CaseLockMode, CaseStatus, CaseTaskStatus, ContactType, FileCategory, PrecedentKind, UserRole
+from app.user_initials import normalize_initials
 
 
 class TokenResponse(BaseModel):
@@ -18,12 +19,19 @@ class UserPublic(BaseModel):
     id: uuid.UUID
     email: EmailStr
     display_name: str
+    initials: str
     job_title: str | None = None
     role: UserRole
     is_active: bool
     is_2fa_enabled: bool
     email_launch_preference: Literal["desktop", "outlook_web"] = "desktop"
     email_outlook_web_url: str | None = None
+    email_integration_mode: Literal["mailto", "microsoft_graph"] = "microsoft_graph"
+    m365_graph_drafts_configured: bool = False
+    admin_console_access: bool = Field(
+        default=False,
+        description="User may open the admin console (built-in admin or category Admin permission).",
+    )
 
 
 class UserEmailHandlingUpdate(BaseModel):
@@ -69,6 +77,10 @@ class CalendarEventOut(BaseModel):
     category_id: uuid.UUID | None = None
     category_name: str | None = None
     category_color: str | None = None
+    # Matter-linked row merged into the feed (not from Radicale).
+    case_id: uuid.UUID | None = None
+    case_event_id: uuid.UUID | None = None
+    track_in_calendar: bool | None = None
 
 
 class CalendarEventCreate(BaseModel):
@@ -163,6 +175,12 @@ class BootstrapAdminRequest(BaseModel):
     email: EmailStr
     password: str = Field(min_length=12)
     display_name: str = Field(min_length=1, max_length=200)
+    initials: str = Field(min_length=1, max_length=12)
+
+    @field_validator("initials", mode="after")
+    @classmethod
+    def _bootstrap_initials(cls, v: str) -> str:
+        return normalize_initials(v)
 
 
 class LoginRequest(BaseModel):
@@ -198,18 +216,33 @@ class AdminUserCreate(BaseModel):
     email: EmailStr
     password: str = Field(min_length=12)
     display_name: str = Field(min_length=1, max_length=200)
+    initials: str = Field(min_length=1, max_length=12)
     job_title: str | None = Field(default=None, max_length=300)
     role: UserRole = UserRole.user
     is_active: bool = True
     permission_category_id: uuid.UUID
 
+    @field_validator("initials", mode="after")
+    @classmethod
+    def _admin_create_initials(cls, v: str) -> str:
+        return normalize_initials(v)
+
 
 class AdminUserUpdate(BaseModel):
+    email: EmailStr | None = None
     display_name: str | None = Field(default=None, min_length=1, max_length=200)
+    initials: str | None = Field(default=None, min_length=1, max_length=12)
     job_title: str | None = Field(default=None, max_length=300)
     role: UserRole | None = None
     is_active: bool | None = None
     permission_category_id: uuid.UUID | None = None
+
+    @field_validator("initials", mode="after")
+    @classmethod
+    def _admin_update_initials(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        return normalize_initials(v)
 
 
 class AdminUserPublic(UserPublic):
@@ -224,6 +257,7 @@ class UserPermissionCategoryOut(BaseModel):
     perm_post_office: bool
     perm_approve_payments: bool
     perm_approve_invoices: bool
+    perm_admin: bool
     created_at: datetime
     updated_at: datetime
 
@@ -237,6 +271,7 @@ class UserPermissionCategoryCreate(BaseModel):
     perm_post_office: bool = False
     perm_approve_payments: bool = False
     perm_approve_invoices: bool = False
+    perm_admin: bool = False
 
 
 class UserPermissionCategoryPatch(BaseModel):
@@ -246,18 +281,15 @@ class UserPermissionCategoryPatch(BaseModel):
     perm_post_office: bool | None = None
     perm_approve_payments: bool | None = None
     perm_approve_invoices: bool | None = None
+    perm_admin: bool | None = None
 
 
 class AdminUserSetPassword(BaseModel):
     password: str = Field(min_length=12)
 
 
-class MatterHeadTypeCreate(BaseModel):
-    name: str = Field(min_length=1, max_length=200)
-
-
-class MatterHeadTypeUpdate(BaseModel):
-    name: str = Field(min_length=1, max_length=200)
+class MatterHeadTypeVisibilityUpdate(BaseModel):
+    is_hidden: bool
 
 
 class MatterSubTypeMenuOut(BaseModel):
@@ -283,6 +315,7 @@ class MatterSubTypeOut(BaseModel):
 class MatterHeadTypeOut(BaseModel):
     id: uuid.UUID
     name: str
+    is_hidden: bool = False
     sub_types: list[MatterSubTypeOut] = []
 
 
@@ -469,6 +502,32 @@ class CaseEmailDraftM365Out(BaseModel):
     open_url: str
     graph_message_id: str | None = None
     draft_compose_web_link: str | None = None
+
+
+class CaseEmailMailtoOut(BaseModel):
+    to: str
+    subject: str
+    body: str
+    attachment_count: int
+    note: str = (
+        "Standard mailto links cannot attach case files — add attachments manually in your mail program."
+    )
+
+
+class EmailIntegrationSettingsOut(BaseModel):
+    integration_mode: Literal["mailto", "microsoft_graph"]
+    graph_tenant_id: str | None
+    graph_client_id: str | None
+    graph_client_secret_configured: bool
+    outlook_web_mail_base: str | None
+
+
+class EmailIntegrationSettingsUpdate(BaseModel):
+    integration_mode: Literal["mailto", "microsoft_graph"] | None = None
+    graph_tenant_id: str | None = Field(default=None, max_length=2000)
+    graph_client_id: str | None = Field(default=None, max_length=2000)
+    graph_client_secret: str | None = Field(default=None, max_length=2000)
+    outlook_web_mail_base: str | None = Field(default=None, max_length=2000)
 
 
 class ContactCreate(BaseModel):
@@ -694,6 +753,9 @@ class TaskMenuRowOut(BaseModel):
     priority: CaseTaskPriority = "normal"
     status: CaseTaskStatus
     is_private: bool = False
+    standard_task_id: uuid.UUID | None = None
+    """Resolved template title for Kanban columns (standard tasks)."""
+    standard_task_category_title: str | None = None
 
 
 class FilePinUpdate(BaseModel):
@@ -710,6 +772,22 @@ class OutlookOpenHintsOut(BaseModel):
 class OutlookPluginLinkedCaseResolveIn(BaseModel):
     outlook_item_id: str | None = None
     internet_message_id: str | None = None
+    conversation_id: str | None = None
+
+
+class OutlookPluginPendingSendPutIn(BaseModel):
+    """Remember a matter for the next message sent from Outlook with the add-in signed in."""
+
+    case_id: uuid.UUID
+    source_file_id: uuid.UUID | None = None
+    ttl_seconds: int | None = 86400
+
+
+class OutlookPluginPendingSendOut(BaseModel):
+    active: bool
+    case_id: uuid.UUID | None = None
+    source_file_id: uuid.UUID | None = None
+    expires_at: datetime | None = None
 
 
 class OutlookPluginLinkedCaseOut(BaseModel):
@@ -871,7 +949,7 @@ class LedgerEntryOut(BaseModel):
     contact_label: str | None = None
     posted_by_user_id: uuid.UUID | None
     posted_at: datetime
-    is_approved: bool = True
+    is_approved: bool
 
     model_config = {"from_attributes": True}
 
@@ -1113,6 +1191,16 @@ class MatterSubTypeEventTemplateOut(BaseModel):
     updated_at: datetime
 
 
+class CalendarEventTemplatePickOut(BaseModel):
+    """Matter sub-type calendar line template for quick-fill on the main (CalDAV) calendar."""
+
+    id: uuid.UUID
+    matter_sub_type_id: uuid.UUID
+    matter_sub_type_name: str
+    name: str
+    sort_order: int
+
+
 class MatterSubTypeEventTemplateCreate(BaseModel):
     matter_sub_type_id: uuid.UUID
     name: str = Field(min_length=1, max_length=200)
@@ -1131,6 +1219,12 @@ class CaseEventOut(BaseModel):
     name: str
     sort_order: int
     event_date: date | None
+    event_all_day: bool = True
+    event_start_time: time | None = None
+    """ISO start/end for CalDAV sync (UTC Z); only set when ``event_date`` is set."""
+    calendar_block_start: str | None = None
+    calendar_block_end: str | None = None
+    calendar_block_all_day: bool | None = None
     track_in_calendar: bool = False
     calendar_event_uid: str | None = None
     created_at: datetime
@@ -1144,10 +1238,24 @@ class CaseEventsOut(BaseModel):
 
 class CaseEventCreate(BaseModel):
     name: str = Field(min_length=1, max_length=200)
+    event_date: date | None = None
+    event_all_day: bool = True
+    event_start_time: time | None = None
+    track_in_calendar: bool = False
+
+    @field_validator("event_date", mode="before")
+    @classmethod
+    def _empty_event_date_create(cls, v: object) -> object:
+        if v == "" or v is None:
+            return None
+        return v
 
 
 class CaseEventUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=200)
     event_date: date | None = None
+    event_all_day: bool | None = None
+    event_start_time: time | None = None
     track_in_calendar: bool | None = None
     calendar_event_uid: str | None = Field(default=None, max_length=512)
 

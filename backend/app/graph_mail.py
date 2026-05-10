@@ -7,34 +7,46 @@ import json
 import logging
 import os
 import re
-from urllib.parse import quote, parse_qs, parse_qsl, urlparse, urlencode
+from urllib.parse import parse_qs, parse_qsl, quote, urlencode, urlparse
 
 import httpx
+from sqlalchemy.orm import Session
 
 log = logging.getLogger(__name__)
 
 
-def graph_mail_configured() -> bool:
-    return bool(
-        (os.getenv("CANARY_MS_GRAPH_TENANT_ID") or "").strip()
-        and (os.getenv("CANARY_MS_GRAPH_CLIENT_ID") or "").strip()
-        and (os.getenv("CANARY_MS_GRAPH_CLIENT_SECRET") or "").strip()
-    )
+def graph_mail_configured(db: Session | None = None) -> bool:
+    """True when Entra credentials resolve and admin has not forced mailto-only mode."""
+    if db is None:
+        return bool(
+            (os.getenv("CANARY_MS_GRAPH_TENANT_ID") or "").strip()
+            and (os.getenv("CANARY_MS_GRAPH_CLIENT_ID") or "").strip()
+            and (os.getenv("CANARY_MS_GRAPH_CLIENT_SECRET") or "").strip()
+        )
+    from app.email_integration_settings import graph_mail_effective_configured
+
+    return graph_mail_effective_configured(db)
 
 
-def _token_endpoint() -> str:
-    tenant = (os.getenv("CANARY_MS_GRAPH_TENANT_ID") or "").strip()
-    if not tenant:
-        raise RuntimeError("CANARY_MS_GRAPH_TENANT_ID is not set.")
-    return f"https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token"
+def _resolve_creds(db: Session | None) -> tuple[str, str, str]:
+    if db is None:
+        t = (os.getenv("CANARY_MS_GRAPH_TENANT_ID") or "").strip()
+        c = (os.getenv("CANARY_MS_GRAPH_CLIENT_ID") or "").strip()
+        s = (os.getenv("CANARY_MS_GRAPH_CLIENT_SECRET") or "").strip()
+        if not (t and c and s):
+            raise RuntimeError("Microsoft Graph credentials are not configured.")
+        return (t, c, s)
+    from app.email_integration_settings import effective_graph_credentials
+
+    creds = effective_graph_credentials(db)
+    if not creds:
+        raise RuntimeError("Microsoft Graph credentials are not configured for this deployment.")
+    return creds
 
 
-def app_access_token() -> str:
-    client_id = (os.getenv("CANARY_MS_GRAPH_CLIENT_ID") or "").strip()
-    client_secret = (os.getenv("CANARY_MS_GRAPH_CLIENT_SECRET") or "").strip()
-    if not client_id or not client_secret:
-        raise RuntimeError("CANARY_MS_GRAPH_CLIENT_ID / CANARY_MS_GRAPH_CLIENT_SECRET are not set.")
-    token_url = _token_endpoint()
+def app_access_token(db: Session | None = None) -> str:
+    tenant, client_id, client_secret = _resolve_creds(db)
+    token_url = f"https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token"
     payload = {
         "client_id": client_id,
         "client_secret": client_secret,
@@ -61,8 +73,13 @@ def app_access_token() -> str:
     return tok
 
 
-def _owa_mail_base_for_compose_deeplinks() -> str:
-    raw = (os.getenv("CANARY_OUTLOOK_WEB_MAIL_BASE") or "https://outlook.office.com/mail").strip().rstrip("/")
+def _owa_mail_base_for_compose_deeplinks(db: Session | None = None) -> str:
+    if db is None:
+        raw = (os.getenv("CANARY_OUTLOOK_WEB_MAIL_BASE") or "https://outlook.office.com/mail").strip().rstrip("/")
+    else:
+        from app.email_integration_settings import effective_outlook_web_mail_base
+
+        raw = effective_outlook_web_mail_base(db)
     try:
         host = (urlparse(raw if "://" in raw else f"https://{raw}").hostname or "").lower()
     except Exception:
@@ -145,12 +162,13 @@ def create_outlook_draft(
     subject: str,
     body_text: str,
     attachments: list[tuple[str, str, bytes]],
+    db: Session | None = None,
 ) -> tuple[str, str | None, str | None, str | None]:
     """
     Create a draft via Graph. Returns
     (primary_browser_url, graph_message_id, compose_deeplink_or_none, internet_message_id_or_none).
     """
-    token = app_access_token()
+    token = app_access_token(db)
     mailbox = mailbox_user.strip()
     if not mailbox:
         raise RuntimeError("Mailbox user principal name is required.")
@@ -208,7 +226,7 @@ def create_outlook_draft(
     if not isinstance(draft_id, str) or not draft_id.strip():
         raise RuntimeError("Microsoft Graph created the draft but did not return an id.")
 
-    owa_base = _owa_mail_base_for_compose_deeplinks()
+    owa_base = _owa_mail_base_for_compose_deeplinks(db)
     compose = _build_owa_compose_deeplink(owa_base, body)
     item_link = _item_web_link_from_create_body(body)
     primary = item_link or compose

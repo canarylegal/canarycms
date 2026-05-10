@@ -18,7 +18,7 @@ from app.case_task_visibility import case_task_list_visibility_clause, case_task
 from app.db_errors import raise_if_missing_case_task_is_private
 from app.db import get_db
 from app.deps import get_current_user, require_case_access
-from app.models import Case, CaseTask, CaseTaskStatus, MatterHeadType, MatterSubType, User
+from app.models import Case, CaseTask, CaseTaskStatus, MatterHeadType, MatterSubType, MatterSubTypeStandardTask, User
 from app.schemas import TaskMenuRowOut
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
@@ -71,6 +71,12 @@ def list_task_menu(
         for u in db.execute(select(User).where(User.id.in_(assign_ids))).scalars():
             user_map[u.id] = u.display_name
 
+    std_ids = {t.standard_task_id for t, _ in rows if t.standard_task_id}
+    std_title_map: dict = {}
+    if std_ids:
+        for st in db.execute(select(MatterSubTypeStandardTask).where(MatterSubTypeStandardTask.id.in_(std_ids))).scalars():
+            std_title_map[st.id] = st.title
+
     out: list[TaskMenuRowOut] = []
     for task, case in rows:
         sub_name = None
@@ -85,6 +91,7 @@ def list_task_menu(
         dt = task.due_at or task.created_at
         assign = user_map.get(task.assigned_to_user_id) if task.assigned_to_user_id else None
         pr = task.priority if task.priority in _PRI else "normal"
+        sid = task.standard_task_id
         out.append(
             TaskMenuRowOut(
                 id=task.id,
@@ -99,6 +106,8 @@ def list_task_menu(
                 priority=pr,  # type: ignore[arg-type]
                 status=task.status,
                 is_private=bool(task.is_private),
+                standard_task_id=sid,
+                standard_task_category_title=std_title_map.get(sid) if sid else None,
             )
         )
 
@@ -108,6 +117,18 @@ def list_task_menu(
 
     out.sort(key=sort_key)
     return out
+
+
+@router.get("/kanban-column-titles", response_model=list[str])
+def list_kanban_column_titles(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> list[str]:
+    """Distinct standard-task titles (Admin → Tasks) for Kanban column headers."""
+    del user  # authenticated
+    rows = db.execute(select(MatterSubTypeStandardTask.title)).scalars().all()
+    titles = sorted({str(t).strip() for t in rows if t and str(t).strip()})
+    return titles
 
 
 @router.delete("/completed", status_code=status.HTTP_204_NO_CONTENT)

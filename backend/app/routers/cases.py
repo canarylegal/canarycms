@@ -4,17 +4,56 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, status
 
 _MISSING = object()
-from sqlalchemy import select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
+from app.admin_access import user_effective_admin
 from app.db import get_db
 from app.deps import get_current_user, require_case_access
-from app.models import Case, CaseReferenceCounter, MatterHeadType, MatterSubType, MatterSubTypeMenu, MatterSubTypeStandardTask, User
+from app.models import (
+    Case,
+    CaseAccessMode,
+    CaseAccessRule,
+    CaseLockMode,
+    CaseReferenceCounter,
+    CaseStatus,
+    MatterHeadType,
+    MatterSubType,
+    MatterSubTypeMenu,
+    MatterSubTypeStandardTask,
+    User,
+)
 from app.schemas import CaseCreate, CaseOut, CaseUpdate, MatterSubTypeStandardTaskOut
 from app.audit import log_event
+from app.ledger_service import get_ledger
 
 
 router = APIRouter(prefix="/cases", tags=["cases"])
+
+
+def _raise_if_hidden_matter_head_for_user(
+    matter_sub_type_id: uuid.UUID | None,
+    matter_head_type_id: uuid.UUID | None,
+    user: User,
+    db: Session,
+) -> None:
+    if user_effective_admin(user, db):
+        return
+    head_id: uuid.UUID | None = None
+    if matter_sub_type_id:
+        sub = db.get(MatterSubType, matter_sub_type_id)
+        if sub:
+            head_id = sub.head_type_id
+    elif matter_head_type_id:
+        head_id = matter_head_type_id
+    if head_id is None:
+        return
+    head = db.get(MatterHeadType, head_id)
+    if head and head.is_hidden:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This matter head type is hidden and cannot be assigned to a matter.",
+        )
 
 
 def _matter_names(
@@ -103,6 +142,7 @@ def create_case(
     sub = db.get(MatterSubType, payload.matter_sub_type_id)
     if not sub:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Matter sub-type not found")
+    _raise_if_hidden_matter_head_for_user(sub.id, None, user, db)
     resolved_sub = sub.id
     resolved_head = sub.head_type_id
 
@@ -116,6 +156,7 @@ def create_case(
         matter_head_type_id=resolved_head,
         created_by=user.id,
         is_locked=False,
+        lock_mode=CaseLockMode.whitelist,
     )
     db.add(counter)
     db.add(case)
@@ -239,6 +280,51 @@ def update_case(
     if "matter_description" in data:
         data["title"] = data.pop("matter_description")
 
+    access_mode_keys = {"lock_mode", "is_locked"}
+    if access_mode_keys & set(data.keys()):
+        if not (
+            user_effective_admin(user, db)
+            or (case.fee_earner_user_id is not None and user.id == case.fee_earner_user_id)
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only the fee earner or an administrator may change case access mode.",
+            )
+
+    old_lock_mode = case.lock_mode
+    if "lock_mode" in data and data["lock_mode"] is not None and data["lock_mode"] != old_lock_mode:
+        new_lm = data["lock_mode"]
+        if new_lm == CaseLockMode.none:
+            db.execute(delete(CaseAccessRule).where(CaseAccessRule.case_id == case_id))
+        elif new_lm == CaseLockMode.blacklist:
+            db.execute(
+                delete(CaseAccessRule).where(
+                    CaseAccessRule.case_id == case_id,
+                    CaseAccessRule.mode == CaseAccessMode.deny,
+                )
+            )
+        elif new_lm == CaseLockMode.whitelist:
+            db.execute(
+                delete(CaseAccessRule).where(
+                    CaseAccessRule.case_id == case_id,
+                    CaseAccessRule.mode == CaseAccessMode.allow,
+                )
+            )
+        db.flush()
+        if new_lm == CaseLockMode.blacklist:
+            case.is_locked = True
+        elif new_lm == CaseLockMode.whitelist:
+            n_deny = db.scalar(
+                select(func.count())
+                .select_from(CaseAccessRule)
+                .where(CaseAccessRule.case_id == case_id, CaseAccessRule.mode == CaseAccessMode.deny)
+            ) or 0
+            case.is_locked = int(n_deny) > 0
+        else:
+            case.is_locked = False
+        if "is_locked" in data:
+            data.pop("is_locked", None)
+
     ms = data.pop("matter_sub_type_id", _MISSING)
     mh = data.pop("matter_head_type_id", _MISSING)
     if ms is not _MISSING or mh is not _MISSING:
@@ -266,6 +352,33 @@ def update_case(
                 if mh is not None and db.get(MatterHeadType, mh) is None:
                     raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Matter head type not found")
                 case.matter_head_type_id = mh
+
+        _raise_if_hidden_matter_head_for_user(case.matter_sub_type_id, case.matter_head_type_id, user, db)
+
+    if "status" in data and data["status"] == CaseStatus.quote:
+        if case.status != CaseStatus.quote:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    "A matter that is no longer a quote cannot be set back to Quote. "
+                    "Use Active or another status, or keep the matter as a quote until it is instructed."
+                ),
+            )
+
+    if "status" in data and data["status"] in (CaseStatus.closed, CaseStatus.archived):
+        ledger = get_ledger(case_id, db)
+        c_bal = ledger.client.balance_pence
+        o_bal = ledger.office.balance_pence
+        if c_bal != 0 or o_bal != 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    "Cannot set a matter to Closed or Archived while the client or office account "
+                    "has a non-zero balance (approved ledger entries only). "
+                    f"Client balance: £{c_bal / 100:.2f}; office balance: £{o_bal / 100:.2f}. "
+                    "Both must be £0.00."
+                ),
+            )
 
     for key, value in data.items():
         setattr(case, key, value)

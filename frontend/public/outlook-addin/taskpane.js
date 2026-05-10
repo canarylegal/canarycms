@@ -4,12 +4,14 @@
   'use strict'
 
   const RS_KEY = 'canary_jwt'
+  const LS_API_ORIGIN_KEY = 'canary_outlook_addin_api_origin'
+  const RS_API_ORIGIN_KEY = 'canary_api_origin'
   /** Same-origin backup when ``roamingSettings`` is empty (common in Outlook on the web). */
   const LS_KEY = 'canary_outlook_addin_jwt'
   /** Outlook master + item category applied after a successful file (client-only). */
   const CANARY_CATEGORY = 'Canary'
   /** Bumped when task pane logic changes — shown in error text so you can confirm the browser loaded the new bundle. */
-  const ADDIN_UI_VERSION = '1.0.6.2'
+  const ADDIN_UI_VERSION = '1.0.7.2'
   const CATEGORY_APPLY_ATTEMPTS = 3
   const CATEGORY_RETRY_DELAY_MS = 450
 
@@ -110,14 +112,24 @@
   function persistTokenAsync(token) {
     const v = token || ''
     try {
-      if (v) localStorage.setItem(LS_KEY, v)
-      else localStorage.removeItem(LS_KEY)
+      if (v) {
+        localStorage.setItem(LS_KEY, v)
+        localStorage.setItem(LS_API_ORIGIN_KEY, pageOrigin())
+      } else {
+        localStorage.removeItem(LS_KEY)
+        localStorage.removeItem(LS_API_ORIGIN_KEY)
+      }
     } catch (e) {
       return Promise.reject(e)
     }
     return new Promise((resolve, reject) => {
       try {
         Office.context.roamingSettings.set(RS_KEY, v)
+        try {
+          Office.context.roamingSettings.set(RS_API_ORIGIN_KEY, v ? pageOrigin() : '')
+        } catch {
+          /* ignore */
+        }
         Office.context.roamingSettings.saveAsync((r) => {
           if (r.status === Office.AsyncResultStatus.Succeeded) {
             resolve()
@@ -277,6 +289,16 @@
     return raw
   }
 
+  /** Prefer REST / Graph id for API + OWA deeplinks; fall back to raw itemId if conversion is unavailable. */
+  function primaryOutlookItemIdForApi(item) {
+    var rest = graphRestItemIdFromItem(item)
+    if (rest) return rest
+    try {
+      if (item && item.itemId) return String(item.itemId).trim()
+    } catch (_) {}
+    return ''
+  }
+
   /**
    * When Office.js cannot set ``categories``, PATCH the message via Canary API + Graph (Mail.ReadWrite app).
    * @returns {Promise<'ok'|string>} ``'ok'`` or an error detail string
@@ -355,12 +377,15 @@
     return body
   }
 
-  async function uploadMultipart(token, caseId, { blob, filename, mime, parentFileId, outlookItemId }) {
+  async function uploadMultipart(token, caseId, { blob, filename, mime, parentFileId, outlookItemId, outlookConversationId }) {
     const fd = new FormData()
     fd.append('upload', blob, filename)
     fd.append('folder', '')
     if (parentFileId) fd.append('parent_file_id', parentFileId)
-    else if (outlookItemId) fd.append('outlook_item_id', outlookItemId)
+    else {
+      if (outlookItemId) fd.append('outlook_item_id', outlookItemId)
+      if (outlookConversationId) fd.append('outlook_conversation_id', outlookConversationId)
+    }
 
     const res = await fetch(apiRoot() + '/cases/' + encodeURIComponent(caseId) + '/files', {
       method: 'POST',
@@ -584,14 +609,18 @@
 
     var oid = ''
     var imid = ''
+    var conv = ''
     try {
-      if (item.itemId) oid = String(item.itemId)
+      oid = primaryOutlookItemIdForApi(item)
     } catch (_) {}
     try {
       if (item.internetMessageId) imid = String(item.internetMessageId)
     } catch (_) {}
+    try {
+      if (item.conversationId) conv = String(item.conversationId).trim()
+    } catch (_) {}
 
-    if (!oid && !imid) {
+    if (!oid && !imid && !conv) {
       linkedCaseId = ''
       setCaseSelection('', '')
       renderCaseResults()
@@ -605,6 +634,7 @@
         body: JSON.stringify({
           outlook_item_id: oid || null,
           internet_message_id: imid || null,
+          conversation_id: conv || null,
         }),
       })
       const body = await res.json().catch(function () {
@@ -872,9 +902,11 @@
     const parentBlob = buildSyntheticEml(item, bodyText, displayBase)
 
     var outlookItemIdForParent = ''
+    var outlookConversationIdForParent = ''
     try {
       var mailItem = Office.context.mailbox && Office.context.mailbox.item
-      if (mailItem && mailItem.itemId) outlookItemIdForParent = String(mailItem.itemId)
+      if (mailItem) outlookItemIdForParent = primaryOutlookItemIdForApi(mailItem)
+      if (mailItem && mailItem.conversationId) outlookConversationIdForParent = String(mailItem.conversationId).trim()
     } catch (_) {
       /* ignore */
     }
@@ -884,6 +916,7 @@
       mime: 'message/rfc822',
       parentFileId: null,
       outlookItemId: outlookItemIdForParent || undefined,
+      outlookConversationId: outlookConversationIdForParent || undefined,
     })
     const parentId = parent.id
 

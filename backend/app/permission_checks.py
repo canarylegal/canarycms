@@ -5,6 +5,7 @@ from __future__ import annotations
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
+from app.admin_access import user_effective_admin
 from app.models import User, UserPermissionCategory, UserRole
 from app.schemas import LedgerPostCreate
 
@@ -17,7 +18,7 @@ def _category(user: User, db: Session) -> UserPermissionCategory | None:
 
 def assert_may_post_ledger(user: User, payload: LedgerPostCreate, db: Session) -> None:
     """Allow posting if admin, or no category (legacy), or category grants the relevant leg."""
-    if user.role == UserRole.admin:
+    if user_effective_admin(user, db):
         return
     cat = _category(user, db)
     if cat is None:
@@ -35,14 +36,14 @@ def assert_may_post_ledger(user: User, payload: LedgerPostCreate, db: Session) -
 
 
 def user_may_approve_ledger(user: User, db: Session) -> bool:
-    if user.role == UserRole.admin:
+    if user_effective_admin(user, db):
         return True
     cat = _category(user, db)
     return bool(cat and cat.perm_approve_payments)
 
 
 def user_may_approve_invoice(user: User, db: Session) -> bool:
-    if user.role == UserRole.admin:
+    if user_effective_admin(user, db):
         return True
     cat = _category(user, db)
     return bool(cat and cat.perm_approve_invoices)

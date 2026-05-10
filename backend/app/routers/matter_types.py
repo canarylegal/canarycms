@@ -5,14 +5,16 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.admin_access import user_effective_admin
 from app.audit import log_event
 from app.db import get_db
 from app.deps import get_current_user, require_admin
+from app.event_service import list_calendar_event_template_picks
 from app.models import MatterHeadType, MatterSubType, MatterSubTypeMenu, Precedent, PrecedentCategory, User
 from app.schemas import (
-    MatterHeadTypeCreate,
+    CalendarEventTemplatePickOut,
     MatterHeadTypeOut,
-    MatterHeadTypeUpdate,
+    MatterHeadTypeVisibilityUpdate,
     MatterSubTypeCreate,
     MatterSubTypeMenuCreate,
     MatterSubTypeMenuOut,
@@ -59,6 +61,7 @@ def _head_out(head: MatterHeadType, db: Session) -> MatterHeadTypeOut:
     return MatterHeadTypeOut(
         id=head.id,
         name=head.name,
+        is_hidden=head.is_hidden,
         sub_types=[_sub_out(s, db) for s in subs],
     )
 
@@ -71,64 +74,38 @@ def list_head_types(
     db: Session = Depends(get_db),
 ) -> list[MatterHeadTypeOut]:
     heads = db.execute(select(MatterHeadType).order_by(MatterHeadType.name)).scalars().all()
+    if not user_effective_admin(user, db):
+        heads = [h for h in heads if not h.is_hidden]
     return [_head_out(h, db) for h in heads]
 
 
-# ── Admin: head type CRUD ────────────────────────────────────────────────────
-
-@router.post("/heads", response_model=MatterHeadTypeOut, status_code=status.HTTP_201_CREATED)
-def create_head_type(
-    payload: MatterHeadTypeCreate,
-    admin: User = Depends(require_admin),
+@router.get("/event-line-templates", response_model=list[CalendarEventTemplatePickOut])
+def list_event_line_templates_for_calendar(
+    _user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
-) -> MatterHeadTypeOut:
-    existing = db.execute(
-        select(MatterHeadType).where(MatterHeadType.name == payload.name.strip())
-    ).scalar_one_or_none()
-    if existing:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Head type name already exists")
-    head = MatterHeadType(name=payload.name.strip(), created_at=datetime.utcnow(), updated_at=datetime.utcnow())
-    db.add(head)
-    db.commit()
-    db.refresh(head)
-    return _head_out(head, db)
+) -> list[CalendarEventTemplatePickOut]:
+    """Admin calendar template lines (per matter sub-type). Used by the main CalDAV calendar composer."""
+    return list_calendar_event_template_picks(db)
 
+
+# ── Admin: head type visibility (canonical names come from Canary seed; no create/rename/delete) ──
 
 @router.patch("/heads/{head_id}", response_model=MatterHeadTypeOut)
-def rename_head_type(
+def set_head_type_visibility(
     head_id: uuid.UUID,
-    payload: MatterHeadTypeUpdate,
+    payload: MatterHeadTypeVisibilityUpdate,
     admin: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ) -> MatterHeadTypeOut:
     head = db.get(MatterHeadType, head_id)
     if not head:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Head type not found")
-    conflict = db.execute(
-        select(MatterHeadType)
-        .where(MatterHeadType.name == payload.name.strip(), MatterHeadType.id != head_id)
-    ).scalar_one_or_none()
-    if conflict:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Head type name already exists")
-    head.name = payload.name.strip()
+    head.is_hidden = payload.is_hidden
     head.updated_at = datetime.utcnow()
     db.add(head)
     db.commit()
     db.refresh(head)
     return _head_out(head, db)
-
-
-@router.delete("/heads/{head_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_head_type(
-    head_id: uuid.UUID,
-    admin: User = Depends(require_admin),
-    db: Session = Depends(get_db),
-) -> None:
-    head = db.get(MatterHeadType, head_id)
-    if not head:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Head type not found")
-    db.delete(head)
-    db.commit()
 
 
 # ── Admin: sub type CRUD ─────────────────────────────────────────────────────
@@ -203,6 +180,37 @@ def delete_sub_type(
     sub = db.get(MatterSubType, sub_id)
     if not sub:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sub type not found")
+    n_menu = (
+        db.execute(
+            select(func.count()).select_from(MatterSubTypeMenu).where(MatterSubTypeMenu.sub_type_id == sub_id)
+        ).scalar_one()
+        or 0
+    )
+    if int(n_menu) > 0:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Remove all sub-menus for this sub type before deleting it.",
+        )
+    n_cat = (
+        db.execute(
+            select(func.count()).select_from(PrecedentCategory).where(PrecedentCategory.matter_sub_type_id == sub_id)
+        ).scalar_one()
+        or 0
+    )
+    if int(n_cat) > 0:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Remove precedent categories for this sub type before deleting it.",
+        )
+    n_prec = (
+        db.execute(select(func.count()).select_from(Precedent).where(Precedent.matter_sub_type_id == sub_id)).scalar_one()
+        or 0
+    )
+    if int(n_prec) > 0:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Reassign or remove precedents scoped to this sub type before deleting it.",
+        )
     db.delete(sub)
     db.commit()
 

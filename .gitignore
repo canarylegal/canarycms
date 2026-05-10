@@ -13,3 +13,6 @@ data/
 # Stray artifacts
 backend/=2.8.0
 claudecanary1.txt
+
+# Portable Node.js toolchain (used when system npm is unavailable)
+.tools/

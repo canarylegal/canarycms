@@ -70,6 +70,29 @@ function loadOoScript(base: string): Promise<void> {
   })
 }
 
+/**
+ * ONLYOFFICE `onDocumentStateChange`: `true` while the user is actively editing; `false` once
+ * changes are synced to the document server — not “nothing to save”. Parse defensively because
+ * embedders may stringify or wrap `data`.
+ */
+function parseOnlyofficeDocumentStateEvent(event: unknown): boolean | null {
+  if (event === true || event === false) return event
+  if (typeof event === 'string') {
+    const s = event.trim().toLowerCase()
+    if (s === 'true') return true
+    if (s === 'false') return false
+    try {
+      return parseOnlyofficeDocumentStateEvent(JSON.parse(event) as unknown)
+    } catch {
+      return null
+    }
+  }
+  if (event && typeof event === 'object' && 'data' in event) {
+    return parseOnlyofficeDocumentStateEvent((event as { data: unknown }).data)
+  }
+  return null
+}
+
 function formatOoError(event: unknown): string {
   try {
     const e = event as {
@@ -98,8 +121,14 @@ export default function EditorPage() {
   const [filename, setFilename] = useState('')
   const [err, setErr] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
-  const [discarding, setDiscarding] = useState(false)
-  const [confirmDiscard, setConfirmDiscard] = useState(false)
+  const [closing, setClosing] = useState(false)
+  /**
+   * Session has edits that are not committed via our Save path yet. Latched when ONLYOFFICE reports
+   * active editing; not cleared on DS sync (`event.data === false` — that is not “saved to Canary”).
+   */
+  const [documentDirty, setDocumentDirty] = useState(false)
+  const hasUncommittedOoEditsRef = useRef(false)
+  const [unsavedCloseOpen, setUnsavedCloseOpen] = useState(false)
   const [pdfExportBusy, setPdfExportBusy] = useState(false)
   const apiRef = useRef<DocsApiEditor | null>(null)
   const pdfExportTimeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
@@ -145,7 +174,7 @@ export default function EditorPage() {
       const isP = ev.key === 'p' || ev.key === 'P'
       if (!isP || ev.altKey) return
       if (!ev.ctrlKey && !ev.metaKey) return
-      if (!cfg || !apiRef.current?.downloadAs || pdfExportBusy || saving || discarding) return
+      if (!cfg || !apiRef.current?.downloadAs || pdfExportBusy || saving || closing) return
       ev.preventDefault()
       const w = window.open(
         'about:blank',
@@ -183,11 +212,13 @@ export default function EditorPage() {
     }
     window.addEventListener('keydown', onKey, true)
     return () => window.removeEventListener('keydown', onKey, true)
-  }, [cfg, pdfExportBusy, saving, discarding])
+  }, [cfg, pdfExportBusy, saving, closing])
 
   // Initialise OO DS editor once config is available
   useEffect(() => {
     if (!cfg) return
+    hasUncommittedOoEditsRef.current = false
+    setDocumentDirty(false)
     const base = resolveOoScriptBase(cfg.document_server_url)
     let active = true
 
@@ -214,7 +245,23 @@ export default function EditorPage() {
           height: '100%',
           events: {
             onAppReady: () => console.info('[ONLYOFFICE] onAppReady'),
-            onDocumentReady: () => console.info('[ONLYOFFICE] onDocumentReady — document rendered OK'),
+            onDocumentStateChange: (event: unknown) => {
+              if (!active) return
+              const v = parseOnlyofficeDocumentStateEvent(event)
+              if (v === true) {
+                hasUncommittedOoEditsRef.current = true
+                setDocumentDirty(true)
+              } else if (v === false) {
+                setDocumentDirty(hasUncommittedOoEditsRef.current)
+              }
+            },
+            onDocumentReady: () => {
+              console.info('[ONLYOFFICE] onDocumentReady — document rendered OK')
+              if (active) {
+                hasUncommittedOoEditsRef.current = false
+                setDocumentDirty(false)
+              }
+            },
             onWarning: (event: unknown) => console.warn('[ONLYOFFICE onWarning]', event),
             onError: (event: unknown) => {
               const raw = JSON.stringify(event)
@@ -301,14 +348,26 @@ export default function EditorPage() {
     }
   }, [cfg]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  async function handleSaveAndClose() {
-    if (!params || !cfg || saving) return
+  function notifyCaseFilesChangedIfCase() {
+    if (params?.mode !== 'case') return
+    try {
+      window.opener?.postMessage(
+        { type: 'canary-files-changed', caseId: params.caseId },
+        window.location.origin,
+      )
+    } catch {
+      /* ignore */
+    }
+    signalCaseFilesChanged(params.caseId)
+  }
+
+  async function performSave(): Promise<boolean> {
+    if (!params || !cfg) return false
     const docKey = (cfg.document as { key?: string }).key ?? ''
     if (!docKey) {
       setErr('Editor key missing; cannot save safely. Please reload and try again.')
-      return
+      return false
     }
-    setSaving(true)
     try {
       if (params.mode === 'case') {
         await apiFetch(
@@ -319,53 +378,101 @@ export default function EditorPage() {
           method: 'POST',
           token,
         })
-        try {
-          window.opener?.postMessage(
-            { type: 'canary-files-changed', caseId: params.caseId },
-            window.location.origin,
-          )
-        } catch {
-          /* ignore */
-        }
-        signalCaseFilesChanged(params.caseId)
+        notifyCaseFilesChangedIfCase()
       } else {
         await apiFetch(
           `/precedents/${params.precedentId}/oo-force-save?doc_key=${encodeURIComponent(docKey)}`,
           { method: 'POST', token },
         )
       }
-      window.close()
+      hasUncommittedOoEditsRef.current = false
+      setDocumentDirty(false)
+      return true
     } catch (e: unknown) {
       setErr((e as { message?: string }).message ?? 'Save failed. Keep this window open and try again.')
+      return false
+    }
+  }
+
+  async function handleSaveChanges() {
+    if (!params || !cfg || saving || closing) return
+    setSaving(true)
+    try {
+      await performSave()
     } finally {
       setSaving(false)
     }
   }
 
-  async function handleDiscard() {
-    if (!params || discarding) return
-    setConfirmDiscard(false)
-    setDiscarding(true)
+  async function releaseCaseEditSession() {
+    if (params?.mode !== 'case') return
+    try {
+      await apiFetch(`/cases/${params.caseId}/files/${params.fileId}/release-edit`, {
+        method: 'POST',
+        token,
+      })
+    } catch {
+      /* best-effort: still try to close */
+    }
+  }
+
+  async function performCloseClean() {
+    if (!params || closing) return
+    setClosing(true)
+    try {
+      await releaseCaseEditSession()
+      notifyCaseFilesChangedIfCase()
+      window.close()
+    } finally {
+      setClosing(false)
+    }
+  }
+
+  async function performCloseDiscardUnsaved() {
+    if (!params || closing) return
+    setClosing(true)
     try {
       if (params.mode === 'case') {
-        await apiFetch(`/cases/${params.caseId}/files/${params.fileId}/discard-edit`, {
-          method: 'POST',
-          token,
-        })
         try {
-          window.opener?.postMessage(
-            { type: 'canary-files-changed', caseId: params.caseId },
-            window.location.origin,
-          )
+          await apiFetch(`/cases/${params.caseId}/files/${params.fileId}/discard-edit`, {
+            method: 'POST',
+            token,
+          })
         } catch {
-          /* ignore */
+          /* best-effort */
         }
-        signalCaseFilesChanged(params.caseId)
       }
-    } catch {
-      // best-effort
+      notifyCaseFilesChangedIfCase()
+      window.close()
+    } finally {
+      setClosing(false)
     }
-    window.close()
+  }
+
+  function handleCloseClick() {
+    if (!params || saving || closing || !cfg) return
+    if (!documentDirty) void performCloseClean()
+    else setUnsavedCloseOpen(true)
+  }
+
+  async function handleUnsavedCloseSave() {
+    if (!params || closing) return
+    setClosing(true)
+    try {
+      const ok = await performSave()
+      if (!ok) return
+      setUnsavedCloseOpen(false)
+      await releaseCaseEditSession()
+      notifyCaseFilesChangedIfCase()
+      window.close()
+    } finally {
+      setClosing(false)
+    }
+  }
+
+  function handleUnsavedCloseDontSave() {
+    setUnsavedCloseOpen(false)
+    void performCloseDiscardUnsaved()
   }
 
   if (!params) {
@@ -413,7 +520,7 @@ export default function EditorPage() {
           type="button"
           title="Opens a print dialog via HTML preview (works when the browser treats ONLYOFFICE PDFs as downloads)."
           onClick={() => {
-            if (pdfExportBusy || !apiRef.current?.downloadAs || !cfg) return
+            if (pdfExportBusy || !apiRef.current?.downloadAs || !cfg || saving || closing) return
             const w = window.open(
               'about:blank',
               'canary_oo_print',
@@ -448,17 +555,17 @@ export default function EditorPage() {
               }
             }
           }}
-          disabled={pdfExportBusy || saving || discarding || !cfg}
+          disabled={pdfExportBusy || saving || closing || !cfg}
           style={{
             background: 'rgba(15,23,42,0.06)',
             border: '1px solid rgba(15,23,42,0.15)',
             color: '#334155',
-            cursor: pdfExportBusy || saving || discarding || !cfg ? 'default' : 'pointer',
+            cursor: pdfExportBusy || saving || closing || !cfg ? 'default' : 'pointer',
             fontSize: 12,
             padding: '3px 10px',
             borderRadius: 4,
             flexShrink: 0,
-            opacity: pdfExportBusy || saving || discarding || !cfg ? 0.5 : 1,
+            opacity: pdfExportBusy || saving || closing || !cfg ? 0.5 : 1,
             whiteSpace: 'nowrap',
           }}
         >
@@ -468,7 +575,7 @@ export default function EditorPage() {
           type="button"
           title="Download ONLYOFFICE’s PDF in a new tab (browser PDF handler)."
           onClick={() => {
-            if (pdfExportBusy || !apiRef.current?.downloadAs) return
+            if (pdfExportBusy || !apiRef.current?.downloadAs || saving || closing) return
             pendingDownloadAsRef.current = 'export'
             setPdfExportBusy(true)
             if (pdfExportTimeoutRef.current !== undefined) clearTimeout(pdfExportTimeoutRef.current)
@@ -486,70 +593,93 @@ export default function EditorPage() {
               setPdfExportBusy(false)
             }
           }}
-          disabled={pdfExportBusy || saving || discarding || !cfg}
+          disabled={pdfExportBusy || saving || closing || !cfg}
           style={{
             background: 'rgba(15,23,42,0.06)',
             border: '1px solid rgba(15,23,42,0.15)',
             color: '#334155',
-            cursor: pdfExportBusy || saving || discarding || !cfg ? 'default' : 'pointer',
+            cursor: pdfExportBusy || saving || closing || !cfg ? 'default' : 'pointer',
             fontSize: 12,
             padding: '3px 10px',
             borderRadius: 4,
             flexShrink: 0,
-            opacity: pdfExportBusy || saving || discarding || !cfg ? 0.5 : 1,
+            opacity: pdfExportBusy || saving || closing || !cfg ? 0.5 : 1,
             whiteSpace: 'nowrap',
           }}
         >
           {pdfExportBusy ? 'Preparing PDF…' : 'Export PDF'}
         </button>
         <button
-          onClick={() => void handleSaveAndClose()}
-          disabled={saving || discarding || !cfg}
+          type="button"
+          onClick={() => void handleSaveChanges()}
+          disabled={saving || closing || !cfg}
           style={{
             background: 'rgba(37,99,235,0.12)',
             border: '1px solid rgba(37,99,235,0.45)',
             color: '#1d4ed8',
-            cursor: saving || discarding || !cfg ? 'default' : 'pointer',
+            cursor: saving || closing || !cfg ? 'default' : 'pointer',
             fontSize: 12,
             padding: '3px 10px',
             borderRadius: 4,
             flexShrink: 0,
-            opacity: saving || discarding || !cfg ? 0.5 : 1,
+            opacity: saving || closing || !cfg ? 0.5 : 1,
             whiteSpace: 'nowrap',
           }}
         >
-          {saving ? 'Saving…' : 'Save & Close'}
+          {saving ? 'Saving…' : 'Save Changes'}
         </button>
-        {confirmDiscard ? (
+        {unsavedCloseOpen ? (
           <>
             <span style={{ color: '#64748b', fontSize: 12, whiteSpace: 'nowrap' }}>
-              Discard all changes?
+              Unsaved changes. Save before closing?
             </span>
             <button
-              onClick={() => void handleDiscard()}
-              disabled={discarding}
+              type="button"
+              onClick={() => void handleUnsavedCloseSave()}
+              disabled={closing}
               style={{
-                background: 'rgba(255,77,77,0.15)',
-                border: '1px solid rgba(255,77,77,0.6)',
-                color: '#dc2626',
-                cursor: discarding ? 'default' : 'pointer',
+                background: 'rgba(37,99,235,0.12)',
+                border: '1px solid rgba(37,99,235,0.45)',
+                color: '#1d4ed8',
+                cursor: closing ? 'default' : 'pointer',
                 fontSize: 12,
                 padding: '3px 10px',
                 borderRadius: 4,
                 flexShrink: 0,
-                opacity: discarding ? 0.5 : 1,
+                opacity: closing ? 0.5 : 1,
                 whiteSpace: 'nowrap',
               }}
             >
-              {discarding ? 'Discarding…' : 'Yes, discard'}
+              {closing ? 'Working…' : 'Save'}
             </button>
             <button
-              onClick={() => setConfirmDiscard(false)}
+              type="button"
+              onClick={() => handleUnsavedCloseDontSave()}
+              disabled={closing}
+              style={{
+                background: 'rgba(255,77,77,0.15)',
+                border: '1px solid rgba(255,77,77,0.6)',
+                color: '#dc2626',
+                cursor: closing ? 'default' : 'pointer',
+                fontSize: 12,
+                padding: '3px 10px',
+                borderRadius: 4,
+                flexShrink: 0,
+                opacity: closing ? 0.5 : 1,
+                whiteSpace: 'nowrap',
+              }}
+            >
+              Don&apos;t save
+            </button>
+            <button
+              type="button"
+              onClick={() => setUnsavedCloseOpen(false)}
+              disabled={closing}
               style={{
                 background: 'none',
                 border: '1px solid rgba(15,23,42,0.1)',
                 color: '#64748b',
-                cursor: 'pointer',
+                cursor: closing ? 'default' : 'pointer',
                 fontSize: 12,
                 padding: '3px 10px',
                 borderRadius: 4,
@@ -562,22 +692,24 @@ export default function EditorPage() {
           </>
         ) : (
           <button
-            onClick={() => setConfirmDiscard(true)}
-            disabled={discarding || saving}
+            type="button"
+            title="Close this editor. You will be prompted if there are unsaved changes."
+            onClick={() => handleCloseClick()}
+            disabled={saving || closing || !cfg}
             style={{
               background: 'none',
               border: '1px solid rgba(220,38,38,0.35)',
               color: '#dc2626',
-              cursor: discarding || saving ? 'default' : 'pointer',
+              cursor: saving || closing || !cfg ? 'default' : 'pointer',
               fontSize: 12,
               padding: '3px 10px',
               borderRadius: 4,
               flexShrink: 0,
-              opacity: discarding || saving ? 0.5 : 1,
+              opacity: saving || closing || !cfg ? 0.5 : 1,
               whiteSpace: 'nowrap',
             }}
           >
-            Discard Changes
+            {closing ? 'Closing…' : 'Close'}
           </button>
         )}
       </div>

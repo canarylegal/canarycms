@@ -12,8 +12,11 @@ const root = path.join(__dirname, '..')
 const REQUIRED_DIST = [
   'manifest.xml',
   'manifest.local.xml',
+  'manifest.dev.xml',
   'taskpane.html',
   'taskpane.js',
+  'commands.html',
+  'commands.js',
   'canary-login.html',
   'styles.css',
 ]

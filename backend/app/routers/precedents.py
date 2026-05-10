@@ -522,7 +522,7 @@ async def oo_force_save_precedent(
             return
     raise HTTPException(
         status_code=status.HTTP_504_GATEWAY_TIMEOUT,
-        detail="Force-save timed out before the template was written. Keep the editor open and retry Save & Close.",
+        detail="Force-save timed out before the template was written. Keep the editor open and retry Save Changes.",
     )
 
 

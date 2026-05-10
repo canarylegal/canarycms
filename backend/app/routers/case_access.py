@@ -6,9 +6,10 @@ from pydantic import BaseModel
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
+from app.admin_access import subject_user_effective_admin, user_effective_admin
 from app.db import get_db
 from app.deps import get_current_user, require_case_access
-from app.models import Case, CaseAccessMode, CaseAccessRule, CaseLockMode, User, UserRole
+from app.models import Case, CaseAccessMode, CaseAccessRule, CaseLockMode, User
 from app.audit import log_event
 
 
@@ -27,25 +28,24 @@ class CaseAccessRuleOut(BaseModel):
     mode: CaseAccessMode
 
 
-def _sync_blacklist_lock(case_id: uuid.UUID, db: Session) -> None:
-    """Set case lock to blacklist when any deny rules exist; otherwise unlock."""
-    # Session uses autoflush=False (see db.SessionLocal). Pending rule INSERT/UPDATE must hit the
-    # DB before COUNT runs, or we wrongly clear is_locked / lock_mode while deny rows still commit.
+def _may_manage_access_rules(user: User, case: Case, db) -> bool:
+    return user_effective_admin(user, db) or (case.fee_earner_user_id is not None and user.id == case.fee_earner_user_id)
+
+
+def _sync_case_access_flags(case_id: uuid.UUID, db: Session) -> None:
     db.flush()
     case = db.get(Case, case_id)
-    if not case:
+    if not case or case.lock_mode == CaseLockMode.none:
         return
-    n = db.execute(
-        select(func.count())
-        .select_from(CaseAccessRule)
-        .where(CaseAccessRule.case_id == case_id, CaseAccessRule.mode == CaseAccessMode.deny)
-    ).scalar_one()
-    if n > 0:
+    if case.lock_mode == CaseLockMode.whitelist:
+        n = db.scalar(
+            select(func.count())
+            .select_from(CaseAccessRule)
+            .where(CaseAccessRule.case_id == case_id, CaseAccessRule.mode == CaseAccessMode.deny)
+        ) or 0
+        case.is_locked = int(n) > 0
+    elif case.lock_mode == CaseLockMode.blacklist:
         case.is_locked = True
-        case.lock_mode = CaseLockMode.blacklist
-    else:
-        case.is_locked = False
-        case.lock_mode = CaseLockMode.none
     case.updated_at = datetime.utcnow()
     db.add(case)
 
@@ -68,22 +68,39 @@ def upsert_rule(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> CaseAccessRuleOut:
-    require_case_access(case_id, user, db)
+    case = require_case_access(case_id, user, db)
 
-    if payload.mode != CaseAccessMode.deny and user.role != UserRole.admin:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only administrators may set allow rules",
-        )
+    if not _may_manage_access_rules(user, case, db):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only the fee earner or an administrator may change access rules.")
 
     target = db.get(User, payload.user_id)
     if not target:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
-    if target.role == UserRole.admin and payload.mode == CaseAccessMode.deny:
+    if subject_user_effective_admin(target, db) and payload.mode == CaseAccessMode.deny:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Cannot revoke access for administrators",
+            detail="Cannot revoke access for administrators.",
         )
+    if case.fee_earner_user_id and payload.user_id == case.fee_earner_user_id and payload.mode == CaseAccessMode.deny:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot revoke access for the fee earner.",
+        )
+
+    if case.lock_mode == CaseLockMode.blacklist:
+        if payload.mode != CaseAccessMode.allow:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="In allow-list mode, grant access with allow rules only.",
+            )
+    elif case.lock_mode == CaseLockMode.whitelist:
+        if payload.mode != CaseAccessMode.deny:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="In open-by-default mode, remove access with deny rules only.",
+            )
+    else:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Set an access mode on the matter before editing rules.")
 
     existing = (
         db.execute(
@@ -98,7 +115,7 @@ def upsert_rule(
     if existing:
         existing.mode = payload.mode
         db.add(existing)
-        _sync_blacklist_lock(case_id, db)
+        _sync_case_access_flags(case_id, db)
         db.commit()
         db.refresh(existing)
         log_event(
@@ -113,7 +130,7 @@ def upsert_rule(
 
     rule = CaseAccessRule(case_id=case_id, user_id=payload.user_id, mode=payload.mode)
     db.add(rule)
-    _sync_blacklist_lock(case_id, db)
+    _sync_case_access_flags(case_id, db)
     db.commit()
     db.refresh(rule)
     log_event(
@@ -134,14 +151,16 @@ def delete_rule(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> None:
-    require_case_access(case_id, user, db)
+    case = require_case_access(case_id, user, db)
+    if not _may_manage_access_rules(user, case, db):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only the fee earner or an administrator may change access rules.")
 
     res = db.execute(
         delete(CaseAccessRule).where(CaseAccessRule.case_id == case_id, CaseAccessRule.user_id == user_id)
     )
     if res.rowcount == 0:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Rule not found")
-    _sync_blacklist_lock(case_id, db)
+    _sync_case_access_flags(case_id, db)
     db.commit()
     log_event(
         db,

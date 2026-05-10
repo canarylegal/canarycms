@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { AdminBilling } from './AdminBilling'
+import { AdminEmail } from './AdminEmail'
 import { AdminSubMenus } from './AdminSubMenus'
 import { AdminTasks } from './AdminTasks'
 import { CalendarPage } from './CalendarPage'
+import { TaskCreateModal } from './TaskCreateModal'
+import { TasksTable } from './TasksTable'
 import {
   GlobalContactCreateForm,
   ContactPersonOrgAddressFields,
@@ -13,6 +16,12 @@ import {
 import { CASE_FILES_STORAGE_KEY, signalCaseFilesChanged } from './caseFilesCrossTab'
 import { CaseDetail } from './case/CaseDetail'
 import { matterContactTypeLabel } from './case/matterLabels'
+import { PropertyDetailsForm } from './case/PropertyDetailsForm'
+import {
+  blankPropertyPayload,
+  buildNewMatterDescription,
+  subTypeHasPropertyMenu,
+} from './case/propertyMatterHelpers'
 import { CASE_MENU_OPTIONS } from './caseMenuOptions'
 import { apiFetch, apiUrl, formatApiErrorDetail } from './api'
 import {
@@ -25,6 +34,7 @@ import {
   saveThemePreferences,
 } from './theme'
 import { AppLogo } from './AppLogo'
+import { onlyofficePrecedentEditorWindowTarget } from './onlyofficeEditorWindow'
 import { DEFAULT_OUTLOOK_WEB_MAIL_URL, openCanaryEmailLauncher } from './emailLauncher'
 import { useDialogs } from './DialogProvider'
 import { SearchInput } from './SearchInput'
@@ -37,6 +47,7 @@ import type {
   CaseContactOut,
   CaseNoteOut,
   CaseOut,
+  CasePropertyPayload,
   CaseTaskOut,
   TaskMenuRow,
   ContactOut,
@@ -64,6 +75,8 @@ type View =
   | 'reports'
   | 'user-settings'
   | 'admin-console'
+
+const TASK_MENU_LAYOUT_STORAGE_KEY = 'canary.tasks.menuLayout'
 
 function canaryViewTitleSegment(view: View, caseDetail: CaseOut | null): string {
   switch (view) {
@@ -95,21 +108,9 @@ function formatTs(s: string) {
   return isNaN(d.getTime()) ? s : d.toLocaleString()
 }
 
-function formatTaskMenuDate(iso: string) {
-  const d = new Date(iso)
-  return isNaN(d.getTime()) ? iso : d.toLocaleDateString()
-}
-
 /** Main menu cases: Reference · Client · Description · Fee earner · Status — Client 30fr; Status 5fr (5% moved from Status to Client). */
 const MAIN_MENU_CASES_TABLE_GRID =
   'minmax(0, 10fr) minmax(0, 30fr) minmax(0, 35fr) minmax(0, 20fr) minmax(0, 5fr)'
-
-/**
- * Tasks menu: Date · Priority · Assigned · Task · Description · Client · Reference.
- * Description is 30% of row width (30fr of 100fr); other columns scale with prior proportions on the remaining 70%.
- */
-const TASKS_MENU_TABLE_GRID =
-  'minmax(0, 8.768fr) minmax(0, 6.427fr) minmax(0, 8.768fr) minmax(0, 20.459fr) minmax(0, 30fr) minmax(0, 18.267fr) minmax(0, 7.311fr)'
 
 /** Contacts page: Name · Type · Email · Phone — Name 30% (90fr/300fr); others share 70% equally (70fr each). */
 const CONTACTS_TABLE_GRID =
@@ -310,6 +311,22 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
     'reference' | 'client' | 'matter' | 'task' | 'date' | 'assigned' | 'priority'
   >('priority')
   const [taskMenuSortDir, setTaskMenuSortDir] = useState<'asc' | 'desc'>('asc')
+  const [taskMenuLayout, setTaskMenuLayout] = useState<'list' | 'kanban'>(() => {
+    try {
+      return localStorage.getItem(TASK_MENU_LAYOUT_STORAGE_KEY) === 'kanban' ? 'kanban' : 'list'
+    } catch {
+      return 'list'
+    }
+  })
+  const setTaskMenuLayoutPersist = useCallback((v: 'list' | 'kanban') => {
+    setTaskMenuLayout(v)
+    try {
+      localStorage.setItem(TASK_MENU_LAYOUT_STORAGE_KEY, v)
+    } catch {
+      /* ignore quota / private mode */
+    }
+  }, [])
+  const [globalTaskCreateOpen, setGlobalTaskCreateOpen] = useState(false)
   const [tasksMenuFilterOpen, setTasksMenuFilterOpen] = useState(false)
   const tasksMenuFilterWrapRef = useRef<HTMLDivElement | null>(null)
 
@@ -321,7 +338,7 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
   const [caseContacts, setCaseContacts] = useState<CaseContactOut[]>([])
   const [detailErr, setDetailErr] = useState<string | null>(null)
   const [caseListUsers, setCaseListUsers] = useState<UserSummary[]>([])
-  const isAdmin = auth.me?.role === 'admin'
+  const canAdminConsole = Boolean(auth.me?.admin_console_access || auth.me?.role === 'admin')
 
   const token = auth.token ?? undefined
 
@@ -500,10 +517,11 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
   const main = useMemo(() => {
     if (!token) return null
 
-    if (view === 'admin-console') return <AdminConsole token={token} />
+    if (view === 'admin-console') return <AdminConsole token={token} refreshMe={auth.refreshMe} />
     if (view === 'user-settings')
       return <UserSettingsPage token={token} refreshMe={auth.refreshMe} />
-    if (view === 'calendar') return <CalendarPage token={token} onOpenSettings={() => setView('user-settings')} />
+    if (view === 'calendar')
+      return <CalendarPage token={token} onOpenSettings={() => setView('user-settings')} />
     if (view === 'contacts') return <Contacts token={token} />
 
     if (view === 'reports') {
@@ -538,6 +556,7 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
 
     if (view === 'tasks') {
       return (
+        <>
         <div className="mainMenuShell mainMenuShell--mainMenu">
           <div className="mainMenuFilterBar">
             <div className="row mainMenuFilterRow mainMenuFilterRow--toolbar">
@@ -617,6 +636,21 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
                     Show all tasks
                   </button>
                 ) : null}
+                <button type="button" className="btn primary" onClick={() => setGlobalTaskCreateOpen(true)}>
+                  New task
+                </button>
+                <div className="tasksToolbarLayoutGroup">
+                  <span className="tasksToolbarLayoutLabel">View</span>
+                  <select
+                    className="tasksToolbarLayoutSelect"
+                    value={taskMenuLayout}
+                    onChange={(e) => setTaskMenuLayoutPersist(e.target.value as 'list' | 'kanban')}
+                    aria-label="Task layout"
+                  >
+                    <option value="list">List</option>
+                    <option value="kanban">Kanban</option>
+                  </select>
+                </div>
                 <button
                   type="button"
                   className="btn"
@@ -658,6 +692,7 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
             currentUserId={auth.me?.id ?? ''}
             users={caseListUsers}
             rows={taskMenuRows}
+            layoutMode={taskMenuLayout}
             search={taskMenuSearch}
             filterMatterType={taskMenuFilterMatterType}
             onSelectCase={(caseId) => {
@@ -676,6 +711,17 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
             onInvalidate={() => void refreshTaskMenu()}
           />
         </div>
+        <TaskCreateModal
+          open={globalTaskCreateOpen}
+          token={token}
+          users={caseListUsers}
+          caseIdFixed={null}
+          casesForPicker={cases}
+          preset={null}
+          onClose={() => setGlobalTaskCreateOpen(false)}
+          onCreated={() => void refreshTaskMenu()}
+        />
+        </>
       )
     }
 
@@ -873,6 +919,8 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
     taskMenuFilterMatterType,
     taskMenuSortKey,
     taskMenuSortDir,
+    taskMenuLayout,
+    setTaskMenuLayoutPersist,
     tasksMenuFilterOpen,
     tasksMenuActiveFilterCount,
     tasksMenuMatterTypeOptions,
@@ -947,7 +995,7 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
             >
               User Settings
             </button>
-            {isAdmin ? (
+            {canAdminConsole ? (
               <button
                 type="button"
                 className={`navBtn ${view === 'admin-console' ? 'active' : ''}`}
@@ -967,9 +1015,11 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
       </header>
       <main
         className={
-          view === 'main-menu' || view === 'contacts' || view === 'tasks' || view === 'reports'
-            ? 'main main--mainMenu'
-            : 'main'
+          view === 'case-menu'
+            ? 'main main--caseView'
+            : view === 'main-menu' || view === 'contacts' || view === 'tasks' || view === 'reports'
+              ? 'main main--mainMenu'
+              : 'main'
         }
       >
         {main}
@@ -1000,7 +1050,8 @@ function NewMatterModal({
   const [feeEarner, setFeeEarner] = useState<string>('')
   /** Active = open; Quote = quote (only these may be set on create). */
   const [newMatterStatus, setNewMatterStatus] = useState<'open' | 'quote'>('open')
-  const [step, setStep] = useState<'details' | 'contacts'>('details')
+  const [step, setStep] = useState<'details' | 'property' | 'description' | 'contacts'>('details')
+  const [propertyDraft, setPropertyDraft] = useState<CasePropertyPayload | null>(null)
   const [users, setUsers] = useState<UserSummary[]>([])
   const [matterHeadTypes, setMatterHeadTypes] = useState<MatterHeadTypeOut[]>([])
   const [contacts, setContacts] = useState<ContactOut[]>([])
@@ -1015,6 +1066,15 @@ function NewMatterModal({
   const [newContactFormKey, setNewContactFormKey] = useState(0)
 
   const hasClientOnMatter = pendingClientLinks.length > 0
+
+  const selectedSubType = useMemo(() => {
+    if (!practiceArea) return null
+    return matterHeadTypes.flatMap((h) => h.sub_types).find((s) => s.id === practiceArea) ?? null
+  }, [practiceArea, matterHeadTypes])
+
+  useEffect(() => {
+    setPropertyDraft(null)
+  }, [practiceArea])
 
   useEffect(() => {
     let cancelled = false
@@ -1084,12 +1144,7 @@ function NewMatterModal({
             <span>Matter type</span>
             <select
               value={practiceArea}
-              onChange={(e) => {
-                const id = e.target.value
-                setPracticeArea(id)
-                const sub = matterHeadTypes.flatMap((h) => h.sub_types).find((s) => s.id === id)
-                setMatterDescription(sub?.prefix ?? '')
-              }}
+              onChange={(e) => setPracticeArea(e.target.value)}
               disabled={busy}
             >
               <option value="">— select —</option>
@@ -1103,12 +1158,19 @@ function NewMatterModal({
             </select>
           </label>
           <label className="field">
-            <span>Description</span>
-            <input
-              value={matterDescription}
-              onChange={(e) => setMatterDescription(e.target.value)}
+            <span>Fee earner</span>
+            <select
+              value={feeEarner}
+              onChange={(e) => setFeeEarner(e.target.value)}
               disabled={busy}
-            />
+            >
+              <option value="">Unassigned</option>
+              {users.map((u) => (
+                <option key={u.id} value={u.id}>
+                  {u.display_name} ({u.email})
+                </option>
+              ))}
+            </select>
           </label>
           <div className="field">
             <span>Status</span>
@@ -1135,21 +1197,6 @@ function NewMatterModal({
               </label>
             </div>
           </div>
-          <label className="field">
-            <span>Fee earner</span>
-            <select
-              value={feeEarner}
-              onChange={(e) => setFeeEarner(e.target.value)}
-              disabled={busy}
-            >
-              <option value="">Unassigned</option>
-              {users.map((u) => (
-                <option key={u.id} value={u.id}>
-                  {u.display_name} ({u.email})
-                </option>
-              ))}
-            </select>
-          </label>
           {err ? <div className="error">{err}</div> : null}
           <div className="row" style={{ justifyContent: 'flex-end' }}>
             <button className="btn" onClick={onClose} disabled={busy}>
@@ -1157,17 +1204,116 @@ function NewMatterModal({
             </button>
             <button
               className="btn primary"
-              disabled={busy || !matterDescription.trim() || !practiceArea}
+              disabled={busy || !practiceArea}
               onClick={() => {
                 setErr(null)
                 setContactErr(null)
-                setStep('contacts')
+                const sub = matterHeadTypes.flatMap((h) => h.sub_types).find((s) => s.id === practiceArea)
+                if (subTypeHasPropertyMenu(sub)) {
+                  setPropertyDraft((d) => d ?? blankPropertyPayload())
+                  setStep('property')
+                } else {
+                  setPropertyDraft(null)
+                  setMatterDescription(buildNewMatterDescription(sub?.prefix ?? null, null))
+                  setStep('description')
+                }
               }}
             >
               Continue
             </button>
           </div>
         </div>
+        ) : null}
+
+        {step === 'property' && propertyDraft ? (
+          <div className="stack" style={{ marginTop: 12 }}>
+            <div className="paneHead" style={{ padding: 0, marginBottom: 8 }}>
+              <div>
+                <h2 style={{ margin: 0, fontSize: 18 }}>Property details</h2>
+                <div className="muted">Same fields as the Property sub-menu on the matter.</div>
+              </div>
+              <button
+                type="button"
+                className="btn"
+                onClick={() => {
+                  setErr(null)
+                  setStep('details')
+                }}
+                disabled={busy}
+              >
+                Back
+              </button>
+            </div>
+            <div className="card" style={{ padding: 12 }}>
+              <PropertyDetailsForm draft={propertyDraft} onChange={setPropertyDraft} disabled={busy} />
+            </div>
+            {err ? <div className="error">{err}</div> : null}
+            <div className="row" style={{ justifyContent: 'flex-end' }}>
+              <button
+                type="button"
+                className="btn primary"
+                disabled={busy}
+                onClick={() => {
+                  setErr(null)
+                  setMatterDescription(
+                    buildNewMatterDescription(selectedSubType?.prefix ?? null, propertyDraft),
+                  )
+                  setStep('description')
+                }}
+              >
+                Continue
+              </button>
+            </div>
+          </div>
+        ) : null}
+
+        {step === 'description' ? (
+          <div className="stack" style={{ marginTop: 12 }}>
+            <div className="paneHead" style={{ padding: 0, marginBottom: 8 }}>
+              <div>
+                <h2 style={{ margin: 0, fontSize: 18 }}>Description</h2>
+              </div>
+              <button
+                type="button"
+                className="btn"
+                onClick={() => {
+                  setErr(null)
+                  if (selectedSubType && subTypeHasPropertyMenu(selectedSubType)) {
+                    setPropertyDraft((d) => d ?? blankPropertyPayload())
+                    setStep('property')
+                  } else {
+                    setStep('details')
+                  }
+                }}
+                disabled={busy}
+              >
+                Back
+              </button>
+            </div>
+            <label className="field">
+              <span>Description</span>
+              <input
+                value={matterDescription}
+                onChange={(e) => setMatterDescription(e.target.value)}
+                disabled={busy}
+              />
+            </label>
+            {err ? <div className="error">{err}</div> : null}
+            <div className="row" style={{ justifyContent: 'flex-end' }}>
+              <button
+                type="button"
+                className="btn primary"
+                disabled={busy || !matterDescription.trim()}
+                onClick={() => {
+                  setErr(null)
+                  setContactErr(null)
+                  setStep('contacts')
+                }}
+              >
+                Continue
+              </button>
+            </div>
+          </div>
         ) : null}
 
         {step === 'contacts' ? (
@@ -1177,7 +1323,7 @@ function NewMatterModal({
                 <h2 style={{ margin: 0, fontSize: 18 }}>Contacts</h2>
                 <div className="muted">Link at least one client contact, then finish to create the matter.</div>
               </div>
-              <button className="btn" onClick={() => setStep('details')} disabled={busy}>
+              <button className="btn" onClick={() => setStep('description')} disabled={busy}>
                 Back
               </button>
             </div>
@@ -1365,6 +1511,15 @@ function NewMatterModal({
                             matter_contact_type: 'client',
                             matter_contact_reference: null,
                           },
+                        })
+                      }
+                      if (selectedSubType && subTypeHasPropertyMenu(selectedSubType) && propertyDraft) {
+                        const lines = [...propertyDraft.free_lines]
+                        while (lines.length < 6) lines.push('')
+                        await apiFetch(`/cases/${created.id}/property-details`, {
+                          token,
+                          method: 'PUT',
+                          json: { ...propertyDraft, free_lines: lines.slice(0, 6) },
                         })
                       }
                       onCreated()
@@ -1586,479 +1741,6 @@ function CasesTable({
   )
 }
 
-const TASK_PRI_ORDER: Record<string, number> = { high: 2, normal: 1, low: 0 }
-
-function priorityLabel(p: string): string {
-  if (p === 'high') return 'High'
-  if (p === 'low') return 'Low'
-  return 'Normal'
-}
-
-function TasksTable({
-  token,
-  currentUserId,
-  users,
-  rows,
-  search,
-  filterMatterType,
-  onSelectCase,
-  sortKey,
-  sortDir,
-  onSort,
-  onInvalidate,
-}: {
-  token: string
-  currentUserId: string
-  users: UserSummary[]
-  rows: TaskMenuRow[]
-  search: string
-  filterMatterType: string
-  onSelectCase: (caseId: string) => void
-  sortKey: 'reference' | 'client' | 'matter' | 'task' | 'date' | 'assigned' | 'priority'
-  sortDir: 'asc' | 'desc'
-  onSort: (k: 'reference' | 'client' | 'matter' | 'task' | 'date' | 'assigned' | 'priority') => void
-  onInvalidate: () => void
-}) {
-  const { askConfirm } = useDialogs()
-  const [ctx, setCtx] = useState<null | { x: number; y: number; row: TaskMenuRow }>(null)
-  const taskCtxRef = useRef<HTMLDivElement | null>(null)
-  const [editRow, setEditRow] = useState<TaskMenuRow | null>(null)
-  const [editTitle, setEditTitle] = useState('')
-  const [editDue, setEditDue] = useState('')
-  const [editAssign, setEditAssign] = useState('')
-  const [editPriority, setEditPriority] = useState<'low' | 'normal' | 'high'>('normal')
-  const [editCompleted, setEditCompleted] = useState(false)
-  const [editPrivate, setEditPrivate] = useState(false)
-  const [editCreatedBy, setEditCreatedBy] = useState('')
-  const [editBaseline, setEditBaseline] = useState<{
-    title: string
-    due: string
-    assign: string
-    priority: 'low' | 'normal' | 'high'
-    completed: boolean
-    isPrivate: boolean
-  } | null>(null)
-  const [editBusy, setEditBusy] = useState(false)
-  const [editErr, setEditErr] = useState<string | null>(null)
-  const [taskRowFocusId, setTaskRowFocusId] = useState<string | null>(null)
-  const visible = useMemo(() => {
-    const s = search.trim().toLowerCase()
-    let filtered = rows
-    if (s) {
-      filtered = filtered.filter((r) => {
-        const parts = [
-          r.case_number,
-          r.client_name ?? '',
-          r.matter_description ?? '',
-          r.task_title,
-          r.date,
-          formatTaskMenuDate(r.date),
-          r.assigned_display_name ?? '',
-          r.priority,
-          r.status,
-          r.is_private ? 'private' : '',
-        ]
-        return parts.join(' ').toLowerCase().includes(s)
-      })
-    }
-    if (filterMatterType) {
-      filtered = filtered.filter((r) => r.matter_type_label === filterMatterType)
-    }
-    const dir = sortDir === 'asc' ? 1 : -1
-    const sorted = [...filtered].sort((a, b) => {
-      const key = sortKey
-      if (key === 'priority') {
-        const pa = TASK_PRI_ORDER[a.priority] ?? 1
-        const pb = TASK_PRI_ORDER[b.priority] ?? 1
-        if (pa !== pb) return (pa - pb) * -dir
-        return (new Date(a.date).getTime() - new Date(b.date).getTime()) * dir
-      }
-      const av =
-        key === 'reference'
-          ? a.case_number
-          : key === 'client'
-            ? a.client_name ?? ''
-            : key === 'matter'
-              ? a.matter_description ?? ''
-              : key === 'task'
-                ? a.task_title
-                : key === 'date'
-                  ? a.date
-                  : a.assigned_display_name ?? ''
-      const bv =
-        key === 'reference'
-          ? b.case_number
-          : key === 'client'
-            ? b.client_name ?? ''
-            : key === 'matter'
-              ? b.matter_description ?? ''
-              : key === 'task'
-                ? b.task_title
-                : key === 'date'
-                  ? b.date
-                  : b.assigned_display_name ?? ''
-      const c = String(av).localeCompare(String(bv)) * dir
-      if (c !== 0) return c
-      const pa = TASK_PRI_ORDER[a.priority] ?? 1
-      const pb = TASK_PRI_ORDER[b.priority] ?? 1
-      if (pa !== pb) return pb - pa
-      return new Date(a.date).getTime() - new Date(b.date).getTime()
-    })
-    return sorted
-  }, [rows, search, filterMatterType, sortKey, sortDir])
-
-  useEffect(() => {
-    if (!ctx) return
-    function handleMouseDown(e: MouseEvent) {
-      const t = e.target as Node
-      if (taskCtxRef.current?.contains(t)) return
-      setCtx(null)
-    }
-    document.addEventListener('mousedown', handleMouseDown)
-    return () => document.removeEventListener('mousedown', handleMouseDown)
-  }, [ctx])
-
-  async function openEdit(r: TaskMenuRow) {
-    setEditErr(null)
-    setEditRow(r)
-    setEditBusy(true)
-    try {
-      const list = await apiFetch<CaseTaskOut[]>(`/cases/${r.case_id}/tasks`, { token })
-      const t = list.find((x) => x.id === r.id)
-      const title = (t?.title ?? r.task_title).trim()
-      const dueRaw = t?.due_at ?? r.date
-      const due = dueRaw.slice(0, 10)
-      const assign = t?.assigned_to_user_id ?? ''
-      const pri = (t?.priority ?? r.priority ?? 'normal') as 'low' | 'normal' | 'high'
-      const completed = (t?.status ?? r.status) === 'done'
-      const priv = Boolean(t?.is_private)
-      const createdBy = t?.created_by_user_id ?? ''
-      setEditTitle(title)
-      setEditDue(due)
-      setEditAssign(assign)
-      setEditPriority(pri)
-      setEditCompleted(completed)
-      setEditPrivate(priv)
-      setEditCreatedBy(createdBy)
-      setEditBaseline({ title, due, assign, priority: pri, completed, isPrivate: priv })
-    } catch {
-      const due = r.date.slice(0, 10)
-      const pri = (r.priority ?? 'normal') as 'low' | 'normal' | 'high'
-      const completed = r.status === 'done'
-      const priv = Boolean(r.is_private)
-      setEditTitle(r.task_title)
-      setEditDue(due)
-      setEditAssign('')
-      setEditPriority(pri)
-      setEditCompleted(completed)
-      setEditPrivate(priv)
-      setEditCreatedBy('')
-      setEditBaseline({
-        title: r.task_title,
-        due,
-        assign: '',
-        priority: pri,
-        completed,
-        isPrivate: priv,
-      })
-    } finally {
-      setEditBusy(false)
-    }
-  }
-
-  function discardTaskEdit() {
-    if (editBaseline) {
-      setEditTitle(editBaseline.title)
-      setEditDue(editBaseline.due)
-      setEditAssign(editBaseline.assign)
-      setEditPriority(editBaseline.priority)
-      setEditCompleted(editBaseline.completed)
-      setEditPrivate(editBaseline.isPrivate)
-    }
-    setEditRow(null)
-    setEditErr(null)
-  }
-
-  async function saveEdit() {
-    if (!editRow) return
-    setEditBusy(true)
-    setEditErr(null)
-    try {
-      const due = new Date(`${editDue}T12:00:00`)
-      const patch: Record<string, unknown> = {
-        title: editTitle.trim(),
-        due_at: due.toISOString(),
-        priority: editPriority,
-        assigned_to_user_id: editAssign || null,
-        status: editCompleted ? 'done' : 'open',
-      }
-      if (currentUserId && editCreatedBy === currentUserId) {
-        patch.is_private = editPrivate
-      }
-      await apiFetch(`/cases/${editRow.case_id}/tasks/${editRow.id}`, {
-        token,
-        method: 'PATCH',
-        json: patch,
-      })
-      setEditRow(null)
-      setEditBaseline(null)
-      onInvalidate()
-    } catch (e: any) {
-      setEditErr(e?.message ?? 'Failed to update task')
-    } finally {
-      setEditBusy(false)
-    }
-  }
-
-  async function markComplete(r: TaskMenuRow) {
-    try {
-      await apiFetch(`/cases/${r.case_id}/tasks/${r.id}`, {
-        token,
-        method: 'PATCH',
-        json: { status: 'done' },
-      })
-      onInvalidate()
-    } catch {
-      // ignore
-    }
-  }
-
-  async function deleteTask(r: TaskMenuRow) {
-    const ok = await askConfirm({
-      title: 'Delete task',
-      message: 'Delete this task permanently?',
-      danger: true,
-      confirmLabel: 'Delete',
-    })
-    if (!ok) return
-    try {
-      await apiFetch(`/cases/${r.case_id}/tasks/${r.id}`, { token, method: 'DELETE' })
-      onInvalidate()
-    } catch {
-      // ignore
-    }
-  }
-
-  return (
-    <div className="card casesTableCard" style={{ padding: 0, overflow: 'hidden' }}>
-      <div className="casesTableScroll tasksTableScroll">
-        <div className="table">
-          <div className="tr th" style={{ gridTemplateColumns: TASKS_MENU_TABLE_GRID }}>
-            {(
-              [
-                ['date', 'Date'],
-                ['priority', 'Priority'],
-                ['assigned', 'Assigned'],
-                ['task', 'Task'],
-                ['matter', 'Description'],
-                ['client', 'Client name'],
-                ['reference', 'Reference'],
-              ] as const
-            ).map(([k, label]) => (
-              <div key={k} className="thCell">
-                <button type="button" className="thbtn" onClick={() => onSort(k)}>
-                  {label}
-                </button>
-              </div>
-            ))}
-          </div>
-          {visible.map((r) => {
-            const rowCls =
-              r.status === 'done'
-                ? 'taskMenuRow--done'
-                : (r.priority ?? 'normal') === 'high'
-                  ? 'taskMenuRow--high'
-                  : ''
-            const rowActive = taskRowFocusId === r.id
-            return (
-              <button
-                key={r.id}
-                type="button"
-                className={`tr rowbtn taskMenuRow ${rowCls} ${rowActive ? 'active' : ''}`}
-                style={{ gridTemplateColumns: TASKS_MENU_TABLE_GRID }}
-                onClick={() => setTaskRowFocusId(r.id)}
-                onDoubleClick={() => onSelectCase(r.case_id)}
-                onContextMenu={(e) => {
-                  e.preventDefault()
-                  e.stopPropagation()
-                  setCtx({ x: e.clientX, y: e.clientY, row: r })
-                }}
-              >
-                <div className="td">{formatTaskMenuDate(r.date)}</div>
-                <div className="td">{priorityLabel(r.priority ?? 'normal')}</div>
-                <div className="td">{r.assigned_display_name ?? '—'}</div>
-                <div className="td">
-                  {r.task_title}
-                  {r.is_private ? <span className="muted"> (private)</span> : null}
-                </div>
-                <div className="td">{r.matter_description ?? '—'}</div>
-                <div className="td">{r.client_name ?? '—'}</div>
-                <div className="td mono">{r.case_number}</div>
-              </button>
-            )
-          })}
-          {visible.length === 0 ? (
-            <div className="muted" style={{ padding: 12 }}>
-              No tasks to show yet.
-            </div>
-          ) : null}
-        </div>
-      </div>
-      {ctx ? (
-        <div
-          ref={taskCtxRef}
-          className="docContextMenu"
-          style={{ left: ctx.x, top: ctx.y, zIndex: 30 }}
-          onMouseDown={(e) => e.stopPropagation()}
-        >
-          <div
-            className="docContextItem"
-            role="menuitem"
-            tabIndex={0}
-            onClick={() => {
-              const r = ctx.row
-              setCtx(null)
-              onSelectCase(r.case_id)
-            }}
-          >
-            Open
-          </div>
-          <div
-            className="docContextItem"
-            role="menuitem"
-            tabIndex={0}
-            onClick={() => {
-              const r = ctx.row
-              setCtx(null)
-              void openEdit(r)
-            }}
-          >
-            Edit…
-          </div>
-          <div
-            className="docContextItem"
-            role="menuitem"
-            tabIndex={0}
-            onClick={() => {
-              const r = ctx.row
-              setCtx(null)
-              void markComplete(r)
-            }}
-          >
-            Mark as complete
-          </div>
-          <div
-            className="docContextItem"
-            role="menuitem"
-            tabIndex={0}
-            onClick={() => {
-              const r = ctx.row
-              setCtx(null)
-              void deleteTask(r)
-            }}
-          >
-            Delete
-          </div>
-        </div>
-      ) : null}
-      {editRow ? (
-        <div
-          className="modalOverlay"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="task-edit-title"
-          onClick={(e) => {
-            if (e.target === e.currentTarget && !editBusy) discardTaskEdit()
-          }}
-        >
-          <div className="modal card" style={{ maxWidth: 480 }} onClick={(e) => e.stopPropagation()}>
-            <div className="paneHead">
-              <h2 id="task-edit-title" style={{ margin: 0, fontSize: 18 }}>
-                Edit task
-              </h2>
-              <div className="row" style={{ gap: 8 }}>
-                <button type="button" className="btn" disabled={editBusy} onClick={discardTaskEdit}>
-                  Discard changes
-                </button>
-                <button
-                  type="button"
-                  className="btn"
-                  style={{ background: 'var(--primary)', color: '#fff', borderColor: 'var(--primary)' }}
-                  disabled={editBusy}
-                  onClick={() => void saveEdit()}
-                >
-                  {editBusy ? 'Saving…' : 'Save and close'}
-                </button>
-              </div>
-            </div>
-            <div className="stack" style={{ marginTop: 12, gap: 12 }}>
-              {editErr ? <div className="error">{editErr}</div> : null}
-              <label className="field">
-                <span>Title</span>
-                <input value={editTitle} onChange={(e) => setEditTitle(e.target.value)} disabled={editBusy} />
-              </label>
-              <label className="field">
-                <span>Due date</span>
-                <input type="date" value={editDue} onChange={(e) => setEditDue(e.target.value)} disabled={editBusy} />
-              </label>
-              <label className="field">
-                <span>Priority</span>
-                <select
-                  value={editPriority}
-                  disabled={editBusy}
-                  onChange={(e) => setEditPriority(e.target.value as 'low' | 'normal' | 'high')}
-                >
-                  <option value="low">Low</option>
-                  <option value="normal">Normal</option>
-                  <option value="high">High</option>
-                </select>
-              </label>
-              <label className="field">
-                <span>Assigned to</span>
-                <select value={editAssign} disabled={editBusy} onChange={(e) => setEditAssign(e.target.value)}>
-                  <option value="">— Unassigned —</option>
-                  {users
-                    .filter((u) => u.is_active)
-                    .slice()
-                    .sort((a, b) => a.display_name.localeCompare(b.display_name))
-                    .map((u) => (
-                      <option key={u.id} value={u.id}>
-                        {u.display_name}
-                      </option>
-                    ))}
-                </select>
-              </label>
-              <label className="row" style={{ alignItems: 'center', gap: 8 }}>
-                <input
-                  type="checkbox"
-                  checked={editCompleted}
-                  disabled={editBusy}
-                  onChange={(e) => setEditCompleted(e.target.checked)}
-                />
-                <span>Completed</span>
-              </label>
-              {currentUserId && editCreatedBy === currentUserId ? (
-                <label className="row" style={{ alignItems: 'flex-start', gap: 8 }}>
-                  <input
-                    type="checkbox"
-                    checked={editPrivate}
-                    disabled={editBusy}
-                    onChange={(e) => setEditPrivate(e.target.checked)}
-                  />
-                  <span>
-                    Private — only you and the assignee (if any) can see this task on the matter.
-                  </span>
-                </label>
-              ) : null}
-            </div>
-          </div>
-        </div>
-      ) : null}
-    </div>
-  )
-}
-
-
 function AdminMatters({ token }: { token: string }) {
   const { askConfirm } = useDialogs()
   const [heads, setHeads] = useState<MatterHeadTypeOut[]>([])
@@ -2068,11 +1750,6 @@ function AdminMatters({ token }: { token: string }) {
   const [err, setErr] = useState<string | null>(null)
   const [subPrecCats, setSubPrecCats] = useState<PrecedentCategoryOut[]>([])
   const [newPrecCatName, setNewPrecCatName] = useState('')
-
-  // Head type form state
-  const [newHeadName, setNewHeadName] = useState('')
-  const [editingHeadId, setEditingHeadId] = useState<string | null>(null)
-  const [editingHeadName, setEditingHeadName] = useState('')
 
   // Sub type form state
   const [newSubName, setNewSubName] = useState('')
@@ -2126,40 +1803,12 @@ function AdminMatters({ token }: { token: string }) {
   const smallBtn = { padding: '3px 8px', fontSize: '0.82em' } as const
   const inlineInput = { flex: 1, width: 'auto' } as const
 
-  // ── Head type actions ────────────────────────────────────────────────────
+  // ── Head type visibility (canonical list from Canary; no add/rename/delete) ──
 
-  async function addHead() {
-    if (!newHeadName.trim()) return
+  async function setHeadHidden(id: string, is_hidden: boolean) {
     setBusy(true); setErr(null)
     try {
-      await apiFetch('/matter-types/heads', { token, json: { name: newHeadName.trim() } })
-      setNewHeadName('')
-      await loadHeads()
-    } catch (e: any) { setErr(e?.message ?? 'Failed') } finally { setBusy(false) }
-  }
-
-  async function saveHeadRename(id: string) {
-    if (!editingHeadName.trim()) return
-    setBusy(true); setErr(null)
-    try {
-      await apiFetch(`/matter-types/heads/${id}`, { token, method: 'PATCH', json: { name: editingHeadName.trim() } })
-      setEditingHeadId(null)
-      await loadHeads()
-    } catch (e: any) { setErr(e?.message ?? 'Failed') } finally { setBusy(false) }
-  }
-
-  async function deleteHead(id: string) {
-    const ok = await askConfirm({
-      title: 'Delete head type',
-      message: 'Delete this head type and all its sub types?',
-      danger: true,
-      confirmLabel: 'Delete',
-    })
-    if (!ok) return
-    setBusy(true); setErr(null)
-    try {
-      await apiFetch(`/matter-types/heads/${id}`, { token, method: 'DELETE' })
-      if (selectedHeadId === id) setSelectedHeadId(null)
+      await apiFetch(`/matter-types/heads/${id}`, { token, method: 'PATCH', json: { is_hidden } })
       await loadHeads()
     } catch (e: any) { setErr(e?.message ?? 'Failed') } finally { setBusy(false) }
   }
@@ -2189,7 +1838,8 @@ function AdminMatters({ token }: { token: string }) {
   async function deleteSub(id: string) {
     const ok = await askConfirm({
       title: 'Delete sub type',
-      message: 'Delete this sub type?',
+      message:
+        'Delete this sub type? You must remove its sub-menus, precedent categories, and precedents scoped to it first; hiding the head matter type does not delete sub-types or menus.',
       danger: true,
       confirmLabel: 'Delete',
     })
@@ -2262,6 +1912,9 @@ function AdminMatters({ token }: { token: string }) {
         {/* Head matter types */}
         <div className="card" style={{ flex: 1 }}>
           <h3 style={{ marginTop: 0 }}>Head matter types</h3>
+          <p className="muted" style={{ marginTop: 0, fontSize: 13 }}>
+            Head types are defined by Canary and sync from the product seed. Hide a head here if your firm does not use that area of law (it disappears from fee-earner matter pickers but stays in the database for existing matters).
+          </p>
           <div className="list">
             {heads.map((h) => (
               <div
@@ -2271,49 +1924,30 @@ function AdminMatters({ token }: { token: string }) {
                   justifyContent: 'space-between',
                   cursor: 'pointer',
                   background: selectedHeadId === h.id ? 'rgba(37,99,235,0.1)' : undefined,
+                  opacity: h.is_hidden ? 0.72 : undefined,
                 }}
                 onClick={() => setSelectedHeadId(h.id)}
               >
-                {editingHeadId === h.id ? (
+                <span className="listTitle">
+                  {h.name}
+                  {h.is_hidden ? <span className="muted" style={{ marginLeft: 8, fontWeight: 400 }}>(hidden)</span> : null}
+                </span>
+                <label
+                  className="row"
+                  style={{ gap: 6, alignItems: 'center', fontSize: 13 }}
+                  onClick={(e) => e.stopPropagation()}
+                >
                   <input
-                    style={inlineInput}
-                    value={editingHeadName}
-                    onChange={(e) => setEditingHeadName(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === 'Enter') void saveHeadRename(h.id); if (e.key === 'Escape') setEditingHeadId(null) }}
-                    autoFocus
+                    type="checkbox"
+                    checked={Boolean(h.is_hidden)}
                     disabled={busy}
-                    onClick={(e) => e.stopPropagation()}
+                    onChange={(e) => void setHeadHidden(h.id, e.target.checked)}
                   />
-                ) : (
-                  <span className="listTitle">{h.name}</span>
-                )}
-                <div className="row" style={{ gap: 4 }} onClick={(e) => e.stopPropagation()}>
-                  {editingHeadId === h.id ? (
-                    <>
-                      <button className="btn" style={smallBtn} disabled={busy} onClick={() => void saveHeadRename(h.id)}>Save</button>
-                      <button className="btn" style={smallBtn} disabled={busy} onClick={() => setEditingHeadId(null)}>Cancel</button>
-                    </>
-                  ) : (
-                    <>
-                      <button className="btn" style={smallBtn} disabled={busy} onClick={() => { setEditingHeadId(h.id); setEditingHeadName(h.name) }}>Rename</button>
-                      <button className="btn danger" style={smallBtn} disabled={busy} onClick={() => void deleteHead(h.id)}>Delete</button>
-                    </>
-                  )}
-                </div>
+                  <span>Hidden</span>
+                </label>
               </div>
             ))}
             {heads.length === 0 && <div className="muted" style={{ padding: '6px 0' }}>No head types yet.</div>}
-          </div>
-          <div className="row" style={{ marginTop: 10, gap: 6 }}>
-            <input
-              style={inlineInput}
-              placeholder="New head type name…"
-              value={newHeadName}
-              onChange={(e) => setNewHeadName(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter') void addHead() }}
-              disabled={busy}
-            />
-            <button className="btn primary" disabled={busy || !newHeadName.trim()} onClick={() => void addHead()}>Add</button>
           </div>
         </div>
 
@@ -3207,7 +2841,9 @@ function AdminPrecedents({ token }: { token: string }) {
                 type="button"
                 className="btn"
                 disabled={busy}
-                onClick={() => window.open(`/editor/precedent/${p.id}`, '_blank')}
+                onClick={() =>
+                  window.open(`/editor/precedent/${p.id}`, onlyofficePrecedentEditorWindowTarget(p.id))
+                }
               >
                 Edit in OnlyOffice
               </button>
@@ -4255,10 +3891,30 @@ function AdminMatterContacts({ token }: { token: string }) {
   )
 }
 
-function AdminConsole({ token }: { token: string }) {
+function AdminConsole({ token, refreshMe }: { token: string; refreshMe: () => Promise<void> }) {
   const [tab, setTab] = useState<
-    'users' | 'matters' | 'billing' | 'submenus' | 'tasks' | 'contacts' | 'precedents' | 'audit'
+    'users' | 'matters' | 'billing' | 'email' | 'submenus' | 'tasks' | 'contacts' | 'precedents' | 'audit'
   >('users')
+  const adminSubtitle =
+    tab === 'email'
+      ? 'Org-wide e-mail integration (mailto vs Microsoft 365).'
+      : tab === 'audit'
+        ? 'Activity and audit trail.'
+        : tab === 'users'
+          ? 'User accounts and permission categories.'
+          : tab === 'matters'
+            ? 'Matter types and defaults.'
+            : tab === 'billing'
+              ? 'Billing configuration.'
+              : tab === 'submenus'
+                ? 'Case sub-menu configuration.'
+                : tab === 'tasks'
+                  ? 'Task templates and defaults.'
+                  : tab === 'contacts'
+                    ? 'Matter contact types.'
+                    : tab === 'precedents'
+                      ? 'Precedent library.'
+                      : ''
   return (
     <div
       className="mainMenuShell mainMenuShell--surface"
@@ -4267,7 +3923,7 @@ function AdminConsole({ token }: { token: string }) {
       <div className="paneHead">
         <div>
           <h2 style={{ margin: 0 }}>Admin settings</h2>
-          <div className="muted" style={{ marginTop: 4 }}>Users and audit trail</div>
+          <div className="muted" style={{ marginTop: 4 }}>{adminSubtitle}</div>
         </div>
         <div className="row" style={{ alignItems: 'center', flexWrap: 'wrap', gap: 4 }}>
           <button type="button" className={`navBtn ${tab === 'users' ? 'active' : ''}`} onClick={() => setTab('users')}>
@@ -4278,6 +3934,9 @@ function AdminConsole({ token }: { token: string }) {
           </button>
           <button type="button" className={`navBtn ${tab === 'billing' ? 'active' : ''}`} onClick={() => setTab('billing')}>
             Billing
+          </button>
+          <button type="button" className={`navBtn ${tab === 'email' ? 'active' : ''}`} onClick={() => setTab('email')}>
+            E-mail
           </button>
           <button type="button" className={`navBtn ${tab === 'submenus' ? 'active' : ''}`} onClick={() => setTab('submenus')}>
             Sub-Menus
@@ -4303,6 +3962,8 @@ function AdminConsole({ token }: { token: string }) {
           <AdminMatters token={token} />
         ) : tab === 'billing' ? (
           <AdminBilling token={token} />
+        ) : tab === 'email' ? (
+          <AdminEmail token={token} onSaved={() => void refreshMe()} />
         ) : tab === 'submenus' ? (
           <AdminSubMenus token={token} />
         ) : tab === 'tasks' ? (
@@ -4328,9 +3989,19 @@ function AdminUsers({ token, embedded }: { token: string; embedded?: boolean }) 
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [displayName, setDisplayName] = useState('')
+  const [newInitials, setNewInitials] = useState('')
   const [newJobTitle, setNewJobTitle] = useState('')
-  const [jobTitleByUser, setJobTitleByUser] = useState<Record<string, string>>({})
   const [newUserCategoryId, setNewUserCategoryId] = useState('')
+  const [editingUser, setEditingUser] = useState<AdminUserPublic | null>(null)
+  const [editEmail, setEditEmail] = useState('')
+  const [editDisplayName, setEditDisplayName] = useState('')
+  const [editInitials, setEditInitials] = useState('')
+  const [editJobTitle, setEditJobTitle] = useState('')
+  const [editRole, setEditRole] = useState<'admin' | 'user'>('user')
+  const [editActive, setEditActive] = useState(true)
+  const [editCategoryId, setEditCategoryId] = useState('')
+  const [editPw, setEditPw] = useState('')
+  const [editPw2, setEditPw2] = useState('')
   const [newCatName, setNewCatName] = useState('')
   const [newCat, setNewCat] = useState({
     perm_fee_earner: false,
@@ -4338,6 +4009,7 @@ function AdminUsers({ token, embedded }: { token: string; embedded?: boolean }) 
     perm_post_office: false,
     perm_approve_payments: false,
     perm_approve_invoices: false,
+    perm_admin: false,
   })
   const [editCatId, setEditCatId] = useState<string | null>(null)
   const [editCatName, setEditCatName] = useState('')
@@ -4347,6 +4019,7 @@ function AdminUsers({ token, embedded }: { token: string; embedded?: boolean }) 
     perm_post_office: false,
     perm_approve_payments: false,
     perm_approve_invoices: false,
+    perm_admin: false,
   })
 
   async function load() {
@@ -4370,11 +4043,19 @@ function AdminUsers({ token, embedded }: { token: string; embedded?: boolean }) 
     void load()
   }, [])
 
-  useEffect(() => {
-    const m: Record<string, string> = {}
-    for (const u of users) m[u.id] = u.job_title ?? ''
-    setJobTitleByUser(m)
-  }, [users])
+  function openUserEditor(u: AdminUserPublic) {
+    setErr(null)
+    setEditingUser(u)
+    setEditEmail(u.email)
+    setEditDisplayName(u.display_name)
+    setEditInitials(u.initials ?? '')
+    setEditJobTitle(u.job_title ?? '')
+    setEditRole(u.role)
+    setEditActive(u.is_active)
+    setEditCategoryId(u.permission_category_id ?? '')
+    setEditPw('')
+    setEditPw2('')
+  }
 
   return (
     <div className="stack">
@@ -4384,7 +4065,7 @@ function AdminUsers({ token, embedded }: { token: string; embedded?: boolean }) 
           Refresh
         </button>
       </div>
-      {err ? <div className="error">{err}</div> : null}
+      {err && !editingUser ? <div className="error">{err}</div> : null}
       <div className="card">
         <h3>User categories</h3>
         <p className="muted" style={{ marginTop: 0 }}>
@@ -4430,6 +4111,7 @@ function AdminUsers({ token, embedded }: { token: string; embedded?: boolean }) 
                 ['perm_post_office', 'Post office'],
                 ['perm_approve_payments', 'Approve payments'],
                 ['perm_approve_invoices', 'Approve invoices'],
+                ['perm_admin', 'Admin'],
               ] as const
             ).map(([k, label]) => (
               <label key={k} className="row" style={{ gap: 6, cursor: 'pointer' }}>
@@ -4461,6 +4143,7 @@ function AdminUsers({ token, embedded }: { token: string; embedded?: boolean }) 
                         ['perm_post_office', 'Post office'],
                         ['perm_approve_payments', 'Approve payments'],
                         ['perm_approve_invoices', 'Approve invoices'],
+                        ['perm_admin', 'Admin'],
                       ] as const
                     ).map(([k, label]) => (
                       <label key={k} className="row" style={{ gap: 6, cursor: 'pointer' }}>
@@ -4493,6 +4176,7 @@ function AdminUsers({ token, embedded }: { token: string; embedded?: boolean }) 
                               perm_post_office: editCat.perm_post_office,
                               perm_approve_payments: editCat.perm_approve_payments,
                               perm_approve_invoices: editCat.perm_approve_invoices,
+                              perm_admin: editCat.perm_admin,
                             },
                           })
                           setEditCatId(null)
@@ -4527,6 +4211,7 @@ function AdminUsers({ token, embedded }: { token: string; embedded?: boolean }) 
                         c.perm_post_office ? 'Office post' : null,
                         c.perm_approve_payments ? 'Approve payments' : null,
                         c.perm_approve_invoices ? 'Approve invoices' : null,
+                        c.perm_admin ? 'Admin' : null,
                       ]
                         .filter(Boolean)
                         .join(' · ') || 'No permissions'}
@@ -4546,6 +4231,7 @@ function AdminUsers({ token, embedded }: { token: string; embedded?: boolean }) 
                           perm_post_office: c.perm_post_office,
                           perm_approve_payments: c.perm_approve_payments,
                           perm_approve_invoices: c.perm_approve_invoices,
+                          perm_admin: c.perm_admin ?? false,
                         })
                       }}
                     >
@@ -4594,6 +4280,13 @@ function AdminUsers({ token, embedded }: { token: string; embedded?: boolean }) 
           <input placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} />
           <input placeholder="Display name" value={displayName} onChange={(e) => setDisplayName(e.target.value)} />
           <input
+            placeholder="Initials (unique)"
+            value={newInitials ?? ''}
+            onChange={(e) => setNewInitials(e.target.value)}
+            style={{ maxWidth: 120 }}
+            title="Letters, digits, dot, underscore, hyphen; 1–12 characters"
+          />
+          <input
             placeholder="Job title (optional)"
             value={newJobTitle}
             onChange={(e) => setNewJobTitle(e.target.value)}
@@ -4613,7 +4306,14 @@ function AdminUsers({ token, embedded }: { token: string; embedded?: boolean }) 
           </label>
           <button
             className="btn primary"
-            disabled={busy || !email || !displayName || password.length < 12 || !newUserCategoryId}
+            disabled={
+              busy ||
+              !email ||
+              !displayName ||
+              !(newInitials ?? '').trim() ||
+              password.length < 12 ||
+              !newUserCategoryId
+            }
             onClick={async () => {
               setBusy(true)
               setErr(null)
@@ -4623,6 +4323,7 @@ function AdminUsers({ token, embedded }: { token: string; embedded?: boolean }) 
                   json: {
                     email,
                     display_name: displayName,
+                    initials: (newInitials ?? '').trim(),
                     job_title: newJobTitle.trim() || null,
                     password,
                     permission_category_id: newUserCategoryId,
@@ -4630,12 +4331,14 @@ function AdminUsers({ token, embedded }: { token: string; embedded?: boolean }) 
                 })
                 setEmail('')
                 setDisplayName('')
+                setNewInitials('')
                 setNewJobTitle('')
                 setPassword('')
                 setNewUserCategoryId('')
                 await load()
-              } catch (e: any) {
-                setErr(e?.message ?? 'Create failed')
+              } catch (e: unknown) {
+                const msg = ((e as ApiError).message ?? '').trim()
+                setErr(msg || 'Create failed')
               } finally {
                 setBusy(false)
               }
@@ -4647,6 +4350,9 @@ function AdminUsers({ token, embedded }: { token: string; embedded?: boolean }) 
       </div>
       <div className="card">
         <h3>Users</h3>
+        <p className="muted" style={{ marginTop: 0 }}>
+          Edit a user to change e-mail, display name, job title, role, category, active state, or set a new password (optional).
+        </p>
         <div className="list">
           {users.map((u) => (
             <div key={u.id} className="listCard row" style={{ justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
@@ -4655,61 +4361,99 @@ function AdminUsers({ token, embedded }: { token: string; embedded?: boolean }) 
                   {u.email} <span className="muted">· {u.role}</span>
                 </div>
                 <div className="muted">
-                  {u.display_name} · {u.is_active ? 'active' : 'disabled'} · 2FA {u.is_2fa_enabled ? 'on' : 'off'}
+                  {u.display_name} ({u.initials ?? '—'}) · {u.is_active ? 'active' : 'disabled'} · 2FA{' '}
+                  {u.is_2fa_enabled ? 'on' : 'off'}
                 </div>
-                <label className="field" style={{ marginTop: 8, marginBottom: 0, maxWidth: 420 }}>
-                  <span>Job title</span>
-                  <input
-                    value={jobTitleByUser[u.id] ?? ''}
-                    onChange={(e) => setJobTitleByUser((p) => ({ ...p, [u.id]: e.target.value }))}
-                    onBlur={async () => {
-                      const next = (jobTitleByUser[u.id] ?? '').trim()
-                      const prev = (u.job_title ?? '').trim()
-                      if (next === prev) return
-                      setBusy(true)
-                      setErr(null)
-                      try {
-                        await apiFetch(`/admin/users/${u.id}`, {
-                          token,
-                          method: 'PATCH',
-                          json: { job_title: next || null },
-                        })
-                        await load()
-                      } catch (err2: any) {
-                        setErr(err2?.message ?? 'Could not update job title')
-                        setJobTitleByUser((p) => ({ ...p, [u.id]: u.job_title ?? '' }))
-                      } finally {
-                        setBusy(false)
-                      }
-                    }}
-                    disabled={busy}
-                    placeholder="Optional"
-                  />
-                </label>
               </div>
-              <label className="field" style={{ marginBottom: 0, minWidth: 200 }}>
-                <span>Category</span>
-                <select
-                  value={u.permission_category_id ?? ''}
+              <div className="row" style={{ gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                <button type="button" className="btn" disabled={busy} onClick={() => openUserEditor(u)}>
+                  Edit
+                </button>
+                <button
+                  className="btn"
                   disabled={busy}
-                  onChange={async (e) => {
-                    const v = e.target.value || null
+                  onClick={async () => {
                     setBusy(true)
                     setErr(null)
                     try {
-                      await apiFetch(`/admin/users/${u.id}`, {
-                        token,
-                        method: 'PATCH',
-                        json: { permission_category_id: v },
-                      })
+                      await apiFetch(`/admin/users/${u.id}`, { token, method: 'PATCH', json: { is_active: !u.is_active } })
                       await load()
-                    } catch (err2: any) {
-                      setErr(err2?.message ?? 'Update failed')
+                    } catch (e: any) {
+                      setErr(e?.message ?? 'Update failed')
                     } finally {
                       setBusy(false)
                     }
                   }}
                 >
+                  {u.is_active ? 'Disable' : 'Enable'}
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {editingUser ? (
+        <div
+          className="modalOverlay"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="admin-edit-user-title"
+          onClick={() => !busy && setEditingUser(null)}
+        >
+          <div
+            className="modal card modal--scrollBody"
+            style={{ maxWidth: 520, width: 'min(520px, 94vw)' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="paneHead">
+              <div>
+                <h2 id="admin-edit-user-title">Edit user</h2>
+                <div className="muted" style={{ fontSize: 13 }}>
+                  Same fields as create user. New password is optional; when set, it must be at least 12 characters and 2FA enrolment is cleared.
+                </div>
+              </div>
+              <button type="button" className="btn" disabled={busy} onClick={() => setEditingUser(null)}>
+                Close
+              </button>
+            </div>
+            <div className="stack modalBodyScroll" style={{ gap: 12, marginTop: 12 }}>
+              {err ? (
+                <div className="error" role="alert">
+                  {err}
+                </div>
+              ) : null}
+              <label className="field" style={{ marginBottom: 0 }}>
+                <span>Email</span>
+                <input value={editEmail} onChange={(e) => setEditEmail(e.target.value)} disabled={busy} autoComplete="off" />
+              </label>
+              <label className="field" style={{ marginBottom: 0 }}>
+                <span>Display name</span>
+                <input value={editDisplayName} onChange={(e) => setEditDisplayName(e.target.value)} disabled={busy} />
+              </label>
+              <label className="field" style={{ marginBottom: 0 }}>
+                <span>Initials (unique)</span>
+                <input
+                  value={editInitials ?? ''}
+                  onChange={(e) => setEditInitials(e.target.value)}
+                  disabled={busy}
+                  title="Letters, digits, dot, underscore, hyphen; 1–12 characters"
+                />
+              </label>
+              <label className="field" style={{ marginBottom: 0 }}>
+                <span>Job title (optional)</span>
+                <input value={editJobTitle} onChange={(e) => setEditJobTitle(e.target.value)} disabled={busy} placeholder="Optional" />
+              </label>
+              <label className="field" style={{ marginBottom: 0 }}>
+                <span>Role</span>
+                <select value={editRole} onChange={(e) => setEditRole(e.target.value as 'admin' | 'user')} disabled={busy}>
+                  <option value="user">User</option>
+                  <option value="admin">Admin</option>
+                </select>
+              </label>
+              <label className="field" style={{ marginBottom: 0 }}>
+                <span>Permission category</span>
+                <select value={editCategoryId} onChange={(e) => setEditCategoryId(e.target.value)} disabled={busy}>
                   <option value="">— None —</option>
                   {categories.map((c) => (
                     <option key={c.id} value={c.id}>
@@ -4718,28 +4462,114 @@ function AdminUsers({ token, embedded }: { token: string; embedded?: boolean }) 
                   ))}
                 </select>
               </label>
-              <button
-                className="btn"
-                disabled={busy}
-                onClick={async () => {
-                  setBusy(true)
-                  setErr(null)
-                  try {
-                    await apiFetch(`/admin/users/${u.id}`, { token, method: 'PATCH', json: { is_active: !u.is_active } })
-                    await load()
-                  } catch (e: any) {
-                    setErr(e?.message ?? 'Update failed')
-                  } finally {
-                    setBusy(false)
+              <label className="row" style={{ gap: 8, cursor: 'pointer' }}>
+                <input type="checkbox" checked={editActive} onChange={(e) => setEditActive(e.target.checked)} disabled={busy} />
+                <span>Account active</span>
+              </label>
+              <label className="field" style={{ marginBottom: 0 }}>
+                <span>New password (optional, min 12 characters)</span>
+                <input
+                  type="password"
+                  value={editPw}
+                  onChange={(e) => setEditPw(e.target.value)}
+                  disabled={busy}
+                  autoComplete="new-password"
+                  placeholder="Leave blank to keep current password"
+                />
+              </label>
+              <label className="field" style={{ marginBottom: 0 }}>
+                <span>Confirm new password</span>
+                <input
+                  type="password"
+                  value={editPw2}
+                  onChange={(e) => setEditPw2(e.target.value)}
+                  disabled={busy}
+                  autoComplete="new-password"
+                />
+              </label>
+              <div className="row" style={{ gap: 8, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+                <button type="button" className="btn" disabled={busy} onClick={() => setEditingUser(null)}>
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="btn primary"
+                  disabled={
+                    busy ||
+                    !editEmail.trim() ||
+                    !editDisplayName.trim() ||
+                    !(editInitials ?? '').trim() ||
+                    (editPw.length > 0 && (editPw.length < 12 || editPw !== editPw2))
                   }
-                }}
-              >
-                {u.is_active ? 'Disable' : 'Enable'}
-              </button>
+                  onClick={async () => {
+                    if (!editingUser) return
+                    if (editPw.length > 0 && editPw !== editPw2) {
+                      setErr('Passwords do not match')
+                      return
+                    }
+                    if (editPw.length > 0 && editPw.length < 12) {
+                      setErr('Password must be at least 12 characters')
+                      return
+                    }
+                    setBusy(true)
+                    setErr(null)
+                    try {
+                      const updatedUser = await apiFetch<AdminUserPublic>(`/admin/users/${editingUser.id}`, {
+                        token,
+                        method: 'PATCH',
+                        json: {
+                          email: editEmail.trim(),
+                          display_name: editDisplayName.trim(),
+                          initials: (editInitials ?? '').trim(),
+                          job_title: (editJobTitle ?? '').trim() || null,
+                          role: editRole,
+                          is_active: editActive,
+                          permission_category_id: editCategoryId || null,
+                        },
+                      })
+                      if (editPw.length >= 12) {
+                        await apiFetch(`/admin/users/${editingUser.id}/set-password`, {
+                          token,
+                          method: 'POST',
+                          json: { password: editPw },
+                        })
+                      }
+                      setEditingUser(null)
+                      setEditPw('')
+                      setEditPw2('')
+                      await load()
+                      // Fill in fields from PATCH (not a full spread: set-password may run after PATCH
+                      // and load() is the source of truth for 2FA state).
+                      setUsers((prev) =>
+                        prev.map((u) => {
+                          if (u.id !== updatedUser.id) return u
+                          return {
+                            ...u,
+                            email: updatedUser.email,
+                            display_name: updatedUser.display_name,
+                            initials: updatedUser.initials ?? u.initials,
+                            job_title: updatedUser.job_title,
+                            role: updatedUser.role,
+                            is_active: updatedUser.is_active,
+                            permission_category_id: updatedUser.permission_category_id,
+                          }
+                        }),
+                      )
+                    } catch (e: unknown) {
+                      const msg = ((e as ApiError).message ?? '').trim()
+                      setErr(msg || 'Update failed')
+                    } finally {
+                      setBusy(false)
+                    }
+                  }}
+                >
+                  Save changes
+                </button>
+              </div>
             </div>
-          ))}
+          </div>
         </div>
-      </div>
+      ) : null}
     </div>
   )
 }

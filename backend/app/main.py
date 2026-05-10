@@ -11,6 +11,7 @@ from app.webdav_cors_middleware import WebdavPublicCORSMiddleware
 from app.routers import (
     admin_audit,
     admin_billing,
+    admin_email_integration,
     admin_finance,
     admin_matter_contact_types,
     admin_permission_categories,
@@ -48,13 +49,13 @@ async def lifespan(app: FastAPI):
     import logging
 
     from app.db import SessionLocal
-    from app.matter_type_bootstrap import apply_matter_type_seed_if_empty
+    from app.matter_type_bootstrap import sync_matter_types_from_seed
     from app.precedent_bootstrap import apply_precedent_seed_if_empty
 
     _log = logging.getLogger("uvicorn.error")
     db = SessionLocal()
     try:
-        apply_matter_type_seed_if_empty(db)
+        sync_matter_types_from_seed(db)
     except Exception as e:
         db.rollback()
         _log.warning("Matter type seed skipped: %s", e)
@@ -165,6 +166,7 @@ app.include_router(case_finance.router)
 app.include_router(case_events.router)
 app.include_router(admin_finance.router)
 app.include_router(admin_billing.router)
+app.include_router(admin_email_integration.router)
 app.include_router(admin_standard_tasks.router)
 app.include_router(admin_sub_menu_events.router)
 app.include_router(files.router)

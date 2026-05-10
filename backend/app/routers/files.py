@@ -8,16 +8,19 @@ import uuid
 from datetime import datetime, timezone
 from email import message_from_bytes
 from email.header import decode_header, make_header
-from email.utils import parseaddr
+from email.utils import parseaddr, parsedate_to_datetime
 from pathlib import Path
-from urllib.parse import quote
+from urllib.parse import quote, unquote
 
 import shutil
+import tempfile
+import zipfile
 import httpx
 from fastapi import APIRouter, Depends, File as FastAPIFile, HTTPException, Query, Request, Response, UploadFile, status, Form
 from fastapi.responses import FileResponse
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
+from starlette.background import BackgroundTask
 
 from app.db import get_db
 from app.deps import get_current_user, require_case_access
@@ -43,6 +46,7 @@ from app.schemas import (
     CaseFolderRenameUpdate,
     CaseEmailDraftM365In,
     CaseEmailDraftM365Out,
+    CaseEmailMailtoOut,
     CommentFileUpdate,
     ComposeOfficeDocumentIn,
     FileDesktopCheckoutOut,
@@ -85,6 +89,20 @@ def _canary_public_url() -> str:
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+# DB column ``outlook_graph_message_id`` is VARCHAR(450); Office.js REST/EWS ids can be longer.
+_OUTLOOK_GRAPH_MESSAGE_ID_MAX = 450
+
+
+def _outlook_graph_message_id_storable(rest_id: str | None) -> str | None:
+    """Return a value safe for ``outlook_graph_message_id``; long ids remain only in ``source_outlook_item_id`` (Text)."""
+    t = (rest_id or "").strip()
+    if not t:
+        return None
+    if len(t) > _OUTLOOK_GRAPH_MESSAGE_ID_MAX:
+        return None
+    return t
 
 
 def _onlyoffice_types_for_file(original_filename: str) -> tuple[str, str] | None:
@@ -209,6 +227,37 @@ def _eml_parse_from_header(abs_path: Path) -> tuple[str | None, str | None]:
         return None, None
 
 
+def _eml_parse_date_header(abs_path: Path) -> datetime | None:
+    """Read Date: from the first chunk of a .eml / message/rfc822 file; return UTC-aware datetime or None."""
+    try:
+        with abs_path.open("rb") as fh:
+            raw = fh.read(131072)
+        if not raw.strip():
+            return None
+        while raw.startswith(b"From ") and b"\n" in raw:
+            raw = raw.split(b"\n", 1)[1]
+        if b"\r\n\r\n" in raw:
+            header = raw.split(b"\r\n\r\n", 1)[0]
+        elif b"\n\n" in raw:
+            header = raw.split(b"\n\n", 1)[0]
+        else:
+            header = raw
+        if not header.strip():
+            return None
+        msg = message_from_bytes(header + b"\n\n")
+        raw_date = msg.get("Date")
+        if not raw_date:
+            return None
+        dt = parsedate_to_datetime(str(raw_date))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        else:
+            dt = dt.astimezone(timezone.utc)
+        return dt
+    except Exception:
+        return None
+
+
 def _imap_mbox_implies_outbound(mbox: str | None) -> bool | None:
     """Return True/False when the IMAP folder name reliably indicates sent vs inbox; else None."""
     if not mbox or not str(mbox).strip():
@@ -220,7 +269,7 @@ def _imap_mbox_implies_outbound(mbox: str | None) -> bool | None:
         return False
     if "outbox" in s or "sent" in s:
         return True
-    return False
+    return None
 
 
 def _infer_source_mail_is_outbound(
@@ -288,13 +337,15 @@ def refresh_root_eml_mail_metadata(frow: DbFile, abs_path: Path, *, uploader_ema
     if frow.parent_file_id is not None:
         return
     low = (frow.original_filename or "").lower()
-    if not low.endswith(".eml"):
+    mime = (frow.mime_type or "").lower()
+    if not low.endswith(".eml") and "message/rfc822" not in mime:
         return
     fn, fe = _eml_parse_from_header(abs_path)
     frow.source_mail_from_name = fn
     frow.source_mail_from_email = fe
     frow.source_mail_is_outbound = _infer_source_mail_is_outbound(frow.source_imap_mbox, fe, uploader_email)
     frow.source_internet_message_id = _eml_parse_message_id_from_header(abs_path)
+    frow.source_mail_date = _eml_parse_date_header(abs_path)
 
 
 def _correct_file_type(file_type: str, abs_path: Path) -> str:
@@ -326,6 +377,7 @@ def upload_case_file(
     source_imap_mbox: str | None = Form(default=None),
     source_imap_uid: str | None = Form(default=None),
     outlook_item_id: str | None = Form(default=None),
+    outlook_conversation_id: str | None = Form(default=None),
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -371,8 +423,10 @@ def upload_case_file(
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="parent_file_id is invalid")
 
     outlook_rest_id = (outlook_item_id or "").strip() or None
+    outlook_conv_id = (outlook_conversation_id or "").strip() or None
     if parent_file_id is not None:
         outlook_rest_id = None
+        outlook_conv_id = None
 
     internet_mid: str | None = None
     if parent_file_id is None:
@@ -390,11 +444,13 @@ def upload_case_file(
     from_name: str | None = None
     from_email_addr: str | None = None
     mail_outbound: bool | None = None
+    mail_header_date: datetime | None = None
     if parent_file_id is None:
         low = original.lower()
         if mime_base == "message/rfc822" or low.endswith(".eml"):
             from_name, from_email_addr = _eml_parse_from_header(paths.abs_path)
             mail_outbound = _infer_source_mail_is_outbound(smbox, from_email_addr, user.email)
+            mail_header_date = _eml_parse_date_header(paths.abs_path)
 
     row = DbFile(
         id=file_id,
@@ -410,8 +466,10 @@ def upload_case_file(
         source_mail_from_email=from_email_addr,
         source_mail_is_outbound=mail_outbound,
         source_internet_message_id=internet_mid,
+        source_mail_date=mail_header_date,
+        source_outlook_conversation_id=outlook_conv_id,
         source_outlook_item_id=outlook_rest_id,
-        outlook_graph_message_id=outlook_rest_id,
+        outlook_graph_message_id=_outlook_graph_message_id_storable(outlook_rest_id),
         outlook_web_link=None,
         is_pinned=False,
         original_filename=original,
@@ -520,82 +578,29 @@ def _resolve_recipient_email_m365(
     case_id: uuid.UUID,
     body: ComposeOfficeDocumentIn,
 ) -> str:
+    """To: address for the Graph draft. Empty string omits toRecipients; user fills To in Outlook."""
     if body.precedent_merge_all_clients:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail='Choose a single matter or global contact with an e-mail (not "All clients") for Microsoft 365 e-mail.',
-        )
+        return ""
     if body.case_contact_id:
         cc = db.get(CaseContact, body.case_contact_id)
         if not cc or cc.case_id != case_id:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Matter contact not found")
-        em = (cc.email or "").strip()
-        if not em:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Selected matter contact has no e-mail address.",
-            )
-        return em
+        return (cc.email or "").strip()
     if body.global_contact_id:
         g = db.get(GlobalContactRow, body.global_contact_id)
         if not g:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Contact not found")
-        em = (g.email or "").strip() if g.email else ""
-        if not em:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Selected contact has no e-mail address.",
-            )
-        return em
-    raise HTTPException(
-        status_code=status.HTTP_400_BAD_REQUEST,
-        detail="Select a matter contact or global contact with an e-mail address.",
-    )
+        return (g.email or "").strip() if g.email else ""
+    return ""
 
 
-@router.post("/email-drafts/m365", status_code=status.HTTP_201_CREATED, response_model=CaseEmailDraftM365Out)
-def create_case_email_draft_m365(
-    case_id: uuid.UUID,
-    body: CaseEmailDraftM365In,
-    user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-) -> CaseEmailDraftM365Out:
-    """Create an Outlook draft in the signed-in user's mailbox via Microsoft Graph (application permissions)."""
-    try:
-        return _create_case_email_draft_m365_body(case_id, body, user, db)
-    except HTTPException:
-        raise
-    except Exception as e:
-        log.exception("M365 email draft failed")
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"{type(e).__name__}: {e}",
-        ) from e
-
-
-def _create_case_email_draft_m365_body(
+def _case_email_compose_bundle(
     case_id: uuid.UUID,
     body: CaseEmailDraftM365In,
     user: User,
     db: Session,
-) -> CaseEmailDraftM365Out:
-    require_case_access(case_id, user, db)
-    if not graph_mail_configured():
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=(
-                "Microsoft 365 e-mail drafts are not configured. Set CANARY_MS_GRAPH_TENANT_ID, "
-                "CANARY_MS_GRAPH_CLIENT_ID, and CANARY_MS_GRAPH_CLIENT_SECRET on the server, "
-                "and grant Mail.ReadWrite (application) admin consent."
-            ),
-        )
-    mailbox = (user.email or "").strip()
-    if not mailbox:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Your Canary account must have an e-mail address that matches the Microsoft 365 mailbox to use.",
-        )
-
+) -> tuple[str, str, str, list[tuple[str, str, bytes]]]:
+    """Shared merge + attachments for M365 draft and mailto compose."""
     merge_in = ComposeOfficeDocumentIn(
         original_filename="Email draft.docx",
         folder=body.folder or "",
@@ -648,6 +653,72 @@ def _create_case_email_draft_m365_body(
         mt = frow.mime_type or mimetypes.guess_type(fn)[0] or "application/octet-stream"
         attachments.append((fn, mt, raw))
 
+    return to_addr, subject, body_text, attachments
+
+
+@router.post("/email-mailto", response_model=CaseEmailMailtoOut)
+def create_case_email_mailto(
+    case_id: uuid.UUID,
+    body: CaseEmailDraftM365In,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> CaseEmailMailtoOut:
+    """Build subject/body/to for a desktop mailto compose (no Microsoft Graph)."""
+    require_case_access(case_id, user, db)
+    to_addr, subject, body_text, attachments = _case_email_compose_bundle(case_id, body, user, db)
+    return CaseEmailMailtoOut(
+        to=to_addr,
+        subject=subject,
+        body=body_text,
+        attachment_count=len(attachments),
+    )
+
+
+@router.post("/email-drafts/m365", status_code=status.HTTP_201_CREATED, response_model=CaseEmailDraftM365Out)
+def create_case_email_draft_m365(
+    case_id: uuid.UUID,
+    body: CaseEmailDraftM365In,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> CaseEmailDraftM365Out:
+    """Create an Outlook draft in the signed-in user's mailbox via Microsoft Graph (application permissions)."""
+    try:
+        return _create_case_email_draft_m365_body(case_id, body, user, db)
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.exception("M365 email draft failed")
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"{type(e).__name__}: {e}",
+        ) from e
+
+
+def _create_case_email_draft_m365_body(
+    case_id: uuid.UUID,
+    body: CaseEmailDraftM365In,
+    user: User,
+    db: Session,
+) -> CaseEmailDraftM365Out:
+    require_case_access(case_id, user, db)
+    if not graph_mail_configured(db):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=(
+                "Microsoft 365 e-mail drafts are not configured. An admin must set **Microsoft 365 (Entra / Graph)** "
+                "in Admin settings → E-mail (or set CANARY_MS_GRAPH_* in the server environment), "
+                "and grant Mail.ReadWrite (application) admin consent."
+            ),
+        )
+    mailbox = (user.email or "").strip()
+    if not mailbox:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Your Canary account must have an e-mail address that matches the Microsoft 365 mailbox to use.",
+        )
+
+    to_addr, subject, body_text, attachments = _case_email_compose_bundle(case_id, body, user, db)
+
     try:
         primary, draft_id, compose_extra, _imid = create_outlook_draft(
             mailbox,
@@ -655,10 +726,26 @@ def _create_case_email_draft_m365_body(
             subject=subject,
             body_text=body_text,
             attachments=attachments,
+            db=db,
         )
     except RuntimeError as e:
-        log.warning("Graph draft failed: %s", e)
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(e)) from e
+        msg = str(e)
+        log.warning("Graph draft failed: %s", msg)
+        # Avoid HTTP 502 for Graph auth/ACL failures — some CDNs replace the JSON body with an HTML error page.
+        if "Microsoft Graph token request failed (401)" in msg or "invalid_client" in msg:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=msg) from e
+        if "Microsoft Graph draft create failed (403)" in msg or "ErrorAccessDenied" in msg:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=(
+                    "Microsoft Graph refused to create the draft (access denied). "
+                    "In Entra ID → your app → API permissions: add **Mail.ReadWrite** under **Application** "
+                    "(not Delegated), then **Grant admin consent** for the tenant. "
+                    "The Canary account email must be an Exchange Online mailbox in that same tenant. "
+                    f"Upstream detail: {msg[:900]}"
+                ),
+            ) from e
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=msg) from e
     except Exception as e:
         log.exception("M365 draft failed with unexpected error")
         raise HTTPException(
@@ -695,7 +782,7 @@ def list_case_files(
     require_case_access(case_id, user, db)
     rows = (
         db.execute(
-            select(DbFile, User.display_name, User.email)
+            select(DbFile, User.display_name, User.email, User.initials)
             .join(User, DbFile.owner_id == User.id)
             .where(DbFile.case_id == case_id, DbFile.oo_compose_pending.is_(False))
             .order_by(DbFile.created_at.desc())
@@ -718,14 +805,16 @@ def list_case_files(
             "source_mail_from_name": f.source_mail_from_name,
             "source_mail_from_email": f.source_mail_from_email,
             "source_mail_is_outbound": f.source_mail_is_outbound,
+            "source_mail_date": f.source_mail_date.isoformat() if f.source_mail_date else None,
             "source_internet_message_id": f.source_internet_message_id,
             "source_outlook_item_id": f.source_outlook_item_id,
             "outlook_graph_message_id": f.outlook_graph_message_id,
             "outlook_web_link": f.outlook_web_link,
             "owner_display_name": owner_display_name,
             "owner_email": owner_email,
+            "owner_initials": owner_initials,
         }
-        for (f, owner_display_name, owner_email) in rows
+        for (f, owner_display_name, owner_email, owner_initials) in rows
     ]
 
 
@@ -936,6 +1025,146 @@ def move_case_folder(
         user=user,
         db=db,
     )
+
+
+def _safe_zip_path_component(name: str) -> str:
+    """Single path segment safe for zip archive (decoded, no slashes)."""
+    try:
+        n = unquote(name or "")
+    except Exception:
+        n = name or ""
+    n = n.replace("\\", "_").replace("/", "_").replace("\0", "").strip() or "_"
+    if n in (".", ".."):
+        n = "_"
+    return n
+
+
+def _zip_arc_for_file_row(*, prefix: str, row: DbFile) -> str:
+    fp = (row.folder_path or "").strip()
+    leaf = _safe_zip_path_component(row.original_filename)
+    if fp == prefix:
+        return leaf
+    prefix_slash = f"{prefix}/"
+    if fp.startswith(prefix_slash):
+        rel = fp[len(prefix_slash) :]
+        segs = [_safe_zip_path_component(s) for s in rel.split("/") if s]
+        if not segs:
+            return leaf
+        return "/".join(segs + [leaf])
+    raise ValueError("file row is not under the requested folder prefix")
+
+
+def _unique_zip_name(taken: set[str], want: str) -> str:
+    if want not in taken:
+        taken.add(want)
+        return want
+    n = 2
+    while True:
+        if "/" in want:
+            parent, base = want.rsplit("/", 1)
+            stem = Path(base).stem
+            suf = Path(base).suffix
+            cand = f"{parent}/{stem}_{n}{suf}"
+        else:
+            stem = Path(want).stem
+            suf = Path(want).suffix
+            cand = f"{stem}_{n}{suf}"
+        if cand not in taken:
+            taken.add(cand)
+            return cand
+        n += 1
+
+
+def _unlink_if_exists(path: str) -> None:
+    try:
+        os.unlink(path)
+    except OSError:
+        pass
+
+
+@router.get("/folders/download-zip")
+def download_case_folder_zip(
+    case_id: uuid.UUID,
+    folder_path: str = Query(..., description="Case folder_path (encoded segments, slash-separated)."),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Download all non-folder files under ``folder_path`` as a single .zip (relative paths preserved)."""
+    require_case_access(case_id, user, db)
+    prefix = sanitize_folder_path(folder_path)
+    if not prefix:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="folder_path is required")
+    ensure_files_root()
+
+    like_prefix = f"{prefix}/%"
+    rows = (
+        db.execute(
+            select(DbFile).where(
+                DbFile.case_id == case_id,
+                DbFile.oo_compose_pending.is_(False),
+                or_(DbFile.folder_path == prefix, DbFile.folder_path.like(like_prefix)),
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if not rows:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Folder not found")
+
+    parts = [p for p in prefix.split("/") if p]
+    leaf_enc = parts[-1] if parts else ""
+    zip_label = _safe_zip_path_component(leaf_enc) if leaf_enc else "folder"
+    if zip_label == "_":
+        zip_label = "folder"
+
+    file_rows = [r for r in rows if (r.mime_type or "") != "application/x-directory"]
+    arc_taken: set[str] = set()
+    tmp: str | None = None
+    try:
+        fd, tmp = tempfile.mkstemp(suffix=".zip")
+        os.close(fd)
+        with zipfile.ZipFile(tmp, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+            for row in file_rows:
+                abs_path = (FILES_ROOT / row.storage_path).resolve()
+                if not str(abs_path).startswith(str(FILES_ROOT)) or not abs_path.is_file():
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail=f"File missing on disk: {row.original_filename}",
+                    )
+                try:
+                    arc = _zip_arc_for_file_row(prefix=prefix, row=row)
+                except ValueError:
+                    continue
+                arc = arc.replace("\\", "/")
+                if arc.startswith("/") or arc.startswith("../") or "/../" in arc:
+                    continue
+                arc = _unique_zip_name(arc_taken, arc)
+                zf.write(abs_path, arcname=arc)
+
+        log_event(
+            db,
+            actor_user_id=user.id,
+            action="case.folder.download_zip",
+            entity_type="case",
+            entity_id=str(case_id),
+            meta={"folder_path": prefix, "file_count": len(file_rows)},
+        )
+
+        return FileResponse(
+            path=tmp,
+            media_type="application/zip",
+            filename=f"{zip_label}.zip",
+            content_disposition_type="attachment",
+            background=BackgroundTask(_unlink_if_exists, tmp),
+        )
+    except HTTPException:
+        if tmp:
+            _unlink_if_exists(tmp)
+        raise
+    except Exception:
+        if tmp:
+            _unlink_if_exists(tmp)
+        raise
 
 
 @router.patch("/{file_id}/pin", status_code=status.HTTP_200_OK)
@@ -1505,7 +1734,7 @@ async def oo_force_save(
             return
     raise HTTPException(
         status_code=status.HTTP_504_GATEWAY_TIMEOUT,
-        detail="Force-save timed out before the document was written. Keep the editor open and retry Save & Close.",
+        detail="Force-save timed out before the document was written. Keep the editor open and retry Save Changes.",
     )
 
 
@@ -1516,7 +1745,7 @@ def publish_compose_office_file(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> None:
-    """Show a compose-office document in the case file list (after OnlyOffice Save & Close).
+    """Show a compose-office document in the case file list (after OnlyOffice Save Changes).
 
     Idempotent: if the file is not a pending compose, succeeds with no change.
     """

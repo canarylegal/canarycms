@@ -29,11 +29,20 @@ def create_user(payload: AdminUserCreate, admin: User = Depends(require_admin), 
     if existing:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already exists")
 
+    ini = payload.initials
+    taken_i = db.execute(select(User).where(User.initials == ini)).scalar_one_or_none()
+    if taken_i:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Initials are already in use by another user.",
+        )
+
     jt = (payload.job_title or "").strip() or None
     user = User(
         email=email,
         password_hash=hash_password(payload.password),
         display_name=payload.display_name,
+        initials=ini,
         job_title=jt,
         role=payload.role,
         is_active=payload.is_active,
@@ -69,8 +78,33 @@ def update_user(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
     data = payload.model_dump(exclude_unset=True)
+    # Ensure PATCH honours initials when the client sends them: avoid relying solely on
+    # exclude_unset edge cases with optional fields on partial updates.
+    fields_set = getattr(payload, "model_fields_set", set()) or set()
+    if "initials" in fields_set:
+        if payload.initials is not None:
+            data["initials"] = payload.initials
+        else:
+            data.pop("initials", None)
+    if "email" in data and data["email"] is not None:
+        new_email = str(data["email"]).lower().strip()
+        conflict = db.execute(
+            select(User).where(User.email == new_email, User.id != user_id)
+        ).scalar_one_or_none()
+        if conflict:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already exists")
+        data["email"] = new_email
     if "job_title" in data:
         data["job_title"] = (data["job_title"] or "").strip() or None
+    if "initials" in data and data["initials"] is not None:
+        taken_i = db.execute(
+            select(User).where(User.initials == data["initials"], User.id != user_id)
+        ).scalar_one_or_none()
+        if taken_i:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Initials are already in use by another user.",
+            )
     for k, v in data.items():
         setattr(user, k, v)
     user.updated_at = datetime.utcnow()

@@ -8,7 +8,8 @@ from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import LedgerAccount, LedgerAccountType, LedgerDirection, LedgerEntry, User, UserRole
+from app.admin_access import user_effective_admin
+from app.models import LedgerAccount, LedgerAccountType, LedgerDirection, LedgerEntry, User
 from app.permission_checks import assert_may_post_ledger
 from app.schemas import LedgerAccountSummary, LedgerEntryOut, LedgerOut, LedgerPostCreate
 
@@ -60,6 +61,8 @@ def post_transaction(
     payload: LedgerPostCreate,
     user: User,
     db: Session,
+    *,
+    force_unapproved: bool = False,
 ) -> uuid.UUID:
     """
     Create a double-entry posting.
@@ -83,7 +86,7 @@ def post_transaction(
     pair_id = uuid.uuid4()
     now = datetime.utcnow()
     legs: list[LedgerEntry] = []
-    is_approved = user.role == UserRole.admin
+    is_approved = False if force_unapproved else user_effective_admin(user, db)
 
     if payload.client_direction:
         legs.append(
@@ -235,6 +238,16 @@ def approve_ledger_pair(case_id: uuid.UUID, pair_id: uuid.UUID, db: Session) -> 
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid posting")
     for e in legs:
         e.is_approved = True
+    db.flush()
+
+    # Invoice drafts (and similar) store this suffix until approved; strip when approving from the ledger.
+    pending_suffix = " (pending approval)"
+    for e in legs:
+        if e.description and pending_suffix in e.description:
+            stripped = e.description.replace(pending_suffix, "").strip()
+            if stripped:
+                e.description = stripped
+            db.add(e)
     db.flush()
 
     client_balance = _balance(accounts["client"].id, db, approved_only=True)

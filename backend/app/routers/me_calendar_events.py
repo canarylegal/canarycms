@@ -16,6 +16,7 @@ from app.calendar_service import (
 )
 from app.db import get_db
 from app.deps import get_current_user
+from app.event_service import list_calendar_event_template_picks
 from app.models import User
 from app.calendar_category import (
     delete_event_category_link,
@@ -32,7 +33,12 @@ from app.radicale_calendar import (
     ref_to_href,
     update_event_on_principal,
 )
-from app.schemas import CalendarEventCreate, CalendarEventOut, CalendarEventPatch
+from app.schemas import (
+    CalendarEventCreate,
+    CalendarEventOut,
+    CalendarEventPatch,
+    CalendarEventTemplatePickOut,
+)
 
 router = APIRouter(prefix="/users/me/calendar", tags=["calendar"])
 
@@ -63,6 +69,15 @@ def _parse_calendar_ids(raw: str | None) -> list[uuid.UUID] | None:
             continue
         out.append(uuid.UUID(p))
     return out or None
+
+
+@router.get("/event-line-templates", response_model=list[CalendarEventTemplatePickOut])
+def list_my_calendar_event_line_templates(
+    _user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> list[CalendarEventTemplatePickOut]:
+    """Admin calendar template lines (per matter sub-type). Does not require CalDAV."""
+    return list_calendar_event_template_picks(db)
 
 
 @router.get("/events", response_model=list[CalendarEventOut])

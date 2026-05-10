@@ -8,11 +8,15 @@ extend with ``httpx`` + app credentials when ``CANARY_MS_GRAPH_*`` env vars are 
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timezone
 from pathlib import Path
 
 from sqlalchemy.orm import Session
 
+from app.graph_mail import graph_mail_configured
+from app.graph_outlook_categories import resolve_outlook_owa_link_via_graph
 from app.models import File as DbFile
+from app.models import User
 
 log = logging.getLogger(__name__)
 
@@ -24,7 +28,32 @@ def link_outlook_graph_metadata_for_eml_file(db: Session, row: DbFile, abs_path:
 
 def repair_outlook_web_link_on_file(db: Session, row: DbFile) -> None:
     """Best-effort backfill of ``outlook_web_link`` from Graph when server is configured."""
-    _ = db
     if row.outlook_web_link and str(row.outlook_web_link).strip():
         return
-    # Future: if CANARY_MS_GRAPH_* are set, GET message by id and set row.outlook_web_link.
+    if not graph_mail_configured(db):
+        return
+
+    owner = db.get(User, row.owner_id)
+    if owner is None or not (owner.email or "").strip():
+        return
+
+    mid = (row.outlook_graph_message_id or row.source_outlook_item_id or "").strip()
+    if not mid:
+        return
+
+    imid = (row.source_internet_message_id or "").strip() or None
+    try:
+        wl, resolved_gid = resolve_outlook_owa_link_via_graph(owner.email.strip(), mid, imid, db=db)
+    except Exception:
+        log.warning("repair_outlook_web_link_on_file: Graph lookup failed", exc_info=True)
+        return
+
+    if not wl:
+        return
+
+    row.outlook_web_link = wl
+    if resolved_gid:
+        row.outlook_graph_message_id = resolved_gid[:450]
+    row.updated_at = datetime.now(timezone.utc)
+    db.add(row)
+    db.commit()

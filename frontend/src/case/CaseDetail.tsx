@@ -1,62 +1,75 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { CaseEventCreateModal } from '../CaseEventCreateModal'
 import { EventsPage } from '../EventsPage'
 import { FinancePage } from '../FinancePage'
-import {
-  GlobalContactCreateForm,
-  ContactPersonOrgAddressFields,
-  contactOutToFormFields,
-  contactFieldsModelToPayload,
-  resolveContactNameWithFallback,
-} from '../GlobalContactCreateForm'
+import { resolveContactNameWithFallback } from '../GlobalContactCreateForm'
 import { ManageCaseAccessModal } from '../ManageCaseAccessModal'
 import { MATTER_CONTACT_TYPE_OPTIONS_FALLBACK } from '../matterContactTypeOptions'
 import { apiFetch, apiUrl, browserAbsoluteApiUrl, formatApiErrorDetail } from '../api'
 import {
   appendOutlookWebAuthHintsForNav,
   buildOutlookWebReadUrlFromGraphMessageId,
+  OWA_MESSAGE_WINDOW_FEATURES,
   openOutlookWebAppFromGraphWebLink,
+  OWA_MAIL_WINDOW_NAME,
 } from '../emailClient'
 import {
+  buildOutlookWebComposeUrl,
   buildOutlookWebMessageSearchUrl,
   extractInternetMessageIdFromEmlText,
   openCanaryEmailLauncher,
 } from '../emailLauncher'
 import { useDialogs } from '../DialogProvider'
 import { SearchInput } from '../SearchInput'
+import { TaskCreateModal } from '../TaskCreateModal'
 import { CANARY_FOLLOW_UP_STANDARD_TASK_ID } from '../standardTasks'
 import { TextPromptModal } from '../TextPromptModal'
-import { useModalDrag } from '../useModalDrag'
+import { LedgerPage } from '../LedgerPage'
+import { onlyofficeCaseEditorWindowTarget } from '../onlyofficeEditorWindow'
 import { caseHasRevokedUserAccess, formatCaseStatusLabel, type CaseWorkflowStatus } from '../types'
 import type {
   CaseContactOut,
   CaseEmailDraftM365Out,
+  CaseEmailMailtoOut,
   CaseEventsOut,
   CaseNoteOut,
   CaseOut,
   CasePropertyDetailsOut,
   CasePropertyPayload,
-  CasePropertyTenure,
   CaseTaskOut,
   ContactOut,
   FileSummary,
   FinanceOut,
+  LedgerOut,
   MatterContactTypeOut,
   MatterHeadTypeOut,
-  MatterSubTypeStandardTaskOut,
   PrecedentCategoryOut,
   PrecedentOut,
+  TaskMenuRow,
   UserPublic,
   UserSummary,
 } from '../types'
-import { applyCaseContactFieldPatch } from './caseContactPatch'
+import { TasksTable } from '../TasksTable'
+import { CaseContactsAddDocForm, CaseContactsEditDocForm } from './CaseContactsDocForms'
 import { computeDocContextMenuStyle } from './docContextMenu'
-import { dndEventHasFiles, formatDocFileSize, formatDocModified, matterTypeDisplayLine } from './docFormat'
+import { dndEventHasFiles, docListPrimaryDate, formatDocFileSize, formatDocModified, matterTypeDisplayLine } from './docFormat'
 import { DocMimeIcon, DocsFileDescCell, DocsFolderDescCell } from './DocCells'
 import { financeCaseTotals, penceGb } from './financeTotals'
 import { matterContactTypeLabel } from './matterLabels'
+import { PropertyDetailsForm } from './PropertyDetailsForm'
+import { propertyTenureLabel } from './propertyLabels'
 import { EmlPreviewModal, parseEmlForPreview, type EmlPreviewData } from './emlPreview'
 import { isEmlLikeFileSummary, isOfficeLikeFile } from './officeFiles'
-import { propertyTenureLabel } from './propertyLabels'
+import {
+  decodeFolderPathForDisplay,
+  decodeFolderPathSegment,
+  joinFolderPath,
+  splitFolderPath,
+} from './folderPathCodec'
+
+function fileDocOwnerLabel(f: FileSummary): string {
+  return f.owner_initials ?? f.owner_display_name ?? f.owner_email ?? '—'
+}
 
 /** Abort same-origin file GETs so a stuck server/proxy cannot leave the UI on “Loading” indefinitely. */
 const CASE_FILE_FETCH_MS = 90_000
@@ -119,7 +132,10 @@ async function fetchEmlTextForPreview(caseId: string, fileId: string, token: str
   }
 }
 
-const CONTACT_TYPE_REQUIRED_MSG = 'Please select a contact type for this matter.'
+function ledgerSignedGb(p: number): string {
+  if (p === 0) return penceGb(0)
+  return p < 0 ? `-${penceGb(-p)}` : penceGb(p)
+}
 
 const CLIENT_TYPE_SLUG = 'client'
 const LAWYERS_TYPE_SLUG = 'lawyers'
@@ -182,6 +198,106 @@ function showHandoffTabError(tab: Window | null, message: string) {
   }
 }
 
+const CASE_DOC_PANEL_ZOOM_MIN = 0.12
+
+/**
+ * Scale panel content so it fits the documents card without scrollbars.
+ * Uses CSS `zoom` when effective (Chromium); otherwise `transform: scale(...)`.
+ */
+function CaseDocPanelZoomFit({
+  children,
+  /** Stretch inner wrapper to host height (flex layouts e.g. case calendar). */
+  fillHost = false,
+}: {
+  children: React.ReactNode
+  fillHost?: boolean
+}) {
+  const hostRef = useRef<HTMLDivElement>(null)
+  const innerRef = useRef<HTMLDivElement>(null)
+
+  const runFit = useCallback(() => {
+    const host = hostRef.current
+    const inner = innerRef.current
+    if (!host || !inner) return
+    const cw = host.clientWidth
+    const ch = host.clientHeight
+    if (cw < 4 || ch < 4) return
+
+    const st = inner.style as CSSStyleDeclaration & { zoom?: string }
+    st.zoom = ''
+    inner.style.removeProperty('transform')
+    inner.style.transformOrigin = 'top left'
+
+    const fitsZoom = (z: number) => {
+      st.zoom = String(z)
+      void inner.offsetHeight
+      return inner.scrollHeight <= ch + 2 && inner.scrollWidth <= cw + 2
+    }
+
+    const applyTransformScale = () => {
+      st.zoom = ''
+      const ih = inner.scrollHeight
+      const iw = inner.scrollWidth
+      if (ih < 1 || iw < 1) return
+      const s = Math.max(CASE_DOC_PANEL_ZOOM_MIN, Math.min(1, cw / iw, ch / ih))
+      inner.style.transformOrigin = 'top left'
+      inner.style.transform = s < 0.998 ? `scale(${s})` : ''
+    }
+
+    if (fitsZoom(1)) {
+      st.zoom = '1'
+      return
+    }
+
+    if (!fitsZoom(CASE_DOC_PANEL_ZOOM_MIN)) {
+      applyTransformScale()
+      return
+    }
+
+    let lo = CASE_DOC_PANEL_ZOOM_MIN
+    let hi = 1
+    for (let i = 0; i < 20; i++) {
+      const mid = (lo + hi) / 2
+      if (fitsZoom(mid)) lo = mid
+      else hi = mid
+    }
+    st.zoom = String(lo)
+    void inner.offsetHeight
+    if (inner.scrollHeight > ch + 3 || inner.scrollWidth > cw + 3) {
+      applyTransformScale()
+    }
+  }, [])
+
+  useLayoutEffect(() => {
+    runFit()
+    const ro = new ResizeObserver(() => {
+      requestAnimationFrame(() => runFit())
+    })
+    if (hostRef.current) ro.observe(hostRef.current)
+    if (innerRef.current) ro.observe(innerRef.current)
+    const t0 = window.setTimeout(runFit, 0)
+    const t1 = window.setTimeout(runFit, 120)
+    const t2 = window.setTimeout(runFit, 400)
+    return () => {
+      clearTimeout(t0)
+      clearTimeout(t1)
+      clearTimeout(t2)
+      ro.disconnect()
+    }
+  }, [runFit, children, fillHost])
+
+  return (
+    <div ref={hostRef} className="caseDocPanelZoomFitHost">
+      <div
+        ref={innerRef}
+        className={`caseDocPanelZoomFitContent${fillHost ? ' caseDocPanelZoomFitContent--fillHost' : ''}`}
+      >
+        {children}
+      </div>
+    </div>
+  )
+}
+
 export function CaseDetail({
   token,
   caseDetail,
@@ -221,6 +337,15 @@ export function CaseDetail({
     if (selectedCaseId === undefined || selectedCaseId === null) return caseId
     return String(selectedCaseId) === String(caseId) ? caseId : null
   }, [caseId, selectedCaseId])
+
+  /** Mailto / OWA compose URLs cannot carry case-file attachments; only Graph drafts support that. */
+  const m365EmailDraftsEnabled = useMemo(
+    () =>
+      currentUser?.email_integration_mode === 'microsoft_graph' &&
+      currentUser?.m365_graph_drafts_configured === true,
+    [currentUser?.email_integration_mode, currentUser?.m365_graph_drafts_configured],
+  )
+
   const [busy, setBusy] = useState(false)
   useEffect(() => {
     if (!busy) return
@@ -312,7 +437,7 @@ export function CaseDetail({
   // Multi-selection: each entry is a file ID or "folder:<path>"
   const [selectedDocSet, setSelectedDocSet] = useState<Set<string>>(new Set())
   const docAnchorRef = useRef<string | null>(null)
-  const [docSortKey, setDocSortKey] = useState<'description' | 'size' | 'modified' | 'user'>('modified')
+  const [docSortKey, setDocSortKey] = useState<'description' | 'size' | 'created' | 'user'>('created')
   const [docSortDir, setDocSortDir] = useState<'asc' | 'desc'>('desc')
   const [docsDragOver, setDocsDragOver] = useState(false)
   const [moveMenu, setMoveMenu] = useState<{ kind: 'file'; fileId: string } | { kind: 'folder'; folderPath: string } | null>(null)
@@ -322,17 +447,7 @@ export function CaseDetail({
   const newMenuRef = useRef<HTMLDivElement | null>(null)
   const [newMenuOpen, setNewMenuOpen] = useState(false)
   const [taskCreateOpen, setTaskCreateOpen] = useState(false)
-  const [taskCreateStandardId, setTaskCreateStandardId] = useState<string>('__custom__')
-  const [taskCreateCustomTitle, setTaskCreateCustomTitle] = useState('')
-  const [taskCreateDueDate, setTaskCreateDueDate] = useState('')
-  const [taskCreateAssignUserId, setTaskCreateAssignUserId] = useState('')
-  const [taskCreatePriority, setTaskCreatePriority] = useState<'low' | 'normal' | 'high'>('normal')
-  const [taskCreatePrivate, setTaskCreatePrivate] = useState(false)
-  const [taskCreateErr, setTaskCreateErr] = useState<string | null>(null)
-  const [taskCreateBusy, setTaskCreateBusy] = useState(false)
-  /** When set, optional title override for a standard task (e.g. document “Follow up”). */
-  const [taskCreateTitleOverride, setTaskCreateTitleOverride] = useState<string | null>(null)
-  const [standardTaskTemplates, setStandardTaskTemplates] = useState<MatterSubTypeStandardTaskOut[]>([])
+  const [taskCreatePreset, setTaskCreatePreset] = useState<{ standardTaskId?: string; title?: string } | null>(null)
   const [commentOpen, setCommentOpen] = useState(false)
   const [commentText, setCommentText] = useState('')
   const [commentBusy, setCommentBusy] = useState(false)
@@ -347,22 +462,67 @@ export function CaseDetail({
   const [users, setUsers] = useState<UserSummary[]>([])
   const [leftOpen, setLeftOpen] = useState<{
     contacts: boolean
+    accounts: boolean
+    tasks: boolean
     property: boolean
     events: boolean
     finance: boolean
   }>({
     contacts: false,
+    accounts: false,
+    tasks: false,
     property: false,
     events: false,
     finance: false,
   })
-  const [financeModalOpen, setFinanceModalOpen] = useState(false)
-  const [eventsModalOpen, setEventsModalOpen] = useState(false)
+
+  type LeftAccordionKey = 'contacts' | 'accounts' | 'tasks' | 'property' | 'events' | 'finance'
+  const toggleLeftAccordion = useCallback((key: LeftAccordionKey) => {
+    setLeftOpen((prev) => {
+      if (prev[key]) {
+        return { ...prev, [key]: false }
+      }
+      return {
+        contacts: key === 'contacts',
+        accounts: key === 'accounts',
+        tasks: key === 'tasks',
+        property: key === 'property',
+        events: key === 'events',
+        finance: key === 'finance',
+      }
+    })
+  }, [])
+
+  const openTaskCreateModal = useCallback(() => {
+    setTaskCreatePreset(null)
+    setTaskCreateOpen(true)
+  }, [])
+
+  type CaseDocPanel =
+    | 'documents'
+    | 'events'
+    | 'finance'
+    | 'property'
+    | 'tasks'
+    | 'contacts'
+    | 'edit-details'
+    | 'accounts'
+  const [caseDocPanel, setCaseDocPanel] = useState<CaseDocPanel>('documents')
+  const [caseTaskMenuRows, setCaseTaskMenuRows] = useState<TaskMenuRow[]>([])
+  const [caseTasksSearch, setCaseTasksSearch] = useState('')
+  const [caseTasksSortKey, setCaseTasksSortKey] = useState<
+    'reference' | 'client' | 'matter' | 'task' | 'date' | 'assigned' | 'priority'
+  >('priority')
+  const [caseTasksSortDir, setCaseTasksSortDir] = useState<'asc' | 'desc'>('asc')
+  const [caseTasksLayout, setCaseTasksLayout] = useState<'list' | 'kanban'>('list')
   const [eventsPreview, setEventsPreview] = useState<CaseEventsOut | null>(null)
+  const [caseEventModalOpen, setCaseEventModalOpen] = useState(false)
+  const openCaseEventModal = useCallback(() => setCaseEventModalOpen(true), [])
+  const [accountsPreview, setAccountsPreview] = useState<LedgerOut | null>(null)
+  const [accountsPreviewErr, setAccountsPreviewErr] = useState<string | null>(null)
   const [financePreview, setFinancePreview] = useState<FinanceOut | null>(null)
   const [propertyDetails, setPropertyDetails] = useState<CasePropertyDetailsOut | null>(null)
   const [propertyLoading, setPropertyLoading] = useState(false)
-  const [propertyModalOpen, setPropertyModalOpen] = useState(false)
   const [propertyDraft, setPropertyDraft] = useState<CasePropertyPayload | null>(null)
   const [propertyBaseline, setPropertyBaseline] = useState<CasePropertyPayload | null>(null)
   const [precedentPicker, setPrecedentPicker] = useState<null | { kind: 'letter' | 'document' | 'email' }>(null)
@@ -384,12 +544,13 @@ export function CaseDetail({
   const [pickLinkType, setPickLinkType] = useState('')
   const [pickLawyerClientIds, setPickLawyerClientIds] = useState<string[]>([])
   const [pickSearch, setPickSearch] = useState('')
-  const [caseEditOpen, setCaseEditOpen] = useState(false)
   const [manageAccessOpen, setManageAccessOpen] = useState(false)
   const [editMatterDescription, setEditMatterDescription] = useState('')
   const [editPracticeArea, setEditPracticeArea] = useState('')
   const [editFeeEarner, setEditFeeEarner] = useState<string>('')
   const [editCaseStatus, setEditCaseStatus] = useState<CaseWorkflowStatus>('open')
+  /** Edit-case save/API errors only (shown inside the edit card, never in the case shell). */
+  const [editCaseErr, setEditCaseErr] = useState<string | null>(null)
   const [matterHeadTypes, setMatterHeadTypes] = useState<MatterHeadTypeOut[]>([])
 
   const [contactAddOpen, setContactAddOpen] = useState(false)
@@ -406,8 +567,50 @@ export function CaseDetail({
   const [contactRowMenu, setContactRowMenu] = useState<null | { cc: CaseContactOut; x: number; y: number }>(null)
   const contactRowMenuRef = useRef<HTMLDivElement | null>(null)
 
-  const caseEditDrag = useModalDrag(caseEditOpen)
-  const contactAddDrag = useModalDrag(contactAddOpen)
+  const backToDocuments = useCallback(() => {
+    if (caseDocPanel === 'edit-details') setEditCaseErr(null)
+    if (caseDocPanel === 'property' && propertyBaseline) {
+      setPropertyDraft(JSON.parse(JSON.stringify(propertyBaseline)) as CasePropertyPayload)
+    }
+    setCaseDocPanel('documents')
+    setContactAddOpen(false)
+    setEditSnapshot(null)
+  }, [caseDocPanel, propertyBaseline])
+
+  const finishContactsDoc = useCallback(() => {
+    setContactAddOpen(false)
+    setEditSnapshot(null)
+    setCaseDocPanel('documents')
+    onRefresh()
+  }, [onRefresh])
+
+  const refreshGlobalContacts = useCallback(async () => {
+    try {
+      const data = await apiFetch<ContactOut[]>('/contacts', { token })
+      setContacts(data)
+    } catch {
+      /* ignore */
+    }
+  }, [token])
+
+  useEffect(() => {
+    if (caseDocPanel !== 'tasks' || !caseId) return
+    let cancelled = false
+    void apiFetch<TaskMenuRow[]>(`/tasks?case_id=${encodeURIComponent(caseId)}`, { token })
+      .then((data) => {
+        if (!cancelled) setCaseTaskMenuRows(Array.isArray(data) ? data : [])
+      })
+      .catch(() => {
+        if (!cancelled) setCaseTaskMenuRows([])
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [caseDocPanel, caseId, token])
+
+  useEffect(() => {
+    setCaseDocPanel('documents')
+  }, [caseId])
 
   useEffect(() => {
     if (!contactRowMenu) return
@@ -499,9 +702,36 @@ export function CaseDetail({
   )
 
   const hasEventsMenu = useMemo(
-    () => Boolean(caseDetail?.matter_menus?.some((m) => m.name.trim().toLowerCase() === 'events')),
+    () =>
+      Boolean(
+        caseDetail?.matter_menus?.some((m) => {
+          const n = m.name.trim().toLowerCase()
+          return n === 'events' || n === 'calendar'
+        }),
+      ),
     [caseDetail?.matter_menus],
   )
+
+  const hasTasksMenu = useMemo(
+    () => Boolean(caseDetail?.matter_menus?.some((m) => m.name.trim().toLowerCase() === 'tasks')),
+    [caseDetail?.matter_menus],
+  )
+
+  const [sidebarTaskRows, setSidebarTaskRows] = useState<TaskMenuRow[]>([])
+  useEffect(() => {
+    if (!caseId || !leftOpen.tasks || !hasTasksMenu) return
+    let cancelled = false
+    void apiFetch<TaskMenuRow[]>(`/tasks?case_id=${encodeURIComponent(caseId)}`, { token })
+      .then((data) => {
+        if (!cancelled) setSidebarTaskRows(Array.isArray(data) ? data : [])
+      })
+      .catch(() => {
+        if (!cancelled) setSidebarTaskRows([])
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [caseId, leftOpen.tasks, hasTasksMenu, token])
 
   useEffect(() => {
     if (!caseId || !hasPropertyMenu || !leftOpen.property) return
@@ -554,12 +784,39 @@ export function CaseDetail({
   }, [caseId, token, leftOpen.finance])
 
   useEffect(() => {
-    if (!caseEditOpen) return
+    if (!caseId || !leftOpen.accounts) {
+      setAccountsPreview(null)
+      setAccountsPreviewErr(null)
+      return
+    }
+    let cancelled = false
+    setAccountsPreview(null)
+    setAccountsPreviewErr(null)
+    void apiFetch<LedgerOut>(`/cases/${caseId}/ledger`, { token })
+      .then((d) => {
+        if (!cancelled) {
+          setAccountsPreview(d)
+          setAccountsPreviewErr(null)
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setAccountsPreview(null)
+          setAccountsPreviewErr('Could not load balances.')
+        }
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [caseId, token, leftOpen.accounts])
+
+  useEffect(() => {
+    if (caseDocPanel !== 'edit-details') return
     setEditMatterDescription(caseDetail?.matter_description ?? '')
     setEditPracticeArea(caseDetail?.matter_sub_type_id ?? '')
     setEditFeeEarner(caseDetail?.fee_earner_user_id ?? '')
     setEditCaseStatus(caseDetail?.status ?? 'open')
-  }, [caseEditOpen, caseDetail])
+  }, [caseDocPanel, caseDetail])
 
   useLayoutEffect(() => {
     if (!docMenu) {
@@ -604,58 +861,6 @@ export function CaseDetail({
       window.removeEventListener('keydown', onKey)
     }
   }, [newMenuOpen])
-
-  useEffect(() => {
-    if (!taskCreateOpen || !caseId) {
-      setStandardTaskTemplates([])
-      return
-    }
-    let cancelled = false
-    async function loadStd() {
-      try {
-        const data = await apiFetch<MatterSubTypeStandardTaskOut[]>(`/cases/${caseId}/standard-tasks`, { token })
-        if (cancelled) return
-        const list = Array.isArray(data) ? data : []
-        setStandardTaskTemplates(list)
-        setTaskCreateStandardId((prev) => {
-          if (prev !== '__custom__' && list.some((x) => x.id === prev)) return prev
-          return list.length > 0 ? list[0].id : '__custom__'
-        })
-      } catch {
-        if (!cancelled) {
-          setStandardTaskTemplates([])
-          setTaskCreateStandardId('__custom__')
-        }
-      }
-    }
-    void loadStd()
-    return () => {
-      cancelled = true
-    }
-  }, [taskCreateOpen, caseId, token])
-
-  useEffect(() => {
-    if (!taskCreateOpen) setTaskCreateTitleOverride(null)
-  }, [taskCreateOpen])
-
-  useEffect(() => {
-    if (!taskCreateOpen) return
-    const t = new Date()
-    const y = t.getFullYear()
-    const mo = String(t.getMonth() + 1).padStart(2, '0')
-    const d = String(t.getDate()).padStart(2, '0')
-    setTaskCreateDueDate(`${y}-${mo}-${d}`)
-    setTaskCreatePrivate(false)
-  }, [taskCreateOpen])
-
-  useEffect(() => {
-    if (!taskCreateOpen) return
-    function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape' && !taskCreateBusy) setTaskCreateOpen(false)
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [taskCreateOpen, taskCreateBusy])
 
   useEffect(() => {
     if (!precedentPicker) {
@@ -876,17 +1081,17 @@ export function CaseDetail({
           ? a.original_filename
           : docSortKey === 'size'
             ? a.size_bytes
-            : docSortKey === 'modified'
-              ? a.updated_at ?? a.created_at
-              : a.owner_display_name ?? a.owner_email ?? ''
+            : docSortKey === 'created'
+              ? docListPrimaryDate(a)
+              : fileDocOwnerLabel(a)
       const bv =
         docSortKey === 'description'
           ? b.original_filename
           : docSortKey === 'size'
             ? b.size_bytes
-            : docSortKey === 'modified'
-              ? b.updated_at ?? b.created_at
-              : b.owner_display_name ?? b.owner_email ?? ''
+            : docSortKey === 'created'
+              ? docListPrimaryDate(b)
+              : fileDocOwnerLabel(b)
       if (typeof av === 'number' && typeof bv === 'number') return (av - bv) * dir
       return String(av).localeCompare(String(bv)) * dir
     }
@@ -911,17 +1116,17 @@ export function CaseDetail({
           ? a.original_filename
           : docSortKey === 'size'
             ? a.size_bytes
-            : docSortKey === 'modified'
-              ? a.updated_at ?? a.created_at
-              : a.owner_display_name ?? a.owner_email ?? ''
+            : docSortKey === 'created'
+              ? docListPrimaryDate(a)
+              : fileDocOwnerLabel(a)
       const bv =
         docSortKey === 'description'
           ? b.original_filename
           : docSortKey === 'size'
             ? b.size_bytes
-            : docSortKey === 'modified'
-              ? b.updated_at ?? b.created_at
-              : b.owner_display_name ?? b.owner_email ?? ''
+            : docSortKey === 'created'
+              ? docListPrimaryDate(b)
+              : fileDocOwnerLabel(b)
       if (typeof av === 'number' && typeof bv === 'number') return (av - bv) * dir
       return String(av).localeCompare(String(bv)) * dir
     }
@@ -940,7 +1145,7 @@ export function CaseDetail({
 
   const breadcrumbParts = useMemo(() => {
     if (!docFolder) return []
-    return docFolder.split('/').filter(Boolean)
+    return splitFolderPath(docFolder)
   }, [docFolder])
 
   // Flat ordered key list for shift-range selection.
@@ -1005,7 +1210,7 @@ export function CaseDetail({
   }
 
   async function uploadLocalFilesForEmailAttach(incomingFiles: File[]) {
-    if (!caseId || incomingFiles.length === 0) return
+    if (!caseId || incomingFiles.length === 0 || !m365EmailDraftsEnabled) return
     setBusy(true)
     setActionErr(null)
     try {
@@ -1053,14 +1258,14 @@ export function CaseDetail({
   function createFolderAtCurrentPath() {
     setTextPrompt({
       title: 'New folder',
-      hint: 'Enter a folder name (no slashes).',
+      hint: 'Enter a folder name. Slashes are allowed (e.g. A/B is one folder, not nested).',
       initial: '',
       confirmLabel: 'Create',
       onConfirm: (name) => {
         const trimmed = name.trim()
         setTextPrompt(null)
         if (!trimmed) return
-        const folder_path = docFolder ? `${docFolder}/${trimmed}` : trimmed
+        const folder_path = joinFolderPath(docFolder, trimmed)
         if (!folder_path) return
         setBusy(true)
         setActionErr(null)
@@ -1094,7 +1299,7 @@ export function CaseDetail({
           precedent_merge_all_clients: Boolean(precedentMergeAllClients),
         },
       })
-      window.open(`/editor/${caseId}/${res.id}`, '_blank')
+      window.open(`/editor/${caseId}/${res.id}`, onlyofficeCaseEditorWindowTarget(caseId, res.id))
     } catch (e: any) {
       setActionErr(e?.message ?? 'Could not create document')
     } finally {
@@ -1111,9 +1316,10 @@ export function CaseDetail({
   ) {
     if (!caseId) return
     /* Open a tab synchronously on the click path so popup blockers allow navigation after `await`.
+     * Same window shape as opening an ``.eml`` in Outlook web (see ``openCaseFile``).
      * Do not pass `noopener` here: with noopener many browsers return `null` while still opening a tab,
      * so we cannot call `location.replace` and the user sees a blank orphan tab. */
-    const handoffTab = window.open('about:blank', '_blank')
+    const handoffTab = window.open('about:blank', OWA_MAIL_WINDOW_NAME, OWA_MESSAGE_WINDOW_FEATURES)
     setBusy(true)
     setActionErr(null)
     try {
@@ -1135,7 +1341,20 @@ export function CaseDetail({
         setActionErr(msg)
         return
       }
-      const url = browserAbsoluteApiUrl(rawOpen)
+      try {
+        await apiFetch(`/outlook-plugin/pending-send`, {
+          token,
+          method: 'PUT',
+          json: { case_id: caseId, ttl_seconds: 86400 },
+        })
+      } catch {
+        /* Best-effort: add-in send capture works without this if user files manually. */
+      }
+      let url = browserAbsoluteApiUrl(rawOpen)
+      const launchPref = currentUser?.email_launch_preference ?? 'desktop'
+      if (launchPref === 'outlook_web') {
+        url = appendOutlookWebAuthHintsForNav(url, currentUser?.email?.trim() || null)
+      }
       if (handoffTab) {
         handoffTab.location.replace(url)
       } else {
@@ -1145,6 +1364,71 @@ export function CaseDetail({
             'Your browser blocked opening Outlook. Allow pop-ups for this site, or copy the draft link from the browser network response.',
           )
         }
+      }
+    } catch (e: unknown) {
+      const msg = formatHandoffCaughtError(e)
+      showHandoffTabError(handoffTab, msg)
+      setActionErr(msg)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function composeMailtoEmailDraft(
+    precedentId: string | null,
+    caseContactId: string | null,
+    globalContactId: string | null,
+    precedentMergeAllClients: boolean,
+    attachmentFileIds: string[],
+  ) {
+    if (!caseId) return
+    const launchPrefEarly = currentUser?.email_launch_preference ?? 'desktop'
+    const handoffTab =
+      launchPrefEarly === 'outlook_web'
+        ? window.open('about:blank', OWA_MAIL_WINDOW_NAME, OWA_MESSAGE_WINDOW_FEATURES)
+        : window.open('about:blank', '_blank')
+    setBusy(true)
+    setActionErr(null)
+    try {
+      const res = await apiFetch<CaseEmailMailtoOut>(`/cases/${caseId}/files/email-mailto`, {
+        token,
+        json: {
+          folder: docFolder,
+          precedent_id: precedentId,
+          case_contact_id: caseContactId,
+          global_contact_id: globalContactId,
+          precedent_merge_all_clients: precedentMergeAllClients,
+          attachment_file_ids: attachmentFileIds,
+        },
+      })
+      const toAddr = (res.to || '').trim()
+      const launchPref = currentUser?.email_launch_preference ?? 'desktop'
+      if (launchPref === 'outlook_web') {
+        const owa =
+          buildOutlookWebComposeUrl(currentUser?.email_outlook_web_url ?? null, {
+            to: toAddr,
+            subject: res.subject,
+            body: res.body,
+          })
+        const href = appendOutlookWebAuthHintsForNav(owa, currentUser?.email?.trim() || null)
+        if (handoffTab) {
+          handoffTab.location.replace(href)
+        } else {
+          window.location.href = href
+        }
+      } else {
+        const query = new URLSearchParams({ subject: res.subject, body: res.body }).toString()
+        const href = toAddr ? `mailto:${toAddr}?${query}` : `mailto:?${query}`
+        if (handoffTab) {
+          handoffTab.location.href = href
+        } else {
+          window.location.href = href
+        }
+      }
+      if (res.attachment_count > 0) {
+        window.setTimeout(() => {
+          window.alert(res.note)
+        }, 400)
       }
     } catch (e: unknown) {
       const msg = formatHandoffCaughtError(e)
@@ -1220,7 +1504,7 @@ export function CaseDetail({
     }
 
     if (isOfficeLikeFile(file)) {
-      window.open(`/editor/${caseId}/${file.id}`, '_blank')
+      window.open(`/editor/${caseId}/${file.id}`, onlyofficeCaseEditorWindowTarget(caseId, file.id))
       return
     }
 
@@ -1248,7 +1532,7 @@ export function CaseDetail({
           ).trim()
           if (web) {
             const url = appendOutlookWebAuthHintsForNav(browserAbsoluteApiUrl(web), loginHint)
-            const ok = openOutlookWebAppFromGraphWebLink(url)
+            const ok = openOutlookWebAppFromGraphWebLink(url, { windowFeatures: OWA_MESSAGE_WINDOW_FEATURES })
             if (!ok) {
               setActionErr('Your browser blocked the Outlook window. Allow pop-ups for this site, then try again.')
             }
@@ -1257,7 +1541,7 @@ export function CaseDetail({
           if (gid) {
             const readUrl = buildOutlookWebReadUrlFromGraphMessageId(gid, owaBase)
             const url = appendOutlookWebAuthHintsForNav(browserAbsoluteApiUrl(readUrl), loginHint)
-            const ok = openOutlookWebAppFromGraphWebLink(url)
+            const ok = openOutlookWebAppFromGraphWebLink(url, { windowFeatures: OWA_MESSAGE_WINDOW_FEATURES })
             if (!ok) {
               setActionErr('Your browser blocked the Outlook window. Allow pop-ups for this site, then try again.')
             }
@@ -1266,7 +1550,7 @@ export function CaseDetail({
           const storedMid = (file.source_internet_message_id ?? '').trim()
           if (storedMid) {
             const url = buildOutlookWebMessageSearchUrl(owaBase, storedMid)
-            window.open(browserAbsoluteApiUrl(url), '_blank', 'noopener,noreferrer')
+            window.open(browserAbsoluteApiUrl(url), OWA_MAIL_WINDOW_NAME, OWA_MESSAGE_WINDOW_FEATURES)
             return
           }
           const res = await fetchCaseFileResponse(caseId, file.id, token)
@@ -1280,7 +1564,7 @@ export function CaseDetail({
           const mid = extractInternetMessageIdFromEmlText(text)
           if (mid) {
             const url = buildOutlookWebMessageSearchUrl(owaBase, mid)
-            window.open(browserAbsoluteApiUrl(url), '_blank', 'noopener,noreferrer')
+            window.open(browserAbsoluteApiUrl(url), OWA_MAIL_WINDOW_NAME, OWA_MESSAGE_WINDOW_FEATURES)
           } else {
             openCanaryEmailLauncher(currentUser)
             setActionErr(
@@ -1384,6 +1668,50 @@ export function CaseDetail({
     }
   }
 
+  async function downloadCaseFolderZip(folderPath: string) {
+    if (!caseId) return
+    setBusy(true)
+    setActionErr(null)
+    setDocMenu(null)
+    const ctrl = new AbortController()
+    const tid = window.setTimeout(() => ctrl.abort(), CASE_FILE_FETCH_MS)
+    try {
+      const q = new URLSearchParams({ folder_path: folderPath })
+      const res = await fetch(apiUrl(`/cases/${caseId}/files/folders/download-zip?${q}`), {
+        headers: { Authorization: `Bearer ${token}` },
+        signal: ctrl.signal,
+      })
+      if (res.status === 401) {
+        localStorage.removeItem('token')
+        window.location.reload()
+        return
+      }
+      if (!res.ok) throw new Error((await res.text()) || res.statusText)
+      const blob = await res.blob()
+      const typed = new Blob([blob], { type: 'application/zip' })
+      const url = URL.createObjectURL(typed)
+      const parts = splitFolderPath(folderPath)
+      const leaf = parts[parts.length - 1] ?? ''
+      const safeBase =
+        decodeFolderPathSegment(leaf).replace(/[/\\]/g, '_').replace(/^\.+/, '').trim() || 'folder'
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `${safeBase}.zip`
+      a.rel = 'noopener'
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      window.setTimeout(() => URL.revokeObjectURL(url), 120_000)
+    } catch (e: unknown) {
+      const msg = fetchTimedOutMessage(e)
+      const err = e as { message?: string }
+      setActionErr(msg ?? err.message ?? 'Download failed')
+    } finally {
+      clearTimeout(tid)
+      setBusy(false)
+    }
+  }
+
   function resetContactPickForm() {
     setPickMatterCcId('none')
     setPickGlobalId(null)
@@ -1471,19 +1799,24 @@ export function CaseDetail({
 
       const composeKind = contactPickModal.composeKind ?? 'letter'
       if (composeKind === 'email') {
-        if (mergeAllClients) {
-          setActionErr(
-            'Choose a single matter contact or global contact with an e-mail (not “All clients”) for e-mail.',
+        const attachmentIdsForCompose = m365EmailDraftsEnabled ? emailAttachIds : []
+        if (m365EmailDraftsEnabled) {
+          await composeM365EmailDraft(
+            contactPickModal.precedentId,
+            caseContactIdForMerge,
+            globalContactIdForMerge,
+            mergeAllClients,
+            attachmentIdsForCompose,
           )
-          return
+        } else {
+          await composeMailtoEmailDraft(
+            contactPickModal.precedentId,
+            caseContactIdForMerge,
+            globalContactIdForMerge,
+            mergeAllClients,
+            attachmentIdsForCompose,
+          )
         }
-        await composeM365EmailDraft(
-          contactPickModal.precedentId,
-          caseContactIdForMerge,
-          globalContactIdForMerge,
-          mergeAllClients,
-          emailAttachIds,
-        )
         setContactPickModal(null)
         resetContactPickForm()
         return
@@ -1511,141 +1844,8 @@ export function CaseDetail({
 
   return (
     <div className="caseShell">
-      <div className="caseToolbar" role="toolbar" aria-label="Case actions and documents">
-        <div className="caseToolbarLeft">
-          <button type="button" className="btn" disabled={busy} onClick={() => setCaseEditOpen(true)}>
-            Edit details
-          </button>
-          <button
-            type="button"
-            className="btn"
-            style={{ marginLeft: 8 }}
-            onClick={() =>
-              window.open(`${window.location.origin}${window.location.pathname}?tasks=${caseId}`, '_blank')
-            }
-          >
-            Tasks
-          </button>
-          <button
-            type="button"
-            className="btn"
-            style={{ marginLeft: 8 }}
-            onClick={() => window.open(`${window.location.origin}${window.location.pathname}?ledger=${caseId}`, '_blank')}
-          >
-            Ledger
-          </button>
-        </div>
-        <div className="caseToolbarMain">
-          <div className="caseToolbarGroup caseToolbarDocs">
-            <div className="caseToolbarDropdownWrap" ref={newMenuRef}>
-              <button
-                type="button"
-                className="btn"
-                disabled={busy}
-                aria-haspopup="menu"
-                aria-expanded={newMenuOpen}
-                onClick={() => setNewMenuOpen((o) => !o)}
-              >
-                New <span aria-hidden>▾</span>
-              </button>
-              {newMenuOpen ? (
-                <div className="caseToolbarDropdown" role="menu">
-                  <button
-                    type="button"
-                    className="caseToolbarDropdownItem"
-                    role="menuitem"
-                    onClick={() => {
-                      setNewMenuOpen(false)
-                      createFolderAtCurrentPath()
-                    }}
-                  >
-                    Folder
-                  </button>
-                  <button
-                    type="button"
-                    className="caseToolbarDropdownItem"
-                    role="menuitem"
-                    onClick={() => {
-                      setNewMenuOpen(false)
-                      setTaskCreateErr(null)
-                      setTaskCreateCustomTitle('')
-                      setTaskCreateTitleOverride(null)
-                      setTaskCreateDueDate('')
-                      setTaskCreateAssignUserId('')
-                      setTaskCreateOpen(true)
-                    }}
-                  >
-                    Task
-                  </button>
-                  <button
-                    type="button"
-                    className="caseToolbarDropdownItem"
-                    role="menuitem"
-                    onClick={() => {
-                      setNewMenuOpen(false)
-                      setPrecedentPicker({ kind: 'letter' })
-                    }}
-                  >
-                    Letter
-                  </button>
-                  <button
-                    type="button"
-                    className="caseToolbarDropdownItem"
-                    role="menuitem"
-                    onClick={() => {
-                      setNewMenuOpen(false)
-                      setPrecedentPicker({ kind: 'document' })
-                    }}
-                  >
-                    Document
-                  </button>
-                  <button
-                    type="button"
-                    className="caseToolbarDropdownItem"
-                    role="menuitem"
-                    onClick={() => {
-                      setNewMenuOpen(false)
-                      setPrecedentPicker({ kind: 'email' })
-                    }}
-                  >
-                    E-mail
-                  </button>
-                  <button
-                    type="button"
-                    className="caseToolbarDropdownItem"
-                    role="menuitem"
-                    onClick={() => {
-                      setNewMenuOpen(false)
-                      setCommentText('')
-                      setCommentErr(null)
-                      setCommentOpen(true)
-                    }}
-                  >
-                    Comment
-                  </button>
-                </div>
-              ) : null}
-            </div>
-            <button type="button" className="btn" disabled={busy} onClick={() => importInputRef.current?.click()}>
-              Import
-            </button>
-            <button type="button" className="btn" disabled={busy} onClick={() => onRefresh()}>
-              Refresh
-            </button>
-          </div>
-          <SearchInput
-            className="caseToolbarSearch"
-            placeholder="Search documents…"
-            value={docSearch}
-            onChange={(e) => setDocSearch(e.target.value)}
-            onClear={() => setDocSearch('')}
-            aria-label="Search documents"
-          />
-        </div>
-      </div>
-
       {error ? <div className="error">{error}</div> : null}
-      {actionErr ? <div className="error">{actionErr}</div> : null}
+      {caseDocPanel !== 'edit-details' && actionErr ? <div className="error">{actionErr}</div> : null}
 
       <div
         className="caseGrid"
@@ -1660,7 +1860,21 @@ export function CaseDetail({
       >
         <div className="caseLeft">
           <div className="card caseDetailsCard">
-            <h3>Case details</h3>
+            <div className="caseDetailsCardHeader">
+              <h3>Case details</h3>
+              <button
+                type="button"
+                className="btn btnCaseChrome"
+                disabled={busy}
+                onClick={() => {
+                  setActionErr(null)
+                  setEditCaseErr(null)
+                  setCaseDocPanel('edit-details')
+                }}
+              >
+                Edit details
+              </button>
+            </div>
             <dl className="caseDetailsList">
               <div className="caseDetailRow">
                 <dt>Reference</dt>
@@ -1692,29 +1906,21 @@ export function CaseDetail({
               </div>
               <div className="caseDetailRow">
                 <dt>Lock</dt>
-                <dd>
-                  {caseHasRevokedUserAccess(caseDetail)
-                    ? 'Locked'
-                    : !caseDetail.is_locked || caseDetail.lock_mode === 'none'
-                      ? 'Unlocked'
-                      : caseDetail.lock_mode}
-                </dd>
+                <dd>{caseHasRevokedUserAccess(caseDetail) ? 'Locked' : 'Unlocked'}</dd>
               </div>
             </dl>
           </div>
 
           <div className="card">
             <div className="accordion">
-              <button className="accHead" onClick={() => setLeftOpen({ ...leftOpen, contacts: !leftOpen.contacts })}>
+              <button className="accHead" onClick={() => toggleLeftAccordion('contacts')}>
                 <span>Contacts</span>
                 <span className="muted">{leftOpen.contacts ? '▾' : '▸'}</span>
               </button>
               {leftOpen.contacts ? (
                 <div className="accBody">
-                  {contactAddOpen ? <div className="muted" style={{ fontSize: 13 }}>Adding contact…</div> : null}
-                  {!contactAddOpen ? (
-                    <>
-                      <div className="list caseLeftContactsList">
+                  <>
+                    <div className="list caseLeftContactsList">
                         {caseContactsMenuOrder.map((cc) => (
                           <div
                             key={cc.id}
@@ -1725,6 +1931,7 @@ export function CaseDetail({
                               setContactAddOpen(false)
                               setEditSnapshot(cc)
                               setPushToGlobal(false)
+                              setCaseDocPanel('contacts')
                             }}
                             onContextMenu={(e) => {
                               e.preventDefault()
@@ -1744,6 +1951,7 @@ export function CaseDetail({
                                 setContactAddOpen(false)
                                 setEditSnapshot(cc)
                                 setPushToGlobal(false)
+                                setCaseDocPanel('contacts')
                               }}
                             >
                               Edit
@@ -1774,6 +1982,7 @@ export function CaseDetail({
                               setContactAddOpen(false)
                               setEditSnapshot(cc)
                               setPushToGlobal(false)
+                              setCaseDocPanel('contacts')
                             }}
                           >
                             Open
@@ -1791,24 +2000,101 @@ export function CaseDetail({
                           setMatterContactReference('')
                           setLawyerLinkClientIds([])
                           setContactAddErr(null)
+                          setSelectedGlobalContactId(null)
+                          setContactAddSearch('')
                           setContactAddOpen(true)
+                          setCaseDocPanel('contacts')
                         }}
                       >
                         Add contact…
                       </button>
-                    </>
-                  ) : null}
+                  </>
                 </div>
               ) : null}
             </div>
           </div>
+
+          <div className="card">
+            <div className="accordion">
+              <button
+                className="accHead"
+                onClick={() => toggleLeftAccordion('accounts')}
+              >
+                <span>Accounts</span>
+                <span className="muted">{leftOpen.accounts ? '▾' : '▸'}</span>
+              </button>
+              {leftOpen.accounts ? (
+                <div className="accBody">
+                  {accountsPreviewErr ? (
+                    <div className="muted" style={{ fontSize: 13 }}>
+                      {accountsPreviewErr}
+                    </div>
+                  ) : accountsPreview ? (
+                    <div className="stack" style={{ gap: 6, fontSize: 14 }}>
+                      <div>
+                        Client balance:{' '}
+                        <strong>{ledgerSignedGb(accountsPreview.client.balance_pence)}</strong>
+                      </div>
+                      <div>
+                        Office balance:{' '}
+                        <strong>{ledgerSignedGb(accountsPreview.office.balance_pence)}</strong>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="muted" style={{ fontSize: 13 }}>
+                      Loading…
+                    </div>
+                  )}
+                  <button
+                    type="button"
+                    className="btn primary"
+                    style={{ marginTop: 8, width: '100%', boxSizing: 'border-box' }}
+                    disabled={busy}
+                    onClick={() => setCaseDocPanel('accounts')}
+                  >
+                    View accounts
+                  </button>
+                </div>
+              ) : null}
+            </div>
+          </div>
+
+          {hasTasksMenu ? (
+            <div className="card">
+              <div className="accordion">
+                <button
+                  className="accHead"
+                  onClick={() => toggleLeftAccordion('tasks')}
+                >
+                  <span>Tasks</span>
+                  <span className="muted">{leftOpen.tasks ? '▾' : '▸'}</span>
+                </button>
+                {leftOpen.tasks ? (
+                  <div className="accBody">
+                    <div className="muted" style={{ fontSize: 13 }}>
+                      {sidebarTaskRows.length === 0 ? 'No tasks yet.' : `${sidebarTaskRows.length} task(s).`}
+                    </div>
+                    <button
+                      type="button"
+                      className="btn primary"
+                      style={{ marginTop: 8, width: '100%', boxSizing: 'border-box' }}
+                      disabled={busy}
+                      onClick={() => setCaseDocPanel('tasks')}
+                    >
+                      View tasks
+                    </button>
+                  </div>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
 
           {hasPropertyMenu ? (
             <div className="card">
               <div className="accordion">
                 <button
                   className="accHead"
-                  onClick={() => setLeftOpen({ ...leftOpen, property: !leftOpen.property })}
+                  onClick={() => toggleLeftAccordion('property')}
                 >
                   <span>Property</span>
                   <span className="muted">{leftOpen.property ? '▾' : '▸'}</span>
@@ -1835,7 +2121,7 @@ export function CaseDetail({
                             }
                             setPropertyDraft(blank)
                             setPropertyBaseline(JSON.parse(JSON.stringify(blank)) as CasePropertyPayload)
-                            setPropertyModalOpen(true)
+                            setCaseDocPanel('property')
                           }}
                         >
                           Add
@@ -1884,7 +2170,7 @@ export function CaseDetail({
                             }
                             setPropertyDraft(d)
                             setPropertyBaseline(JSON.parse(JSON.stringify(d)) as CasePropertyPayload)
-                            setPropertyModalOpen(true)
+                            setCaseDocPanel('property')
                           }}
                         >
                           Edit
@@ -1902,10 +2188,10 @@ export function CaseDetail({
               <div className="accordion">
                 <button
                   className="accHead"
-                  onClick={() => setLeftOpen({ ...leftOpen, events: !leftOpen.events })}
+                  onClick={() => toggleLeftAccordion('events')}
                 >
                   <span className="row" style={{ gap: 8, alignItems: 'center' }}>
-                    <span>Events</span>
+                    <span>Calendar</span>
                   </span>
                   <span className="muted">{leftOpen.events ? '▾' : '▸'}</span>
                 </button>
@@ -1939,15 +2225,24 @@ export function CaseDetail({
                     ) : (
                       <div className="muted">Loading…</div>
                     )}
-                    <button
-                      type="button"
-                      className="btn primary"
-                      style={{ marginTop: 8 }}
-                      disabled={busy}
-                      onClick={() => setEventsModalOpen(true)}
-                    >
-                      Edit
-                    </button>
+                    <div className="row" style={{ marginTop: 8, gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                      <button
+                        type="button"
+                        className="btn"
+                        disabled={busy}
+                        onClick={() => openCaseEventModal()}
+                      >
+                        New event
+                      </button>
+                      <button
+                        type="button"
+                        className="btn primary"
+                        disabled={busy}
+                        onClick={() => setCaseDocPanel('events')}
+                      >
+                        View
+                      </button>
+                    </div>
                   </div>
                 ) : null}
               </div>
@@ -1959,7 +2254,7 @@ export function CaseDetail({
               <div className="accordion">
                 <button
                   className="accHead"
-                  onClick={() => setLeftOpen({ ...leftOpen, finance: !leftOpen.finance })}
+                  onClick={() => toggleLeftAccordion('finance')}
                 >
                   <span>Finance</span>
                   <span className="muted">{leftOpen.finance ? '▾' : '▸'}</span>
@@ -1996,7 +2291,7 @@ export function CaseDetail({
                       className="btn primary"
                       style={{ marginTop: 8 }}
                       disabled={busy}
-                      onClick={() => setFinanceModalOpen(true)}
+                      onClick={() => setCaseDocPanel('finance')}
                     >
                       Edit
                     </button>
@@ -2006,76 +2301,27 @@ export function CaseDetail({
             </div>
           ) : null}
 
-          {/* Events modal */}
-          {eventsModalOpen && caseId && (
-            <div
-              className="modalOverlay"
-              role="dialog"
-              aria-modal="true"
-              aria-label="Events"
-            >
-              <div className="modal card modal--scrollBody" style={{ maxWidth: 720 }}>
-                <div className="stack modalBodyScroll">
-                  <EventsPage
-                    caseId={caseId}
-                    token={token}
-                    caseLabel={
-                      caseDetail
-                        ? `${caseDetail.case_number}${caseDetail.matter_description ? ` — ${caseDetail.matter_description}` : ''}`.trim()
-                        : ''
-                    }
-                    onClose={() => {
-                      setEventsModalOpen(false)
-                      void apiFetch<CaseEventsOut>(`/cases/${caseId}/events`, { token }).then(setEventsPreview).catch(() => {})
-                    }}
-                  />
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Finance modal */}
-          {financeModalOpen && caseId && (
-            <div
-              className="modalOverlay"
-              role="dialog"
-              aria-modal="true"
-              aria-label="Finance"
-            >
-              <div className="modal card modal--scrollBody" style={{ maxWidth: 860 }}>
-                <div className="stack modalBodyScroll">
-                  <FinancePage
-                    caseId={caseId}
-                    token={token}
-                    onClose={() => {
-                      setFinanceModalOpen(false)
-                      void apiFetch<FinanceOut>(`/cases/${caseId}/finance`, { token })
-                        .then(setFinancePreview)
-                        .catch(() => {})
-                    }}
-                  />
-                </div>
-              </div>
-            </div>
-          )}
         </div>
 
         <div className="caseRight">
           <div
             className={`card caseDocsCard${docsDragOver ? ' caseDocsCard--dragOver' : ''}`}
             onDragEnter={(e) => {
+              if (caseDocPanel !== 'documents') return
               e.preventDefault()
               e.stopPropagation()
               if (!dndEventHasFiles(e)) return
               setDocsDragOver(true)
             }}
             onDragLeave={(e) => {
+              if (caseDocPanel !== 'documents') return
               const cur = e.currentTarget as HTMLElement
               const rel = e.relatedTarget as Node | null
               if (rel && cur.contains(rel)) return
               setDocsDragOver(false)
             }}
             onDragOver={(e) => {
+              if (caseDocPanel !== 'documents') return
               e.preventDefault()
               e.stopPropagation()
               if (dndEventHasFiles(e)) {
@@ -2084,13 +2330,17 @@ export function CaseDetail({
                 e.dataTransfer.dropEffect = 'none'
               }
             }}
-            onClick={() => setSelectedDocSet(new Set())}
+            onClick={() => {
+              if (caseDocPanel === 'documents') setSelectedDocSet(new Set())
+            }}
             onContextMenu={(e) => {
+              if (caseDocPanel !== 'documents') return
               e.preventDefault()
               e.stopPropagation()
               setDocMenu({ kind: 'surface', x: e.clientX, y: e.clientY })
             }}
             onDrop={async (e) => {
+              if (caseDocPanel !== 'documents') return
               e.preventDefault()
               e.stopPropagation()
               setDocsDragOver(false)
@@ -2099,7 +2349,132 @@ export function CaseDetail({
               await uploadFilesToCurrentFolder(droppedFiles)
             }}
           >
-            <div className="caseDocsScroll">
+            <div
+              className={
+                caseDocPanel === 'documents' ? 'caseDocsScroll' : 'caseDocsScroll caseDocsScroll--panelOnly'
+              }
+            >
+              {caseDocPanel === 'documents' ? (
+              <>
+              <div
+                className="caseDocsToolbar"
+                role="toolbar"
+                aria-label="Documents actions"
+                onClick={(e) => e.stopPropagation()}
+                onContextMenu={(e) => e.stopPropagation()}
+              >
+                <div className="caseDocsToolbarMain">
+                  <div className="caseToolbarDropdownWrap" ref={newMenuRef}>
+                    <button
+                      type="button"
+                      className="btn btnCaseChrome caseDocsNewMenuBtn"
+                      disabled={busy}
+                      aria-haspopup="menu"
+                      aria-expanded={newMenuOpen}
+                      onClick={() => setNewMenuOpen((o) => !o)}
+                    >
+                      New <span className="caseDocsNewMenuChevron" aria-hidden>▾</span>
+                    </button>
+                    {newMenuOpen ? (
+                      <div className="caseToolbarDropdown" role="menu">
+                        <button
+                          type="button"
+                          className="caseToolbarDropdownItem"
+                          role="menuitem"
+                          onClick={() => {
+                            setNewMenuOpen(false)
+                            createFolderAtCurrentPath()
+                          }}
+                        >
+                          Folder
+                        </button>
+                        <button
+                          type="button"
+                          className="caseToolbarDropdownItem"
+                          role="menuitem"
+                          onClick={() => {
+                            setNewMenuOpen(false)
+                            openTaskCreateModal()
+                          }}
+                        >
+                          Task
+                        </button>
+                        <button
+                          type="button"
+                          className="caseToolbarDropdownItem"
+                          role="menuitem"
+                          onClick={() => {
+                            setNewMenuOpen(false)
+                            openCaseEventModal()
+                          }}
+                        >
+                          Event
+                        </button>
+                        <button
+                          type="button"
+                          className="caseToolbarDropdownItem"
+                          role="menuitem"
+                          onClick={() => {
+                            setNewMenuOpen(false)
+                            setPrecedentPicker({ kind: 'letter' })
+                          }}
+                        >
+                          Letter
+                        </button>
+                        <button
+                          type="button"
+                          className="caseToolbarDropdownItem"
+                          role="menuitem"
+                          onClick={() => {
+                            setNewMenuOpen(false)
+                            setPrecedentPicker({ kind: 'document' })
+                          }}
+                        >
+                          Document
+                        </button>
+                        <button
+                          type="button"
+                          className="caseToolbarDropdownItem"
+                          role="menuitem"
+                          onClick={() => {
+                            setNewMenuOpen(false)
+                            setPrecedentPicker({ kind: 'email' })
+                          }}
+                        >
+                          E-mail
+                        </button>
+                        <button
+                          type="button"
+                          className="caseToolbarDropdownItem"
+                          role="menuitem"
+                          onClick={() => {
+                            setNewMenuOpen(false)
+                            setCommentText('')
+                            setCommentErr(null)
+                            setCommentOpen(true)
+                          }}
+                        >
+                          Comment
+                        </button>
+                      </div>
+                    ) : null}
+                  </div>
+                  <button type="button" className="btn btnCaseChrome" disabled={busy} onClick={() => importInputRef.current?.click()}>
+                    Import
+                  </button>
+                  <button type="button" className="btn btnCaseChrome" disabled={busy} onClick={() => onRefresh()}>
+                    Refresh
+                  </button>
+                </div>
+                <SearchInput
+                  className="caseDocsToolbarSearch"
+                  placeholder="Search documents…"
+                  value={docSearch}
+                  onChange={(e) => setDocSearch(e.target.value)}
+                  onClear={() => setDocSearch('')}
+                  aria-label="Search documents"
+                />
+              </div>
               <div className="docsTr docsTh">
                 <button
                   type="button"
@@ -2131,14 +2506,14 @@ export function CaseDetail({
                   type="button"
                   className="thbtn docsCenter"
                   onClick={() => {
-                    if (docSortKey === 'modified') setDocSortDir(docSortDir === 'asc' ? 'desc' : 'asc')
+                    if (docSortKey === 'created') setDocSortDir(docSortDir === 'asc' ? 'desc' : 'asc')
                     else {
-                      setDocSortKey('modified')
+                      setDocSortKey('created')
                       setDocSortDir('desc')
                     }
                   }}
                 >
-                  Modified
+                  Created
                 </button>
                 <button
                   type="button"
@@ -2172,7 +2547,7 @@ export function CaseDetail({
                     <span key={path} style={{ display: 'inline-flex', gap: 8, alignItems: 'center' }}>
                       <span aria-hidden> / </span>
                       <span style={{ cursor: 'pointer', textDecoration: 'underline' }} onClick={() => setDocFolder(path)}>
-                        {p}
+                        {decodeFolderPathSegment(p)}
                       </span>
                     </span>
                   )
@@ -2198,8 +2573,8 @@ export function CaseDetail({
                 >
                   <DocsFileDescCell f={f} showPin={!f.parent_file_id} />
                   <div className="td docsCenter">{formatDocFileSize(f.size_bytes)}</div>
-                  <div className="td docsCenter">{formatDocModified(f.updated_at ?? f.created_at)}</div>
-                  <div className="td docsCenter">{f.owner_display_name ?? f.owner_email ?? '—'}</div>
+                  <div className="td docsCenter">{formatDocModified(docListPrimaryDate(f))}</div>
+                  <div className="td docsCenter">{fileDocOwnerLabel(f)}</div>
                 </div>
               ))}
 
@@ -2219,7 +2594,7 @@ export function CaseDetail({
                       setDocMenu({ kind: 'folder', folderPath: next, x: e.clientX, y: e.clientY })
                     }}
                   >
-                    <DocsFolderDescCell name={folderName} />
+                    <DocsFolderDescCell name={decodeFolderPathSegment(folderName)} />
                     <div className="td muted docsCenter">—</div>
                     <div className="td muted docsCenter">—</div>
                     <div className="td muted docsCenter">—</div>
@@ -2246,14 +2621,468 @@ export function CaseDetail({
                 >
                   <DocsFileDescCell f={f} showPin={false} />
                   <div className="td docsCenter">{formatDocFileSize(f.size_bytes)}</div>
-                  <div className="td docsCenter">{formatDocModified(f.updated_at ?? f.created_at)}</div>
-                  <div className="td docsCenter">{f.owner_display_name ?? f.owner_email ?? '—'}</div>
+                  <div className="td docsCenter">{formatDocModified(docListPrimaryDate(f))}</div>
+                  <div className="td docsCenter">{fileDocOwnerLabel(f)}</div>
                 </div>
               ))}
 
               {sortedPinnedInFolder.length === 0 && sortedRegularInFolder.length === 0 && childFolders.length === 0 ? (
                 <div className="muted" style={{ padding: 12 }}>
                   No documents in this folder.
+                </div>
+              ) : null}
+              </>
+              ) : caseDocPanel === 'events' && caseId ? (
+                <div
+                  className="caseDocPanelInset caseDocPanelHost stack"
+                  style={{ gap: 12, padding: '8px 12px 16px', minHeight: 0 }}
+                >
+                  <div className="row caseDocPanelBar" style={{ alignItems: 'center', gap: 8 }}>
+                    <button type="button" className="btn" onClick={backToDocuments}>
+                      ← Documents
+                    </button>
+                  </div>
+                  <CaseDocPanelZoomFit fillHost>
+                    <EventsPage
+                      caseId={caseId}
+                      token={token}
+                      embedded
+                      onRequestNewEvent={openCaseEventModal}
+                      caseLabel={
+                        caseDetail
+                          ? `${caseDetail.case_number}${caseDetail.matter_description ? ` — ${caseDetail.matter_description}` : ''}`.trim()
+                          : ''
+                      }
+                      onClose={() => {
+                        setCaseDocPanel('documents')
+                        void apiFetch<CaseEventsOut>(`/cases/${caseId}/events`, { token }).then(setEventsPreview).catch(() => {})
+                      }}
+                    />
+                  </CaseDocPanelZoomFit>
+                </div>
+              ) : caseDocPanel === 'finance' && caseId ? (
+                <div
+                  className="caseDocPanelInset caseDocPanelHost stack"
+                  style={{ gap: 12, padding: '8px 12px 16px', minHeight: 0 }}
+                >
+                  <div className="row caseDocPanelBar" style={{ alignItems: 'center', gap: 8 }}>
+                    <button type="button" className="btn" onClick={backToDocuments}>
+                      ← Documents
+                    </button>
+                  </div>
+                  <CaseDocPanelZoomFit>
+                    <FinancePage
+                      caseId={caseId}
+                      token={token}
+                      embedded
+                      onClose={() => {
+                        setCaseDocPanel('documents')
+                        void apiFetch<FinanceOut>(`/cases/${caseId}/finance`, { token })
+                          .then(setFinancePreview)
+                          .catch(() => {})
+                      }}
+                    />
+                  </CaseDocPanelZoomFit>
+                </div>
+              ) : caseDocPanel === 'edit-details' && caseId ? (
+                <div
+                  className="caseDocPanelInset caseDocPanelHost stack"
+                  style={{ gap: 12, padding: '8px 12px 16px', minHeight: 0 }}
+                >
+                  <div className="row caseDocPanelBar" style={{ alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                    <button type="button" className="btn" onClick={backToDocuments}>
+                      ← Documents
+                    </button>
+                    <span className="muted">Edit case</span>
+                    <button className="btn" style={{ marginLeft: 'auto' }} onClick={backToDocuments} disabled={busy}>
+                      Close
+                    </button>
+                  </div>
+                  <CaseDocPanelZoomFit>
+                    <div className="card caseDocEditEmbed">
+                      <div className="muted" style={{ marginBottom: 12 }}>
+                        Reference is immutable and generated automatically. Client name comes from matter contacts with type
+                        &quot;Client&quot;. Use Contacts in the left menu → Edit to change names.
+                      </div>
+                      <label className="field">
+                        <span>Matter type</span>
+                        <select value={editPracticeArea} onChange={(e) => setEditPracticeArea(e.target.value)} disabled={busy}>
+                          <option value="">— select —</option>
+                          {matterHeadTypes.map((head) => (
+                            <optgroup key={head.id} label={head.name}>
+                              {head.sub_types.map((sub) => (
+                                <option key={sub.id} value={sub.id}>
+                                  {sub.name}
+                                </option>
+                              ))}
+                            </optgroup>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="field">
+                        <span>Description</span>
+                        <input
+                          value={editMatterDescription}
+                          onChange={(e) => setEditMatterDescription(e.target.value)}
+                        />
+                      </label>
+                      <label className="field">
+                        <span>Fee earner</span>
+                        <select value={editFeeEarner} onChange={(e) => setEditFeeEarner(e.target.value)} disabled={busy}>
+                          <option value="">Unassigned</option>
+                          {users
+                            .filter((u) => u.is_active)
+                            .map((u) => (
+                              <option key={u.id} value={u.id}>
+                                {u.display_name} ({u.email})
+                              </option>
+                            ))}
+                        </select>
+                      </label>
+                      <label className="field">
+                        <span>Status</span>
+                        <select
+                          value={editCaseStatus}
+                          onChange={(e) => setEditCaseStatus(e.target.value as CaseWorkflowStatus)}
+                          disabled={busy}
+                        >
+                          <option value="open">Active</option>
+                          {caseDetail?.status === 'quote' ? <option value="quote">Quote</option> : null}
+                          <option value="post_completion">Post-completion</option>
+                          <option value="closed">Closed</option>
+                          <option value="archived">Archived</option>
+                        </select>
+                      </label>
+                      <div className="row" style={{ justifyContent: 'flex-start', marginTop: 8 }}>
+                        <button
+                          type="button"
+                          className="btn"
+                          disabled={busy || !caseId}
+                          onClick={() => setManageAccessOpen(true)}
+                        >
+                          Manage access…
+                        </button>
+                      </div>
+                      {editCaseErr ? <div className="error">{editCaseErr}</div> : null}
+                      <div className="row" style={{ justifyContent: 'flex-end', marginTop: 12, gap: 8 }}>
+                        <button className="btn" onClick={backToDocuments} disabled={busy}>
+                          Cancel
+                        </button>
+                        <button
+                          className="btn primary"
+                          disabled={busy || !editMatterDescription.trim()}
+                          onClick={async () => {
+                            setBusy(true)
+                            setEditCaseErr(null)
+                            try {
+                              await apiFetch(`/cases/${caseId}`, {
+                                token,
+                                method: 'PATCH',
+                                json: {
+                                  matter_description: editMatterDescription.trim(),
+                                  fee_earner_user_id: editFeeEarner || null,
+                                  status: editCaseStatus,
+                                  ...(editPracticeArea.trim()
+                                    ? { matter_sub_type_id: editPracticeArea.trim() }
+                                    : { matter_sub_type_id: null, matter_head_type_id: null }),
+                                },
+                              })
+                              backToDocuments()
+                              onRefresh()
+                              onCaseListInvalidate?.()
+                            } catch (e: unknown) {
+                              const err = e as { message?: string }
+                              setEditCaseErr(err?.message ?? 'Failed to update case')
+                            } finally {
+                              setBusy(false)
+                            }
+                          }}
+                        >
+                          Save
+                        </button>
+                      </div>
+                    </div>
+                  </CaseDocPanelZoomFit>
+                </div>
+              ) : caseDocPanel === 'accounts' && caseId ? (
+                <div
+                  className="caseDocPanelInset caseDocPanelHost stack"
+                  style={{ gap: 12, padding: '8px 12px 16px', minHeight: 0 }}
+                >
+                  <div className="row caseDocPanelBar" style={{ alignItems: 'center', gap: 8 }}>
+                    <button type="button" className="btn" onClick={backToDocuments}>
+                      ← Documents
+                    </button>
+                  </div>
+                  <div className="caseDocLedgerEmbed">
+                    <CaseDocPanelZoomFit>
+                      <LedgerPage caseId={caseId} token={token} />
+                    </CaseDocPanelZoomFit>
+                  </div>
+                </div>
+              ) : caseDocPanel === 'tasks' && caseId ? (
+                <div
+                  className="caseDocPanelInset caseDocPanelHost stack"
+                  style={{ gap: 12, padding: '8px 12px 16px', minHeight: 0 }}
+                >
+                  <div className="row caseDocPanelBar" style={{ alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+                    <button type="button" className="btn" onClick={backToDocuments}>
+                      ← Documents
+                    </button>
+                    <button type="button" className="btn primary" disabled={busy} onClick={() => openTaskCreateModal()}>
+                      New task
+                    </button>
+                    <div className="tasksToolbarLayoutGroup">
+                      <span className="tasksToolbarLayoutLabel">View</span>
+                      <select
+                        className="tasksToolbarLayoutSelect"
+                        value={caseTasksLayout}
+                        onChange={(e) => setCaseTasksLayout(e.target.value as 'list' | 'kanban')}
+                        aria-label="Task layout"
+                      >
+                        <option value="list">List</option>
+                        <option value="kanban">Kanban</option>
+                      </select>
+                    </div>
+                    <SearchInput
+                      placeholder="Search tasks…"
+                      value={caseTasksSearch}
+                      onChange={(e) => setCaseTasksSearch(e.target.value)}
+                      onClear={() => setCaseTasksSearch('')}
+                      style={{ flex: 1, minWidth: 160 }}
+                      aria-label="Search tasks for this matter"
+                    />
+                    <button
+                      type="button"
+                      className="btn"
+                      onClick={() => {
+                        void apiFetch<TaskMenuRow[]>(`/tasks?case_id=${encodeURIComponent(caseId)}`, { token })
+                          .then((data) => setCaseTaskMenuRows(Array.isArray(data) ? data : []))
+                          .catch(() => setCaseTaskMenuRows([]))
+                      }}
+                    >
+                      Refresh
+                    </button>
+                    <button
+                      type="button"
+                      className="btn"
+                      onClick={() => void (async () => {
+                        const ok = await askConfirm({
+                          title: 'Clear completed tasks',
+                          message:
+                            'Remove all completed tasks for this matter from the list? Only tasks on this matter are affected.',
+                        })
+                        if (!ok) return
+                        try {
+                          await apiFetch(`/tasks/completed?case_id=${encodeURIComponent(caseId)}`, {
+                            token,
+                            method: 'DELETE',
+                          })
+                          void apiFetch<TaskMenuRow[]>(`/tasks?case_id=${encodeURIComponent(caseId)}`, { token })
+                            .then((data) => setCaseTaskMenuRows(Array.isArray(data) ? data : []))
+                            .catch(() => setCaseTaskMenuRows([]))
+                          onRefresh()
+                          onTaskMenuInvalidate?.()
+                        } catch {
+                          // ignore
+                        }
+                      })()}
+                    >
+                      Clear completed tasks
+                    </button>
+                  </div>
+                  <CaseDocPanelZoomFit>
+                    <TasksTable
+                      token={token}
+                      currentUserId={currentUser?.id ?? ''}
+                      users={users}
+                      rows={caseTaskMenuRows}
+                      layoutMode={caseTasksLayout}
+                      search={caseTasksSearch}
+                      filterMatterType=""
+                      onSelectCase={() => {}}
+                      sortKey={caseTasksSortKey}
+                      sortDir={caseTasksSortDir}
+                      onSort={(k) => {
+                        if (k === caseTasksSortKey) setCaseTasksSortDir(caseTasksSortDir === 'asc' ? 'desc' : 'asc')
+                        else {
+                          setCaseTasksSortKey(k)
+                          setCaseTasksSortDir(k === 'priority' ? 'desc' : 'asc')
+                        }
+                      }}
+                      onInvalidate={() => {
+                        void apiFetch<TaskMenuRow[]>(`/tasks?case_id=${encodeURIComponent(caseId)}`, { token })
+                          .then((data) => setCaseTaskMenuRows(Array.isArray(data) ? data : []))
+                          .catch(() => setCaseTaskMenuRows([]))
+                        onRefresh()
+                        onTaskMenuInvalidate?.()
+                      }}
+                      embedded
+                      suppressCaseOpen
+                    />
+                  </CaseDocPanelZoomFit>
+                </div>
+              ) : caseDocPanel === 'property' && propertyDraft ? (
+                <div
+                  className="caseDocPanelInset caseDocPanelHost stack"
+                  style={{ gap: 12, padding: '8px 12px 16px', minHeight: 0 }}
+                >
+                  <div className="row caseDocPanelBar" style={{ alignItems: 'center', gap: 8 }}>
+                    <button type="button" className="btn" onClick={backToDocuments}>
+                      ← Documents
+                    </button>
+                  </div>
+                  <CaseDocPanelZoomFit>
+                    <div className="card caseDocPropertyEmbed">
+                    <div className="paneHead">
+                      <div>
+                        <h2 style={{ margin: 0, fontSize: 18 }}>Property details</h2>
+                      </div>
+                      <div className="row" style={{ gap: 8 }}>
+                        <button
+                          type="button"
+                          className="btn"
+                          disabled={busy}
+                          onClick={() => {
+                            if (propertyBaseline) {
+                              setPropertyDraft(JSON.parse(JSON.stringify(propertyBaseline)) as CasePropertyPayload)
+                            }
+                            setCaseDocPanel('documents')
+                          }}
+                        >
+                          Discard changes
+                        </button>
+                        <button
+                          type="button"
+                          className="btn"
+                          style={{ background: 'var(--primary)', color: '#fff', borderColor: 'var(--primary)' }}
+                          disabled={busy}
+                          onClick={async () => {
+                            if (!caseId) return
+                            setBusy(true)
+                            setActionErr(null)
+                            try {
+                              const lines = [...propertyDraft.free_lines]
+                              while (lines.length < 6) lines.push('')
+                              const out = await apiFetch<CasePropertyDetailsOut>(
+                                `/cases/${caseId}/property-details`,
+                                {
+                                  method: 'PUT',
+                                  token,
+                                  json: { ...propertyDraft, free_lines: lines.slice(0, 6) },
+                                },
+                              )
+                              setPropertyDetails(out)
+                              setCaseDocPanel('documents')
+                            } catch (e: any) {
+                              setActionErr(e?.message ?? 'Save failed')
+                            } finally {
+                              setBusy(false)
+                            }
+                          }}
+                        >
+                          Save and close
+                        </button>
+                      </div>
+                    </div>
+                    <PropertyDetailsForm
+                      draft={propertyDraft}
+                      onChange={setPropertyDraft}
+                      disabled={busy}
+                    />
+                  </div>
+                  </CaseDocPanelZoomFit>
+                </div>
+              ) : caseDocPanel === 'contacts' && caseId && (contactAddOpen || editSnapshot) ? (
+                <div
+                  className="caseDocPanelInset caseDocPanelHost stack"
+                  style={{ gap: 12, padding: '8px 12px 16px', minHeight: 0 }}
+                >
+                  <div className="row caseDocPanelBar" style={{ alignItems: 'center', gap: 8 }}>
+                    <button type="button" className="btn" onClick={backToDocuments}>
+                      ← Documents
+                    </button>
+                  </div>
+                  <CaseDocPanelZoomFit>
+                  <div className="card caseDocPropertyEmbed" style={{ maxWidth: '100%' }}>
+                    {contactAddOpen ? (
+                      <>
+                        <div className="paneHead">
+                          <div>
+                            <h2 style={{ margin: 0, fontSize: 18 }}>Add contact</h2>
+                            <div className="muted">Link an existing global contact or create a new one.</div>
+                          </div>
+                          <button
+                            type="button"
+                            className="btn"
+                            onClick={() => {
+                              setContactAddErr(null)
+                              backToDocuments()
+                            }}
+                            disabled={busy}
+                          >
+                            Close
+                          </button>
+                        </div>
+                        <CaseContactsAddDocForm
+                          token={token}
+                          caseId={caseId}
+                          busy={busy}
+                          setBusy={setBusy}
+                          onDone={finishContactsDoc}
+                          matterContactType={matterContactType}
+                          setMatterContactType={setMatterContactType}
+                          matterContactReference={matterContactReference}
+                          setMatterContactReference={setMatterContactReference}
+                          lawyerLinkClientIds={lawyerLinkClientIds}
+                          setLawyerLinkClientIds={setLawyerLinkClientIds}
+                          contacts={contacts}
+                          contactAddSearch={contactAddSearch}
+                          setContactAddSearch={setContactAddSearch}
+                          selectedGlobalContactId={selectedGlobalContactId}
+                          setSelectedGlobalContactId={setSelectedGlobalContactId}
+                          matterTypeOptions={matterTypeOptions}
+                          clientMatterContacts={clientMatterContacts}
+                          contactAddErr={contactAddErr}
+                          setContactAddErr={setContactAddErr}
+                          setActionErr={setActionErr}
+                          onGlobalContactsUpdated={refreshGlobalContacts}
+                        />
+                      </>
+                    ) : editSnapshot ? (
+                      <>
+                        <div className="paneHead">
+                          <div>
+                            <h2 id="edit-contact-title" style={{ margin: 0, fontSize: 18 }}>
+                              Edit contact
+                            </h2>
+                            <div className="muted">Update the snapshot on this matter.</div>
+                          </div>
+                          <button type="button" className="btn" onClick={backToDocuments} disabled={busy}>
+                            Close
+                          </button>
+                        </div>
+                        <CaseContactsEditDocForm
+                          token={token}
+                          caseId={caseId}
+                          busy={busy}
+                          setBusy={setBusy}
+                          editSnapshot={editSnapshot}
+                          setEditSnapshot={setEditSnapshot}
+                          editLawyerLinkClientIds={editLawyerLinkClientIds}
+                          setEditLawyerLinkClientIds={setEditLawyerLinkClientIds}
+                          pushToGlobal={pushToGlobal}
+                          setPushToGlobal={setPushToGlobal}
+                          resolvedEditSnapshotName={resolvedEditSnapshotName}
+                          matterTypeOptions={matterTypeOptions}
+                          clientMatterContacts={clientMatterContacts}
+                          onDone={finishContactsDoc}
+                          setActionErr={setActionErr}
+                        />
+                      </>
+                    ) : null}
+                  </div>
+                  </CaseDocPanelZoomFit>
                 </div>
               ) : null}
             </div>
@@ -2383,175 +3212,46 @@ export function CaseDetail({
           />
         ) : null}
 
-        {taskCreateOpen ? (
-          <div
-            className="modalOverlay"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="task-create-title"
-            onClick={(e) => e.target === e.currentTarget && !taskCreateBusy && setTaskCreateOpen(false)}
-          >
-            <div className="modal card" style={{ maxWidth: 480 }} onClick={(e) => e.stopPropagation()}>
-              <div className="paneHead">
-                <h2 id="task-create-title" style={{ margin: 0, fontSize: 18 }}>
-                  New task
-                </h2>
-                <button type="button" className="btn" disabled={taskCreateBusy} onClick={() => setTaskCreateOpen(false)}>
-                  Cancel
-                </button>
-              </div>
-              <div className="stack" style={{ marginTop: 12, gap: 12 }}>
-                {taskCreateErr ? <div className="error">{taskCreateErr}</div> : null}
-                {!caseDetail?.matter_sub_type_id ? (
-                  <div className="muted">
-                    This case has no matter sub-type. You can still use the built-in &quot;Follow up&quot; template or a
-                    custom task title below.
-                  </div>
-                ) : null}
-                <label className="field">
-                  <span>Task</span>
-                  <select
-                    value={taskCreateStandardId}
-                    disabled={taskCreateBusy}
-                    onChange={(e) => {
-                      const v = e.target.value
-                      setTaskCreateStandardId(v)
-                      if (v === '__custom__' && taskCreateTitleOverride) {
-                        setTaskCreateCustomTitle(taskCreateTitleOverride)
-                        setTaskCreateTitleOverride(null)
-                      } else if (v !== CANARY_FOLLOW_UP_STANDARD_TASK_ID) {
-                        setTaskCreateTitleOverride(null)
-                      }
-                    }}
-                    aria-label="Standard or custom task"
-                  >
-                    {standardTaskTemplates.map((t) => (
-                      <option key={t.id} value={t.id}>
-                        {t.title}
-                      </option>
-                    ))}
-                    <option value="__custom__">Custom task…</option>
-                  </select>
-                </label>
-                {taskCreateTitleOverride !== null ? (
-                  <label className="field">
-                    <span>Title</span>
-                    <input
-                      value={taskCreateTitleOverride}
-                      onChange={(e) => setTaskCreateTitleOverride(e.target.value)}
-                      disabled={taskCreateBusy}
-                    />
-                  </label>
-                ) : null}
-                {taskCreateStandardId === '__custom__' ? (
-                  <label className="field">
-                    <span>Custom title</span>
-                    <input
-                      value={taskCreateCustomTitle}
-                      onChange={(e) => setTaskCreateCustomTitle(e.target.value)}
-                      disabled={taskCreateBusy}
-                      placeholder="Describe the task…"
-                    />
-                  </label>
-                ) : null}
-                <label className="field">
-                  <span>Date</span>
-                  <input
-                    type="date"
-                    value={taskCreateDueDate}
-                    onChange={(e) => setTaskCreateDueDate(e.target.value)}
-                    disabled={taskCreateBusy}
-                  />
-                </label>
-                <label className="field">
-                  <span>Assigned to</span>
-                  <select
-                    value={taskCreateAssignUserId}
-                    disabled={taskCreateBusy}
-                    onChange={(e) => setTaskCreateAssignUserId(e.target.value)}
-                    aria-label="Assign to user"
-                  >
-                    <option value="">— Unassigned —</option>
-                    {users
-                      .filter((u) => u.is_active)
-                      .slice()
-                      .sort((a, b) => a.display_name.localeCompare(b.display_name))
-                      .map((u) => (
-                        <option key={u.id} value={u.id}>
-                          {u.display_name}
-                        </option>
-                      ))}
-                  </select>
-                </label>
-                <label className="field">
-                  <span>Priority</span>
-                  <select
-                    value={taskCreatePriority}
-                    disabled={taskCreateBusy}
-                    onChange={(e) => setTaskCreatePriority(e.target.value as 'low' | 'normal' | 'high')}
-                    aria-label="Task priority"
-                  >
-                    <option value="low">Low</option>
-                    <option value="normal">Normal</option>
-                    <option value="high">High</option>
-                  </select>
-                </label>
-                <label className="row" style={{ alignItems: 'flex-start', gap: 8 }}>
-                  <input
-                    type="checkbox"
-                    checked={taskCreatePrivate}
-                    disabled={taskCreateBusy}
-                    onChange={(e) => setTaskCreatePrivate(e.target.checked)}
-                  />
-                  <span className="muted" style={{ lineHeight: 1.4 }}>
-                    Private — only you and the assignee (if any) can see this task on the matter.
-                  </span>
-                </label>
-                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-                  <button type="button" className="btn primary" disabled={taskCreateBusy} onClick={() => void (async () => {
-                    if (!caseId) return
-                    if (!taskCreateDueDate.trim()) {
-                      setTaskCreateErr('Please choose a date.')
-                      return
-                    }
-                    if (taskCreateStandardId === '__custom__' && !taskCreateCustomTitle.trim()) {
-                      setTaskCreateErr('Please enter a task title or pick a standard task.')
-                      return
-                    }
-                    setTaskCreateBusy(true)
-                    setTaskCreateErr(null)
-                    try {
-                      const due = new Date(`${taskCreateDueDate}T12:00:00`)
-                      const json: Record<string, unknown> = {
-                        due_at: due.toISOString(),
-                        priority: taskCreatePriority,
-                        is_private: taskCreatePrivate,
-                      }
-                      if (taskCreateAssignUserId) json.assigned_to_user_id = taskCreateAssignUserId
-                      if (taskCreateStandardId !== '__custom__') {
-                        json.standard_task_id = taskCreateStandardId
-                        if (taskCreateTitleOverride != null && taskCreateTitleOverride.trim() !== '') {
-                          json.title = taskCreateTitleOverride.trim()
-                        }
-                      } else {
-                        json.title = taskCreateCustomTitle.trim()
-                      }
-                      await apiFetch(`/cases/${caseId}/tasks`, { token, method: 'POST', json })
-                      setTaskCreateOpen(false)
-                      onRefresh()
-                      onTaskMenuInvalidate?.()
-                    } catch (e: any) {
-                      setTaskCreateErr(e?.message ?? 'Failed to create task')
-                    } finally {
-                      setTaskCreateBusy(false)
-                    }
-                  })()}>
-                    {taskCreateBusy ? 'Creating…' : 'Create task'}
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
+        <TaskCreateModal
+          open={taskCreateOpen}
+          token={token}
+          users={users}
+          caseIdFixed={caseId ?? null}
+          casesForPicker={null}
+          preset={taskCreatePreset}
+          onClose={() => {
+            setTaskCreateOpen(false)
+            setTaskCreatePreset(null)
+          }}
+          onCreated={() => {
+            onRefresh()
+            onTaskMenuInvalidate?.()
+            if (caseId) {
+              void apiFetch<TaskMenuRow[]>(`/tasks?case_id=${encodeURIComponent(caseId)}`, { token })
+                .then((data) => setCaseTaskMenuRows(Array.isArray(data) ? data : []))
+                .catch(() => setCaseTaskMenuRows([]))
+            }
+          }}
+        />
+
+        {caseId ? (
+          <CaseEventCreateModal
+            open={caseEventModalOpen}
+            caseId={caseId}
+            token={token}
+            caseLabel={
+              caseDetail
+                ? `${caseDetail.case_number}${caseDetail.matter_description ? ` — ${caseDetail.matter_description}` : ''}`.trim()
+                : ''
+            }
+            onClose={() => setCaseEventModalOpen(false)}
+            onSaved={() => {
+              void apiFetch<CaseEventsOut>(`/cases/${caseId}/events`, { token })
+                .then(setEventsPreview)
+                .catch(() => {})
+              onRefresh()
+            }}
+          />
         ) : null}
 
         {precedentPicker ? (
@@ -2715,8 +3415,9 @@ export function CaseDetail({
                   <div className="muted">
                     {contactPickModal.composeKind === 'email' ? (
                       <>
-                        Select a matter contact or global contact with an e-mail address. &quot;All clients&quot; is not
-                        available for Microsoft 365 e-mail.
+                        Optional: pick a recipient to pre-fill <strong>To</strong>. If there is no contact, no e-mail on
+                        the contact, or you skip this step, the draft opens with an empty To line so you can type it in
+                        Outlook. You can still use &quot;All clients&quot; for merge fields only.
                       </>
                     ) : (
                       <>
@@ -2749,9 +3450,7 @@ export function CaseDetail({
                     }}
                   >
                     <option value="none">None</option>
-                    {contactPickModal.composeKind !== 'email' ? (
-                      <option value="all_clients">All clients</option>
-                    ) : null}
+                    <option value="all_clients">All clients</option>
                     {caseContactsMenuOrder.map((cc) => (
                       <option key={cc.id} value={cc.id}>
                         {cc.name} ({matterContactTypeLabel(cc.matter_contact_type, matterTypeOptions)})
@@ -2877,7 +3576,7 @@ export function CaseDetail({
                     </div>
                   </div>
                 ) : null}
-                {contactPickModal.composeKind === 'email' ? (
+                {contactPickModal.composeKind === 'email' && m365EmailDraftsEnabled ? (
                   <>
                     <input
                       ref={emailLocalAttachInputRef}
@@ -2948,6 +3647,12 @@ export function CaseDetail({
                       </div>
                     ) : null}
                   </>
+                ) : contactPickModal.composeKind === 'email' ? (
+                  <p className="muted" style={{ margin: 0, fontSize: 13, lineHeight: 1.45 }}>
+                    File attachments are only available when Admin → E-mail uses <strong>Microsoft 365 (Entra / Graph)</strong>{' '}
+                    with a working app registration. <code>mailto</code> and Outlook on the web compose from here carry
+                    subject and body only.
+                  </p>
                 ) : null}
                 <div className="row" style={{ justifyContent: 'flex-end', marginTop: 12 }}>
                   <button
@@ -2969,7 +3674,7 @@ export function CaseDetail({
           </div>
         ) : null}
 
-        {contactPickModal?.composeKind === 'email' && emailAttachCanaryOpen ? (
+        {contactPickModal?.composeKind === 'email' && m365EmailDraftsEnabled && emailAttachCanaryOpen ? (
           <div
             className="modalOverlay emailAttachCanaryOverlay"
             role="dialog"
@@ -3003,9 +3708,9 @@ export function CaseDetail({
                 >
                   Home
                 </span>
-                {emailAttachBrowseFolder.split('/').filter(Boolean).map((_seg, idx, arr) => {
+                {splitFolderPath(emailAttachBrowseFolder).map((_seg, idx, arr) => {
                   const path = arr.slice(0, idx + 1).join('/')
-                  const label = arr[idx]
+                  const label = decodeFolderPathSegment(arr[idx] ?? '')
                   return (
                     <span key={path} style={{ display: 'inline-flex', gap: 8, alignItems: 'center' }}>
                       <span aria-hidden> / </span>
@@ -3030,7 +3735,7 @@ export function CaseDetail({
                       onClick={() => setEmailAttachBrowseFolder(next)}
                     >
                       <span className="emailAttachPickerCheckSpacer" aria-hidden />
-                      <DocsFolderDescCell name={folderName} />
+                      <DocsFolderDescCell name={decodeFolderPathSegment(folderName)} />
                     </button>
                   )
                 })}
@@ -3057,233 +3762,6 @@ export function CaseDetail({
                     No documents in this folder.
                   </div>
                 ) : null}
-              </div>
-            </div>
-          </div>
-        ) : null}
-
-        {propertyModalOpen && propertyDraft ? (
-          <div
-            className="modalOverlay"
-            role="dialog"
-            aria-modal="true"
-            onClick={(e) => {
-              if (e.target !== e.currentTarget) return
-              if (propertyBaseline) {
-                setPropertyDraft(JSON.parse(JSON.stringify(propertyBaseline)) as CasePropertyPayload)
-              }
-              setPropertyModalOpen(false)
-            }}
-          >
-            <div className="modal card modal--scrollBody" style={{ maxWidth: 520 }} onClick={(e) => e.stopPropagation()}>
-              <div className="paneHead">
-                <div>
-                  <h2 style={{ margin: 0, fontSize: 18 }}>Property details</h2>
-                </div>
-                <div className="row" style={{ gap: 8 }}>
-                  <button
-                    type="button"
-                    className="btn"
-                    disabled={busy}
-                    onClick={() => {
-                      if (propertyBaseline) {
-                        setPropertyDraft(JSON.parse(JSON.stringify(propertyBaseline)) as CasePropertyPayload)
-                      }
-                      setPropertyModalOpen(false)
-                    }}
-                  >
-                    Discard changes
-                  </button>
-                  <button
-                    type="button"
-                    className="btn"
-                    style={{ background: 'var(--primary)', color: '#fff', borderColor: 'var(--primary)' }}
-                    disabled={busy}
-                    onClick={async () => {
-                      if (!caseId) return
-                      setBusy(true)
-                      setActionErr(null)
-                      try {
-                        const lines = [...propertyDraft.free_lines]
-                        while (lines.length < 6) lines.push('')
-                        const out = await apiFetch<CasePropertyDetailsOut>(
-                          `/cases/${caseId}/property-details`,
-                          {
-                            method: 'PUT',
-                            token,
-                            json: { ...propertyDraft, free_lines: lines.slice(0, 6) },
-                          },
-                        )
-                        setPropertyDetails(out)
-                        setPropertyModalOpen(false)
-                      } catch (e: any) {
-                        setActionErr(e?.message ?? 'Save failed')
-                      } finally {
-                        setBusy(false)
-                      }
-                    }}
-                  >
-                    Save and close
-                  </button>
-                </div>
-              </div>
-              <div className="stack modalBodyScroll" style={{ marginTop: 12 }}>
-                <div className="muted" style={{ fontWeight: 600 }}>
-                  Title number(s)
-                </div>
-                {propertyDraft.title_numbers.map((t, i) => (
-                  <div key={i} className="row" style={{ gap: 8 }}>
-                    <input
-                      style={{ flex: 1 }}
-                      value={t}
-                      onChange={(e) => {
-                        const next = [...propertyDraft.title_numbers]
-                        next[i] = e.target.value
-                        setPropertyDraft({ ...propertyDraft, title_numbers: next })
-                      }}
-                    />
-                    <button
-                      type="button"
-                      className="btn"
-                      onClick={() => {
-                        const next = propertyDraft.title_numbers.filter((_, j) => j !== i)
-                        setPropertyDraft({ ...propertyDraft, title_numbers: next })
-                      }}
-                    >
-                      Remove
-                    </button>
-                  </div>
-                ))}
-                <button
-                  type="button"
-                  className="btn"
-                  onClick={() =>
-                    setPropertyDraft({
-                      ...propertyDraft,
-                      title_numbers: [...propertyDraft.title_numbers, ''],
-                    })
-                  }
-                >
-                  Add title number
-                </button>
-                <label className="field">
-                  <span>Tenure</span>
-                  <select
-                    value={propertyDraft.tenure ?? ''}
-                    onChange={(e) => {
-                      const v = e.target.value
-                      setPropertyDraft({
-                        ...propertyDraft,
-                        tenure: v === '' ? null : (v as CasePropertyTenure),
-                      })
-                    }}
-                  >
-                    <option value="">—</option>
-                    <option value="freehold">Freehold</option>
-                    <option value="leasehold">Leasehold</option>
-                    <option value="commonhold">Commonhold</option>
-                  </select>
-                </label>
-                <label className="row" style={{ alignItems: 'center', gap: 8 }}>
-                  <input
-                    type="checkbox"
-                    checked={propertyDraft.is_non_postal}
-                    onChange={(e) =>
-                      setPropertyDraft({ ...propertyDraft, is_non_postal: e.target.checked })
-                    }
-                  />
-                  <span>Non-postal address (free lines)</span>
-                </label>
-                {!propertyDraft.is_non_postal ? (
-                  <>
-                    <label className="field">
-                      <span>Address line 1</span>
-                      <input
-                        value={propertyDraft.uk.line1 ?? ''}
-                        onChange={(e) =>
-                          setPropertyDraft({
-                            ...propertyDraft,
-                            uk: { ...propertyDraft.uk, line1: e.target.value },
-                          })
-                        }
-                      />
-                    </label>
-                    <label className="field">
-                      <span>Address line 2</span>
-                      <input
-                        value={propertyDraft.uk.line2 ?? ''}
-                        onChange={(e) =>
-                          setPropertyDraft({
-                            ...propertyDraft,
-                            uk: { ...propertyDraft.uk, line2: e.target.value },
-                          })
-                        }
-                      />
-                    </label>
-                    <label className="field">
-                      <span>Town / city</span>
-                      <input
-                        value={propertyDraft.uk.town ?? ''}
-                        onChange={(e) =>
-                          setPropertyDraft({
-                            ...propertyDraft,
-                            uk: { ...propertyDraft.uk, town: e.target.value },
-                          })
-                        }
-                      />
-                    </label>
-                    <label className="field">
-                      <span>County</span>
-                      <input
-                        value={propertyDraft.uk.county ?? ''}
-                        onChange={(e) =>
-                          setPropertyDraft({
-                            ...propertyDraft,
-                            uk: { ...propertyDraft.uk, county: e.target.value },
-                          })
-                        }
-                      />
-                    </label>
-                    <label className="field">
-                      <span>Postcode</span>
-                      <input
-                        value={propertyDraft.uk.postcode ?? ''}
-                        onChange={(e) =>
-                          setPropertyDraft({
-                            ...propertyDraft,
-                            uk: { ...propertyDraft.uk, postcode: e.target.value },
-                          })
-                        }
-                      />
-                    </label>
-                    <label className="field">
-                      <span>Country</span>
-                      <input
-                        value={propertyDraft.uk.country ?? ''}
-                        onChange={(e) =>
-                          setPropertyDraft({
-                            ...propertyDraft,
-                            uk: { ...propertyDraft.uk, country: e.target.value },
-                          })
-                        }
-                      />
-                    </label>
-                  </>
-                ) : (
-                  [0, 1, 2, 3, 4, 5].map((i) => (
-                    <label key={i} className="field">
-                      <span>Address line {i + 1}</span>
-                      <input
-                        value={propertyDraft.free_lines[i] ?? ''}
-                        onChange={(e) => {
-                          const next = [...propertyDraft.free_lines]
-                          next[i] = e.target.value
-                          setPropertyDraft({ ...propertyDraft, free_lines: next })
-                        }}
-                      />
-                    </label>
-                  ))
-                )}
               </div>
             </div>
           </div>
@@ -3328,14 +3806,26 @@ export function CaseDetail({
             ) : null}
 
             {docMenu.kind === 'folder' ? (
+              <div
+                className="docContextItem"
+                onClick={() => {
+                  void downloadCaseFolderZip(docMenu.folderPath)
+                }}
+              >
+                Download
+              </div>
+            ) : null}
+
+            {docMenu.kind === 'folder' ? (
               <>
                 <div
                   className="docContextItem"
                   onClick={() => {
                     const current = docMenu.folderPath
-                    const parts = current.split('/').filter(Boolean)
+                    const parts = splitFolderPath(current)
                     const parent = parts.length > 1 ? parts.slice(0, -1).join('/') : ''
-                    const leaf = parts[parts.length - 1] || ''
+                    const leafEnc = parts[parts.length - 1] || ''
+                    const leaf = decodeFolderPathSegment(leafEnc)
                     setDocMenu(null)
                     setTextPrompt({
                       title: 'Rename folder',
@@ -3346,7 +3836,7 @@ export function CaseDetail({
                         const trimmed = newName.trim()
                         setTextPrompt(null)
                         if (!trimmed) return
-                        const newFolderPath = parent ? `${parent}/${trimmed}` : trimmed
+                        const newFolderPath = joinFolderPath(parent, trimmed)
                         if (docFolder === current) setDocFolder(newFolderPath)
                         setBusy(true)
                         setActionErr(null)
@@ -3386,7 +3876,7 @@ export function CaseDetail({
                     <div className="docSubMenu" role="menu">
                       {(() => {
                         const current = docMenu.folderPath
-                        const currentParts = current.split('/').filter(Boolean)
+                        const currentParts = splitFolderPath(current)
                         const leaf = currentParts[currentParts.length - 1] ?? ''
                         const forbiddenPrefix = `${current}/`
                         const currentParent = currentParts.length > 1 ? currentParts.slice(0, -1).join('/') : ''
@@ -3396,7 +3886,7 @@ export function CaseDetail({
                             .filter(
                               (p) => p !== current && !p.startsWith(forbiddenPrefix),
                             )
-                            .map((p) => ({ label: p, parent: p })),
+                            .map((p) => ({ label: decodeFolderPathForDisplay(p), parent: p })),
                         ]
                         return options.map((opt) => {
                           const isCurrentParent = opt.parent === currentParent
@@ -3443,7 +3933,7 @@ export function CaseDetail({
                       const current = docMenu.folderPath
                       const ok = await askConfirm({
                         title: 'Delete folder',
-                        message: `Delete folder "${current}" (including its contents)?`,
+                        message: `Delete folder "${decodeFolderPathForDisplay(current)}" (including its contents)?`,
                         danger: true,
                         confirmLabel: 'Delete',
                       })
@@ -3525,11 +4015,11 @@ export function CaseDetail({
                       className="docContextItem"
                       onClick={() => {
                         setDocMenu(null)
-                        setTaskCreateErr(null)
-                        setTaskCreateCustomTitle('')
                         const name = f.original_filename.trim() || 'Document'
-                        setTaskCreateTitleOverride(`Follow up: ${name}`)
-                        setTaskCreateStandardId(CANARY_FOLLOW_UP_STANDARD_TASK_ID)
+                        setTaskCreatePreset({
+                          standardTaskId: CANARY_FOLLOW_UP_STANDARD_TASK_ID,
+                          title: `Follow up: ${name}`,
+                        })
                         setTaskCreateOpen(true)
                       }}
                     >
@@ -3636,8 +4126,10 @@ export function CaseDetail({
                         const f = files.find((x) => x.id === docMenu.fileId)
                         if (!f) return null
                         const here = (f.folder_path ?? '').trim()
-                        return [{ label: 'Home', path: '' }, ...allFolderPaths.map((p) => ({ label: p, path: p }))].map(
-                          (opt) => {
+                        return [
+                          { label: 'Home', path: '' },
+                          ...allFolderPaths.map((p) => ({ label: decodeFolderPathForDisplay(p), path: p })),
+                        ].map((opt) => {
                             const isHere = here === (opt.path ?? '').trim()
                             return (
                           <div
@@ -3649,15 +4141,27 @@ export function CaseDetail({
                               if (isHere) return
                               const file = files.find((x) => x.id === moveMenu.fileId)
                               if (!file) return
+                              const isMultiSelected =
+                                selectedDocSet.has(file.id) && selectedDocSet.size > 1
+                              const idsToMove = isMultiSelected
+                                ? [...selectedDocSet].filter((k) => !k.startsWith('folder:'))
+                                : [file.id]
                               setBusy(true)
                               setActionErr(null)
-                              apiFetch(`/cases/${caseId}/files/${file.id}/move`, {
-                                token,
-                                method: 'POST',
-                                json: { folder_path: opt.path },
-                              })
-                                .then(() => onRefresh())
-                                .catch((e: any) => setActionErr(e?.message ?? 'Failed to move file'))
+                              Promise.all(
+                                idsToMove.map((id) =>
+                                  apiFetch(`/cases/${caseId}/files/${id}/move`, {
+                                    token,
+                                    method: 'POST',
+                                    json: { folder_path: opt.path },
+                                  }),
+                                ),
+                              )
+                                .then(() => {
+                                  setSelectedDocSet(new Set())
+                                  onRefresh()
+                                })
+                                .catch((e: any) => setActionErr(e?.message ?? 'Failed to move file(s)'))
                                 .finally(() => setBusy(false))
                               setMoveMenu(null)
                               setDocMenu(null)
@@ -3729,129 +4233,19 @@ export function CaseDetail({
             onCancel={() => setTextPrompt(null)}
           />
         ) : null}
-        {caseEditOpen ? (
-          <div className="modalOverlay" role="dialog" aria-modal="true">
-            <div className="modal card modalSurfaceDraggable" style={caseEditDrag.surfaceStyle}>
-              <div className="paneHead">
-                <div>
-                  <h2 className="modalDragHandle" {...caseEditDrag.handleProps}>
-                    Edit case
-                  </h2>
-                  <div className="muted">Reference is immutable and generated automatically.</div>
-                </div>
-                <button className="btn" onClick={() => setCaseEditOpen(false)} disabled={busy}>
-                  Close
-                </button>
-              </div>
-              <div className="stack" style={{ marginTop: 12 }}>
-                <div className="muted">
-                  Client name comes from matter contacts with type &quot;Client&quot;. Use Contacts in the left menu →
-                  Edit to change names.
-                </div>
-                <label className="field">
-                  <span>Matter type</span>
-                  <select value={editPracticeArea} onChange={(e) => setEditPracticeArea(e.target.value)} disabled={busy}>
-                    <option value="">— select —</option>
-                    {matterHeadTypes.map((head) => (
-                      <optgroup key={head.id} label={head.name}>
-                        {head.sub_types.map((sub) => (
-                          <option key={sub.id} value={sub.id}>{sub.name}</option>
-                        ))}
-                      </optgroup>
-                    ))}
-                  </select>
-                </label>
-                <label className="field">
-                  <span>Description</span>
-                  <input
-                    value={editMatterDescription}
-                    onChange={(e) => setEditMatterDescription(e.target.value)}
-                  />
-                </label>
-                <label className="field">
-                  <span>Fee earner</span>
-                  <select value={editFeeEarner} onChange={(e) => setEditFeeEarner(e.target.value)} disabled={busy}>
-                    <option value="">Unassigned</option>
-                    {users
-                      .filter((u) => u.is_active)
-                      .map((u) => (
-                      <option key={u.id} value={u.id}>
-                        {u.display_name} ({u.email})
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="field">
-                  <span>Status</span>
-                  <select
-                    value={editCaseStatus}
-                    onChange={(e) => setEditCaseStatus(e.target.value as CaseWorkflowStatus)}
-                    disabled={busy}
-                  >
-                    <option value="open">Active</option>
-                    <option value="quote">Quote</option>
-                    <option value="post_completion">Post-completion</option>
-                    <option value="closed">Closed</option>
-                    <option value="archived">Archived</option>
-                  </select>
-                </label>
-                <div className="row" style={{ justifyContent: 'flex-start' }}>
-                  <button
-                    type="button"
-                    className="btn"
-                    disabled={busy || !caseId}
-                    onClick={() => setManageAccessOpen(true)}
-                  >
-                    Manage access…
-                  </button>
-                </div>
-                {actionErr ? <div className="error">{actionErr}</div> : null}
-                <div className="row" style={{ justifyContent: 'flex-end' }}>
-                  <button className="btn" onClick={() => setCaseEditOpen(false)} disabled={busy}>
-                    Cancel
-                  </button>
-                  <button
-                    className="btn primary"
-                    disabled={busy || !editMatterDescription.trim()}
-                    onClick={async () => {
-                      setBusy(true)
-                      setActionErr(null)
-                      try {
-                        await apiFetch(`/cases/${caseId}`, {
-                          token,
-                          method: 'PATCH',
-                          json: {
-                            matter_description: editMatterDescription.trim(),
-                            fee_earner_user_id: editFeeEarner || null,
-                            status: editCaseStatus,
-                            ...(editPracticeArea.trim()
-                              ? { matter_sub_type_id: editPracticeArea.trim() }
-                              : { matter_sub_type_id: null, matter_head_type_id: null }),
-                          },
-                        })
-                        setCaseEditOpen(false)
-                        onRefresh()
-                        onCaseListInvalidate?.()
-                      } catch (e: any) {
-                        setActionErr(e?.message ?? 'Failed to update case')
-                      } finally {
-                        setBusy(false)
-                      }
-                    }}
-                  >
-                    Save
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        ) : null}
 
-        {manageAccessOpen && caseId ? (
+        {manageAccessOpen && caseId && caseDetail ? (
           <ManageCaseAccessModal
             token={token}
             caseId={caseId}
             users={users}
+            feeEarnerUserId={caseDetail.fee_earner_user_id ?? null}
+            lockMode={caseDetail.lock_mode}
+            canSetLockMode={Boolean(
+              currentUser?.admin_console_access ||
+                currentUser?.role === 'admin' ||
+                (caseDetail.fee_earner_user_id && currentUser?.id === caseDetail.fee_earner_user_id),
+            )}
             onClose={() => setManageAccessOpen(false)}
             onSaved={() => {
               onRefresh()
@@ -3860,455 +4254,7 @@ export function CaseDetail({
           />
         ) : null}
 
-        {contactAddOpen ? (
-          <div className="modalOverlay" role="dialog" aria-modal="true">
-            <div className="modal modal--scrollBody card modalSurfaceDraggable" style={contactAddDrag.surfaceStyle}>
-              <div className="paneHead">
-                <div>
-                  <h2 className="modalDragHandle" {...contactAddDrag.handleProps}>
-                    Add contact
-                  </h2>
-                  <div className="muted">Link an existing global contact or create a new one.</div>
-                </div>
-                <button
-                  className="btn"
-                  onClick={() => {
-                    setContactAddErr(null)
-                    setContactAddOpen(false)
-                  }}
-                  disabled={busy}
-                >
-                  Close
-                </button>
-              </div>
-              <div className="stack modalBodyScroll" style={{ marginTop: 12 }}>
-                <div className="card" style={{ padding: 12 }}>
-                  <div className="muted" style={{ marginBottom: 8 }}>Matter-specific</div>
-                  <label className="field">
-                    <span>Contact type (required)</span>
-                    <select
-                      required
-                      value={matterContactType}
-                      onChange={(e) => {
-                        const v = e.target.value
-                        setMatterContactType(v)
-                        setContactAddErr(null)
-                        if (v.trim().toLowerCase() !== LAWYERS_TYPE_SLUG) {
-                          setLawyerLinkClientIds([])
-                        } else if (selectedGlobalContactId) {
-                          const sel = contacts.find((x) => x.id === selectedGlobalContactId)
-                          if (sel && sel.type === 'person') setSelectedGlobalContactId(null)
-                        }
-                      }}
-                      disabled={busy}
-                    >
-                      <option value="" disabled>
-                        Select contact type
-                      </option>
-                      {matterTypeOptions.map((o) => (
-                        <option key={o.value} value={o.value}>
-                          {o.label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="field">
-                    <span>Contact reference</span>
-                    <input
-                      value={matterContactReference}
-                      onChange={(e) => setMatterContactReference(e.target.value)}
-                      placeholder="Reference for this matter only"
-                      disabled={busy}
-                    />
-                  </label>
-                  {matterContactType.trim().toLowerCase() === LAWYERS_TYPE_SLUG ? (
-                    <div className="field">
-                      <span>Linked clients (required)</span>
-                      <div className="stack" style={{ gap: 6, maxHeight: 160, overflow: 'auto' }}>
-                        {clientMatterContacts.length === 0 ? (
-                          <div className="muted">Add at least one Client matter contact on this case first.</div>
-                        ) : (
-                          clientMatterContacts.map((c) => (
-                            <label key={c.id} className="row" style={{ gap: 8, cursor: 'pointer' }}>
-                              <input
-                                type="checkbox"
-                                checked={lawyerLinkClientIds.includes(c.id)}
-                                disabled={busy}
-                                onChange={(e) => {
-                                  setLawyerLinkClientIds((prev) => {
-                                    if (e.target.checked) {
-                                      if (prev.includes(c.id) || prev.length >= 4) return prev
-                                      return [...prev, c.id]
-                                    }
-                                    return prev.filter((x) => x !== c.id)
-                                  })
-                                }}
-                              />
-                              <span>{c.name}</span>
-                            </label>
-                          ))
-                        )}
-                      </div>
-                    </div>
-                  ) : null}
-                </div>
-                {contactAddErr ? <div className="error">{contactAddErr}</div> : null}
-                <div className="row">
-                  <SearchInput
-                    placeholder="Search global contacts…"
-                    value={contactAddSearch}
-                    onChange={(e) => setContactAddSearch(e.target.value)}
-                    onClear={() => setContactAddSearch('')}
-                    style={{ flex: 1 }}
-                    aria-label="Search global contacts to add"
-                  />
-                </div>
 
-                <div className="card" style={{ padding: 12 }}>
-                  <div className="muted" style={{ marginBottom: 8 }}>Existing contacts</div>
-                  <div className="list" style={{ maxHeight: 140, overflow: 'auto' }}>
-                    {contacts
-                      .filter((c) => {
-                        if (matterContactType.trim().toLowerCase() === LAWYERS_TYPE_SLUG && c.type !== 'organisation') {
-                          return false
-                        }
-                        const s = contactAddSearch.trim().toLowerCase()
-                        if (!s) return true
-                        return (
-                          c.name.toLowerCase().includes(s) ||
-                          (c.email ?? '').toLowerCase().includes(s) ||
-                          (c.phone ?? '').toLowerCase().includes(s)
-                        )
-                      })
-                      .slice(0, 25)
-                      .map((c) => (
-                        <div key={c.id} className="listCard row" style={{ justifyContent: 'space-between' }}>
-                          <div>
-                            <div className="listTitle">
-                              {c.name} <span className="muted">· {c.type}</span>
-                            </div>
-                            <div className="muted">{c.email ?? c.phone ?? '—'}</div>
-                          </div>
-                          <button
-                            className={`btn ${selectedGlobalContactId === c.id ? 'primary' : ''}`}
-                            disabled={busy}
-                            onClick={() => setSelectedGlobalContactId(c.id)}
-                          >
-                            {selectedGlobalContactId === c.id ? 'Selected' : 'Select'}
-                          </button>
-                        </div>
-                      ))}
-                    {contacts.length === 0 ? <div className="muted">No contacts yet.</div> : null}
-                  </div>
-                </div>
-
-                <button
-                  className="btn primary"
-                  disabled={busy || !selectedGlobalContactId}
-                  onClick={async () => {
-                    setContactAddErr(null)
-                    setActionErr(null)
-                    if (!matterContactType.trim()) {
-                      setContactAddErr(CONTACT_TYPE_REQUIRED_MSG)
-                      return
-                    }
-                    if (matterContactType.trim().toLowerCase() === LAWYERS_TYPE_SLUG && lawyerLinkClientIds.length < 1) {
-                      setContactAddErr('Select one or more clients that this lawyer represents on this matter.')
-                      return
-                    }
-                    if (!selectedGlobalContactId) return
-                    setBusy(true)
-                    try {
-                      const linkBody: Record<string, unknown> = {
-                        contact_id: selectedGlobalContactId,
-                        matter_contact_type: matterContactType.trim(),
-                        matter_contact_reference: matterContactReference.trim() || null,
-                      }
-                      if (matterContactType.trim().toLowerCase() === LAWYERS_TYPE_SLUG) {
-                        linkBody.lawyer_client_ids = lawyerLinkClientIds
-                      }
-                      await apiFetch(`/cases/${caseId}/contacts`, {
-                        token,
-                        json: linkBody,
-                      })
-                      setContactAddOpen(false)
-                      onRefresh()
-                    } catch (e: any) {
-                      setContactAddErr(e?.message ?? 'Failed to link contact')
-                    } finally {
-                      setBusy(false)
-                    }
-                  }}
-                >
-                  Link selected
-                </button>
-
-                <div className="card" style={{ padding: 12, marginTop: 12 }}>
-                  <GlobalContactCreateForm
-                    key={matterContactType || 'mc'}
-                    organisationOnly={matterContactType.trim().toLowerCase() === LAWYERS_TYPE_SLUG}
-                    busy={busy}
-                    formError={contactAddErr}
-                    submitLabel="Create & link"
-                    intro={<div className="muted" style={{ marginBottom: 8 }}>Create new contact</div>}
-                    onSubmit={async (payload) => {
-                      setContactAddErr(null)
-                      setActionErr(null)
-                      if (!matterContactType.trim()) {
-                        setContactAddErr(CONTACT_TYPE_REQUIRED_MSG)
-                        throw new Error(CONTACT_TYPE_REQUIRED_MSG)
-                      }
-                      if (matterContactType.trim().toLowerCase() === LAWYERS_TYPE_SLUG && lawyerLinkClientIds.length < 1) {
-                        const msg = 'Select one or more clients that this lawyer represents on this matter.'
-                        setContactAddErr(msg)
-                        throw new Error(msg)
-                      }
-                      if (!caseId) throw new Error('No case')
-                      setBusy(true)
-                      try {
-                        const created = await apiFetch<ContactOut>('/contacts', {
-                          token,
-                          method: 'POST',
-                          json: payload,
-                        })
-                        const createLinkBody: Record<string, unknown> = {
-                          contact_id: created.id,
-                          matter_contact_type: matterContactType.trim(),
-                          matter_contact_reference: matterContactReference.trim() || null,
-                        }
-                        if (matterContactType.trim().toLowerCase() === LAWYERS_TYPE_SLUG) {
-                          createLinkBody.lawyer_client_ids = lawyerLinkClientIds
-                        }
-                        await apiFetch(`/cases/${caseId}/contacts`, {
-                          token,
-                          json: createLinkBody,
-                        })
-                        setContactAddOpen(false)
-                        onRefresh()
-                      } catch (e: any) {
-                        if (e?.message !== CONTACT_TYPE_REQUIRED_MSG) {
-                          setContactAddErr(e?.message ?? 'Failed to create/link contact')
-                        }
-                        throw e
-                      } finally {
-                        setBusy(false)
-                      }
-                    }}
-                  />
-                </div>
-              </div>
-            </div>
-          </div>
-        ) : null}
-
-        {editSnapshot ? (
-          <div className="modalOverlay" role="dialog" aria-modal="true" aria-labelledby="edit-contact-title">
-            <div className="modal modal--scrollBody card">
-              <div className="paneHead">
-                <div>
-                  <h2 id="edit-contact-title">Edit contact</h2>
-                  <div className="muted">Update the snapshot on this matter.</div>
-                </div>
-                <button
-                  className="btn"
-                  onClick={() => setEditSnapshot(null)}
-                  disabled={busy}
-                >
-                  Close
-                </button>
-              </div>
-              <div className="stack modalBodyScroll" style={{ marginTop: 12 }}>
-                <label className="field">
-                  <span>Contact type (required)</span>
-                  <select
-                    required
-                    value={editSnapshot.matter_contact_type ?? ''}
-                    onChange={(e) => {
-                      const v = e.target.value ? e.target.value : null
-                      const isLawyers = (v || '').trim().toLowerCase() === LAWYERS_TYPE_SLUG
-                      setEditSnapshot({
-                        ...editSnapshot,
-                        matter_contact_type: v,
-                        ...(isLawyers ? { type: 'organisation' as const } : {}),
-                      })
-                      if (!isLawyers) {
-                        setEditLawyerLinkClientIds([])
-                      }
-                    }}
-                    disabled={busy}
-                  >
-                    <option value="" disabled>
-                      Select contact type
-                    </option>
-                    {matterTypeOptions.map((o) => (
-                      <option key={o.value} value={o.value}>
-                        {o.label}
-                      </option>
-                    ))}
-                    {editSnapshot.matter_contact_type &&
-                    !matterTypeOptions.some((o) => o.value === editSnapshot.matter_contact_type) ? (
-                      <option value={editSnapshot.matter_contact_type}>{editSnapshot.matter_contact_type}</option>
-                    ) : null}
-                  </select>
-                </label>
-                <label className="field">
-                  <span>Contact reference</span>
-                  <input
-                    placeholder="Matter-specific reference"
-                    value={editSnapshot.matter_contact_reference ?? ''}
-                    onChange={(e) =>
-                      setEditSnapshot({ ...editSnapshot, matter_contact_reference: e.target.value || null })
-                    }
-                    disabled={busy}
-                  />
-                </label>
-                {(editSnapshot.matter_contact_type || '').trim().toLowerCase() === LAWYERS_TYPE_SLUG ? (
-                  <div className="field">
-                    <span>Linked clients (required)</span>
-                    <div className="stack" style={{ gap: 6, maxHeight: 160, overflow: 'auto' }}>
-                      {clientMatterContacts.length === 0 ? (
-                        <div className="muted">Add at least one Client matter contact on this case first.</div>
-                      ) : (
-                        clientMatterContacts.map((c) => (
-                          <label key={c.id} className="row" style={{ gap: 8, cursor: 'pointer' }}>
-                            <input
-                              type="checkbox"
-                              checked={editLawyerLinkClientIds.includes(c.id)}
-                              disabled={busy}
-                              onChange={(e) => {
-                                setEditLawyerLinkClientIds((prev) => {
-                                  if (e.target.checked) {
-                                    if (prev.includes(c.id) || prev.length >= 4) return prev
-                                    return [...prev, c.id]
-                                  }
-                                  return prev.filter((x) => x !== c.id)
-                                })
-                              }}
-                            />
-                            <span>{c.name}</span>
-                          </label>
-                        ))
-                      )}
-                    </div>
-                  </div>
-                ) : null}
-                <div className="muted" style={{ fontSize: 12 }}>
-                  Name and email below are the case snapshot; they can be pushed to the global card only when linked.
-                </div>
-                <ContactPersonOrgAddressFields
-                  busy={busy}
-                  organisationOnly={(editSnapshot.matter_contact_type || '').trim().toLowerCase() === LAWYERS_TYPE_SLUG}
-                  value={contactOutToFormFields(editSnapshot as unknown as ContactOut)}
-                  onChange={(patch) => setEditSnapshot((prev) => (prev ? applyCaseContactFieldPatch(prev, patch) : prev))}
-                />
-                {editSnapshot.contact_id ? (
-                  <label className="row" style={{ alignItems: 'center' }}>
-                    <input
-                      type="checkbox"
-                      checked={pushToGlobal}
-                      onChange={(e) => setPushToGlobal(e.target.checked)}
-                      disabled={busy}
-                    />
-                    <span className="muted">Also update global contact</span>
-                  </label>
-                ) : null}
-                <div className="row" style={{ justifyContent: 'space-between', marginTop: 8 }}>
-                    <button
-                    className="btn"
-                    disabled={busy}
-                    onClick={async () => {
-                      if (!caseId) return
-                      const ok = await askConfirm({
-                        title: 'Remove contact',
-                        message:
-                          'Remove this contact from the matter only? The global contact will not be deleted.',
-                        danger: true,
-                        confirmLabel: 'Remove',
-                      })
-                      if (!ok) return
-                      setBusy(true)
-                      setActionErr(null)
-                      try {
-                        await apiFetch(`/cases/${caseId}/contacts/${editSnapshot.id}`, {
-                          token,
-                          method: 'DELETE',
-                        })
-                        setEditSnapshot(null)
-                        onRefresh()
-                      } catch (e: any) {
-                        setActionErr(e?.message ?? 'Failed to remove contact')
-                      } finally {
-                        setBusy(false)
-                      }
-                    }}
-                  >
-                    Remove from matter
-                  </button>
-                  <button
-                    className="btn primary"
-                    disabled={
-                      busy ||
-                      !resolvedEditSnapshotName.trim() ||
-                      !(editSnapshot.matter_contact_type && editSnapshot.matter_contact_type.trim()) ||
-                      ((editSnapshot.matter_contact_type || '').trim().toLowerCase() === LAWYERS_TYPE_SLUG &&
-                        editLawyerLinkClientIds.length < 1)
-                    }
-                    onClick={async () => {
-                      setBusy(true)
-                      setActionErr(null)
-                      try {
-                        const payload = contactFieldsModelToPayload(
-                          contactOutToFormFields(editSnapshot as unknown as ContactOut),
-                        )
-                        if (!payload) {
-                          setActionErr('Enter a name (person or organisation fields).')
-                          return
-                        }
-                        const patchBody: Record<string, unknown> = {
-                          type: payload.type,
-                          name: payload.name,
-                          email: payload.email,
-                          phone: payload.phone,
-                          title: payload.title,
-                          first_name: payload.first_name,
-                          middle_name: payload.middle_name,
-                          last_name: payload.last_name,
-                          company_name: payload.company_name,
-                          trading_name: payload.trading_name,
-                          address_line1: payload.address_line1,
-                          address_line2: payload.address_line2,
-                          city: payload.city,
-                          county: payload.county,
-                          postcode: payload.postcode,
-                          country: payload.country,
-                          matter_contact_type: editSnapshot.matter_contact_type!.trim(),
-                          matter_contact_reference: (editSnapshot.matter_contact_reference ?? '').trim() || null,
-                          push_to_global: pushToGlobal,
-                        }
-                        if ((editSnapshot.matter_contact_type || '').trim().toLowerCase() === LAWYERS_TYPE_SLUG) {
-                          patchBody.lawyer_client_ids = editLawyerLinkClientIds
-                        }
-                        await apiFetch(`/cases/${caseId}/contacts/${editSnapshot.id}`, {
-                          token,
-                          method: 'PATCH',
-                          json: patchBody,
-                        })
-                        setEditSnapshot(null)
-                        onRefresh()
-                      } catch (e: any) {
-                        setActionErr(e?.message ?? 'Failed to update snapshot')
-                      } finally {
-                        setBusy(false)
-                      }
-                    }}
-                  >
-                    Save
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        ) : null}
 
       </div>
     </div>

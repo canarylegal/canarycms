@@ -87,9 +87,25 @@ function fileMailFromSubline(f: FileSummary): string | null {
   return null
 }
 
+/** Same idea as case comment files: plain text or ``.txt`` name (opens in comment editor). */
+function isCaseCommentStyleFile(f: FileSummary): boolean {
+  const m = (f.mime_type || '').toLowerCase()
+  const n = (f.original_filename || '').toLowerCase()
+  return m.startsWith('text/plain') || n.endsWith('.txt')
+}
+
+/** List label: comment bodies are stored as ``… .txt``; hide the extension in the description column. */
+function docsListDisplayFilename(f: FileSummary): string {
+  const raw = f.original_filename || ''
+  if (!isCaseCommentStyleFile(f)) return raw
+  if (raw.length > 4 && raw.toLowerCase().endsWith('.txt')) return raw.slice(0, -4)
+  return raw
+}
+
 export function DocsFileDescCell({ f, showPin }: { f: FileSummary; showPin: boolean }) {
   const sub = fileMailFromSubline(f)
   const mailRoot = isCaseMailRootFile(f)
+  const displayName = f.parent_file_id ? `↳ ${docsListDisplayFilename(f)}` : docsListDisplayFilename(f)
   return (
     <div className={sub ? 'docsDescWrapper docsDescWrapper--hasSub' : 'docsDescWrapper'}>
       {mailRoot ? (
@@ -112,7 +128,7 @@ export function DocsFileDescCell({ f, showPin }: { f: FileSummary; showPin: bool
                 <DocMimeIcon mime={f.mime_type} filename={f.original_filename} />
               </span>
             )}
-            <span className="docsDescName">{f.parent_file_id ? `↳ ${f.original_filename}` : f.original_filename}</span>
+            <span className="docsDescName">{displayName}</span>
           </div>
           {sub ? <div className="docsDescSub muted">{sub}</div> : null}
         </div>

@@ -6,11 +6,11 @@ import uuid
 from datetime import datetime
 
 from fastapi import HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from app.ledger_service import approve_ledger_pair, delete_ledger_pair_unapproved, get_ledger, post_transaction
-from app.models import Case, CaseInvoice, CaseInvoiceLine, InvoiceSeq, User
+from app.models import Case, CaseInvoice, CaseInvoiceLine, InvoiceSeq, LedgerEntry, User
 from app.permission_checks import user_may_approve_invoice
 from app.schemas import CaseInvoiceCreate, CaseInvoiceLineOut, CaseInvoiceOut, CaseInvoicesOut, LedgerPostCreate
 
@@ -130,6 +130,7 @@ def create_case_invoice(case_id: uuid.UUID, payload: CaseInvoiceCreate, user: Us
         ),
         user,
         db,
+        force_unapproved=True,
     )
 
     inv = CaseInvoice(
@@ -171,6 +172,14 @@ def approve_case_invoice(case_id: uuid.UUID, invoice_id: uuid.UUID, user: User, 
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invoice has no ledger posting.")
 
     approve_ledger_pair(case_id, inv.ledger_pair_id, db)
+    new_desc = f"Invoice {inv.invoice_number}"
+    # Core UPDATE so description / approval are persisted even if ORM instances in the session were stale.
+    db.execute(
+        update(LedgerEntry)
+        .where(LedgerEntry.pair_id == inv.ledger_pair_id)
+        .values(description=new_desc, is_approved=True)
+    )
+    db.flush()
     inv.status = INV_APPROVED
     inv.approved_by_user_id = user.id
     inv.approved_at = datetime.utcnow()
