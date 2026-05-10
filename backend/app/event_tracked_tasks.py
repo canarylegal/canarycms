@@ -46,6 +46,18 @@ def due_datetime_utc_for_event_date(event_date: date) -> datetime:
     return dt_local.astimezone(timezone.utc)
 
 
+def due_datetime_utc_for_case_event(case_event: CaseEvent) -> datetime:
+    """Due instant for a tracked event task (all-day → 09:00 UK on date; timed → wall clock UK)."""
+    ed = case_event.event_date
+    if ed is None:
+        return datetime.now(timezone.utc)
+    if case_event.event_all_day:
+        return due_datetime_utc_for_event_date(_event_date_as_date(ed))
+    ev_time = case_event.event_start_time or time(9, 0)
+    dt_local = datetime.combine(_event_date_as_date(ed), ev_time, tzinfo=UK)
+    return dt_local.astimezone(timezone.utc)
+
+
 def _event_date_as_date(ed: date | datetime) -> date:
     if isinstance(ed, datetime):
         return ed.date()
@@ -83,7 +95,7 @@ def sync_tracked_case_event_task(
 
     uk_today = datetime.now(UK).date()
     prio = priority_for_tracked_event(uk_today=uk_today, event_date=ed)
-    due = due_datetime_utc_for_event_date(ed)
+    due = due_datetime_utc_for_case_event(case_event)
     title = f"Case event: {case_event.name}"[:300]
     desc = f"Tracked matter event ({case.case_number})."
 
@@ -143,7 +155,7 @@ def refresh_tracked_event_tasks(db: Session) -> None:
 
         ed = _event_date_as_date(ev.event_date)
         new_prio = priority_for_tracked_event(uk_today=uk_today, event_date=ed)
-        new_due = due_datetime_utc_for_event_date(ed)
+        new_due = due_datetime_utc_for_case_event(ev)
         changed = False
         if task.priority != new_prio:
             task.priority = new_prio

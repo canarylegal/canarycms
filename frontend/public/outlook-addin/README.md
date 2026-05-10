@@ -2,6 +2,17 @@
 
 **Default deployment URL (manifest):** [https://testing.canarylegalsoftware.co.uk](https://testing.canarylegalsoftware.co.uk/) — task pane and login live under `/outlook-addin/`.
 
+**Dev deployment:** use **`manifest.dev.xml`** for `https://dev.canarylegalsoftware.co.uk` (distinct add-in **`<Id>`** from testing/local). For other named hosts, copy that file and replace the origin + generate a new GUID in `<Id>`.
+
+Office add-in manifests **must** use absolute `https://…` URLs in the XML; there is no supported “one file for every host” upload without generating a manifest per origin (or a build step that substitutes the origin).
+
+### If upload fails with “already installed elsewhere”
+
+Outlook ties an add-in identity to **`<Id>`** and the **manifest URLs**. Installing the **same `<Id>`** with a **different** `SourceLocation` host often fails. Fix by either:
+
+1. **Remove** the older Canary add-in (testing / other host) from **My add-ins → Custom add-ins**, then upload the new manifest; or  
+2. Use a manifest that already has a **new GUID** in `<Id>` (as in `manifest.dev.xml` vs `manifest.xml`).
+
 ### If upload fails with “XML Schema Validation Error”
 
 Microsoft’s XSD expects:
@@ -14,7 +25,7 @@ After changing the manifest, validate with Microsoft’s tooling if needed, e.g.
 
 ### Ship checklist (CI / deploy)
 
-1. From `frontend/`, run `npm run build`. The `postbuild` step checks that `dist/outlook-addin/` contains the add-in files (including `manifest.xml` and `manifest.local.xml`).
+1. From `frontend/`, run `npm run build`. If you use `scripts/verify-outlook-addin.mjs`, it expects `dist/outlook-addin/` to include `manifest.xml`, `manifest.local.xml`, and `manifest.dev.xml`.
 2. Deploy the built `dist/` (Docker `frontend` image already copies `dist` to nginx).
 3. Confirm these URLs over **HTTPS** (or HTTP for local only):
    - `/outlook-addin/taskpane.html`
@@ -46,7 +57,7 @@ It calls the same backend routes as the main app: `POST /api/auth/login`, `GET /
 - The site serves HTTPS and these URLs return **200** in a browser:
   - `https://testing.canarylegalsoftware.co.uk/outlook-addin/taskpane.html`
   - `https://testing.canarylegalsoftware.co.uk/outlook-addin/canary-login.html`
-  - `https://testing.canarylegalsoftware.co.uk/favicon.png` (icons in the manifest)
+  - `icons/icon64.png` (manifest ``IconUrl``), `icon128.png` (``HighResolutionIconUrl``), plus `icon16` / `icon32` / `icon80` for the ribbon (generated from `public/favicon.png` via `scripts/generate-outlook-icons.py`)
 - The API is reachable from the same host at `/api` (same pattern as the main Canary web app).
 
 If your production host differs from testing, edit **every** URL in `manifest.xml` to match that origin (no trailing slash), then redeploy the frontend build.

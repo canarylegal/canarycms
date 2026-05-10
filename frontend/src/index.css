@@ -138,8 +138,18 @@ a {
 
 .appShell {
   min-height: 100vh;
+  height: 100vh;
+  max-height: 100vh;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
+}
+
+@supports (height: 100dvh) {
+  .appShell {
+    height: 100dvh;
+    max-height: 100dvh;
+  }
 }
 
 .topbar {
@@ -147,7 +157,7 @@ a {
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  /* Match .main horizontal padding so top nav (e.g. Main Menu) lines up with case page toolbar (Edit details). */
+  /* Match .main horizontal padding so top nav (e.g. Main Menu) lines up with case documents column. */
   padding: 14px 20px;
   border-bottom: 1px solid var(--border);
   background: var(--panel);
@@ -265,6 +275,13 @@ html.dark .topbar .btn:not(.primary):not(.danger) {
   display: flex;
   flex-direction: column;
   overflow-x: hidden;
+  /* Long settings / admin pages scroll inside ``main``; case view overrides with ``.main--caseView``. */
+  overflow-y: auto;
+}
+
+/* Case matter view: no browser/main scrollbar — `.caseShell` + `.caseDocsScroll` own vertical scroll. */
+.main--caseView {
+  overflow: hidden;
 }
 
 /* Main menu: full-width white panels, small side padding, cases list fills viewport height */
@@ -564,8 +581,36 @@ textarea {
 }
 
 input[type='checkbox'] {
-  width: 16px;
-  height: 16px;
+  width: 18px;
+  height: 18px;
+  min-width: 18px;
+  min-height: 18px;
+  padding: 0;
+  margin: 0;
+  flex-shrink: 0;
+  vertical-align: middle;
+  accent-color: var(--primary);
+}
+
+/** Radio must not inherit ``width: 100%`` from generic ``input`` — otherwise flex rows break (Admin E-mail, etc.). */
+input[type='radio'] {
+  width: 1.125rem;
+  height: 1.125rem;
+  min-width: 1.125rem;
+  min-height: 1.125rem;
+  padding: 0;
+  margin: 0;
+  flex-shrink: 0;
+  accent-color: var(--primary);
+}
+
+/** Checkbox + label rows (e.g. Edit task modal): same flex alignment so controls match. */
+.taskEditCheckboxRow {
+  align-items: flex-start;
+}
+
+.taskEditCheckboxRow input[type='checkbox'] {
+  margin-top: 0.15em;
 }
 
 select {
@@ -575,6 +620,28 @@ select {
   border-radius: 10px;
   padding: 10px 10px;
   outline: none;
+}
+
+/** Tasks toolbar: List/Kanban select aligned with adjacent `.btn` rows (main + case tasks). */
+.tasksToolbarLayoutGroup {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.tasksToolbarLayoutLabel {
+  font-size: 13px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.tasksToolbarLayoutGroup select.tasksToolbarLayoutSelect {
+  width: auto;
+  min-width: 6.75rem;
+  max-width: 11rem;
+  padding: 8px 10px;
+  margin: 0;
 }
 
 .list {
@@ -1050,64 +1117,62 @@ select {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  flex: 1;
+  flex: 1 1 0;
   min-height: 0;
   min-width: 0;
   width: 100%;
   overflow-x: hidden;
   /* Keep the case view within the viewport; scroll inside sidebar / documents only. */
   overflow-y: hidden;
-  /* Match toolbar row to documents column below */
   --case-sidebar-width: 360px;
   --case-main-gap: 12px;
 }
 
-/*
- * Mirrors .caseGrid: column 1 = sidebar width (Edit details aligns with Case details card);
- * column 2 = New / Import / Refresh + search, aligned with documents column.
- */
-.caseToolbar {
-  display: grid;
-  grid-template-columns: var(--case-sidebar-width) 1fr;
-  gap: var(--case-main-gap);
-  align-items: center;
-  flex-shrink: 0;
-  width: 100%;
-  min-width: 0;
-}
-
-.caseToolbarLeft {
-  grid-column: 1;
+/* New / Import / Refresh + search now live in .caseDocsToolbar (inside the documents card). */
+.caseDocsToolbar {
   display: flex;
-  align-items: center;
-  justify-content: flex-start;
-  min-width: 0;
+  flex-wrap: wrap;
+  /* Top-align so chrome buttons line up with Edit details in the left column; centering against the
+     taller search field was shifting New / Import / Refresh downward relative to that row. */
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  background: var(--panel2);
+  position: relative;
+  z-index: 2;
 }
 
-.caseToolbarGroup {
+.caseDocsToolbarMain {
   display: flex;
   align-items: center;
   gap: 10px;
-  flex-shrink: 0;
-}
-
-.caseToolbarMain {
-  grid-column: 2;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+  flex-wrap: wrap;
+  flex: 1 1 auto;
   min-width: 0;
-}
-
-/* Edit details + New + Import + Refresh stay adjacent; left edge aligns with documents card below */
-.caseToolbarDocs {
-  flex-shrink: 0;
 }
 
 .caseToolbarDropdownWrap {
   position: relative;
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+}
+
+/* “New ▾” — space between label and chevron */
+.caseDocsNewMenuBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.caseDocsNewMenuChevron {
+  flex-shrink: 0;
+  font-size: 0.72em;
+  line-height: 1;
+  opacity: 0.88;
 }
 
 .caseToolbarDropdown {
@@ -1140,7 +1205,7 @@ select {
   background: var(--hover);
 }
 
-.caseToolbarSearch {
+.caseDocsToolbarSearch {
   flex: 0 1 340px;
   width: 100%;
   max-width: 340px;
@@ -1149,20 +1214,7 @@ select {
 }
 
 @media (max-width: 1100px) {
-  .caseToolbar {
-    grid-template-columns: 1fr;
-  }
-
-  .caseToolbarLeft {
-    grid-column: 1;
-  }
-
-  .caseToolbarMain {
-    grid-column: 1;
-    flex-wrap: wrap;
-  }
-
-  .caseToolbarSearch {
+  .caseDocsToolbarSearch {
     flex: 1 1 100%;
     max-width: none;
     margin-left: 0;
@@ -1176,10 +1228,10 @@ select {
   gap: var(--case-main-gap);
   /* Same row height, content starts at the top of each column */
   align-items: stretch;
-  flex: 1;
+  flex: 1 1 0;
   min-height: 0;
   min-width: 0;
-  overflow-x: hidden;
+  overflow: hidden;
 }
 
 .caseLeft {
@@ -1214,8 +1266,43 @@ select {
   background: var(--panel2);
 }
 
-.caseLeft > .card.caseDetailsCard h3 {
-  margin: 0 0 16px;
+.caseDetailsCardHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.caseDetailsCardHeader h3 {
+  margin: 0;
+  flex: 1;
+  min-width: 0;
+}
+
+/* Shared by Edit details (case card) and New / Import / Refresh (documents toolbar): identical box model */
+.btn.btnCaseChrome {
+  -webkit-appearance: none;
+  appearance: none;
+  box-sizing: border-box;
+  flex: 0 0 auto;
+  align-self: center;
+  height: 34px;
+  min-height: 34px;
+  max-height: 34px;
+  padding: 0 11px;
+  margin: 0;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  font-family: inherit;
+  font-size: 0.875rem;
+  font-weight: 400;
+  line-height: 1;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  vertical-align: middle;
 }
 
 .caseDetailsList {
@@ -1284,6 +1371,93 @@ select {
   overflow-x: hidden;
   overflow-y: auto;
   min-width: 0;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Left-menu panels: no outer scroll; CaseDocPanelZoomFit scales content inside the card. */
+.caseDocsScroll--panelOnly {
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Non-documents panels: fill the card, let CaseDocPanelZoomFit shrink content (no inner scroll). */
+.caseDocPanelHost {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.caseDocPanelZoomFitHost {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+  position: relative;
+}
+
+.caseDocPanelZoomFitContent {
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  overflow: hidden;
+  min-height: 0;
+  min-width: 0;
+}
+
+.caseDocPanelZoomFitContent--fillHost {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Case documents panel: calendar fills space below toolbar / composer. */
+.eventsPageEmbed > *:not(.eventsPageEmbedGrow) {
+  flex-shrink: 0;
+}
+
+.eventsPageEmbed .eventsPageEmbedGrow {
+  flex: 1;
+  min-height: 0;
+}
+
+/* Avoid nested scroll areas fighting the zoom-fit goal (tables still scale with the wrapper). */
+.caseDocPanelZoomFitContent .casesTableScroll,
+.caseDocPanelZoomFitContent .tasksTableScroll,
+.caseDocPanelZoomFitContent .modalBodyScroll {
+  overflow: hidden !important;
+  max-height: none;
+}
+
+.caseDocPanelZoomFitContent .ledgerTableWrap {
+  overflow: hidden !important;
+}
+
+.caseDocEditEmbed,
+.caseDocLedgerEmbed {
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  overflow: hidden;
+}
+
+.caseDocLedgerEmbed .ledgerShell {
+  min-height: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.caseDocLedgerEmbed .ledgerTableWrap {
+  min-height: 0;
+  flex: 1;
+  overflow: hidden;
 }
 
 .accordion {
@@ -1513,6 +1687,117 @@ select {
 .canaryCalendarInner .fc {
   flex: 1;
   min-height: 0;
+}
+
+/* Calendar “New event” matter search (avoid native select overflow + huge lists) */
+.calendarMatterPicker {
+  min-width: 0;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.calendarMatterPickerSearch.searchInputWrap {
+  flex: none;
+  width: 100%;
+  max-width: 100%;
+}
+
+.calendarMatterPickerSearch .searchInputField {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.calendarMatterPickerSelected {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--panel2);
+  border: 1px solid var(--border);
+  min-width: 0;
+}
+
+.calendarMatterPickerSelectedText {
+  min-width: 0;
+  flex: 1;
+}
+
+.calendarMatterPickerSelectedPrimary {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.calendarMatterPickerSelectedSecondary {
+  font-size: 12px;
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.calendarMatterPickerList {
+  list-style: none;
+  margin: 0;
+  padding: 4px;
+  max-height: 220px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  min-width: 0;
+}
+
+.calendarMatterPickerList button {
+  display: block;
+  width: 100%;
+  margin: 0;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.calendarMatterPickerList button:hover:not(:disabled) {
+  background: var(--hover);
+}
+
+.calendarMatterPickerList button:focus-visible {
+  outline: 2px solid rgba(var(--primary-rgb), 0.45);
+  outline-offset: 2px;
+}
+
+.calendarMatterPickerRowPrimary {
+  display: block;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.calendarMatterPickerRowSecondary {
+  display: block;
+  font-size: 12px;
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.calendarMatterPickerHint {
+  font-size: 12px;
 }
 
 /* FullCalendar (in-app calendar) — theme aligned with Canary UI */
@@ -2537,9 +2822,21 @@ html.dark .ledgerBalanceBand--client {
   color: var(--text);
 }
 
-.caseToolbarSearch.searchInputWrap {
+.caseToolbarSearch.searchInputWrap,
+.caseDocsToolbarSearch.searchInputWrap {
   flex: 1 1 220px;
   max-width: 360px;
+}
+
+/* Same vertical footprint as .btnCaseChrome so the documents toolbar row doesn’t float buttons */
+.caseDocsToolbarSearch.searchInputWrap .searchInputField {
+  height: 34px;
+  box-sizing: border-box;
+  padding-top: 0;
+  padding-bottom: 0;
+  padding-left: 10px;
+  padding-right: 36px;
+  line-height: 34px;
 }
 
 .textPromptModal {
@@ -2549,16 +2846,24 @@ html.dark .ledgerBalanceBand--client {
   min-height: 160px;
 }
 
-/* Ledger pending postings */
-.ledgerRow--pending .ledgerAmtCol,
-.ledgerRow--pending .ledgerDateCell,
-.ledgerRow--pending .ledgerPartyCell,
-.ledgerRow--pending .ledgerRefCell {
+/* Ledger pending postings — whole row muted; inline Approve stays a normal button */
+.ledgerRow--pending td {
   color: var(--muted);
 }
 
+.ledgerRow--pending td .btn {
+  color: var(--text);
+  background: #ffffff;
+  border-color: var(--border);
+}
+
+html.dark .ledgerRow--pending td .btn {
+  background: var(--card);
+  color: var(--text);
+}
+
 .ledgerPendingDesc {
-  color: var(--muted);
+  color: inherit;
 }
 
 .ledgerApproveBtn {
@@ -2566,6 +2871,57 @@ html.dark .ledgerBalanceBand--client {
   padding: 2px 8px;
   font-size: 12px;
   vertical-align: baseline;
+}
+
+/* Invoices table — pending row muted; Approve / Void share one geometry */
+.ledgerInvoiceRow--pending td:not(.ledgerInvoiceActionsCell) {
+  color: var(--muted);
+}
+
+.ledgerInvoiceActionsCell {
+  vertical-align: top;
+}
+
+.ledgerInvoiceActions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: stretch;
+  width: 100%;
+  max-width: 240px;
+}
+
+.ledgerInvoiceActions .ledgerInvoiceActionBtn {
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
+  width: 100% !important;
+  box-sizing: border-box !important;
+  min-height: 40px !important;
+  padding: 8px 12px !important;
+  border-radius: 8px !important;
+  font-size: 13px !important;
+  font-weight: 500 !important;
+  line-height: 1.2 !important;
+  border: 1px solid var(--border) !important;
+  background: #ffffff !important;
+  color: var(--text) !important;
+}
+
+html.dark .ledgerInvoiceActions .ledgerInvoiceActionBtn {
+  background: var(--card) !important;
+  color: var(--text) !important;
+}
+
+.ledgerInvoiceActions .ledgerInvoiceActionBtnDanger {
+  color: #b91c1c !important;
+  border-color: rgba(220, 38, 38, 0.45) !important;
+  background: rgba(220, 38, 38, 0.06) !important;
+}
+
+html.dark .ledgerInvoiceActions .ledgerInvoiceActionBtnDanger {
+  color: #fca5a5 !important;
+  background: rgba(220, 38, 38, 0.12) !important;
 }
 
 .ledgerTable thead .ledgerThCell {

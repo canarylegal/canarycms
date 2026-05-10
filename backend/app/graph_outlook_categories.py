@@ -30,11 +30,18 @@ import json
 import logging
 import os
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import parse_qsl, quote, urlencode, urlparse, urlunparse
 
 import httpx
 
-from app.graph_mail import app_access_token, graph_mail_configured, outlook_category_names
+from sqlalchemy.orm import Session
+
+from app.graph_mail import (
+    _normalize_outlook_office365_web_link_to_office_com,
+    app_access_token,
+    graph_mail_configured,
+    outlook_category_names,
+)
 
 log = logging.getLogger(__name__)
 
@@ -49,18 +56,18 @@ def _graph_user_master_categories_url(mailbox: str) -> str:
     return f"https://graph.microsoft.com/v1.0/users/{quote(m)}/outlook/masterCategories"
 
 
-def ensure_master_category_for_mailbox(mailbox: str) -> dict[str, Any]:
+def ensure_master_category_for_mailbox(mailbox: str, db: Session) -> dict[str, Any]:
     """
     Ensure the configured Outlook master category (``CANARY_OUTLOOK_CATEGORY_NAME``) exists
     for ``mailbox`` (UPN or SMTP). Returns a small status dict for the API layer.
 
     Raises ``RuntimeError`` on Graph misconfiguration or hard failures.
     """
-    if not graph_mail_configured():
+    if not graph_mail_configured(db):
         raise RuntimeError("Microsoft Graph is not configured (set CANARY_MS_GRAPH_*).")
 
     display = _primary_category_display_name()
-    token = app_access_token()
+    token = app_access_token(db)
     base = _graph_user_master_categories_url(mailbox)
     headers = {"Authorization": f"Bearer {token}"}
 
@@ -212,10 +219,86 @@ def _merge_categories_once(mailbox: str, message_id: str, display: str, token: s
     raise RuntimeError(f"Graph PATCH message categories failed ({pres.status_code}): {txt[:1200]}")
 
 
+def _append_popout_v2_to_outlook_url(url: str) -> str:
+    """Ensure ``popoutv2=1`` on OWA links so the reading pane opens in a separate window."""
+    u = (url or "").strip()
+    if not u:
+        return u
+    try:
+        p = urlparse(u)
+        pairs = [(k, v) for k, v in parse_qsl(p.query, keep_blank_values=False) if k.lower() != "popoutv2"]
+        pairs.append(("popoutv2", "1"))
+        new_q = urlencode(pairs, doseq=True)
+        return urlunparse((p.scheme, p.netloc, p.path, p.params, new_q, p.fragment))
+    except Exception:
+        return u
+
+
+def resolve_outlook_owa_link_via_graph(
+    mailbox: str,
+    message_id: str,
+    internet_message_id: str | None = None,
+    *,
+    db: Session,
+) -> tuple[str | None, str | None]:
+    """
+    Fetch Microsoft Graph ``webLink`` for this message (canonical OWA open URL).
+
+    Returns ``(owa_url, resolved_graph_id_or_none)``. When the stored id is stale but
+    ``internet_message_id`` matches, the second value is the Graph ``id`` to persist.
+
+    Requires application permissions that include reading the owner's mailbox (same as category tagging).
+    """
+    if not graph_mail_configured(db):
+        return (None, None)
+
+    mbox = mailbox.strip()
+    mid_raw = (message_id or "").strip()
+    if not mbox or not mid_raw:
+        return (None, None)
+
+    token = app_access_token(db)
+    imid_opt = (internet_message_id or "").strip() or None
+
+    def fetch_web_link(mid: str) -> str | None:
+        base = _graph_message_base_url(mbox, mid)
+        headers = {"Authorization": f"Bearer {token}"}
+        try:
+            with httpx.Client(timeout=25.0) as client:
+                res = client.get(f"{base}?$select=webLink", headers=headers)
+        except httpx.RequestError:
+            return None
+        if res.status_code >= 400:
+            return None
+        try:
+            data = res.json()
+        except json.JSONDecodeError:
+            return None
+        wl = data.get("webLink") if isinstance(data, dict) else None
+        if isinstance(wl, str) and wl.strip().startswith(("http://", "https://")):
+            norm = _normalize_outlook_office365_web_link_to_office_com(wl.strip())
+            return _append_popout_v2_to_outlook_url(norm)
+        return None
+
+    wl = fetch_web_link(mid_raw)
+    if wl:
+        return (wl, None)
+
+    if imid_opt:
+        resolved = _lookup_graph_message_id_by_internet_message_id(mbox, imid_opt, token)
+        if resolved and resolved != mid_raw:
+            wl2 = fetch_web_link(resolved)
+            if wl2:
+                return (wl2, resolved)
+    return (None, None)
+
+
 def merge_canary_category_on_message(
     mailbox: str,
     message_id: str,
     internet_message_id: str | None = None,
+    *,
+    db: Session,
 ) -> dict[str, Any]:
     """
     GET message ``categories``, merge in the configured Canary name, PATCH back.
@@ -225,7 +308,7 @@ def merge_canary_category_on_message(
 
     Optional ``internet_message_id`` enables a second attempt via ``$filter=internetMessageId eq …``.
     """
-    if not graph_mail_configured():
+    if not graph_mail_configured(db):
         raise RuntimeError("Microsoft Graph is not configured (set CANARY_MS_GRAPH_*).")
 
     mbox = mailbox.strip()
@@ -234,7 +317,7 @@ def merge_canary_category_on_message(
         raise RuntimeError("mailbox and message_id are required.")
 
     display = _primary_category_display_name()
-    token = app_access_token()
+    token = app_access_token(db)
     imid_opt = (internet_message_id or "").strip() or None
 
     try:

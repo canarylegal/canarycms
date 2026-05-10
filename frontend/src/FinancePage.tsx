@@ -5,12 +5,15 @@ import type { ApiError } from './api'
 import { useDialogs } from './DialogProvider'
 import { SearchInput } from './SearchInput'
 import type { CaseOut, FinanceCategoryOut, FinanceItemOut, FinanceOut } from './types'
+import { onlyofficeCaseEditorWindowTarget } from './onlyofficeEditorWindow'
 
 interface Props {
   caseId: string
   token: string
   /** When provided (modal mode): renders Save and Close / Discard buttons in a header. */
   onClose?: () => void
+  /** In the case documents panel: show full-page totals and no duplicate modal title bar. */
+  embedded?: boolean
 }
 
 type ItemDraft = { name: string; direction: 'debit' | 'credit'; amountStr: string }
@@ -32,7 +35,7 @@ function totals(items: FinanceItemOut[], drafts: Record<string, ItemDraft>) {
   return { dr, cr }
 }
 
-export function FinancePage({ caseId, token, onClose }: Props) {
+export function FinancePage({ caseId, token, onClose, embedded = false }: Props) {
   const { askConfirm } = useDialogs()
   const [finance, setFinance] = useState<FinanceOut | null>(null)
   const [drafts, setDrafts] = useState<Record<string, ItemDraft>>({})
@@ -147,7 +150,7 @@ export function FinancePage({ caseId, token, onClose }: Props) {
       const res = await apiFetch<{ id: string }>(`/cases/${caseId}/finance/completion-statement`, {
         token, method: 'POST',
       })
-      window.open(`/editor/${caseId}/${res.id}`, '_blank')
+      window.open(`/editor/${caseId}/${res.id}`, onlyofficeCaseEditorWindowTarget(caseId, res.id))
     } catch (e: any) {
       setError(e?.message ?? 'Failed to generate completion statement')
     } finally {
@@ -244,10 +247,12 @@ export function FinancePage({ caseId, token, onClose }: Props) {
     })
   }, [finance, financeSearch, drafts])
 
+  const showModalTitleBar = Boolean(onClose && !embedded)
+  const showTotals = !onClose || embedded
+
   return (
     <div className="finShell">
-      {/* Modal title bar — only shown when used as a pop-out */}
-      {onClose && (
+      {showModalTitleBar ? (
         <div className="paneHead" style={{ marginBottom: 12 }}>
           <h2 style={{ margin: 0, fontSize: 18 }}>Finance</h2>
           <div className="row" style={{ gap: 8 }}>
@@ -265,11 +270,28 @@ export function FinancePage({ caseId, token, onClose }: Props) {
             </button>
           </div>
         </div>
-      )}
+      ) : null}
 
-      {/* Totals + utility buttons (totals hidden in modal — summary is on the case sidebar) */}
+      {embedded && onClose ? (
+        <div className="row" style={{ justifyContent: 'flex-end', flexWrap: 'wrap', gap: 8, marginBottom: 4 }}>
+          <button type="button" className="btn" disabled={busy} onClick={discardChanges}>
+            Discard changes
+          </button>
+          <button
+            type="button"
+            className="btn"
+            style={{ background: 'var(--primary)', color: '#fff', borderColor: 'var(--primary)' }}
+            disabled={busy}
+            onClick={() => void saveAll()}
+          >
+            Save and close
+          </button>
+        </div>
+      ) : null}
+
+      {/* Totals + utility buttons */}
       <div className="finHeader">
-        {!onClose ? (
+        {showTotals ? (
           <div className="finTotals">
             <div className="finTotalCard">
               <span className="finTotalLabel">Total debits</span>
@@ -287,7 +309,10 @@ export function FinancePage({ caseId, token, onClose }: Props) {
             </div>
           </div>
         ) : null}
-        <div className={`finActions${onClose ? ' finActions--modalToolbar' : ''}`} style={{ flexWrap: 'wrap', gap: 8 }}>
+        <div
+          className={`finActions${showModalTitleBar ? ' finActions--modalToolbar' : ''}`}
+          style={{ flexWrap: 'wrap', gap: 8 }}
+        >
           <div style={{ flex: '1 1 220px', minWidth: 200, maxWidth: 360 }}>
             <SearchInput
               placeholder="Search categories and line items…"

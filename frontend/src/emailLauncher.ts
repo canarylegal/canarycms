@@ -76,8 +76,9 @@ export function buildOutlookWebMessageSearchUrl(owaBaseFromUser: string | null |
 }
 
 /**
- * OWA “open by item” deeplink using the Exchange REST id from Office.context.mailbox.item.itemId.
- * Shape matches current outlook.cloud.microsoft behaviour; adjust if Microsoft changes routing.
+ * Fallback OWA open URL when Graph ``webLink`` is not stored yet.
+ * Many tenants ignore ``/mail/deeplink?ItemID=…`` and show the shell only; ``/owa/?ItemID=…`` still opens the item.
+ * Prefer ``outlook_web_link`` from the API (filled via Graph when ``CANARY_MS_GRAPH_*`` is configured).
  */
 export function buildOutlookWebReadItemUrl(owaBaseFromUser: string | null | undefined, restItemId: string): string {
   const base = (owaBaseFromUser || '').trim() || DEFAULT_OUTLOOK_WEB_MAIL_URL
@@ -89,8 +90,45 @@ export function buildOutlookWebReadItemUrl(owaBaseFromUser: string | null | unde
     origin = new URL(DEFAULT_OUTLOOK_WEB_MAIL_URL).origin
   }
   const id = restItemId.trim()
-  const enc = encodeURIComponent(id)
-  return `${origin}/mail/deeplink/read/${enc}?ItemID=${enc}&exvsurl=1`
+  const encId = encodeURIComponent(id)
+  return `${origin}/owa/?ItemID=${encId}&exvsurl=1&viewmodel=ReadMessageItem&popoutv2=1`
+}
+
+/**
+ * Default mailbox compose route. ``/mail/0/`` selects the primary account in multi-account OWA; compose prefill is
+ * unreliable on ``/mail/deeplink/compose`` alone for many work tenants.
+ */
+const OWA_COMPOSE_DEEPLINK_PATH = '/mail/0/deeplink/compose'
+
+/**
+ * Outlook on the web “new message” URL (no Graph). When org integration is mailto and the user chose “Outlook web”.
+ *
+ * ``mailtouri=`` is for Edge’s **mailto protocol handler** (``--app=…``). A normal browser navigation to that URL often
+ * loads the mail shell without opening compose. We instead use the compose route with explicit ``to`` / ``subject`` /
+ * ``body`` and ``encodeURIComponent`` (not ``URLSearchParams``, which can emit ``+`` for spaces and confuse OWA).
+ *
+ * Auth hints (``login_hint`` / ``domain_hint``) are appended separately via ``appendOutlookWebAuthHintsForNav``.
+ */
+export function buildOutlookWebComposeUrl(
+  owaBaseFromUser: string | null | undefined,
+  params: { to: string; subject: string; body: string },
+): string {
+  const base = (owaBaseFromUser || '').trim() || DEFAULT_OUTLOOK_WEB_MAIL_URL
+  let origin: string
+  try {
+    const u = new URL(base.includes('://') ? base : `https://${base}`)
+    origin = u.origin
+  } catch {
+    origin = new URL(DEFAULT_OUTLOOK_WEB_MAIL_URL).origin
+  }
+
+  const to = (params.to || '').trim()
+  const q: string[] = []
+  if (to) q.push(`to=${encodeURIComponent(to)}`)
+  q.push(`subject=${encodeURIComponent(params.subject)}`)
+  q.push(`body=${encodeURIComponent(params.body)}`)
+
+  return `${origin}${OWA_COMPOSE_DEEPLINK_PATH}?${q.join('&')}`
 }
 
 /**

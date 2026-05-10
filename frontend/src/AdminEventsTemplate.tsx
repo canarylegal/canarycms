@@ -113,14 +113,14 @@ export function AdminEventsTemplate({ token, subTypeId, subTypeName }: Props) {
     <div className="adminFinanceSection" style={{ marginTop: 0 }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
         <div style={{ fontWeight: 600 }}>
-          Events template — <span style={{ fontWeight: 400 }}>{subTypeName}</span>
+          Calendar template — <span style={{ fontWeight: 400 }}>{subTypeName}</span>
         </div>
         <button type="button" className="btn" style={SMALL} disabled={busy} onClick={() => void load()}>
           Refresh
         </button>
       </div>
       <div className="muted" style={{ marginBottom: 12, fontSize: '0.9em' }}>
-        Event names and order shown when a user opens Events on a case of this sub-type (after you assign the Events menu
+        Event names and order shown when a user opens Calendar on a case of this sub-type (after you assign the Calendar menu
         under Matters). Lower numbers appear first.
       </div>
       {err ? <div className="error" style={{ marginBottom: 8 }}>{err}</div> : null}

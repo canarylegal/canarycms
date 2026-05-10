@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import or_, select
@@ -23,10 +24,27 @@ from app.schemas import (
     OutlookPluginLinkedCaseOut,
     OutlookPluginLinkedCaseResolveIn,
     OutlookPluginLinkedCaseResolveOut,
+    OutlookPluginPendingSendOut,
+    OutlookPluginPendingSendPutIn,
 )
 
 router = APIRouter(prefix="/outlook-plugin", tags=["outlook-plugin"])
 log = logging.getLogger(__name__)
+
+_PENDING_TTL_MIN = 60
+_PENDING_TTL_MAX = 86400 * 7
+
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _clear_expired_pending(db: Session, user_row: User) -> None:
+    exp = user_row.outlook_pending_send_expires_at
+    if exp is not None and exp < _utcnow():
+        user_row.outlook_pending_send_case_id = None
+        user_row.outlook_pending_send_source_file_id = None
+        user_row.outlook_pending_send_expires_at = None
 
 
 def _internet_message_id_variants(raw: str | None) -> list[str]:
@@ -52,10 +70,11 @@ def resolve_linked_case_for_outlook_message(
     """Return the matter a message is already filed to, if any, by Outlook item id and/or RFC5322 Message-ID."""
     oid = (payload.outlook_item_id or "").strip() or None
     variants = _internet_message_id_variants(payload.internet_message_id)
-    if not oid and not variants:
+    conv = (payload.conversation_id or "").strip() or None
+    if not oid and not variants and not conv:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Provide outlook_item_id and/or internet_message_id.",
+            detail="Provide outlook_item_id, internet_message_id, and/or conversation_id.",
         )
 
     top_ors = []
@@ -63,6 +82,8 @@ def resolve_linked_case_for_outlook_message(
         top_ors.append(or_(DbFile.source_outlook_item_id == oid, DbFile.outlook_graph_message_id == oid))
     if variants:
         top_ors.append(DbFile.source_internet_message_id.in_(variants))
+    if conv:
+        top_ors.append(DbFile.source_outlook_conversation_id == conv)
     if not top_ors:
         return OutlookPluginLinkedCaseResolveOut(linked_case=None)
 
@@ -91,10 +112,92 @@ def resolve_linked_case_for_outlook_message(
     return OutlookPluginLinkedCaseResolveOut(linked_case=None)
 
 
+@router.get("/pending-send", response_model=OutlookPluginPendingSendOut)
+def outlook_plugin_get_pending_send(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> OutlookPluginPendingSendOut:
+    row = db.get(User, user.id)
+    if not row:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found.")
+    _clear_expired_pending(db, row)
+    db.commit()
+    db.refresh(row)
+    cid = row.outlook_pending_send_case_id
+    if not cid or not row.outlook_pending_send_expires_at:
+        return OutlookPluginPendingSendOut(active=False)
+    try:
+        require_case_access(cid, user, db)
+    except HTTPException:
+        row.outlook_pending_send_case_id = None
+        row.outlook_pending_send_source_file_id = None
+        row.outlook_pending_send_expires_at = None
+        db.commit()
+        return OutlookPluginPendingSendOut(active=False)
+    return OutlookPluginPendingSendOut(
+        active=True,
+        case_id=cid,
+        source_file_id=row.outlook_pending_send_source_file_id,
+        expires_at=row.outlook_pending_send_expires_at,
+    )
+
+
+@router.put("/pending-send", response_model=OutlookPluginPendingSendOut)
+def outlook_plugin_put_pending_send(
+    payload: OutlookPluginPendingSendPutIn,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> OutlookPluginPendingSendOut:
+    require_case_access(payload.case_id, user, db)
+    ttl = payload.ttl_seconds if payload.ttl_seconds is not None else 86400
+    ttl = max(_PENDING_TTL_MIN, min(_PENDING_TTL_MAX, int(ttl)))
+
+    src_fid = payload.source_file_id
+    if src_fid is not None:
+        frow = db.get(DbFile, src_fid)
+        if not frow or frow.case_id != payload.case_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="source_file_id is invalid for this matter.",
+            )
+
+    row = db.get(User, user.id)
+    if not row:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found.")
+    row.outlook_pending_send_case_id = payload.case_id
+    row.outlook_pending_send_source_file_id = src_fid
+    row.outlook_pending_send_expires_at = _utcnow() + timedelta(seconds=ttl)
+    row.updated_at = _utcnow()
+    db.commit()
+    db.refresh(row)
+    return OutlookPluginPendingSendOut(
+        active=True,
+        case_id=row.outlook_pending_send_case_id,
+        source_file_id=row.outlook_pending_send_source_file_id,
+        expires_at=row.outlook_pending_send_expires_at,
+    )
+
+
+@router.delete("/pending-send", status_code=status.HTTP_204_NO_CONTENT)
+def outlook_plugin_delete_pending_send(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> None:
+    row = db.get(User, user.id)
+    if not row:
+        return
+    row.outlook_pending_send_case_id = None
+    row.outlook_pending_send_source_file_id = None
+    row.outlook_pending_send_expires_at = None
+    row.updated_at = _utcnow()
+    db.commit()
+
+
 @router.post("/ensure-master-category", response_model=OutlookPluginEnsureMasterCategoryOut)
 def outlook_plugin_ensure_master_category(
     payload: OutlookPluginEnsureMasterCategoryIn,
     user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ) -> OutlookPluginEnsureMasterCategoryOut:
     """
     Idempotently create the configured Outlook **master** category (``CANARY_OUTLOOK_CATEGORY_NAME``)
@@ -117,7 +220,7 @@ def outlook_plugin_ensure_master_category(
             detail="Mailbox must match your Canary sign-in email for Graph provisioning.",
         )
 
-    if not graph_mail_configured():
+    if not graph_mail_configured(db):
         return OutlookPluginEnsureMasterCategoryOut(
             ok=False,
             status="skipped_graph_not_configured",
@@ -125,7 +228,7 @@ def outlook_plugin_ensure_master_category(
         )
 
     try:
-        result = ensure_master_category_for_mailbox(mailbox)
+        result = ensure_master_category_for_mailbox(mailbox, db)
         st = str(result.get("status") or "")
         if st in ("created", "already_present"):
             return OutlookPluginEnsureMasterCategoryOut(ok=True, status=st, detail=None)
@@ -143,6 +246,7 @@ def outlook_plugin_ensure_master_category(
 def outlook_plugin_graph_tag_category(
     payload: OutlookPluginGraphTagCategoryIn,
     user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ) -> OutlookPluginGraphTagCategoryOut:
     """
     Apply the configured category name to **this message** via Graph ``PATCH …/messages/{id}``
@@ -163,7 +267,7 @@ def outlook_plugin_graph_tag_category(
             status="skipped_mailbox_mismatch",
             detail="Mailbox must match your Canary sign-in email.",
         )
-    if not graph_mail_configured():
+    if not graph_mail_configured(db):
         return OutlookPluginGraphTagCategoryOut(
             ok=False,
             status="skipped_graph_not_configured",
@@ -174,6 +278,7 @@ def outlook_plugin_graph_tag_category(
             mailbox,
             rest_item_id,
             (payload.internet_message_id or "").strip() or None,
+            db=db,
         )
         st = str(result.get("status") or "")
         if st in ("tagged", "already_tagged"):

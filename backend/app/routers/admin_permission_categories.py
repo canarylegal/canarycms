@@ -45,6 +45,7 @@ def create_category(
         perm_post_office=payload.perm_post_office,
         perm_approve_payments=payload.perm_approve_payments,
         perm_approve_invoices=payload.perm_approve_invoices,
+        perm_admin=payload.perm_admin,
         created_at=now,
         updated_at=now,
     )
@@ -77,6 +78,7 @@ def patch_category(
         "perm_post_office",
         "perm_approve_payments",
         "perm_approve_invoices",
+        "perm_admin",
     ):
         if k in data and data[k] is not None:
             setattr(row, k, data[k])

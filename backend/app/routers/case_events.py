@@ -24,7 +24,7 @@ def add_custom_case_event(
     db: Session = Depends(get_db),
 ) -> CaseEventOut:
     require_case_access(case_id, user, db)
-    out = create_custom_case_event(case_id, payload.name, db)
+    out = create_custom_case_event(case_id, payload, db, actor_user_id=user.id)
     db.commit()
     return out
 

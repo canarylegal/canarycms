@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.audit import log_event
 from app.db import get_db
+from app.admin_access import user_effective_admin
 from app.deps import get_current_user, require_case_access
 from app.models import CaseNote, User
 from app.schemas import CaseNoteCreate, CaseNoteOut, CaseNoteUpdate
@@ -66,7 +67,7 @@ def update_note(
     if not note or note.case_id != case_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Note not found")
 
-    if user.role.value != "admin" and note.author_user_id != user.id:
+    if not user_effective_admin(user, db) and note.author_user_id != user.id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only author or admin can edit")
 
     note.body = payload.body
@@ -97,7 +98,7 @@ def delete_note(
     if not note or note.case_id != case_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Note not found")
 
-    if user.role.value != "admin" and note.author_user_id != user.id:
+    if not user_effective_admin(user, db) and note.author_user_id != user.id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only author or admin can delete")
 
     db.delete(note)

@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.db import get_db
 from app.deps import get_current_user
+from app.email_integration_settings import build_user_public
 from app.models import User, UserRole
 from app.schemas import (
     BootstrapAdminRequest,
@@ -49,17 +50,26 @@ def bootstrap_admin(payload: BootstrapAdminRequest, db: Session = Depends(get_db
     if existing:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Admin already exists")
 
+    ini = payload.initials
+    taken_i = db.execute(select(User).where(User.initials == ini)).scalar_one_or_none()
+    if taken_i:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Initials are already in use by another user.",
+        )
+
     user = User(
         email=str(payload.email).lower(),
         password_hash=hash_password(payload.password),
         display_name=payload.display_name,
+        initials=ini,
         role=UserRole.admin,
         is_active=True,
     )
     db.add(user)
     db.commit()
     db.refresh(user)
-    return UserPublic.model_validate(user, from_attributes=True)
+    return build_user_public(user, db)
 
 
 @router.post("/login", response_model=TokenResponse)
@@ -89,8 +99,8 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)) -> TokenResponse
 
 
 @router.get("/me", response_model=UserPublic)
-def me(user: User = Depends(get_current_user)) -> UserPublic:
-    return UserPublic.model_validate(user, from_attributes=True)
+def me(user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> UserPublic:
+    return build_user_public(user, db)
 
 
 @router.post("/2fa/setup", response_model=Setup2FAResponse)
@@ -131,7 +141,7 @@ def verify_2fa(
         entity_type="user",
         entity_id=str(user.id),
     )
-    return UserPublic.model_validate(user, from_attributes=True)
+    return build_user_public(user, db)
 
 
 @router.post("/2fa/disable", status_code=status.HTTP_204_NO_CONTENT)

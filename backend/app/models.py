@@ -1,13 +1,14 @@
 import enum
 import uuid
 from decimal import Decimal
-from datetime import date, datetime
+from datetime import date, datetime, time
 
 from sqlalchemy import (
     BigInteger,
     Boolean,
     Date,
     DateTime,
+    Time,
     Enum,
     ForeignKey,
     Index,
@@ -42,6 +43,7 @@ class UserPermissionCategory(Base):
     perm_post_office: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     perm_approve_payments: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     perm_approve_invoices: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    perm_admin: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
 
@@ -53,6 +55,7 @@ class User(Base):
     email: Mapped[str] = mapped_column(String(320), unique=True, index=True, nullable=False)
     password_hash: Mapped[str] = mapped_column(Text, nullable=False)
     display_name: Mapped[str] = mapped_column(String(200), nullable=False)
+    initials: Mapped[str] = mapped_column(String(12), nullable=False, unique=True)
     job_title: Mapped[str | None] = mapped_column(String(300), nullable=True)
     role: Mapped[UserRole] = mapped_column(Enum(UserRole, name="user_role"), nullable=False, default=UserRole.user)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
@@ -70,6 +73,15 @@ class User(Base):
     email_launch_preference: Mapped[str] = mapped_column(String(32), nullable=False, default="desktop")
     email_outlook_web_url: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    # Next Outlook send (add-in OnMessageSend): matter chosen from Canary web before composing.
+    outlook_pending_send_case_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("case.id", ondelete="SET NULL"), nullable=True
+    )
+    outlook_pending_send_source_file_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("file.id", ondelete="SET NULL"), nullable=True
+    )
+    outlook_pending_send_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
 
@@ -79,6 +91,8 @@ class MatterHeadType(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name: Mapped[str] = mapped_column(String(200), nullable=False, unique=True)
+    # When True, non-admin pickers hide this head; cases may still reference it. Admins toggle per firm.
+    is_hidden: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
 
@@ -101,7 +115,7 @@ class MatterSubTypeMenu(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     sub_type_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("matter_sub_type.id", ondelete="CASCADE"), nullable=False
+        UUID(as_uuid=True), ForeignKey("matter_sub_type.id", ondelete="RESTRICT"), nullable=False
     )
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
@@ -243,7 +257,7 @@ class Case(Base):
     lock_mode: Mapped[CaseLockMode] = mapped_column(
         Enum(CaseLockMode, name="case_lock_mode"),
         nullable=False,
-        default=CaseLockMode.none,
+        default=CaseLockMode.whitelist,
     )
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
@@ -445,6 +459,10 @@ class File(Base):
     source_mail_is_outbound: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     # RFC5322 Message-ID header value (angle brackets optional), parsed from parent .eml on upload.
     source_internet_message_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # RFC5322 Date header from root .eml / rfc822 (parsed on upload & refresh); UI “Created” for e-mail.
+    source_mail_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Outlook thread id (Office.js ``conversationId``) when filing from read mode — used to match replies on send.
+    source_outlook_conversation_id: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Outlook/Exchange REST item id from the Office add-in when filing from Outlook (OWA read deeplink).
     source_outlook_item_id: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Microsoft Graph message id (often same string as REST item id) — OWA read deeplink / desktop open.
@@ -734,6 +752,8 @@ class CaseEvent(Base):
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     event_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    event_all_day: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    event_start_time: Mapped[time | None] = mapped_column(Time, nullable=True)
     track_in_calendar: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     calendar_event_uid: Mapped[str | None] = mapped_column(String(512), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
@@ -756,6 +776,20 @@ class BillingSettings(Base):
 
     id: Mapped[int] = mapped_column(SmallInteger, primary_key=True)
     default_vat_percent: Mapped[Decimal] = mapped_column(Numeric(8, 3), nullable=False, default=Decimal("20"))
+
+
+class EmailIntegrationSettings(Base):
+    """Singleton row (id=1): mailto vs Microsoft Graph; optional Entra app credentials (secret encrypted)."""
+
+    __tablename__ = "email_integration_settings"
+
+    id: Mapped[int] = mapped_column(SmallInteger, primary_key=True)
+    integration_mode: Mapped[str] = mapped_column(String(32), nullable=False, default="microsoft_graph")
+    graph_tenant_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    graph_client_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    graph_client_secret_enc: Mapped[str | None] = mapped_column(Text, nullable=True)
+    outlook_web_mail_base: Mapped[str | None] = mapped_column(Text, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
 
 
 class BillingLineTemplate(Base):

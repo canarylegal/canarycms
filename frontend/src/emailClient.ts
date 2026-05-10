@@ -16,18 +16,45 @@ export function buildOutlookWebReadUrlFromGraphMessageId(
   return buildOutlookWebReadItemUrl(owaBaseFromUser ?? null, graphMessageId)
 }
 
+/** Reasonable default for “open this message in OWA” as a secondary window (not full-screen tab). */
+export const OWA_MESSAGE_WINDOW_FEATURES =
+  'width=1050,height=760,scrollbars=yes,resizable=yes,status=no'
+
 /**
- * Open a full ``https://…`` Outlook URL in a new tab; returns whether a window was created.
- * Do not pass ``noopener`` in the features string: many browsers return ``null`` from ``window.open``
- * while still opening the tab, which would falsely imply a popup blocker.
+ * Reuse one popup for Canary → OWA navigations so the browser keeps Microsoft session cookies in that browsing context
+ * (new anonymous ``_blank`` windows often trigger account-picker / sign-in again).
  */
-export function openOutlookWebAppFromGraphWebLink(url: string): boolean {
-  const w = window.open(url, '_blank')
+export const OWA_MAIL_WINDOW_NAME = 'CanaryOwaMail'
+
+function consumerMicrosoftMailboxDomain(domain: string): boolean {
+  const d = domain.toLowerCase()
+  return (
+    d === 'outlook.com' ||
+    d === 'hotmail.com' ||
+    d === 'live.com' ||
+    d === 'msn.com' ||
+    d.endsWith('.outlook.com')
+  )
+}
+
+/**
+ * Open a full ``https://…`` Outlook URL; returns whether ``window.open`` returned a handle (not fully reliable across browsers).
+ * Avoid ``noopener`` in ``windowFeatures``: some browsers return ``null`` from ``window.open`` while still opening the window.
+ */
+export function openOutlookWebAppFromGraphWebLink(
+  url: string,
+  options?: { windowFeatures?: string | null; windowName?: string },
+): boolean {
+  const feat = options?.windowFeatures
+  const name = options?.windowName ?? OWA_MAIL_WINDOW_NAME
+  const w =
+    feat != null && feat !== '' ? window.open(url, name, feat) : window.open(url, name)
   return w != null
 }
 
 /**
- * Append ``login_hint`` for tenant SSO flows when opening OWA (experimental parity).
+ * Append ``login_hint`` / ``domain_hint`` so Microsoft identity can pick the right work account without an extra prompt.
+ * (Consumer @outlook.com addresses skip ``domain_hint`` — it can confuse live.com / personal flows.)
  */
 export function appendOutlookWebAuthHintsForNav(url: string, loginHint: string | null | undefined): string {
   const h = (loginHint || '').trim()
@@ -37,6 +64,13 @@ export function appendOutlookWebAuthHintsForNav(url: string, loginHint: string |
     const u = new URL(base)
     if (!u.searchParams.has('login_hint')) {
       u.searchParams.set('login_hint', h)
+    }
+    const at = h.indexOf('@')
+    if (at > 0 && at < h.length - 1) {
+      const domain = h.slice(at + 1).trim().toLowerCase()
+      if (domain && !consumerMicrosoftMailboxDomain(domain) && !u.searchParams.has('domain_hint')) {
+        u.searchParams.set('domain_hint', domain)
+      }
     }
     return u.toString()
   } catch {

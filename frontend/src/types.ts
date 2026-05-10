@@ -4,6 +4,8 @@ export type UserPublic = {
   id: string
   email: string
   display_name: string
+  /** Present once API/backend expose user initials; legacy responses may omit. */
+  initials?: string
   job_title?: string | null
   role: 'admin' | 'user'
   is_active: boolean
@@ -11,6 +13,12 @@ export type UserPublic = {
   /** Top-bar E-mail: `mailto:` vs Outlook web URL */
   email_launch_preference?: 'desktop' | 'outlook_web'
   email_outlook_web_url?: string | null
+  /** Org-wide: Admin → E-mail — desktop mailto vs Microsoft 365 Graph drafts. */
+  email_integration_mode?: 'mailto' | 'microsoft_graph'
+  /** True when mode is Graph and tenant/client/secret resolve (DB or env). */
+  m365_graph_drafts_configured?: boolean
+  /** From GET /auth/me — category Admin or built-in admin role. */
+  admin_console_access?: boolean
 }
 
 /** Admin-only user row (includes permission category). */
@@ -26,6 +34,7 @@ export type UserPermissionCategoryOut = {
   perm_post_office: boolean
   perm_approve_payments: boolean
   perm_approve_invoices: boolean
+  perm_admin: boolean
   created_at: string
   updated_at: string
 }
@@ -96,6 +105,7 @@ export type InvoiceBillingDefaultsUser = {
   id: string
   email: string
   display_name: string
+  initials?: string
 }
 
 export type InvoiceBillingDefaultsOut = {
@@ -134,6 +144,9 @@ export type CalendarEventOut = {
   category_id?: string | null
   category_name?: string | null
   category_color?: string | null
+  case_id?: string | null
+  case_event_id?: string | null
+  track_in_calendar?: boolean | null
 }
 
 export type CalendarCategoryOut = {
@@ -185,6 +198,8 @@ export type MatterSubTypeOut = {
 export type MatterHeadTypeOut = {
   id: string
   name: string
+  /** When true, non-admin matter pickers omit this head; admins can still configure sub-types. */
+  is_hidden?: boolean
   sub_types: MatterSubTypeOut[]
 }
 
@@ -234,9 +249,11 @@ export type CaseOut = {
   updated_at: string
 }
 
-/** True when the case has at least one explicit access revocation (deny / blacklist). */
+/** True when the matter should show as access-locked (🔒 / “Locked”). */
 export function caseHasRevokedUserAccess(c: Pick<CaseOut, 'is_locked' | 'lock_mode'>): boolean {
-  return Boolean(c.is_locked && c.lock_mode === 'blacklist')
+  if (c.lock_mode === 'blacklist') return true
+  if (c.lock_mode === 'whitelist') return Boolean(c.is_locked)
+  return false
 }
 
 export type CaseAccessRuleOut = {
@@ -308,6 +325,7 @@ export type UserSummary = {
   id: string
   email: string
   display_name: string
+  initials?: string
   role: string
   is_active: boolean
 }
@@ -367,6 +385,8 @@ export type TaskMenuRow = {
   assigned_display_name: string | null
   priority: CaseTaskPriority
   status: 'open' | 'done' | 'cancelled'
+  standard_task_id?: string | null
+  standard_task_category_title?: string | null
 }
 
 export type FileSummary = {
@@ -388,6 +408,8 @@ export type FileSummary = {
   source_mail_from_email?: string | null
   /** True when filed from a sent folder (IMAP) or From matches uploader; drives mail icon colour. */
   source_mail_is_outbound?: boolean | null
+  /** When set, RFC5322 ``Date`` from a root .eml / rfc822 (message sent time). Used for Created column when present. */
+  source_mail_date?: string | null
   /** RFC5322 Message-ID header from parent .eml (parsed on upload). */
   source_internet_message_id?: string | null
   /** Exchange/Outlook REST item id when filed from the Office add-in (OWA read deeplink). */
@@ -398,6 +420,7 @@ export type FileSummary = {
   outlook_web_link?: string | null
   owner_display_name?: string | null
   owner_email?: string | null
+  owner_initials?: string | null
 }
 
 /** Response from ``POST /cases/{id}/files/email-drafts/m365`` (Microsoft Graph draft). */
@@ -405,6 +428,23 @@ export type CaseEmailDraftM365Out = {
   open_url: string
   graph_message_id?: string | null
   draft_compose_web_link?: string | null
+}
+
+/** Response from ``POST /cases/{id}/files/email-mailto``. */
+export type CaseEmailMailtoOut = {
+  to: string
+  subject: string
+  body: string
+  attachment_count: number
+  note: string
+}
+
+export type EmailIntegrationSettingsOut = {
+  integration_mode: 'mailto' | 'microsoft_graph'
+  graph_tenant_id: string | null
+  graph_client_id: string | null
+  graph_client_secret_configured: boolean
+  outlook_web_mail_base: string | null
 }
 
 export type AdminAuditEvent = {
@@ -587,6 +627,15 @@ export type MatterSubTypeEventTemplateOut = {
   updated_at: string
 }
 
+/** Admin calendar template lines for quick-fill on the main CalDAV calendar. */
+export type CalendarEventTemplatePickOut = {
+  id: string
+  matter_sub_type_id: string
+  matter_sub_type_name: string
+  name: string
+  sort_order: number
+}
+
 export type CaseEventOut = {
   id: string
   case_id: string
@@ -594,6 +643,11 @@ export type CaseEventOut = {
   name: string
   sort_order: number
   event_date?: string | null
+  event_all_day?: boolean
+  event_start_time?: string | null
+  calendar_block_start?: string | null
+  calendar_block_end?: string | null
+  calendar_block_all_day?: boolean | null
   track_in_calendar?: boolean
   calendar_event_uid?: string | null
   created_at: string

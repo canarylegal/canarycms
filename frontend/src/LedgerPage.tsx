@@ -42,6 +42,22 @@ function formatDate(iso: string): string {
 
 type AccountFilter = 'all' | 'client' | 'office'
 
+/** Pending if API says so, or legacy rows missing the flag but still carrying the invoice draft suffix. */
+function isLedgerEntryPending(e: LedgerEntryOut): boolean {
+  if (e.is_approved === true) return false
+  if (e.is_approved === false) return true
+  return (e.description ?? '').toLowerCase().includes('pending approval')
+}
+
+/** After approval, strip draft suffix for display if the server still returned an older description once. */
+function ledgerDescriptionDisplay(e: LedgerEntryOut): string {
+  let d = e.description ?? ''
+  if (!isLedgerEntryPending(e)) {
+    d = d.replace(/\s*\(pending approval\)\s*/i, '').trim()
+  }
+  return d
+}
+
 // Contact picker mode
 type ContactMode = '' | 'na' | 'matter' | 'global' | 'other'
 
@@ -275,7 +291,7 @@ export function LedgerPage({ caseId, token }: Props) {
     let c = 0
     const m = new Map<string, { o: number; c: number }>()
     for (const e of sorted) {
-      if (e.is_approved === false) {
+      if (isLedgerEntryPending(e)) {
         m.set(e.id, { o, c })
         continue
       }
@@ -292,7 +308,7 @@ export function LedgerPage({ caseId, token }: Props) {
 
   const approveRep = new Map<string, string>()
   for (const e of visible) {
-    if (e.is_approved === false && !approveRep.has(e.pair_id)) {
+    if (isLedgerEntryPending(e) && !approveRep.has(e.pair_id)) {
       approveRep.set(e.pair_id, e.id)
     }
   }
@@ -581,7 +597,7 @@ export function LedgerPage({ caseId, token }: Props) {
                   e.account_type === 'client' && e.direction === 'debit' ? pence(e.amount_pence) : ''
                 const cc =
                   e.account_type === 'client' && e.direction === 'credit' ? pence(e.amount_pence) : ''
-                const pending = e.is_approved === false
+                const pending = isLedgerEntryPending(e)
                 const showApprove = canApprove && pending && approveRep.get(e.pair_id) === e.id
                 const rc = runningById.get(e.id)
                 return (
@@ -590,7 +606,7 @@ export function LedgerPage({ caseId, token }: Props) {
                     <td className="ledgerPartyCell ledgerColParty">{e.contact_label ?? <span className="muted">N/A</span>}</td>
                     <td className="ledgerColDesc">
                       <span className={pending ? 'ledgerPendingDesc' : undefined}>
-                        {e.description}
+                        {ledgerDescriptionDisplay(e)}
                         {pending ? <span className="muted"> (pending)</span> : null}
                       </span>
                       {showApprove ? (
@@ -663,33 +679,40 @@ export function LedgerPage({ caseId, token }: Props) {
               </tr>
             </thead>
             <tbody>
-              {invoicesData.invoices.map((inv) => (
-                <tr key={inv.id}>
-                  <td>{inv.invoice_number}</td>
-                  <td>{inv.status}</td>
-                  <td>{pence(inv.total_pence)}</td>
-                  <td>
-                    <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
-                    {canApproveInvoices && inv.status === 'pending_approval' ? (
-                      <button type="button" className="btn ledgerApproveBtn" disabled={busy} onClick={() => void approveInvoice(inv.id)}>
-                        Approve invoice
-                      </button>
-                    ) : null}
-                    {canApproveInvoices && inv.status !== 'voided' ? (
-                      <button
-                        type="button"
-                        className="btn"
-                        disabled={busy}
-                        onClick={() => setVoidInvoiceId(inv.id)}
-                        style={{ color: 'var(--danger)' }}
-                      >
-                        Void
-                      </button>
-                    ) : null}
-                    </div>
-                  </td>
-                </tr>
-              ))}
+              {invoicesData.invoices.map((inv) => {
+                const pending = inv.status === 'pending_approval'
+                return (
+                  <tr key={inv.id} className={pending ? 'ledgerInvoiceRow--pending' : undefined}>
+                    <td>{inv.invoice_number}</td>
+                    <td>{inv.status}</td>
+                    <td>{pence(inv.total_pence)}</td>
+                    <td className="ledgerInvoiceActionsCell">
+                      <div className="ledgerInvoiceActions">
+                        {canApproveInvoices && pending ? (
+                          <button
+                            type="button"
+                            className="btn ledgerInvoiceActionBtn"
+                            disabled={busy}
+                            onClick={() => void approveInvoice(inv.id)}
+                          >
+                            Approve invoice
+                          </button>
+                        ) : null}
+                        {canApproveInvoices && inv.status !== 'voided' ? (
+                          <button
+                            type="button"
+                            className="btn ledgerInvoiceActionBtn ledgerInvoiceActionBtnDanger"
+                            disabled={busy}
+                            onClick={() => setVoidInvoiceId(inv.id)}
+                          >
+                            Void
+                          </button>
+                        ) : null}
+                      </div>
+                    </td>
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
           )}
@@ -1177,10 +1200,10 @@ export function LedgerStandalone({ caseId, token }: { caseId: string; token: str
       .then((c) => {
         const label = [c.case_number, c.client_name, c.matter_description].filter(Boolean).join(' — ')
         setCaseRef(label || caseId)
-        document.title = canaryDocumentTitle(`Ledger — ${label || caseId}`)
+        document.title = canaryDocumentTitle(`Accounts — ${label || caseId}`)
       })
       .catch(() => {
-        document.title = canaryDocumentTitle('Ledger')
+        document.title = canaryDocumentTitle('Accounts')
       })
   }, [caseId, token])
 
@@ -1189,7 +1212,7 @@ export function LedgerStandalone({ caseId, token }: { caseId: string; token: str
       <div className="ledgerStandaloneBar">
         <span className="ledgerStandaloneLogo">Canary</span>
         {caseRef && <span className="ledgerStandaloneCase">{caseRef}</span>}
-        <span className="ledgerStandaloneTitle">Ledger</span>
+        <span className="ledgerStandaloneTitle">Accounts</span>
       </div>
       <div className="ledgerStandaloneBody">
         <LedgerPage caseId={caseId} token={token} />

@@ -9,10 +9,10 @@ from pydantic import BaseModel, EmailStr
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.calendar_service import ensure_default_calendar
 from app.db import get_db
 from app.deps import get_current_user
 from app.email_crypt import encrypt_password
+from app.email_integration_settings import build_user_public
 from app.models import User
 from app.radicale_htpasswd import remove_user, upsert_user
 from app.permission_checks import user_may_approve_invoice, user_may_approve_ledger
@@ -58,6 +58,7 @@ class UserSummary(BaseModel):
     id: uuid.UUID
     email: EmailStr
     display_name: str
+    initials: str
     role: str
     is_active: bool
 
@@ -171,4 +172,4 @@ def put_my_email_handling(
     db.add(user)
     db.commit()
     db.refresh(user)
-    return UserPublic.model_validate(user, from_attributes=True)
+    return build_user_public(user, db)

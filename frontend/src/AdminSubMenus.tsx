@@ -38,8 +38,8 @@ export function AdminSubMenus({ token }: { token: string }) {
       {err ? <div className="error">{err}</div> : null}
 
       <div className="muted" style={{ fontSize: '0.95em', marginBottom: 8 }}>
-        Select a matter sub-type to configure <strong>Events</strong> lines and the <strong>Finance</strong> template. Add
-        the Events or Finance menu to a sub-type under <strong>Admin → Matters</strong> so they appear on the case page.
+        Select a matter sub-type to configure <strong>Calendar</strong> lines and the <strong>Finance</strong> template. Add
+        the Calendar or Finance menu to a sub-type under <strong>Admin → Matters</strong> so they appear on the case page.
       </div>
 
       <div className="row" style={{ gap: 24, alignItems: 'flex-start' }}>
@@ -105,7 +105,7 @@ export function AdminSubMenus({ token }: { token: string }) {
           </div>
         </div>
       ) : selectedHeadId ? (
-        <div className="muted">Select a sub type to edit Events and Finance templates.</div>
+            <div className="muted">Select a sub type to edit Calendar and Finance templates.</div>
       ) : null}
     </div>
   )
