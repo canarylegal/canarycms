@@ -5,7 +5,7 @@ import { FinancePage } from '../FinancePage'
 import { resolveContactNameWithFallback } from '../GlobalContactCreateForm'
 import { ManageCaseAccessModal } from '../ManageCaseAccessModal'
 import { MATTER_CONTACT_TYPE_OPTIONS_FALLBACK } from '../matterContactTypeOptions'
-import { apiFetch, apiUrl, browserAbsoluteApiUrl, formatApiErrorDetail } from '../api'
+import { apiFetch, apiUrl, applyAuthHeaders, browserAbsoluteApiUrl, formatApiErrorDetail } from '../api'
 import {
   appendOutlookWebAuthHintsForNav,
   buildOutlookWebReadUrlFromGraphMessageId,
@@ -74,12 +74,18 @@ function fileDocOwnerLabel(f: FileSummary): string {
 /** Abort same-origin file GETs so a stuck server/proxy cannot leave the UI on “Loading” indefinitely. */
 const CASE_FILE_FETCH_MS = 90_000
 
+function caseAuthHeaders(token: string): Headers {
+  const h = new Headers()
+  applyAuthHeaders(h, String(token ?? '').trim())
+  return h
+}
+
 async function fetchCaseFileResponse(caseId: string, fileId: string, token: string): Promise<Response> {
   const ctrl = new AbortController()
   const tid = window.setTimeout(() => ctrl.abort(), CASE_FILE_FETCH_MS)
   try {
     return await fetch(apiUrl(`/cases/${caseId}/files/${fileId}`), {
-      headers: { Authorization: `Bearer ${token}` },
+      headers: caseAuthHeaders(token),
       signal: ctrl.signal,
     })
   } finally {
@@ -100,7 +106,7 @@ async function fetchEmlTextForPreview(caseId: string, fileId: string, token: str
   const tid = window.setTimeout(() => ctrl.abort(), CASE_FILE_FETCH_MS)
   try {
     const res = await fetch(apiUrl(`/cases/${caseId}/files/${fileId}`), {
-      headers: { Authorization: `Bearer ${token}` },
+      headers: caseAuthHeaders(token),
       signal: ctrl.signal,
     })
     if (res.status === 401) {
@@ -1190,7 +1196,7 @@ export function CaseDetail({
         form.append('folder', docFolder)
         await fetch(apiUrl(`/cases/${caseId}/files`), {
           method: 'POST',
-          headers: { Authorization: `Bearer ${token}` },
+          headers: caseAuthHeaders(token),
           body: form,
         }).then(async (r) => {
           if (r.status === 401) {
@@ -1221,7 +1227,7 @@ export function CaseDetail({
         form.append('folder', docFolder)
         const r = await fetch(apiUrl(`/cases/${caseId}/files`), {
           method: 'POST',
-          headers: { Authorization: `Bearer ${token}` },
+          headers: caseAuthHeaders(token),
           body: form,
         })
         if (r.status === 401) {
@@ -1283,6 +1289,7 @@ export function CaseDetail({
     caseContactId?: string | null,
     globalContactId?: string | null,
     precedentMergeAllClients?: boolean,
+    composeOfficeRole?: 'letter' | 'document' | null,
   ) {
     if (!caseId) return
     setBusy(true)
@@ -1297,6 +1304,7 @@ export function CaseDetail({
           case_contact_id: caseContactId ?? null,
           global_contact_id: globalContactId ?? null,
           precedent_merge_all_clients: Boolean(precedentMergeAllClients),
+          compose_office_role: composeOfficeRole ?? null,
         },
       })
       window.open(`/editor/${caseId}/${res.id}`, onlyofficeCaseEditorWindowTarget(caseId, res.id))
@@ -1678,7 +1686,7 @@ export function CaseDetail({
     try {
       const q = new URLSearchParams({ folder_path: folderPath })
       const res = await fetch(apiUrl(`/cases/${caseId}/files/folders/download-zip?${q}`), {
-        headers: { Authorization: `Bearer ${token}` },
+        headers: caseAuthHeaders(token),
         signal: ctrl.signal,
       })
       if (res.status === 401) {
@@ -1729,7 +1737,7 @@ export function CaseDetail({
     const pid = precedentChosenId
     if (precedentPicker.kind === 'document') {
       setPrecedentPicker(null)
-      void composeOfficeFile(`Document — ${new Date().toISOString().slice(0, 10)}.docx`, pid)
+      void composeOfficeFile(`Document — ${new Date().toISOString().slice(0, 10)}.docx`, pid, undefined, undefined, undefined, 'document')
       return
     }
     if (precedentPicker.kind === 'letter') {
@@ -1829,6 +1837,7 @@ export function CaseDetail({
         caseContactIdForMerge,
         globalContactIdForMerge,
         mergeAllClients,
+        'letter',
       )
       setContactPickModal(null)
       resetContactPickForm()
@@ -3162,7 +3171,7 @@ export function CaseDetail({
                           fd.set('folder', docFolder)
                           const res = await fetch(apiUrl(`/cases/${caseId}/files`), {
                             method: 'POST',
-                            headers: { Authorization: `Bearer ${token}` },
+                            headers: caseAuthHeaders(token),
                             body: fd,
                           })
                           if (!res.ok) {

@@ -1,6 +1,13 @@
+import {
+  startAuthentication,
+  startRegistration,
+  type PublicKeyCredentialCreationOptionsJSON,
+  type PublicKeyCredentialRequestOptionsJSON,
+} from '@simplewebauthn/browser'
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { AdminBilling } from './AdminBilling'
 import { AdminEmail } from './AdminEmail'
+import { AdminFirmDetails } from './AdminFirmDetails'
 import { AdminSubMenus } from './AdminSubMenus'
 import { AdminTasks } from './AdminTasks'
 import { CalendarPage } from './CalendarPage'
@@ -23,7 +30,7 @@ import {
   subTypeHasPropertyMenu,
 } from './case/propertyMatterHelpers'
 import { CASE_MENU_OPTIONS } from './caseMenuOptions'
-import { apiFetch, apiUrl, formatApiErrorDetail } from './api'
+import { apiFetch, apiUrl, applyAuthHeaders } from './api'
 import {
   ACCENT_COLOR_PRESETS,
   DEFAULT_ACCENT,
@@ -52,18 +59,24 @@ import type {
   TaskMenuRow,
   ContactOut,
   FileSummary,
+  FirmSettingsOut,
+  LetterheadStyle,
+  MergeCodeCatalogImportResult,
+  MergeCodeCatalogOut,
   MatterContactTypeOut,
   MatterHeadTypeOut,
   MatterSubTypeOut,
   PrecedentCategoryOut,
   PrecedentOut,
   TokenResponse,
+  Verify2FASessionResponse,
   AdminUserPublic,
   UserCalDAVProvisionOut,
   UserCalDAVStatusOut,
   UserPermissionCategoryOut,
   UserPublic,
   UserSummary,
+  WebAuthnCredentialOut,
 } from './types'
 
 type View =
@@ -106,6 +119,103 @@ function canaryViewTitleSegment(view: View, caseDetail: CaseOut | null): string 
 function formatTs(s: string) {
   const d = new Date(s)
   return isNaN(d.getTime()) ? s : d.toLocaleString()
+}
+
+/** Non-admin users who must complete authenticator 2FA or register a passkey before using the rest of the app. */
+function userNeedsSecondFactorSetup(me: UserPublic): boolean {
+  if (me.admin_console_access) return false
+  return Boolean(me.organization_requires_second_factor && !me.is_2fa_enabled && !me.has_passkeys)
+}
+
+/** JWT/session did not satisfy org “verified second factor at sign-in” (passkey or password + authenticator). */
+function sessionNeedsVerifiedSecondFactor(me: UserPublic): boolean {
+  if (me.admin_console_access) return false
+  return me.session_second_factor_verified === false
+}
+
+function SecondFactorSessionGate({
+  token,
+  me,
+  onLogout,
+  onPasskeyLogin,
+  refreshMe,
+  applySessionToken,
+  loginError,
+  onClearLoginError,
+}: {
+  token: string
+  me: UserPublic
+  onLogout: () => void
+  onPasskeyLogin: (email: string) => Promise<void>
+  refreshMe: () => Promise<void>
+  applySessionToken: (t: string) => void
+  loginError: string | null
+  onClearLoginError: () => void
+}) {
+  const needsSetup = userNeedsSecondFactorSetup(me)
+  const [busy, setBusy] = useState(false)
+  return (
+    <div className="appShell">
+      <header className="topbar">
+        <div className="topbarMain">
+          <nav className="topNav" aria-label="Verify sign-in">
+            <span className="muted" style={{ padding: '6px 10px' }}>
+              {needsSetup ? 'Security setup required' : 'Verify sign-in'}
+            </span>
+          </nav>
+        </div>
+        <div className="topbarRight">
+          <div className="muted">{me.email}</div>
+          <button type="button" className="btn" onClick={onLogout}>
+            Sign out
+          </button>
+        </div>
+      </header>
+      <main className="main main--mainMenu">
+        <div className="stack" style={{ padding: 16, maxWidth: 720, margin: '0 auto' }}>
+          {!needsSetup ? (
+            <div className="error" role="alert">
+              <p style={{ marginTop: 0 }}>
+                Your organisation requires a verified second factor at sign-in. Use{' '}
+                <strong>Sign in with passkey</strong>, or sign out and sign in with your password — you will be prompted
+                for your authenticator code after your password.
+              </p>
+            </div>
+          ) : null}
+          <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
+            <button
+              type="button"
+              className="btn primary"
+              disabled={busy}
+              onClick={() =>
+                void (async () => {
+                  if (busy) return
+                  onClearLoginError()
+                  setBusy(true)
+                  try {
+                    await onPasskeyLogin(me.email)
+                  } finally {
+                    setBusy(false)
+                  }
+                })()
+              }
+            >
+              {busy ? 'Working…' : 'Sign in with passkey'}
+            </button>
+          </div>
+          {loginError ? <div className="error">{loginError}</div> : null}
+          {needsSetup ? (
+            <UserSettingsPage
+              token={token}
+              refreshMe={refreshMe}
+              applySessionToken={applySessionToken}
+              securitySetupOnly
+            />
+          ) : null}
+        </div>
+      </main>
+    </div>
+  )
 }
 
 /** Main menu cases: Reference · Client · Description · Fee earner · Status — Client 30fr; Status 5fr (5% moved from Status to Client). */
@@ -167,6 +277,21 @@ function useAuth() {
     }
   }, [token])
 
+  const applySessionToken = useCallback((accessToken: string) => {
+    const t = accessToken.trim()
+    if (!t) return
+    localStorage.setItem('token', t)
+    setToken(t)
+    void (async () => {
+      try {
+        const user = await apiFetch<UserPublic>('/auth/me', { token: t })
+        setMe(user)
+      } catch {
+        /* keep existing me */
+      }
+    })()
+  }, [])
+
   return {
     token,
     me,
@@ -175,7 +300,8 @@ function useAuth() {
     loginError,
     clearLoginError: () => setLoginError(null),
     refreshMe,
-    async login(email: string, password: string, totpCode?: string) {
+    applySessionToken,
+    async login(email: string, password: string, totpCode?: string): Promise<'success' | 'needs_2fa' | 'error'> {
       setLoginError(null)
       try {
         const res = await apiFetch<TokenResponse>('/auth/login', {
@@ -183,8 +309,38 @@ function useAuth() {
         })
         localStorage.setItem('token', res.access_token)
         setToken(res.access_token)
-      } catch (e: any) {
-        setLoginError(e?.message ?? 'Login failed')
+        return 'success'
+      } catch (e: unknown) {
+        const msg = ((e as ApiError).message ?? '').trim() || 'Login failed'
+        const totpEmpty = totpCode == null || String(totpCode).trim() === ''
+        if (totpEmpty && msg === '2FA required') {
+          return 'needs_2fa'
+        }
+        setLoginError(msg)
+        return 'error'
+      }
+    },
+    async loginWithPasskey(email: string) {
+      setLoginError(null)
+      const emailNorm = email.trim().toLowerCase()
+      if (!emailNorm) {
+        setLoginError('Enter your email address, then use Sign in with passkey.')
+        return
+      }
+      try {
+        const options = await apiFetch<PublicKeyCredentialRequestOptionsJSON>('/auth/webauthn/login/begin', {
+          method: 'POST',
+          json: { email: emailNorm },
+        })
+        const assertion = await startAuthentication({ optionsJSON: options })
+        const res = await apiFetch<TokenResponse>('/auth/webauthn/login/finish', {
+          method: 'POST',
+          json: { email: emailNorm, credential: assertion },
+        })
+        localStorage.setItem('token', res.access_token)
+        setToken(res.access_token)
+      } catch (e: unknown) {
+        setLoginError((e as ApiError).message ?? 'Passkey sign-in failed')
       }
     },
     logout() {
@@ -198,24 +354,43 @@ function useAuth() {
 
 function LoginForm({
   onLogin,
+  onPasskeyLogin,
   error,
   onClearError,
 }: {
-  onLogin: (email: string, password: string, totp?: string) => Promise<void>
+  onLogin: (email: string, password: string, totp?: string) => Promise<'success' | 'needs_2fa' | 'error'>
+  onPasskeyLogin: (email: string) => Promise<void>
   error: string | null
   onClearError: () => void
 }) {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [totp, setTotp] = useState('')
+  const [faCode, setFaCode] = useState('')
+  const [step, setStep] = useState<'password' | '2fa'>('password')
   const [busy, setBusy] = useState(false)
 
-  async function handleSubmit(e: FormEvent) {
+  async function handlePasswordSubmit(e: FormEvent) {
     e.preventDefault()
     if (busy) return
     setBusy(true)
     try {
-      await onLogin(email, password, totp || undefined)
+      const result = await onLogin(email, password)
+      if (result === 'needs_2fa') {
+        setStep('2fa')
+        setFaCode('')
+        onClearError()
+      }
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function handle2faSubmit(e: FormEvent) {
+    e.preventDefault()
+    if (busy) return
+    setBusy(true)
+    try {
+      await onLogin(email, password, faCode.trim() || undefined)
     } finally {
       setBusy(false)
     }
@@ -228,50 +403,96 @@ function LoginForm({
       </div>
       <div className="card" style={{ maxWidth: 520, margin: '24px auto 0' }}>
         <p className="muted">Sign in to continue.</p>
-        <form className="stack" style={{ marginTop: 16 }} onSubmit={handleSubmit}>
-        <label className="field">
-          <span>Email</span>
-          <input
-            value={email}
-            onChange={(e) => {
-              onClearError()
-              setEmail(e.target.value)
-            }}
-            autoComplete="username"
-          />
-        </label>
-        <label className="field">
-          <span>Password</span>
-          <input
-            type="password"
-            value={password}
-            onChange={(e) => {
-              onClearError()
-              setPassword(e.target.value)
-            }}
-            autoComplete="current-password"
-          />
-        </label>
-        <label className="field">
-          <span>TOTP (if enabled)</span>
-          <input
-            value={totp}
-            onChange={(e) => {
-              onClearError()
-              setTotp(e.target.value)
-            }}
-            inputMode="numeric"
-          />
-        </label>
-        {error ? <div className="error">{error}</div> : null}
-        <button
-          type="submit"
-          className="btn primary"
-          disabled={busy}
-        >
-          {busy ? 'Signing in…' : 'Sign in'}
-        </button>
-        </form>
+        {step === 'password' ? (
+          <>
+            <form className="stack" style={{ marginTop: 16 }} onSubmit={handlePasswordSubmit}>
+              <label className="field">
+                <span>Email</span>
+                <input
+                  value={email}
+                  onChange={(e) => {
+                    onClearError()
+                    setEmail(e.target.value)
+                  }}
+                  autoComplete="username"
+                />
+              </label>
+              <label className="field">
+                <span>Password</span>
+                <input
+                  type="password"
+                  value={password}
+                  onChange={(e) => {
+                    onClearError()
+                    setPassword(e.target.value)
+                  }}
+                  autoComplete="current-password"
+                />
+              </label>
+              {error ? <div className="error">{error}</div> : null}
+              <button type="submit" className="btn primary" disabled={busy}>
+                {busy ? 'Signing in…' : 'Sign in'}
+              </button>
+            </form>
+            <button
+              type="button"
+              className="btn"
+              style={{ marginTop: 12, width: '100%' }}
+              disabled={busy}
+              onClick={() =>
+                void (async () => {
+                  if (busy) return
+                  setBusy(true)
+                  try {
+                    await onPasskeyLogin(email)
+                  } finally {
+                    setBusy(false)
+                  }
+                })()
+              }
+            >
+              Sign in with passkey
+            </button>
+          </>
+        ) : (
+          <form className="stack" style={{ marginTop: 16 }} onSubmit={handle2faSubmit}>
+            <p className="muted" style={{ marginTop: 0 }}>
+              This account uses two-factor authentication. Enter the code from your authenticator app.
+            </p>
+            <label className="field">
+              <span>2FA code</span>
+              <input
+                value={faCode}
+                onChange={(e) => {
+                  onClearError()
+                  setFaCode(e.target.value)
+                }}
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                placeholder="6-digit code"
+                autoFocus
+              />
+            </label>
+            {error ? <div className="error">{error}</div> : null}
+            <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
+              <button type="submit" className="btn primary" disabled={busy || faCode.trim().length < 6}>
+                {busy ? 'Signing in…' : 'Continue'}
+              </button>
+              <button
+                type="button"
+                className="btn"
+                disabled={busy}
+                onClick={() => {
+                  onClearError()
+                  setStep('password')
+                  setFaCode('')
+                }}
+              >
+                Back
+              </button>
+            </div>
+          </form>
+        )}
       </div>
     </div>
   )
@@ -519,7 +740,7 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
 
     if (view === 'admin-console') return <AdminConsole token={token} refreshMe={auth.refreshMe} />
     if (view === 'user-settings')
-      return <UserSettingsPage token={token} refreshMe={auth.refreshMe} />
+      return <UserSettingsPage token={token} refreshMe={auth.refreshMe} applySessionToken={auth.applySessionToken} />
     if (view === 'calendar')
       return <CalendarPage token={token} onOpenSettings={() => setView('user-settings')} />
     if (view === 'contacts') return <Contacts token={token} />
@@ -938,16 +1159,38 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
       document.title = canaryDocumentTitle('Sign in')
       return
     }
+    if (auth.me && sessionNeedsVerifiedSecondFactor(auth.me)) {
+      document.title = canaryDocumentTitle(
+        userNeedsSecondFactorSetup(auth.me) ? 'Security setup' : 'Verify sign-in',
+      )
+      return
+    }
     document.title = canaryDocumentTitle(canaryViewTitleSegment(view, caseDetail))
-  }, [auth.loading, auth.token, view, caseDetail])
+  }, [auth.loading, auth.token, auth.me, view, caseDetail])
 
   if (auth.loading) return <div className="center muted">Loading…</div>
   if (!auth.token) {
     return (
       <LoginForm
         onLogin={auth.login}
+        onPasskeyLogin={auth.loginWithPasskey}
         error={auth.loginError}
         onClearError={auth.clearLoginError}
+      />
+    )
+  }
+
+  if (auth.me && sessionNeedsVerifiedSecondFactor(auth.me)) {
+    return (
+      <SecondFactorSessionGate
+        token={auth.token}
+        me={auth.me}
+        onLogout={auth.logout}
+        onPasskeyLogin={auth.loginWithPasskey}
+        refreshMe={auth.refreshMe}
+        applySessionToken={auth.applySessionToken}
+        loginError={auth.loginError}
+        onClearLoginError={auth.clearLoginError}
       />
     )
   }
@@ -2240,154 +2483,16 @@ function AdminMatters({ token }: { token: string }) {
   )
 }
 
-const PRECEDENT_CODES_EXTRA_CLIENT_FIELDS: { key: string; description: string }[] = [
-  { key: 'TITLE', description: 'Title (Mr / Mrs / Dr etc.)' },
-  { key: 'FIRST_NAME', description: 'First name' },
-  { key: 'FIRST_INITIAL', description: 'First initial (e.g. J)' },
-  { key: 'MIDDLE_NAME', description: 'Middle name' },
-  { key: 'MIDDLE_INITIAL', description: 'Middle initial' },
-  { key: 'LAST_NAME', description: 'Surname' },
-  { key: 'LAST_INITIAL', description: 'Surname initial' },
-  { key: 'COMPANY_NAME', description: 'Registered company name (falls back to display name for organisations)' },
-  { key: 'TRADING_NAME', description: 'Trading name' },
-]
-
-const PRECEDENT_CODES_EXTRA_CLIENTS: { code: string; description: string }[] = (() => {
-  const rows: { code: string; description: string }[] = []
-  for (const slot of [2, 3, 4] as const) {
-    const ord = slot === 2 ? '2nd' : slot === 3 ? '3rd' : '4th'
-    for (const row of PRECEDENT_CODES_EXTRA_CLIENT_FIELDS) {
-      rows.push({
-        code: `[${row.key}_${slot}]`,
-        description: `${row.description} — additional client ${slot} (${ord} 'Client' matter contact on the case, by date added)`,
-      })
-    }
+/** Random 6-character lowercase hex for a new custom precedent reference (uniqueness enforced server-side). */
+function suggestedPrecedentReferenceHex(): string {
+  try {
+    const a = new Uint8Array(3)
+    crypto.getRandomValues(a)
+    return Array.from(a, (b) => b.toString(16).padStart(2, '0')).join('')
+  } catch {
+    return Array.from({ length: 6 }, () => Math.floor(Math.random() * 16).toString(16)).join('')
   }
-  return rows
-})()
-
-const PRECEDENT_CODES_LAWYER_ROW_ORG: { key: string; description: string }[] = [
-  { key: 'COMPANY_NAME', description: 'Registered company name' },
-  { key: 'TRADING_NAME', description: 'Trading name' },
-]
-
-/** Extra fields on each lawyer-linked client (beyond TITLE … TRADING_NAME). */
-const PRECEDENT_CODES_LAWYER_LINKED_CLIENT_EXTRA: { key: string; description: string }[] = [
-  { key: 'NAME', description: 'Display name on the contact card' },
-  { key: 'TYPE', description: 'person or organisation' },
-  { key: 'EMAIL', description: 'Email' },
-  { key: 'PHONE', description: 'Phone' },
-  { key: 'ADDR1', description: 'Address line 1' },
-  { key: 'ADDR2', description: 'Address line 2' },
-  { key: 'ADDR3', description: 'Town / city' },
-  { key: 'ADDR4', description: 'County' },
-  { key: 'POSTCODE', description: 'Postcode' },
-  { key: 'COUNTRY', description: 'Country' },
-  { key: 'MATTER_REFERENCE', description: 'Matter-specific reference on this case' },
-  { key: 'MATTER_CONTACT_TYPE', description: 'Matter contact type label on this case' },
-]
-
-const PRECEDENT_CODES_LAWYER: { code: string; description: string }[] = (() => {
-  const rows: { code: string; description: string }[] = []
-  for (let li = 1; li <= 4; li++) {
-    for (const row of PRECEDENT_CODES_LAWYER_ROW_ORG) {
-      rows.push({
-        code: `[LAWYER_${li}_${row.key}]`,
-        description: `Lawyer ${li}: ${row.description} (among 'Lawyers' matter contacts, by date added; lawyers are organisation contacts)`,
-      })
-    }
-    for (let cj = 1; cj <= 4; cj++) {
-      for (const row of PRECEDENT_CODES_EXTRA_CLIENT_FIELDS) {
-        rows.push({
-          code: `[LAWYER_${li}_CLIENT_${cj}_${row.key}]`,
-          description: `Lawyer ${li}'s linked client ${cj}: ${row.description}`,
-        })
-      }
-      for (const row of PRECEDENT_CODES_LAWYER_LINKED_CLIENT_EXTRA) {
-        rows.push({
-          code: `[LAWYER_${li}_CLIENT_${cj}_${row.key}]`,
-          description: `Lawyer ${li}'s linked client ${cj}: ${row.description} (Case matter contact)`,
-        })
-      }
-    }
-  }
-  const aliasFields = [...PRECEDENT_CODES_EXTRA_CLIENT_FIELDS, ...PRECEDENT_CODES_LAWYER_LINKED_CLIENT_EXTRA]
-  for (let cj = 1; cj <= 4; cj++) {
-    for (const row of aliasFields) {
-      rows.push({
-        code: `[LAWYER_CONTACT_CLIENT_${cj}_${row.key}]`,
-        description: `Same as [LAWYER_1_CLIENT_${cj}_${row.key}]: first 'Lawyers' matter contact’s linked client ${cj} (by date added among Lawyers contacts).`,
-      })
-    }
-  }
-  return rows
-})()
-
-/** Selected in compose dialogue — always the contact picked when generating from a precedent (works with “merge all clients”). */
-const PRECEDENT_CODES_COMPOSE_CONTACT: { code: string; description: string }[] = (() => {
-  const rows: { code: string; description: string }[] = []
-  const head: [string, string][] = [
-    ['CONTACT_NAME', 'Display name on the contact card'],
-    ['CONTACT_TYPE', 'person or organisation'],
-    ['CONTACT_EMAIL', 'Email'],
-    ['CONTACT_PHONE', 'Phone'],
-    ['CONTACT_ADDR1', 'Address line 1'],
-    ['CONTACT_ADDR2', 'Address line 2'],
-    ['CONTACT_ADDR3', 'Town / city'],
-    ['CONTACT_ADDR4', 'County'],
-    ['CONTACT_POSTCODE', 'Postcode'],
-    ['CONTACT_COUNTRY', 'Country'],
-    [
-      'CONTACT_MATTER_REFERENCE',
-      'Matter-specific reference (case contact snapshot only; empty for a global directory contact)',
-    ],
-    [
-      'CONTACT_MATTER_CONTACT_TYPE',
-      'Matter contact type label on this case (case contact only; empty for a global directory contact)',
-    ],
-  ]
-  for (const [suffix, desc] of head) {
-    rows.push({
-      code: `[${suffix}]`,
-      description: `Selected contact for this compose: ${desc}. Empty if no contact was chosen in the dialogue.`,
-    })
-  }
-  for (const row of PRECEDENT_CODES_EXTRA_CLIENT_FIELDS) {
-    rows.push({
-      code: `[CONTACT_${row.key}]`,
-      description:
-        `Selected contact for this compose: ${row.description} — always the contact picked when creating the letter or document ` +
-        `(including when “merge all clients” fills [${row.key}] from a different client).`,
-    })
-  }
-  return rows
-})()
-
-const PRECEDENT_CODES: { code: string; description: string }[] = [
-  { code: '[TITLE]',          description: 'Title (Mr / Mrs / Dr etc.)' },
-  { code: '[FIRST_NAME]',     description: 'First name' },
-  { code: '[FIRST_INITIAL]',  description: 'First initial (e.g. J)' },
-  { code: '[MIDDLE_NAME]',    description: 'Middle name' },
-  { code: '[MIDDLE_INITIAL]', description: 'Middle initial' },
-  { code: '[LAST_NAME]',      description: 'Surname' },
-  { code: '[LAST_INITIAL]',   description: 'Surname initial' },
-  { code: '[COMPANY_NAME]',   description: 'Registered company name (falls back to display name for organisations)' },
-  { code: '[TRADING_NAME]',   description: 'Trading name' },
-  { code: '[ADDR1]',          description: 'Address line 1' },
-  { code: '[ADDR2]',          description: 'Address line 2' },
-  { code: '[ADDR3]',          description: 'Town / city' },
-  { code: '[ADDR4]',          description: 'County' },
-  { code: '[POSTCODE]',       description: 'Postcode' },
-  { code: '[MATTER_DESCRIPTION]', description: 'Matter description' },
-  { code: '[CASE_REF]',       description: 'Case reference number' },
-  { code: '[DATE]',           description: "Today's date when the document is generated (DD/MM/YYYY)" },
-  { code: '[FEE_EARNER]',     description: 'Fee earner (name from the case fee earner)' },
-  { code: '[FEE_EARNER_JOB_TITLE]', description: 'Fee earner job title (from the case fee earner user)' },
-  { code: '[CONTACT_REF]',    description: "Contact's reference (as stored in canary)" },
-  ...PRECEDENT_CODES_EXTRA_CLIENTS,
-  ...PRECEDENT_CODES_LAWYER,
-  ...PRECEDENT_CODES_COMPOSE_CONTACT,
-]
+}
 
 function PrecedentNamePencilIcon() {
   return (
@@ -2423,13 +2528,22 @@ function AdminPrecedents({ token }: { token: string }) {
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const [name, setName] = useState('')
-  const [reference, setReference] = useState('')
+  const [reference, setReference] = useState(() => suggestedPrecedentReferenceHex())
   const [kind, setKind] = useState<'letter' | 'email' | 'document'>('letter')
   const [file, setFile] = useState<File | null>(null)
-  const [showCodes, setShowCodes] = useState(false)
+  const [mergePanelOpen, setMergePanelOpen] = useState(false)
+  const [mergeRows, setMergeRows] = useState<MergeCodeCatalogOut[]>([])
+  const [mergeLoading, setMergeLoading] = useState(false)
+  const [mergeSaving, setMergeSaving] = useState(false)
+  const [mergeFilter, setMergeFilter] = useState('')
+  const [mergeImportKey, setMergeImportKey] = useState(0)
+  const [mergeMsg, setMergeMsg] = useState<string | null>(null)
   const [nameEditId, setNameEditId] = useState<string | null>(null)
   const [nameDraft, setNameDraft] = useState('')
   const precedentNameInputRef = useRef<HTMLInputElement | null>(null)
+  const [firmSettings, setFirmSettings] = useState<FirmSettingsOut | null>(null)
+  const [lhBusy, setLhBusy] = useState(false)
+  const [lhFileKey, setLhFileKey] = useState(0)
 
   const matterTypeOptions = useMemo(
     () => matterHeads.map((h) => ({ id: h.id, label: h.name })),
@@ -2450,6 +2564,14 @@ function AdminPrecedents({ token }: { token: string }) {
     if (uploadSubTypeId === GLOBAL_PRECEDENT_SCOPE) return true
     return Boolean(uploadCategoryId)
   }, [uploadHeadTypeId, headIsGlobal, uploadSubTypeId, uploadCategoryId])
+
+  const mergeFiltered = useMemo(() => {
+    const q = mergeFilter.trim().toLowerCase()
+    if (!q) return mergeRows
+    return mergeRows.filter(
+      (r) => r.code.toLowerCase().includes(q) || r.description.toLowerCase().includes(q),
+    )
+  }, [mergeRows, mergeFilter])
 
   useEffect(() => {
     if (
@@ -2481,12 +2603,14 @@ function AdminPrecedents({ token }: { token: string }) {
     setBusy(true)
     setErr(null)
     try {
-      const [data, heads] = await Promise.all([
+      const [data, heads, firm] = await Promise.all([
         apiFetch<PrecedentOut[]>('/precedents', { token }),
         apiFetch<MatterHeadTypeOut[]>('/matter-types', { token }),
+        apiFetch<FirmSettingsOut>('/admin/firm-settings', { token }),
       ])
       setItems(data)
       setMatterHeads(heads)
+      setFirmSettings(firm)
     } catch (e: any) {
       setErr(e?.message ?? 'Failed to load precedents')
     } finally {
@@ -2494,9 +2618,146 @@ function AdminPrecedents({ token }: { token: string }) {
     }
   }
 
+  async function loadMergeCatalog() {
+    setMergeLoading(true)
+    setMergeMsg(null)
+    try {
+      const rows = await apiFetch<MergeCodeCatalogOut[]>('/admin/merge-codes', { token })
+      setMergeRows(rows)
+    } catch (e2: unknown) {
+      setErr((e2 as ApiError)?.message ?? 'Could not load merge codes')
+    } finally {
+      setMergeLoading(false)
+    }
+  }
+
+  async function saveMergeCatalog() {
+    setMergeSaving(true)
+    setMergeMsg(null)
+    setErr(null)
+    try {
+      const rows = await apiFetch<MergeCodeCatalogOut[]>('/admin/merge-codes', {
+        token,
+        method: 'PATCH',
+        json: { items: mergeRows.map((r) => ({ code: r.code, description: r.description })) },
+      })
+      setMergeRows(rows)
+      setMergeMsg(`Saved ${rows.length} codes.`)
+    } catch (e2: unknown) {
+      setErr((e2 as ApiError)?.message ?? 'Save merge codes failed')
+    } finally {
+      setMergeSaving(false)
+    }
+  }
+
+  async function exportMergeCatalog() {
+    setMergeMsg(null)
+    try {
+      const auth = String(token ?? '').trim()
+      if (!auth) throw new Error('You are not signed in. Refresh the page and log in again.')
+      const xh = new Headers()
+      applyAuthHeaders(xh, auth)
+      const res = await fetch(apiUrl('/admin/merge-codes/export.xlsx'), { headers: xh })
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        const msg = typeof body?.detail === 'string' ? body.detail : `Export failed (${res.status})`
+        throw new Error(msg)
+      }
+      const blob = await res.blob()
+      const a = document.createElement('a')
+      a.href = URL.createObjectURL(blob)
+      a.download = 'canary-merge-codes.xlsx'
+      a.click()
+      URL.revokeObjectURL(a.href)
+      setMergeMsg('Download started.')
+    } catch (e2: unknown) {
+      setErr((e2 as Error)?.message ?? 'Export failed')
+    }
+  }
+
+  async function importMergeCatalogFile(f: File) {
+    setMergeSaving(true)
+    setMergeMsg(null)
+    setErr(null)
+    try {
+      const fd = new FormData()
+      fd.append('upload', f)
+      const body = await apiFetch<MergeCodeCatalogImportResult>('/admin/merge-codes/import', {
+        token,
+        method: 'POST',
+        body: fd,
+      })
+      setMergeMsg(
+        `Import: updated ${body.updated ?? 0} row(s); ${body.skipped_unknown ?? 0} unknown code(s) skipped.`,
+      )
+      await loadMergeCatalog()
+      setMergeImportKey((k) => k + 1)
+    } catch (e2: unknown) {
+      setErr((e2 as Error)?.message ?? 'Import failed')
+    } finally {
+      setMergeSaving(false)
+    }
+  }
+
   useEffect(() => {
     void load()
-  }, [])
+  }, [token])
+
+  useEffect(() => {
+    if (mergePanelOpen) void loadMergeCatalog()
+  }, [mergePanelOpen, token])
+
+  async function patchLetterheadStyle(next: LetterheadStyle) {
+    setLhBusy(true)
+    setErr(null)
+    try {
+      await apiFetch<FirmSettingsOut>('/admin/firm-settings', {
+        token,
+        method: 'PATCH',
+        json: { letterhead_style: next },
+      })
+      await load()
+    } catch (e2: unknown) {
+      setErr((e2 as ApiError)?.message ?? 'Could not update letterhead mode')
+    } finally {
+      setLhBusy(false)
+    }
+  }
+
+  async function uploadLetterheadFile(f: File) {
+    setLhBusy(true)
+    setErr(null)
+    try {
+      const fd = new FormData()
+      fd.append('upload', f)
+      const body = await apiFetch<FirmSettingsOut>('/admin/firm-settings/letterhead', {
+        token,
+        method: 'POST',
+        body: fd,
+      })
+      setFirmSettings(body)
+      await load()
+      setLhFileKey((k) => k + 1)
+    } catch (e2: unknown) {
+      setErr((e2 as Error)?.message ?? 'Letterhead upload failed')
+    } finally {
+      setLhBusy(false)
+    }
+  }
+
+  async function clearLetterheadFile() {
+    setLhBusy(true)
+    setErr(null)
+    try {
+      await apiFetch<FirmSettingsOut>('/admin/firm-settings/letterhead', { token, method: 'DELETE' })
+      await load()
+      setLhFileKey((k) => k + 1)
+    } catch (e2: unknown) {
+      setErr((e2 as ApiError)?.message ?? 'Could not remove letterhead file')
+    } finally {
+      setLhBusy(false)
+    }
+  }
 
   useEffect(() => {
     if (uploadHeadTypeId === GLOBAL_PRECEDENT_SCOPE) {
@@ -2550,6 +2811,74 @@ function AdminPrecedents({ token }: { token: string }) {
         </button>
       </div>
       {err ? <div className="error">{err}</div> : null}
+
+      <div className="card" style={{ padding: 12, marginBottom: 16 }}>
+        <h4 style={{ marginTop: 0 }}>Letterhead (Letter precedents only)</h4>
+        <div className="muted" style={{ marginBottom: 12 }}>
+          <strong>Digital</strong> copies the uploaded .docx <strong>headers and footers</strong> into each{' '}
+          <strong>Letter</strong> precedent before merge codes run. Keep logos and firm blocks in the header/footer so the
+          letter body can sit on page 1 underneath. <strong>Pre-printed</strong> skips any overlay (headed stationery).
+          Images in digital letterheads may not resolve until we add full media package merging.
+        </div>
+        {firmSettings ? (
+          <div className="stack" style={{ gap: 10 }}>
+            <div className="row" style={{ gap: 16, flexWrap: 'wrap', alignItems: 'center' }}>
+              <label className="row" style={{ gap: 6, alignItems: 'center', cursor: lhBusy ? 'default' : 'pointer' }}>
+                <input
+                  type="radio"
+                  name="letterhead-style"
+                  checked={firmSettings.letterhead_style === 'preprinted'}
+                  disabled={lhBusy}
+                  onChange={() => void patchLetterheadStyle('preprinted')}
+                />
+                Pre-printed
+              </label>
+              <label className="row" style={{ gap: 6, alignItems: 'center', cursor: lhBusy ? 'default' : 'pointer' }}>
+                <input
+                  type="radio"
+                  name="letterhead-style"
+                  checked={firmSettings.letterhead_style === 'digital'}
+                  disabled={lhBusy}
+                  onChange={() => void patchLetterheadStyle('digital')}
+                />
+                Digital
+              </label>
+            </div>
+            {firmSettings.letterhead_style === 'digital' ? (
+              <div className="row" style={{ gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+                <label className="btn" style={{ cursor: lhBusy ? 'not-allowed' : 'pointer' }}>
+                  Browse…
+                  <input
+                    key={lhFileKey}
+                    type="file"
+                    accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                    disabled={lhBusy}
+                    style={{ display: 'none' }}
+                    onChange={(ev) => {
+                      const f = ev.target.files?.[0]
+                      ev.target.value = ''
+                      if (f) void uploadLetterheadFile(f)
+                    }}
+                  />
+                </label>
+                <span className="muted">
+                  {firmSettings.letterhead_original_filename
+                    ? `Current file: ${firmSettings.letterhead_original_filename}`
+                    : 'No .docx uploaded yet.'}
+                </span>
+                {firmSettings.letterhead_original_filename ? (
+                  <button type="button" className="btn danger" disabled={lhBusy} onClick={() => void clearLetterheadFile()}>
+                    Remove letterhead file
+                  </button>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
+        ) : (
+          <div className="muted">Loading letterhead settings…</div>
+        )}
+      </div>
+
       <div className="card" style={{ padding: 12 }}>
         <div className="muted" style={{ marginBottom: 8 }}>
           Upload a template. Choose <strong>Global</strong> at any level to widen availability: <strong>Matter type</strong>{' '}
@@ -2565,7 +2894,33 @@ function AdminPrecedents({ token }: { token: string }) {
           </label>
           <label className="field">
             <span>Reference</span>
-            <input value={reference} onChange={(e) => setReference(e.target.value)} />
+            <div className="row" style={{ gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+              <input
+                className="mono"
+                value={reference}
+                onChange={(e) => setReference(e.target.value)}
+                maxLength={200}
+                required
+                aria-required
+                autoComplete="off"
+                spellCheck={false}
+                placeholder="e.g. a1f9c2"
+                title="Required. Must be unique among precedents."
+              />
+              <button
+                type="button"
+                className="btn"
+                disabled={busy}
+                title="Replace with another random 6-character hex"
+                onClick={() => setReference(suggestedPrecedentReferenceHex())}
+              >
+                New suggestion
+              </button>
+            </div>
+            <span className="muted" style={{ fontSize: 12, marginTop: 4, display: 'block' }}>
+              Required for every custom precedent. A random 6-character hex is suggested; change it if you prefer. Must be
+              unique.
+            </span>
           </label>
           <label className="field">
             <span>Type</span>
@@ -2712,24 +3067,12 @@ function AdminPrecedents({ token }: { token: string }) {
                 fd.set('matter_sub_type_id', ms)
                 fd.set('category_id', mc)
                 fd.set('upload', file)
-                const res = await fetch(apiUrl('/precedents'), {
-                  method: 'POST',
-                  headers: { Authorization: `Bearer ${token}` },
-                  body: fd,
-                })
-                if (!res.ok) {
-                  const raw = await res.text()
-                  let parsed: unknown = null
-                  try {
-                    parsed = raw ? JSON.parse(raw) : null
-                  } catch {
-                    parsed = raw
-                  }
-                  const statusFallback = (res.statusText || '').trim() || `HTTP ${res.status}`
-                  throw new Error(formatApiErrorDetail(parsed, statusFallback))
+                if (!String(token ?? '').trim()) {
+                  throw new Error('You are not signed in or your session token is empty. Refresh the page and log in again.')
                 }
+                await apiFetch<PrecedentOut>('/precedents', { token, method: 'POST', body: fd })
                 setName('')
-                setReference('')
+                setReference(suggestedPrecedentReferenceHex())
                 setFile(null)
                 setFileInputKey((k) => k + 1)
                 await load()
@@ -2747,33 +3090,166 @@ function AdminPrecedents({ token }: { token: string }) {
       <div className="card" style={{ padding: 12 }}>
         <div
           className="row"
-          style={{ justifyContent: 'space-between', alignItems: 'center', marginBottom: showCodes ? 8 : 0 }}
+          style={{ justifyContent: 'space-between', alignItems: 'center', marginBottom: mergePanelOpen ? 8 : 0 }}
         >
-          <span className="muted" style={{ fontSize: 13 }}>Merge codes — insert into templates to auto-populate contact details</span>
-          <button type="button" className="btn" style={{ fontSize: 12 }} onClick={() => setShowCodes((v) => !v)}>
-            {showCodes ? 'Hide codes' : 'Show codes'}
+          <span className="muted" style={{ fontSize: 13 }}>
+            Merge codes — stored in the database; edit descriptions here or round-trip via Excel. Codes themselves come from
+            Canary releases (sync on startup).
+          </span>
+          <button
+            type="button"
+            className="btn"
+            style={{ fontSize: 12 }}
+            onClick={() => {
+              setMergePanelOpen((v) => !v)
+              if (mergePanelOpen) setMergeMsg(null)
+            }}
+          >
+            {mergePanelOpen ? 'Hide' : 'View/Edit'}
           </button>
         </div>
-        {showCodes ? (
-          <table
-            className="allow-select"
-            style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}
-          >
-            <thead>
-              <tr>
-                <th style={{ textAlign: 'left', paddingBottom: 4, borderBottom: '1px solid #e2e8f0' }}>Code</th>
-                <th style={{ textAlign: 'left', paddingBottom: 4, borderBottom: '1px solid #e2e8f0' }}>Inserts</th>
-              </tr>
-            </thead>
-            <tbody>
-              {PRECEDENT_CODES.map(({ code, description }) => (
-                <tr key={code}>
-                  <td style={{ padding: '3px 8px 3px 0', fontFamily: 'monospace', color: '#0f172a' }}>{code}</td>
-                  <td style={{ padding: '3px 0', color: '#475569' }}>{description}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        {mergePanelOpen ? (
+          <div className="stack" style={{ gap: 10 }}>
+            <div className="row" style={{ gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+              <label className="field" style={{ flex: '1 1 220px', marginBottom: 0 }}>
+                <span className="muted" style={{ fontSize: 12 }}>
+                  Filter
+                </span>
+                <input
+                  value={mergeFilter}
+                  onChange={(e) => setMergeFilter(e.target.value)}
+                  placeholder="Code or description…"
+                  disabled={mergeLoading || mergeSaving}
+                />
+              </label>
+              <button
+                type="button"
+                className="btn primary"
+                disabled={mergeLoading || mergeSaving || mergeRows.length === 0}
+                onClick={() => void saveMergeCatalog()}
+              >
+                Save descriptions
+              </button>
+              <button
+                type="button"
+                className="btn"
+                disabled={mergeLoading || mergeSaving}
+                onClick={() => void exportMergeCatalog()}
+              >
+                Export Excel
+              </button>
+              <label className="btn" style={{ cursor: mergeSaving ? 'not-allowed' : 'pointer' }}>
+                Import Excel…
+                <input
+                  key={mergeImportKey}
+                  type="file"
+                  accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                  disabled={mergeSaving}
+                  style={{ display: 'none' }}
+                  onChange={(ev) => {
+                    const f = ev.target.files?.[0]
+                    ev.target.value = ''
+                    if (f) void importMergeCatalogFile(f)
+                  }}
+                />
+              </label>
+              <button
+                type="button"
+                className="btn"
+                disabled={mergeLoading}
+                onClick={() => void loadMergeCatalog()}
+              >
+                Reload
+              </button>
+            </div>
+            {mergeMsg ? <div className="muted" style={{ fontSize: 13 }}>{mergeMsg}</div> : null}
+            {mergeLoading ? (
+              <div className="muted">Loading merge codes…</div>
+            ) : (
+              <div
+                style={{
+                  maxHeight: 420,
+                  overflow: 'auto',
+                  border: '1px solid var(--border)',
+                  borderRadius: 6,
+                  background: 'var(--panel)',
+                }}
+              >
+                <table
+                  className="allow-select"
+                  style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}
+                >
+                  <thead style={{ position: 'sticky', top: 0, background: 'var(--panel2)', zIndex: 1 }}>
+                    <tr>
+                      <th
+                        style={{
+                          textAlign: 'left',
+                          padding: '8px',
+                          borderBottom: '1px solid var(--border)',
+                          width: '22%',
+                          color: 'var(--text)',
+                          fontWeight: 600,
+                        }}
+                      >
+                        Code
+                      </th>
+                      <th
+                        style={{
+                          textAlign: 'left',
+                          padding: '8px',
+                          borderBottom: '1px solid var(--border)',
+                          color: 'var(--text)',
+                          fontWeight: 600,
+                        }}
+                      >
+                        Description (editable)
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {mergeFiltered.map((r) => (
+                      <tr key={r.code}>
+                        <td
+                          style={{
+                            padding: '6px 8px',
+                            fontFamily: 'monospace',
+                            color: 'var(--text)',
+                            verticalAlign: 'top',
+                            borderBottom: '1px solid var(--border)',
+                          }}
+                        >
+                          {r.code}
+                        </td>
+                        <td style={{ padding: '4px 8px', borderBottom: '1px solid var(--border)' }}>
+                          <textarea
+                            value={r.description}
+                            rows={2}
+                            disabled={mergeSaving}
+                            style={{ width: '100%', resize: 'vertical', fontFamily: 'inherit', fontSize: 13 }}
+                            onChange={(e) => {
+                              const v = e.target.value
+                              setMergeRows((prev) => prev.map((x) => (x.code === r.code ? { ...x, description: v } : x)))
+                            }}
+                          />
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {mergeFiltered.length === 0 && mergeRows.length > 0 ? (
+                  <div className="muted" style={{ padding: 12 }}>
+                    No rows match the filter.
+                  </div>
+                ) : null}
+                {!mergeLoading && mergeRows.length === 0 ? (
+                  <div className="muted" style={{ padding: 12 }}>
+                    No catalog rows yet — ensure the backend has run a migration and restarted so merge codes sync from the
+                    server defaults.
+                  </div>
+                ) : null}
+              </div>
+            )}
+          </div>
         ) : null}
       </div>
       <div className="list">
@@ -2879,7 +3355,17 @@ function AdminPrecedents({ token }: { token: string }) {
   )
 }
 
-function UserSettingsPage({ token, refreshMe }: { token: string; refreshMe: () => Promise<void> }) {
+function UserSettingsPage({
+  token,
+  refreshMe,
+  applySessionToken,
+  securitySetupOnly,
+}: {
+  token: string
+  refreshMe: () => Promise<void>
+  applySessionToken: (accessToken: string) => void
+  securitySetupOnly?: boolean
+}) {
   const { askConfirm } = useDialogs()
   const [appFont, setAppFont] = useState(() => getThemePreferences().font)
   const [appAccent, setAppAccent] = useState(() => getThemePreferences().accent)
@@ -2912,6 +3398,10 @@ function UserSettingsPage({ token, refreshMe }: { token: string; refreshMe: () =
   const [cancelSetupPwd, setCancelSetupPwd] = useState('')
   const [accountLoadErr, setAccountLoadErr] = useState<string | null>(null)
 
+  const [passkeys, setPasskeys] = useState<WebAuthnCredentialOut[]>([])
+  const [pkErr, setPkErr] = useState<string | null>(null)
+  const [pkLabel, setPkLabel] = useState('')
+
   const [emailPref, setEmailPref] = useState<'desktop' | 'outlook_web'>('desktop')
   const [outlookUrl, setOutlookUrl] = useState(DEFAULT_OUTLOOK_WEB_MAIL_URL)
   const [emailSaveErr, setEmailSaveErr] = useState<string | null>(null)
@@ -2929,12 +3419,25 @@ function UserSettingsPage({ token, refreshMe }: { token: string; refreshMe: () =
       setAccount(null)
       setAccountLoadErr((e as ApiError).message ?? 'Failed to load account')
     }
-    try {
-      const st = await apiFetch<UserCalDAVStatusOut>('/users/me/calendar', { token })
-      setCaldav(st)
-    } catch (e: unknown) {
+    if (!securitySetupOnly) {
+      try {
+        const st = await apiFetch<UserCalDAVStatusOut>('/users/me/calendar', { token })
+        setCaldav(st)
+      } catch (e: unknown) {
+        setCaldav(null)
+        setCaldavLoadErr((e as ApiError).message ?? 'Failed to load CalDAV status')
+      }
+    } else {
       setCaldav(null)
-      setCaldavLoadErr((e as ApiError).message ?? 'Failed to load CalDAV status')
+      setCaldavLoadErr(null)
+    }
+    try {
+      const rows = await apiFetch<WebAuthnCredentialOut[]>('/auth/webauthn/credentials', { token })
+      setPasskeys(rows)
+      setPkErr(null)
+    } catch (e: unknown) {
+      setPasskeys([])
+      setPkErr((e as ApiError).message ?? 'Could not load passkeys')
     } finally {
       setBusy(false)
     }
@@ -2942,7 +3445,7 @@ function UserSettingsPage({ token, refreshMe }: { token: string; refreshMe: () =
 
   useEffect(() => {
     void load()
-  }, [token])
+  }, [token, securitySetupOnly])
 
   useEffect(() => {
     if (!account) return
@@ -3027,12 +3530,13 @@ function UserSettingsPage({ token, refreshMe }: { token: string; refreshMe: () =
     }
     setSecBusy(true)
     try {
-      const me = await apiFetch<UserPublic>('/auth/2fa/verify', {
+      const res = await apiFetch<Verify2FASessionResponse>('/auth/2fa/verify', {
         method: 'POST',
         token,
         json: { code },
       })
-      setAccount(me)
+      applySessionToken(res.access_token)
+      setAccount(res.user)
       setFaSetup(null)
       setFaCode('')
       setFaOk(true)
@@ -3059,6 +3563,7 @@ function UserSettingsPage({ token, refreshMe }: { token: string; refreshMe: () =
       const me = await apiFetch<UserPublic>('/auth/me', { token })
       setAccount(me)
       setFaOk(true)
+      await refreshMe()
     } catch (e: unknown) {
       setFaErr((e as ApiError).message ?? 'Could not disable 2FA')
     } finally {
@@ -3081,8 +3586,39 @@ function UserSettingsPage({ token, refreshMe }: { token: string; refreshMe: () =
       setFaCode('')
       const me = await apiFetch<UserPublic>('/auth/me', { token })
       setAccount(me)
+      await refreshMe()
     } catch (e: unknown) {
       setFaErr((e as ApiError).message ?? 'Could not cancel setup')
+    } finally {
+      setSecBusy(false)
+    }
+  }
+
+  async function registerPasskey() {
+    setPkErr(null)
+    setFaErr(null)
+    setSecBusy(true)
+    try {
+      const options = await apiFetch<PublicKeyCredentialCreationOptionsJSON>('/auth/webauthn/register/begin', {
+        method: 'POST',
+        token,
+      })
+      const att = await startRegistration({ optionsJSON: options })
+      const session = await apiFetch<TokenResponse>('/auth/webauthn/register/finish', {
+        method: 'POST',
+        token,
+        json: { credential: att, label: pkLabel.trim() || null },
+      })
+      applySessionToken(session.access_token)
+      setPkLabel('')
+      const rows = await apiFetch<WebAuthnCredentialOut[]>('/auth/webauthn/credentials', {
+        token: session.access_token,
+      })
+      setPasskeys(rows)
+      const me = await apiFetch<UserPublic>('/auth/me', { token: session.access_token })
+      setAccount(me)
+    } catch (e: unknown) {
+      setPkErr((e as ApiError).message ?? 'Could not register passkey')
     } finally {
       setSecBusy(false)
     }
@@ -3095,9 +3631,11 @@ function UserSettingsPage({ token, refreshMe }: { token: string; refreshMe: () =
     >
       <div className="paneHead">
         <div>
-          <h2 style={{ margin: 0 }}>User settings</h2>
+          <h2 style={{ margin: 0 }}>{securitySetupOnly ? 'Security setup' : 'User settings'}</h2>
           <div className="muted" style={{ marginTop: 4 }}>
-            Preferences for your account: appearance, sign-in security, e-mail launcher, and calendar sync.
+            {securitySetupOnly
+              ? 'Your organisation requires an authenticator app (2FA) or at least one passkey. Complete either option below.'
+              : 'Preferences for your account: appearance, sign-in security, e-mail launcher, and calendar sync.'}
           </div>
         </div>
         <button type="button" className="btn" onClick={() => void load()} disabled={busy}>
@@ -3106,6 +3644,7 @@ function UserSettingsPage({ token, refreshMe }: { token: string; refreshMe: () =
       </div>
       <div style={{ flex: 1, minHeight: 0, marginTop: 12, overflow: 'auto' }} className="stack">
         {accountLoadErr ? <div className="error">{accountLoadErr}</div> : null}
+        {!securitySetupOnly ? (
         <section className="card" style={{ padding: 16 }}>
           <h3 style={{ marginTop: 0 }}>Appearance</h3>
           <p className="muted" style={{ marginTop: 0 }}>
@@ -3310,63 +3849,74 @@ function UserSettingsPage({ token, refreshMe }: { token: string; refreshMe: () =
             </div>
           </div>
         </section>
+        ) : null}
 
-        <section className="card" style={{ padding: 16, marginTop: 16 }}>
-          <h3 style={{ marginTop: 0 }}>Password &amp; two-factor authentication</h3>
+        <section className="card" style={{ padding: 16, marginTop: securitySetupOnly ? 0 : 16 }}>
+          <h3 style={{ marginTop: 0 }}>
+            {securitySetupOnly ? 'Authenticator & passkeys' : 'Password & two-factor authentication'}
+          </h3>
           <p className="muted" style={{ marginTop: 0 }}>
-            Change your Canary login password. Optional TOTP (authenticator app) adds a second step at sign-in.
+            {securitySetupOnly
+              ? 'Enable an authenticator app or register a passkey — either option satisfies your organisation’s requirement.'
+              : 'Change your Canary login password. Optional 2FA (authenticator app) or passkeys add a second step at sign-in.'}
           </p>
 
-          <h4 style={{ margin: '16px 0 8px', fontSize: '1rem', fontWeight: 600 }}>Change password</h4>
-          <div className="stack" style={{ maxWidth: 480, gap: 10 }}>
-            <label className="field">
-              <span>Current password</span>
-              <input
-                type="password"
-                autoComplete="current-password"
-                value={pwdCurrent}
-                onChange={(e) => setPwdCurrent(e.target.value)}
-                disabled={busy || secBusy}
-              />
-            </label>
-            <label className="field">
-              <span>New password</span>
-              <input
-                type="password"
-                autoComplete="new-password"
-                value={pwdNew}
-                onChange={(e) => setPwdNew(e.target.value)}
-                disabled={busy || secBusy}
-              />
-            </label>
-            <label className="field">
-              <span>Confirm new password</span>
-              <input
-                type="password"
-                autoComplete="new-password"
-                value={pwdConfirm}
-                onChange={(e) => setPwdConfirm(e.target.value)}
-                disabled={busy || secBusy}
-              />
-            </label>
-            <div className="muted" style={{ fontSize: 13 }}>
-              At least 12 characters.
-            </div>
-            {pwdErr ? <div className="error">{pwdErr}</div> : null}
-            {pwdOk ? <div className="muted">Password updated.</div> : null}
-            <div className="row" style={{ gap: 8 }}>
-              <button
-                type="button"
-                className="btn primary"
-                disabled={busy || secBusy || !pwdCurrent || !pwdNew}
-                onClick={() => void submitPasswordChange()}
-              >
-                Update password
-              </button>
-            </div>
-          </div>
+          {!securitySetupOnly ? (
+            <>
+              <h4 style={{ margin: '16px 0 8px', fontSize: '1rem', fontWeight: 600 }}>Change password</h4>
+              <div className="stack" style={{ maxWidth: 480, gap: 10 }}>
+                <label className="field">
+                  <span>Current password</span>
+                  <input
+                    type="password"
+                    autoComplete="current-password"
+                    value={pwdCurrent}
+                    onChange={(e) => setPwdCurrent(e.target.value)}
+                    disabled={busy || secBusy}
+                  />
+                </label>
+                <label className="field">
+                  <span>New password</span>
+                  <input
+                    type="password"
+                    autoComplete="new-password"
+                    value={pwdNew}
+                    onChange={(e) => setPwdNew(e.target.value)}
+                    disabled={busy || secBusy}
+                  />
+                </label>
+                <label className="field">
+                  <span>Confirm new password</span>
+                  <input
+                    type="password"
+                    autoComplete="new-password"
+                    value={pwdConfirm}
+                    onChange={(e) => setPwdConfirm(e.target.value)}
+                    disabled={busy || secBusy}
+                  />
+                </label>
+                <div className="muted" style={{ fontSize: 13 }}>
+                  At least 12 characters.
+                </div>
+                {pwdErr ? <div className="error">{pwdErr}</div> : null}
+                {pwdOk ? <div className="muted">Password updated.</div> : null}
+                <div className="row" style={{ gap: 8 }}>
+                  <button
+                    type="button"
+                    className="btn primary"
+                    disabled={busy || secBusy || !pwdCurrent || !pwdNew}
+                    onClick={() => void submitPasswordChange()}
+                  >
+                    Update password
+                  </button>
+                </div>
+              </div>
+            </>
+          ) : null}
 
-          <h4 style={{ margin: '20px 0 8px', fontSize: '1rem', fontWeight: 600 }}>Authenticator (TOTP / 2FA)</h4>
+          <h4 style={{ margin: securitySetupOnly ? '0 0 8px' : '20px 0 8px', fontSize: '1rem', fontWeight: 600 }}>
+            Authenticator (2FA)
+          </h4>
           <p className="muted" style={{ marginTop: 0, fontSize: 13 }}>
             Status:{' '}
             <strong>{account?.is_2fa_enabled ? 'Enabled' : 'Not enabled'}</strong>
@@ -3507,8 +4057,83 @@ function UserSettingsPage({ token, refreshMe }: { token: string; refreshMe: () =
               </div>
             </div>
           )}
+
+          <h4 style={{ margin: '24px 0 8px', fontSize: '1rem', fontWeight: 600 }}>Passkeys</h4>
+          <p className="muted" style={{ marginTop: 0, fontSize: 13 }}>
+            Passkeys let you sign in with your device (Face ID, Touch ID, Windows Hello, or a security key). You can register
+            several and remove ones you no longer use.
+          </p>
+          {pkErr ? <div className="error">{pkErr}</div> : null}
+          <div className="stack" style={{ maxWidth: 520, gap: 10, marginTop: 8 }}>
+            <label className="field">
+              <span className="muted" style={{ fontSize: 12 }}>
+                Label (optional)
+              </span>
+              <input
+                value={pkLabel}
+                onChange={(e) => setPkLabel(e.target.value)}
+                disabled={busy || secBusy}
+                maxLength={200}
+              />
+            </label>
+            <button
+              type="button"
+              className="btn primary"
+              disabled={busy || secBusy}
+              onClick={() => void registerPasskey()}
+            >
+              Register new passkey
+            </button>
+          </div>
+          <div className="list" style={{ marginTop: 12 }}>
+            {passkeys.map((pk) => (
+              <div key={pk.id} className="listCard row" style={{ justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
+                <div>
+                  <div className="listTitle">{pk.label?.trim() || 'Passkey'}</div>
+                  <div className="muted" style={{ fontSize: 12 }}>
+                    Added {formatTs(pk.created_at)}
+                    {pk.transports ? ` · ${pk.transports}` : ''}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  className="btn danger"
+                  disabled={busy || secBusy}
+                  onClick={() =>
+                    void (async () => {
+                      const ok = await askConfirm({
+                        title: 'Remove passkey',
+                        message: 'Remove this passkey from your account?',
+                        danger: true,
+                        confirmLabel: 'Remove',
+                      })
+                      if (!ok) return
+                      setSecBusy(true)
+                      setPkErr(null)
+                      try {
+                        await apiFetch<null>(`/auth/webauthn/credentials/${pk.id}`, { method: 'DELETE', token })
+                        const rows = await apiFetch<WebAuthnCredentialOut[]>('/auth/webauthn/credentials', { token })
+                        setPasskeys(rows)
+                        const me = await apiFetch<UserPublic>('/auth/me', { token })
+                        setAccount(me)
+                        await refreshMe()
+                      } catch (e: unknown) {
+                        setPkErr((e as ApiError).message ?? 'Could not remove passkey')
+                      } finally {
+                        setSecBusy(false)
+                      }
+                    })()
+                  }
+                >
+                  Remove
+                </button>
+              </div>
+            ))}
+            {passkeys.length === 0 ? <div className="muted">No passkeys registered yet.</div> : null}
+          </div>
         </section>
 
+        {!securitySetupOnly ? (
         <section className="card" style={{ padding: 16, marginTop: 16 }}>
           <h3 style={{ marginTop: 0 }}>E-mail</h3>
           <p className="muted" style={{ marginTop: 0 }}>
@@ -3566,7 +4191,9 @@ function UserSettingsPage({ token, refreshMe }: { token: string; refreshMe: () =
             </div>
           </div>
         </section>
+        ) : null}
 
+        {!securitySetupOnly ? (
         <section className="card" style={{ padding: 16, marginTop: 16 }}>
           <h3 style={{ marginTop: 0 }}>Calendar (CalDAV)</h3>
           <p className="muted" style={{ marginTop: 0 }}>
@@ -3739,6 +4366,7 @@ function UserSettingsPage({ token, refreshMe }: { token: string; refreshMe: () =
             ) : null}
           </div>
         </section>
+        ) : null}
       </div>
     </div>
   )
@@ -3893,10 +4521,21 @@ function AdminMatterContacts({ token }: { token: string }) {
 
 function AdminConsole({ token, refreshMe }: { token: string; refreshMe: () => Promise<void> }) {
   const [tab, setTab] = useState<
-    'users' | 'matters' | 'billing' | 'email' | 'submenus' | 'tasks' | 'contacts' | 'precedents' | 'audit'
-  >('users')
+    | 'firm'
+    | 'users'
+    | 'matters'
+    | 'billing'
+    | 'email'
+    | 'submenus'
+    | 'tasks'
+    | 'contacts'
+    | 'precedents'
+    | 'audit'
+  >('firm')
   const adminSubtitle =
-    tab === 'email'
+    tab === 'firm'
+      ? 'Trading name, registered name, and firm address for precedent merge codes.'
+      : tab === 'email'
       ? 'Org-wide e-mail integration (mailto vs Microsoft 365).'
       : tab === 'audit'
         ? 'Activity and audit trail.'
@@ -3926,6 +4565,9 @@ function AdminConsole({ token, refreshMe }: { token: string; refreshMe: () => Pr
           <div className="muted" style={{ marginTop: 4 }}>{adminSubtitle}</div>
         </div>
         <div className="row" style={{ alignItems: 'center', flexWrap: 'wrap', gap: 4 }}>
+          <button type="button" className={`navBtn ${tab === 'firm' ? 'active' : ''}`} onClick={() => setTab('firm')}>
+            Firm details
+          </button>
           <button type="button" className={`navBtn ${tab === 'users' ? 'active' : ''}`} onClick={() => setTab('users')}>
             Users
           </button>
@@ -3956,7 +4598,9 @@ function AdminConsole({ token, refreshMe }: { token: string; refreshMe: () => Pr
         </div>
       </div>
       <div style={{ flex: 1, minHeight: 0, marginTop: 12, overflow: 'auto' }}>
-        {tab === 'users' ? (
+        {tab === 'firm' ? (
+          <AdminFirmDetails token={token} />
+        ) : tab === 'users' ? (
           <AdminUsers token={token} embedded />
         ) : tab === 'matters' ? (
           <AdminMatters token={token} />
@@ -3984,6 +4628,7 @@ function AdminUsers({ token, embedded }: { token: string; embedded?: boolean }) 
   const { askConfirm } = useDialogs()
   const [users, setUsers] = useState<AdminUserPublic[]>([])
   const [categories, setCategories] = useState<UserPermissionCategoryOut[]>([])
+  const [firmSettings, setFirmSettings] = useState<FirmSettingsOut | null>(null)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const [email, setEmail] = useState('')
@@ -4022,18 +4667,22 @@ function AdminUsers({ token, embedded }: { token: string; embedded?: boolean }) 
     perm_admin: false,
   })
 
-  async function load() {
+  async function load(): Promise<AdminUserPublic[] | null> {
     setBusy(true)
     setErr(null)
     try {
-      const [u, c] = await Promise.all([
+      const [u, c, f] = await Promise.all([
         apiFetch<AdminUserPublic[]>('/admin/users', { token }),
         apiFetch<UserPermissionCategoryOut[]>('/admin/permission-categories', { token }),
+        apiFetch<FirmSettingsOut>('/admin/firm-settings', { token }),
       ])
       setUsers(u)
       setCategories(c)
+      setFirmSettings(f)
+      return u
     } catch (e: any) {
       setErr(e?.message ?? 'Failed to load users')
+      return null
     } finally {
       setBusy(false)
     }
@@ -4272,6 +4921,40 @@ function AdminUsers({ token, embedded }: { token: string; embedded?: boolean }) 
         </div>
       </div>
       <div className="card">
+        <h3>Security</h3>
+        <p className="muted" style={{ marginTop: 0 }}>
+          Organisation-wide sign-in policy. When enabled, users who are not admins must enable an authenticator app (2FA) or
+          register at least one passkey before using matters, tasks, and other areas of the app. Admins should enable 2FA or
+          passkeys before turning this on so they can support users who get stuck.
+        </p>
+        <label className="row" style={{ gap: 10, alignItems: 'center', cursor: firmSettings ? 'pointer' : 'default' }}>
+          <input
+            type="checkbox"
+            checked={Boolean(firmSettings?.mandate_two_factor)}
+            disabled={busy || !firmSettings}
+            onChange={async (e) => {
+              if (!firmSettings) return
+              const next = e.target.checked
+              setBusy(true)
+              setErr(null)
+              try {
+                const updated = await apiFetch<FirmSettingsOut>('/admin/firm-settings', {
+                  token,
+                  method: 'PATCH',
+                  json: { mandate_two_factor: next },
+                })
+                setFirmSettings(updated)
+              } catch (err: unknown) {
+                setErr((err as ApiError).message ?? 'Could not update security settings')
+              } finally {
+                setBusy(false)
+              }
+            }}
+          />
+          <span>Mandate two-factor authentication</span>
+        </label>
+      </div>
+      <div className="card">
         <h3>Create user</h3>
         <p className="muted" style={{ marginTop: 0 }}>
           Every new user must be assigned a permission category (create one above if needed).
@@ -4410,7 +5093,7 @@ function AdminUsers({ token, embedded }: { token: string; embedded?: boolean }) 
               <div>
                 <h2 id="admin-edit-user-title">Edit user</h2>
                 <div className="muted" style={{ fontSize: 13 }}>
-                  Same fields as create user. New password is optional; when set, it must be at least 12 characters and 2FA enrolment is cleared.
+                  Same fields as create user. Under Sign-in security you can reset authenticator 2FA or set a new password (min 12 characters). Setting a new password clears their authenticator enrolment.
                 </div>
               </div>
               <button type="button" className="btn" disabled={busy} onClick={() => setEditingUser(null)}>
@@ -4466,7 +5149,47 @@ function AdminUsers({ token, embedded }: { token: string; embedded?: boolean }) 
                 <input type="checkbox" checked={editActive} onChange={(e) => setEditActive(e.target.checked)} disabled={busy} />
                 <span>Account active</span>
               </label>
-              <label className="field" style={{ marginBottom: 0 }}>
+
+              <h4 style={{ margin: '16px 0 8px', fontSize: '1rem', fontWeight: 600 }}>Sign-in security</h4>
+              <p className="muted" style={{ marginTop: 0, fontSize: 13 }}>
+                Authenticator status:{' '}
+                <strong>{editingUser.is_2fa_enabled ? 'Enabled' : 'Not enabled'}</strong>. Reset removes their app enrolment so
+                they must set up 2FA again in User settings (existing passkeys are unchanged).
+              </p>
+              <button
+                type="button"
+                className="btn danger"
+                disabled={busy}
+                onClick={() =>
+                  void (async () => {
+                    if (!editingUser) return
+                    const ok = await askConfirm({
+                      title: 'Reset authenticator (2FA)',
+                      message:
+                        `Clear authenticator enrolment for ${editingUser.email}? They will need to set up 2FA again under User settings before it applies at sign-in.`,
+                      danger: true,
+                      confirmLabel: 'Reset 2FA',
+                    })
+                    if (!ok) return
+                    setBusy(true)
+                    setErr(null)
+                    try {
+                      await apiFetch<null>(`/admin/users/${editingUser.id}/disable-2fa`, { method: 'POST', token })
+                      const list = await load()
+                      const nu = list?.find((x) => x.id === editingUser.id)
+                      if (nu) setEditingUser(nu)
+                    } catch (e: unknown) {
+                      setErr((e as ApiError).message ?? 'Could not reset 2FA')
+                    } finally {
+                      setBusy(false)
+                    }
+                  })()
+                }
+              >
+                Reset authenticator (2FA)
+              </button>
+
+              <label className="field" style={{ marginBottom: 0, marginTop: 14 }}>
                 <span>New password (optional, min 12 characters)</span>
                 <input
                   type="password"
@@ -4487,6 +5210,10 @@ function AdminUsers({ token, embedded }: { token: string; embedded?: boolean }) 
                   autoComplete="new-password"
                 />
               </label>
+              <p className="muted" style={{ marginTop: 0, fontSize: 13 }}>
+                When you set a new password here, this user’s authenticator 2FA enrolment is cleared and they sign in with the
+                new password until they enable 2FA again.
+              </p>
               <div className="row" style={{ gap: 8, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
                 <button type="button" className="btn" disabled={busy} onClick={() => setEditingUser(null)}>
                   Cancel

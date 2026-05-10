@@ -32,7 +32,7 @@ from sqlalchemy.orm import Session
 from app.db import get_db
 from app.deps import get_current_user
 from app.file_storage import FILES_ROOT, ensure_files_root
-from app.models import File as DbFile, FileEditSession, User
+from app.models import File as DbFile, FileEditSession, Precedent, User
 from app.audit import log_event
 
 router = APIRouter(prefix="/onlyoffice", tags=["onlyoffice"])
@@ -336,6 +336,84 @@ async def onlyoffice_print_staged_pdf(
     return Response(content=data, media_type="application/pdf")
 
 
+def _callback_status_int(raw: object) -> int | None:
+    """ONLYOFFICE sometimes sends numeric statuses as strings; coerce for reliable branching."""
+
+    if raw is None or isinstance(raw, bool):
+        return None
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+def _callback_download_url(payload: dict[str, Any]) -> str | None:
+    u = payload.get("url")
+    if isinstance(u, str):
+        t = u.strip()
+        return t or None
+    return None
+
+
+def _callback_resolve_file_row(
+    db: Session,
+    *,
+    case_id: uuid.UUID | None,
+    file_id: uuid.UUID | None,
+    precedent_id: uuid.UUID | None,
+) -> DbFile | None:
+    """Resolve the backing ``file`` row for a ONLYOFFICE callback (case file or precedent template)."""
+
+    if precedent_id is not None:
+        prec = db.get(Precedent, precedent_id)
+        if not prec:
+            return None
+        return db.get(DbFile, prec.file_id)
+    if case_id is None or file_id is None:
+        return None
+    row = db.get(DbFile, file_id)
+    if not row or row.case_id != case_id:
+        return None
+    return row
+
+
+def _oo_ack_unchanged_force_save(
+    db: Session,
+    row: DbFile,
+    *,
+    precedent_id: uuid.UUID | None,
+    case_id: uuid.UUID | None,
+    status_code: int,
+) -> None:
+    """Complete /oo-force-save when DS omits ``url`` (document unchanged). Bump version only metadata-wise."""
+
+    row.version = (row.version or 1) + 1
+    row.updated_at = datetime.now(timezone.utc)
+    row.oo_force_save_pending = False
+    db.add(row)
+    db.commit()
+    log.info(
+        "onlyoffice_callback: unchanged force-save ack file=%s callback_status=%s version=%s",
+        row.id,
+        status_code,
+        row.version,
+    )
+    log_event(
+        db,
+        actor_user_id=None,
+        action=(
+            "precedent.onlyoffice_save_unchanged" if precedent_id is not None else "case.file.onlyoffice_save_unchanged"
+        ),
+        entity_type="file",
+        entity_id=str(row.id),
+        meta={
+            **({"precedent_id": str(precedent_id)} if precedent_id is not None else {"case_id": str(case_id)}),
+            "callback_status": status_code,
+            "version": row.version,
+        },
+    )
+
+
 @router.post("/callback")
 async def onlyoffice_callback(
     request: Request,
@@ -357,43 +435,63 @@ async def onlyoffice_callback(
     # When JWT_IN_BODY=true OO DS wraps the callback data under a nested "payload" key.
     if "payload" in payload and isinstance(payload["payload"], dict):
         payload = payload["payload"]
-    st = payload.get("status")
-    download_url = payload.get("url")
+    st = _callback_status_int(payload.get("status"))
+    download_url = _callback_download_url(payload)
 
     log.warning(
         "onlyoffice_callback: file_id=%s status=%s url=%r keys=%s",
         file_id, st, download_url, list(payload.keys()),
     )
 
-    # 2 = document closed, must save; 6 = force-save while editing
-    if st in (2, 6) and download_url:
-        if precedent_id is not None:
-            # Precedent editing: look up file via the Precedent table (no case_id required)
-            from app.models import Precedent
-            prec = db.get(Precedent, precedent_id)
-            if not prec:
-                return {"error": 1}
-            row = db.get(DbFile, prec.file_id)
-            if not row:
-                return {"error": 1}
-            # Override file_id so the rest of the handler works unchanged
-            file_id = row.id
-        else:
-            row = db.get(DbFile, file_id)
-            if not row or row.case_id != case_id:
-                return {"error": 1}
+    if st is None:
+        log.warning("onlyoffice_callback: missing or non-numeric status — ignoring")
+        return {"error": 0}
 
-        # If the user discarded changes the session is released; skip saving.
+    # 7 = Document Server reported a force-save error (often seen when there is nothing new to persist).
+    # Do **not** clear ``oo_force_save_pending`` here: clearing without bumping ``version`` makes
+    # POST /oo-force-save wait until timeout and then return HTTP 504. ``/oo-force-save`` completes
+    # with a metadata version bump when the CommandService forcesave itself succeeded.
+    if st == 7:
+        row7 = _callback_resolve_file_row(db, case_id=case_id, file_id=file_id, precedent_id=precedent_id)
+        if row7 is not None:
+            log.warning(
+                "onlyoffice_callback: force-save status=7 (DS error) file=%s oo_force_save_pending=%s",
+                row7.id,
+                row7.oo_force_save_pending,
+            )
+        return {"error": 0}
+
+    # 2 = document closed, must save; 4 = closed with no changes (some builds still send a url);
+    # 6 = force-save while editing.
+    if st in (2, 4, 6) and download_url:
+        row = _callback_resolve_file_row(db, case_id=case_id, file_id=file_id, precedent_id=precedent_id)
+        if row is None:
+            return {"error": 1}
+        db.refresh(row)
+        file_id = row.id
+
+        # If the user discarded changes the session is released; skip saving — unless this save was
+        # initiated by POST /oo-force-save (``oo_force_save_pending``). Without that flag, clearing
+        # pending without bumping ``version`` leaves force-save waiters timing out with HTTP 504.
         active_sess = db.execute(
             select(FileEditSession).where(
                 FileEditSession.file_id == file_id,
                 FileEditSession.released_at.is_(None),
             )
         ).scalars().first()
-        if active_sess is None:
-            log.warning("onlyoffice_callback: NO active session for file %s — skipping save (was discarded?)", file_id)
+        if active_sess is None and not row.oo_force_save_pending:
+            log.warning(
+                "onlyoffice_callback: NO active session for file %s — skipping save (was discarded?)",
+                file_id,
+            )
             return {"error": 0}
-        log.warning("onlyoffice_callback: active session found, proceeding to save file %s", file_id)
+        if active_sess is None:
+            log.warning(
+                "onlyoffice_callback: NO active session row for file %s — force-save pending; saving from DS url anyway",
+                file_id,
+            )
+        else:
+            log.warning("onlyoffice_callback: active session found, proceeding to save file %s", file_id)
 
         ensure_files_root()
         abs_path = (FILES_ROOT / row.storage_path).resolve()
@@ -425,22 +523,45 @@ async def onlyoffice_callback(
         row.version = (row.version or 1) + 1
         row.size_bytes = len(data)
         row.updated_at = datetime.now(timezone.utc)
+        row.oo_force_save_pending = False
         db.add(row)
         db.commit()
 
         log_event(
             db,
             actor_user_id=None,
-            action="precedent.onlyoffice_save" if precedent_id else "case.file.onlyoffice_save",
+            action="precedent.onlyoffice_save" if precedent_id is not None else "case.file.onlyoffice_save",
             entity_type="file",
             entity_id=str(row.id),
             meta={
-                **({"precedent_id": str(precedent_id)} if precedent_id else {"case_id": str(case_id)}),
+                **({"precedent_id": str(precedent_id)} if precedent_id is not None else {"case_id": str(case_id)}),
                 "version": row.version,
                 "size_bytes": len(data),
             },
         )
         return {"error": 0}
 
-    # 1 = editing; 3 = save error; 4 = closed with no changes; 7 = force-save error
+    # Force-save with no edits: DS may omit ``url`` (status 4 is “closed, no changes”; some builds also omit url on 2/6).
+    if st in (2, 4, 6) and not download_url:
+        row = _callback_resolve_file_row(db, case_id=case_id, file_id=file_id, precedent_id=precedent_id)
+        if row is None:
+            return {"error": 1}
+        db.refresh(row)
+        if not row.oo_force_save_pending:
+            return {"error": 0}
+        active_sess = db.execute(
+            select(FileEditSession).where(
+                FileEditSession.file_id == row.id,
+                FileEditSession.released_at.is_(None),
+            )
+        ).scalars().first()
+        if active_sess is None:
+            log.warning(
+                "onlyoffice_callback: force-save pending but no session row for file %s — metadata-only ack",
+                row.id,
+            )
+        _oo_ack_unchanged_force_save(db, row, precedent_id=precedent_id, case_id=case_id, status_code=st)
+        return {"error": 0}
+
+    # 1 = editing; 3 = save error; 4 = closed with no changes (handled above when pending); etc.
     return {"error": 0}

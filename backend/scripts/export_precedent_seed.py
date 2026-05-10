@@ -31,6 +31,16 @@ from app.models import File as DbFile
 from app.models import MatterHeadType, MatterSubType, Precedent, PrecedentCategory
 
 
+def _bundle_name_for_global(i: int, p: Precedent, original_filename: str) -> str:
+    """Stable-ish filename under bundle/ for firm-wide (category-less) precedents."""
+    ref = (p.reference or "").strip()
+    ref_slug = ref.lower().replace(" ", "_")
+    safe = "".join(ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in ref_slug)[:80]
+    ext = Path(original_filename).suffix or ".bin"
+    stem = safe or f"global{i}"
+    return f"g{i}_{stem}{ext}"
+
+
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -71,20 +81,36 @@ def main() -> None:
             f = db.get(DbFile, p.file_id)
             if not f:
                 continue
-            if not p.category_id:
-                print(f"skip export (global/sub-wide scope, no single category): {p.name!r}", file=sys.stderr)
+
+            src = (FILES_ROOT / f.storage_path).resolve()
+            if not src.is_file():
+                print(f"skip missing file on disk: {src}", file=sys.stderr)
                 continue
+
+            if not p.category_id:
+                fname = _bundle_name_for_global(i, p, f.original_filename)
+                rel_copy = f"bundle/{fname}"
+                shutil.copy2(src, bundle_dir / fname)
+                precedents_out.append(
+                    {
+                        "name": p.name,
+                        "reference": p.reference,
+                        "kind": p.kind.value,
+                        "global": True,
+                        "original_filename": f.original_filename,
+                        "mime_type": f.mime_type,
+                        "size_bytes": f.size_bytes,
+                        "bundle_file": rel_copy,
+                    }
+                )
+                continue
+
             cat = db.get(PrecedentCategory, p.category_id)
             if not cat:
                 continue
             sub = db.get(MatterSubType, cat.matter_sub_type_id)
             head = db.get(MatterHeadType, sub.head_type_id) if sub else None
             if not sub or not head:
-                continue
-
-            src = (FILES_ROOT / f.storage_path).resolve()
-            if not src.is_file():
-                print(f"skip missing file on disk: {src}", file=sys.stderr)
                 continue
 
             ext = Path(f.original_filename).suffix or ".bin"

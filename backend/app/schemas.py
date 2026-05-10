@@ -6,7 +6,16 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator, model_validator
 
-from app.models import CaseLockMode, CaseStatus, CaseTaskStatus, ContactType, FileCategory, PrecedentKind, UserRole
+from app.models import (
+    CaseLockMode,
+    CaseStatus,
+    CaseTaskStatus,
+    ContactType,
+    FileCategory,
+    LetterheadStyle,
+    PrecedentKind,
+    UserRole,
+)
 from app.user_initials import normalize_initials
 
 
@@ -24,6 +33,8 @@ class UserPublic(BaseModel):
     role: UserRole
     is_active: bool
     is_2fa_enabled: bool
+    organization_requires_second_factor: bool = False
+    has_passkeys: bool = False
     email_launch_preference: Literal["desktop", "outlook_web"] = "desktop"
     email_outlook_web_url: str | None = None
     email_integration_mode: Literal["mailto", "microsoft_graph"] = "microsoft_graph"
@@ -32,6 +43,21 @@ class UserPublic(BaseModel):
         default=False,
         description="User may open the admin console (built-in admin or category Admin permission).",
     )
+    session_second_factor_verified: bool = Field(
+        default=True,
+        description=(
+            "False when this JWT did not prove a second factor at sign-in while org policy requires it "
+            "(password-only session under mandate). Derived from GET /auth/me using the request token."
+        ),
+    )
+
+
+class Verify2FASessionResponse(BaseModel):
+    """Returned after successful authenticator enrolment: replaces the restricted-session JWT."""
+
+    access_token: str
+    token_type: str = "bearer"
+    user: UserPublic
 
 
 class UserEmailHandlingUpdate(BaseModel):
@@ -288,6 +314,56 @@ class AdminUserSetPassword(BaseModel):
     password: str = Field(min_length=12)
 
 
+class FirmSettingsOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int = 1
+    trading_name: str = ""
+    registered_company_name: str | None = None
+    addr_line1: str | None = None
+    addr_line2: str | None = None
+    town_city: str | None = None
+    county: str | None = None
+    postcode: str | None = None
+    letterhead_style: LetterheadStyle = LetterheadStyle.preprinted
+    letterhead_original_filename: str | None = None
+    mandate_two_factor: bool = False
+
+
+class MergeCodeCatalogOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    code: str
+    description: str
+    sort_order: int
+
+
+class MergeCodeCatalogRowIn(BaseModel):
+    code: str = Field(min_length=3, max_length=160)
+    description: str = Field(default="", max_length=16000)
+
+
+class MergeCodeCatalogBulkUpdate(BaseModel):
+    items: list[MergeCodeCatalogRowIn]
+
+
+class MergeCodeCatalogImportResult(BaseModel):
+    updated: int
+    skipped_unknown: int
+
+
+class FirmSettingsUpdate(BaseModel):
+    trading_name: str | None = Field(default=None, max_length=300)
+    registered_company_name: str | None = Field(default=None, max_length=400)
+    addr_line1: str | None = Field(default=None, max_length=300)
+    addr_line2: str | None = Field(default=None, max_length=300)
+    town_city: str | None = Field(default=None, max_length=200)
+    county: str | None = Field(default=None, max_length=150)
+    postcode: str | None = Field(default=None, max_length=50)
+    letterhead_style: LetterheadStyle | None = None
+    mandate_two_factor: bool | None = None
+
+
 class MatterHeadTypeVisibilityUpdate(BaseModel):
     is_hidden: bool
 
@@ -478,6 +554,10 @@ class ComposeOfficeDocumentIn(BaseModel):
     original_filename: str = Field(min_length=1, max_length=512)
     folder: str = ""
     precedent_id: uuid.UUID | None = None
+    # When ``precedent_id`` is omitted: ``letter`` resolves to the reserved ``BLANK_LETTER`` precedent;
+    # ``document`` keeps a minimal empty .docx. If omitted, the server infers from ``original_filename``
+    # (``Letter — …`` vs ``Document — …`` as produced by the web UI).
+    compose_office_role: Literal["letter", "document"] | None = None
     # Contact for precedent code merge; one of these may be supplied
     case_contact_id: uuid.UUID | None = None   # CaseContact row id
     global_contact_id: uuid.UUID | None = None  # global Contact row id
@@ -551,10 +631,32 @@ class ContactCreate(BaseModel):
     postcode: str | None = Field(default=None, max_length=50)
     country: str | None = Field(default=None, max_length=100)
 
+    @model_validator(mode="after")
+    def _organisation_requires_trading_name(self) -> ContactCreate:
+        if self.type == ContactType.organisation and not (self.trading_name or "").strip():
+            raise ValueError("Trading name is required for organisation contacts.")
+        return self
 
-class ContactUpdate(ContactCreate):
+
+class ContactUpdate(BaseModel):
+    """PATCH `/contacts/{id}` — partial body; organisation trading-name rules enforced after merge in the router."""
+
     type: ContactType | None = None
     name: str | None = Field(default=None, min_length=1, max_length=300)
+    email: EmailStr | None = None
+    phone: str | None = Field(default=None, max_length=50)
+    title: str | None = Field(default=None, max_length=50)
+    first_name: str | None = Field(default=None, max_length=150)
+    middle_name: str | None = Field(default=None, max_length=150)
+    last_name: str | None = Field(default=None, max_length=150)
+    company_name: str | None = Field(default=None, max_length=300)
+    trading_name: str | None = Field(default=None, max_length=300)
+    address_line1: str | None = Field(default=None, max_length=300)
+    address_line2: str | None = Field(default=None, max_length=300)
+    city: str | None = Field(default=None, max_length=200)
+    county: str | None = Field(default=None, max_length=150)
+    postcode: str | None = Field(default=None, max_length=50)
+    country: str | None = Field(default=None, max_length=100)
 
 
 class ContactOut(BaseModel):
@@ -909,6 +1011,8 @@ class OnlyofficeEditorConfigOut(BaseModel):
     # Plain (unsigned) fields that must be passed directly to DocsAPI.DocEditor alongside the JWT.
     document: dict
     editor_config: dict
+    # Case compose-office: file stays hidden until Save; editor should treat as needing explicit save/close flow.
+    oo_compose_pending: bool = False
 
 
 # ---------------------------------------------------------------------------

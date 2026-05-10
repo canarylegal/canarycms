@@ -270,6 +270,10 @@ export function CaseContactsAddDocForm({
                   setGlobalEditErr('Name is required.')
                   return
                 }
+                if (globalEditFields.type === 'organisation' && !globalEditFields.tradingName.trim()) {
+                  setGlobalEditErr('Trading name is required for organisations.')
+                  return
+                }
                 const payload = contactFieldsModelToPayload(globalEditFields)
                 if (!payload) {
                   setGlobalEditErr('Name is required.')
@@ -555,6 +559,7 @@ export function CaseContactsEditDocForm({
           disabled={
             busy ||
             !resolvedEditSnapshotName.trim() ||
+            (editSnapshot.type === 'organisation' && !(editSnapshot.trading_name ?? '').trim()) ||
             !(editSnapshot.matter_contact_type && editSnapshot.matter_contact_type.trim()) ||
             ((editSnapshot.matter_contact_type || '').trim().toLowerCase() === LAWYERS_TYPE_SLUG &&
               editLawyerLinkClientIds.length < 1)
@@ -566,6 +571,10 @@ export function CaseContactsEditDocForm({
               const payload = contactFieldsModelToPayload(contactOutToFormFields(editSnapshot as unknown as ContactOut))
               if (!payload) {
                 setActionErr('Enter a name (person or organisation fields).')
+                return
+              }
+              if (editSnapshot.type === 'organisation' && !(editSnapshot.trading_name ?? '').trim()) {
+                setActionErr('Trading name is required for organisations.')
                 return
               }
               const patchBody: Record<string, unknown> = {

@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.audit import log_event
 from app.case_client_sync import sync_case_client_name
+from app.contact_validation import ensure_organisation_trading_name
 from app.db import get_db
 from app.deps import get_current_user, require_case_access
 from app.matter_contact_validation import (
@@ -136,6 +137,7 @@ def update_case_contact(
         existing=cc if not lawyer_ids_in_payload else None,
     )
     ensure_lawyer_contact_is_organisation(next_matter_type, cc.type)
+    ensure_organisation_trading_name(cc.type, cc.trading_name)
     cc.updated_at = datetime.utcnow()
 
     if push_to_global and cc.contact_id:
@@ -159,6 +161,7 @@ def update_case_contact(
             contact.postcode = cc.postcode
             contact.country = cc.country
             contact.updated_at = datetime.utcnow()
+            ensure_organisation_trading_name(contact.type, contact.trading_name)
             db.add(contact)
 
     db.add(cc)

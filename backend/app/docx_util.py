@@ -49,8 +49,8 @@ PRECEDENT_CODES: dict[str, str] = {
     "[LAST_NAME]": "Surname",
     "[LAST_INITIAL]": "Surname initial",
     # Organisation
-    "[COMPANY_NAME]": "Registered company name",
-    "[TRADING_NAME]": "Trading name",
+    "[COMPANY_NAME]": "Registered company name (optional)",
+    "[TRADING_NAME]": "Trading name (required for organisations)",
     # Address (shared)
     "[ADDR1]": "Address line 1",
     "[ADDR2]": "Address line 2",
@@ -63,7 +63,16 @@ PRECEDENT_CODES: dict[str, str] = {
     "[DATE]": "Date when the document is generated (DD/MM/YYYY)",
     "[FEE_EARNER]": "Fee earner display name (from the case fee earner)",
     "[FEE_EARNER_JOB_TITLE]": "Fee earner job title (from the case fee earner user)",
+    "[FEE_EARNER_INITIALS]": "Fee earner initials (from the case fee earner user)",
     "[CONTACT_REF]": "Contact's reference (as stored in canary)",
+    # Firm (Admin → Firm details); narrow scope — precedents / compose merge only for now.
+    "[FIRM_TRADING_NAME]": "Firm trading name",
+    "[FIRM_REGISTERED_NAME]": "Registered company name (optional)",
+    "[FIRM_ADDR1]": "Firm address line 1",
+    "[FIRM_ADDR2]": "Firm address line 2",
+    "[FIRM_TOWN_CITY]": "Firm town / city",
+    "[FIRM_COUNTY]": "Firm county",
+    "[FIRM_POSTCODE]": "Firm postcode",
 }
 
 for _slot_num, _slot_label in ((2, "2nd"), (3, "3rd"), (4, "4th")):
@@ -151,6 +160,60 @@ for _ck, _desc in _CONTACT_COMPOSE_STATIC:
         f"Selected contact for this compose: {_desc}. Empty if no contact was chosen in the dialogue."
     )
 
+PRECEDENT_CODES["[CONTACT_LETTER_DEAR]"] = (
+    "Selected compose contact: opening “Dear …,” using the card display name (empty if none chosen). "
+    "Prefer this over a manual Dear line so person vs organisation stays correct."
+)
+PRECEDENT_CODES["[CONTACT_ORG_LINES]"] = (
+    "Selected compose contact: trading name and registered company name with line breaks between non-empty "
+    "parts only; empty for persons (avoids blank lines from separate [TRADING_NAME]/[COMPANY_NAME] paragraphs)."
+)
+PRECEDENT_CODES["[CONTACT_ADDRESS_BLOCK]"] = (
+    "Selected compose contact: address lines with breaks between non-empty parts only "
+    "(compact substitute for separate [CONTACT_ADDR1]… paragraphs)."
+)
+PRECEDENT_CODES["[CONTACT_ORG_AND_ADDRESS_BLOCK]"] = (
+    "Selected compose contact: [CONTACT_ORG_LINES] and [CONTACT_ADDRESS_BLOCK] in one block — "
+    "one line break between org and address sections only when both exist (no spare blank row for persons)."
+)
+
+PRECEDENT_CODES["[PRIMARY_CLIENT_LETTER_DEAR]"] = (
+    "Primary letter addressee: opening “Dear …,” using the card display name "
+    "(same contact as unsuffixed [ADDR1] / [ADDRESS_BLOCK])."
+)
+PRECEDENT_CODES["[ORG_LINES]"] = (
+    "Primary addressee (slot 1 Client): organisation trading + registered lines with breaks; "
+    "empty for persons. Prefer one paragraph containing this token instead of separate [TRADING_NAME]/[COMPANY_NAME]."
+)
+PRECEDENT_CODES["[ADDRESS_BLOCK]"] = (
+    "Primary addressee: address lines with breaks between non-empty parts only "
+    "(substitute for separate [ADDR1]…[POSTCODE] paragraphs)."
+)
+PRECEDENT_CODES["[ORG_AND_ADDRESS_BLOCK]"] = (
+    "Primary addressee: organisation lines (if any) plus address in one block — inserts a single line break "
+    "between org and address only when both exist. Prefer this instead of separate [ORG_LINES] then [ADDRESS_BLOCK] "
+    "paragraphs to avoid a blank line for person contacts when [ORG_LINES] is empty."
+)
+
+for _slot_num, _slot_label in ((2, "2nd"), (3, "3rd"), (4, "4th")):
+    _olk = _merge_key_with_suffix("[ORG_LINES]", _slot_num)
+    PRECEDENT_CODES[_olk] = (
+        f"Organisation lines for {_slot_label} Client matter contact (merge-all or suffix slot); "
+        "empty for persons."
+    )
+    _abk = _merge_key_with_suffix("[ADDRESS_BLOCK]", _slot_num)
+    PRECEDENT_CODES[_abk] = f"Address block for {_slot_label} Client matter contact; omits blank lines."
+    _oak = _merge_key_with_suffix("[ORG_AND_ADDRESS_BLOCK]", _slot_num)
+    PRECEDENT_CODES[_oak] = (
+        f"Combined org + address block for {_slot_label} Client contact (same rules as [ORG_AND_ADDRESS_BLOCK])."
+    )
+
+for _cn in range(1, 5):
+    PRECEDENT_CODES[f"[CLIENT_{_cn}_LETTER_DEAR]"] = (
+        f"Dear line for Client matter contact {_cn} (by client order on the matter). "
+        "Use with merge-all or when listing multiple clients."
+    )
+
 for _base_key in _ADDITIONAL_CLIENT_NAME_CODES:
     _inner = _base_key[1:-1]
     _cc_key = f"[CONTACT_{_inner}]"
@@ -158,6 +221,106 @@ for _base_key in _ADDITIONAL_CLIENT_NAME_CODES:
         f"Selected contact for this compose: same field as [{_inner}] for person or organisation name parts; "
         f"always the contact picked in the dialogue (including when “merge all clients” fills [{_inner}] from another client)."
     )
+
+
+def _zip_archive_basename(path: str) -> str:
+    return path.replace("\\", "/").rsplit("/", 1)[-1]
+
+
+def _find_ooxml_content_types_member(names: list[str]) -> str | None:
+    """Return the Zip member name for ``[Content_Types].xml`` (case-insensitive basename)."""
+
+    for n in names:
+        if _zip_archive_basename(n).lower() == "[content_types].xml":
+            return n
+    return None
+
+
+def _find_ooxml_document_xml_member(names: list[str]) -> str | None:
+    """Return the Zip member for ``word/document.xml`` (case-insensitive ``word`` / ``document.xml``)."""
+
+    for n in names:
+        norm = n.replace("\\", "/")
+        parts = norm.split("/")
+        if len(parts) >= 2 and parts[-2].lower() == "word" and parts[-1].lower() == "document.xml":
+            return n
+    return None
+
+
+def validate_docx_package_bytes(raw: bytes) -> None:
+    """Raise ``ValueError`` with a plain-language message if ``raw`` is not a WordprocessingML (.docx) package."""
+
+    import io
+    import zipfile
+
+    if not raw:
+        raise ValueError("The file is empty.")
+    if not raw.startswith(b"PK"):
+        raise ValueError(
+            "This file does not look like a .docx — real Office documents are ZIP archives whose bytes start with PK. "
+            "Common causes: the browser saved an HTML/login/error page with a .docx name, the download failed, "
+            "or the file is not Word format. Open it in Word and use Save As → Word Document (.docx), or use the "
+            "Canary-generated Universal-letter-precedent.docx from the backend container."
+        )
+    try:
+        zf = zipfile.ZipFile(io.BytesIO(raw))
+    except zipfile.BadZipFile as e:
+        raise ValueError(
+            "This is not a valid ZIP archive — the .docx may be truncated, corrupted, or incomplete."
+        ) from e
+    try:
+        names = zf.namelist()
+        ct_name = _find_ooxml_content_types_member(names)
+        if ct_name is None:
+            raise ValueError(
+                "Missing [Content_Types].xml — this is not a valid Office Open XML (.docx) package. "
+                "Re-save from Microsoft Word (or export as .docx from Google Docs / LibreOffice). "
+                "If you renamed another format to .docx, merge will not work."
+            )
+        doc_name = _find_ooxml_document_xml_member(names)
+        if doc_name is None:
+            raise ValueError("Missing word/document.xml — not a valid Word .docx.")
+        try:
+            ct_raw = zf.read(ct_name)
+        except KeyError as e:
+            raise ValueError(
+                "The archive lists [Content_Types].xml but it could not be read — the file may be corrupted."
+            ) from e
+        if not ct_raw.strip():
+            raise ValueError(
+                "[Content_Types].xml is empty — this .docx package is invalid. Re-save the document from Word."
+            )
+        if not ct_raw.lstrip().startswith(b"<"):
+            raise ValueError(
+                "[Content_Types].xml is not valid XML — this .docx package is broken. Re-save from Word."
+            )
+    finally:
+        zf.close()
+
+
+def is_invalid_ooxml_merge_exception(exc: BaseException) -> bool:
+    """True when ``exc`` usually means bytes are not a loadable Word .docx (client/template issue, HTTP 400)."""
+
+    import zipfile
+
+    if isinstance(exc, (zipfile.BadZipFile, KeyError, OSError)):
+        return True
+    try:
+        from docx.opc.exceptions import PackageNotFoundError
+
+        if isinstance(exc, PackageNotFoundError):
+            return True
+    except ImportError:
+        pass
+    lowered = str(exc).lower()
+    if "there is no item named" in lowered and "content_types" in lowered:
+        return True
+    if "bad zipfile" in lowered or "bad magic number for file header" in lowered:
+        return True
+    # python-docx / lxml load of corrupt OOXML
+    if type(exc).__name__ == "XMLSyntaxError":
+        return True
+    return False
 
 
 def _s_str(v: object) -> str:
@@ -204,6 +367,93 @@ def _contact_type_str(contact: Any) -> str:
     if hasattr(t, "value"):
         return str(t.value)
     return str(t)
+
+
+def _letter_dear_line(contact: Any | None) -> str:
+    if not contact:
+        return ""
+    name = _s_str(getattr(contact, "name", None))
+    return f"Dear {name}," if name else ""
+
+
+def _org_lines_block(contact: Any | None) -> str:
+    """Trading + registered company lines for organisations only; embedded newlines, no trailing blanks."""
+
+    if not contact:
+        return ""
+    if _contact_type_str(contact) != "organisation":
+        return ""
+    tr = _s_str(getattr(contact, "trading_name", None))
+    reg = _s_str(getattr(contact, "company_name", None))
+    return "\n".join(x for x in (tr, reg) if x)
+
+
+def _address_block_lines(contact: Any | None) -> str:
+    """Single-string address with line breaks; skips empty parts (no blank lines)."""
+
+    if not contact:
+        return ""
+    parts = (
+        _s_str(getattr(contact, "address_line1", None)),
+        _s_str(getattr(contact, "address_line2", None)),
+        _s_str(getattr(contact, "city", None)),
+        _s_str(getattr(contact, "county", None)),
+        _s_str(getattr(contact, "postcode", None)),
+    )
+    return "\n".join(p for p in parts if p)
+
+
+def _org_and_address_block(contact: Any | None) -> str:
+    """Organisation lines plus address in one string; no extra gap when org is empty (typical for persons)."""
+
+    org = _org_lines_block(contact)
+    addr = _address_block_lines(contact)
+    if org and addr:
+        return f"{org}\n{addr}"
+    return org or addr
+
+
+def _fill_full_client_composite_slots(out: dict[str, str], oc: list[Any]) -> None:
+    """ORG_LINES / ADDRESS_BLOCK / dear lines for each Client slot (merge-all layout)."""
+
+    for i, cc in enumerate(oc[:4]):
+        slot = i + 1
+        org_b = _org_lines_block(cc)
+        addr_b = _address_block_lines(cc)
+        dear = _letter_dear_line(cc)
+        out[f"[CLIENT_{slot}_LETTER_DEAR]"] = dear
+        if slot == 1:
+            out["[ORG_LINES]"] = org_b
+            out["[ADDRESS_BLOCK]"] = addr_b
+            out["[ORG_AND_ADDRESS_BLOCK]"] = _org_and_address_block(cc)
+            out["[PRIMARY_CLIENT_LETTER_DEAR]"] = dear
+        else:
+            out[_merge_key_with_suffix("[ORG_LINES]", slot)] = org_b
+            out[_merge_key_with_suffix("[ADDRESS_BLOCK]", slot)] = addr_b
+            out[_merge_key_with_suffix("[ORG_AND_ADDRESS_BLOCK]", slot)] = _org_and_address_block(cc)
+
+
+def _set_primary_addressee_composites(out: dict[str, str], contact: Any | None) -> None:
+    """Primary unsuffixed address/org composites from the letter addressee row."""
+
+    if contact is None:
+        return
+    out["[ORG_LINES]"] = _org_lines_block(contact)
+    out["[ADDRESS_BLOCK]"] = _address_block_lines(contact)
+    out["[ORG_AND_ADDRESS_BLOCK]"] = _org_and_address_block(contact)
+    out["[PRIMARY_CLIENT_LETTER_DEAR]"] = _letter_dear_line(contact)
+
+
+def _fill_client_dear_lines_and_secondary_composites(out: dict[str, str], oc: list[Any]) -> None:
+    """Per-slot Dear lines; suffixed org/address for clients 2–4 (slot 1 primary comes from addressee)."""
+
+    for i, cc in enumerate(oc[:4]):
+        slot = i + 1
+        out[f"[CLIENT_{slot}_LETTER_DEAR]"] = _letter_dear_line(cc)
+        if slot >= 2:
+            out[_merge_key_with_suffix("[ORG_LINES]", slot)] = _org_lines_block(cc)
+            out[_merge_key_with_suffix("[ADDRESS_BLOCK]", slot)] = _address_block_lines(cc)
+            out[_merge_key_with_suffix("[ORG_AND_ADDRESS_BLOCK]", slot)] = _org_and_address_block(cc)
 
 
 def _lawyer_linked_client_extra_map(contact: Any | None) -> dict[str, str]:
@@ -285,12 +535,17 @@ def _fill_compose_selected_contact_codes(out: dict[str, str], contact: Any | Non
     out["[CONTACT_COUNTRY]"] = _s_str(getattr(contact, "country", None))
     out["[CONTACT_MATTER_REFERENCE]"] = _s_str(getattr(contact, "matter_contact_reference", None))
     out["[CONTACT_MATTER_CONTACT_TYPE]"] = _s_str(getattr(contact, "matter_contact_type", None))
+    out["[CONTACT_LETTER_DEAR]"] = _letter_dear_line(contact)
+    out["[CONTACT_ORG_LINES]"] = _org_lines_block(contact)
+    out["[CONTACT_ADDRESS_BLOCK]"] = _address_block_lines(contact)
+    out["[CONTACT_ORG_AND_ADDRESS_BLOCK]"] = _org_and_address_block(contact)
 
 
 def build_merge_fields(
     case: Any,
     fee_earner_name: str = "",
     fee_earner_job_title: str = "",
+    fee_earner_initials: str = "",
     merge_date: date | None = None,
     *,
     merge_all_clients: bool = False,
@@ -299,6 +554,7 @@ def build_merge_fields(
     selected_client_slot: int | None = None,
     lawyer_slots: list[tuple[Any, list[Any]] | None] | None = None,
     compose_selected_contact: Any | None = None,
+    firm: Any | None = None,
 ) -> dict[str, str]:
     """Build precedent code→value dict.
 
@@ -316,6 +572,13 @@ def build_merge_fields(
     * **compose_selected_contact** — When set (the contact chosen in the compose UI), fills
       ``[CONTACT_*]`` codes from that row even when ``merge_all_clients`` is True, so templates
       can address the picked contact separately from unsuffixed client merge keys.
+
+    * **Composite tokens** — ``[ORG_LINES]``, ``[ADDRESS_BLOCK]``, ``[ORG_AND_ADDRESS_BLOCK]`` (combined, no blank row
+      when org is empty), suffixed ``[ORG_LINES_2]`` … ``[ORG_AND_ADDRESS_BLOCK_4]``, ``[PRIMARY_CLIENT_LETTER_DEAR]``,
+      ``[CLIENT_1_LETTER_DEAR]`` … ``[CLIENT_4_LETTER_DEAR]``, and compose-only ``[CONTACT_LETTER_DEAR]``,
+      ``[CONTACT_ORG_LINES]``, ``[CONTACT_ADDRESS_BLOCK]``, ``[CONTACT_ORG_AND_ADDRESS_BLOCK]``
+      pack multiple lines into one placeholder with internal line breaks so merged letters do not
+      retain empty paragraphs when parts are blank.
     """
 
     out = _empty_precedent_field_map()
@@ -335,6 +598,16 @@ def build_merge_fields(
     out["[DATE]"] = date_str
     out["[FEE_EARNER]"] = fee_earner_name
     out["[FEE_EARNER_JOB_TITLE]"] = fee_earner_job_title
+    out["[FEE_EARNER_INITIALS]"] = _s_str(fee_earner_initials)
+
+    if firm is not None:
+        out["[FIRM_TRADING_NAME]"] = _s_str(getattr(firm, "trading_name", None))
+        out["[FIRM_REGISTERED_NAME]"] = _s_str(getattr(firm, "registered_company_name", None))
+        out["[FIRM_ADDR1]"] = _s_str(getattr(firm, "addr_line1", None))
+        out["[FIRM_ADDR2]"] = _s_str(getattr(firm, "addr_line2", None))
+        out["[FIRM_TOWN_CITY]"] = _s_str(getattr(firm, "town_city", None))
+        out["[FIRM_COUNTY]"] = _s_str(getattr(firm, "county", None))
+        out["[FIRM_POSTCODE]"] = _s_str(getattr(firm, "postcode", None))
 
     oc = [c for c in (ordered_client_contacts or [])][:4]
 
@@ -354,6 +627,7 @@ def build_merge_fields(
                 slot = i + 1
                 for k, v in core.items():
                     out[_merge_key_with_suffix(k, slot)] = v
+        _fill_full_client_composite_slots(out, oc)
         return finalize(out)
 
     if selected_contact is None:
@@ -371,12 +645,22 @@ def build_merge_fields(
         for k, v in core.items():
             out[k] = v
         out["[CONTACT_REF]"] = contact_ref
+        _set_primary_addressee_composites(out, selected_contact)
+        if oc:
+            _fill_client_dear_lines_and_secondary_composites(out, oc)
+        else:
+            out["[CLIENT_1_LETTER_DEAR]"] = _letter_dear_line(selected_contact)
         return finalize(out)
 
     idx = selected_client_slot - 1
     cc = oc[idx] if idx < len(oc) else None
     if cc is None:
         out["[CONTACT_REF]"] = contact_ref
+        _set_primary_addressee_composites(out, selected_contact)
+        if oc:
+            _fill_client_dear_lines_and_secondary_composites(out, oc)
+        else:
+            out["[CLIENT_1_LETTER_DEAR]"] = _letter_dear_line(selected_contact)
         return finalize(out)
 
     core = _core_name_company_for_contact(cc)
@@ -388,6 +672,11 @@ def build_merge_fields(
             out[_merge_key_with_suffix(k, selected_client_slot)] = v
 
     out["[CONTACT_REF]"] = contact_ref
+    _set_primary_addressee_composites(out, selected_contact)
+    if oc:
+        _fill_client_dear_lines_and_secondary_composites(out, oc)
+    else:
+        out["[CLIENT_1_LETTER_DEAR]"] = _letter_dear_line(selected_contact)
     return finalize(out)
 
 
@@ -396,6 +685,23 @@ def _replace_in_text(text: str, fields: dict[str, str]) -> str:
     for code in sorted(fields.keys(), key=len, reverse=True):
         text = text.replace(code, fields[code])
     return text
+
+
+def _normalize_post_merge_whitespace(text: str) -> str:
+    """Trim gaps left when earlier client slots merge empty within the same paragraph.
+
+    Templates often interleave ``[TITLE] [FIRST_NAME] … [TITLE_2] …`` with literal spaces.
+    When slot 1 is empty, spaces remain before slot 2; strip leading horizontal whitespace
+    per line and collapse doubled spaces/tabs inside non-empty lines.
+    """
+    lines: list[str] = []
+    for ln in text.split("\n"):
+        if not ln.strip():
+            lines.append("")
+            continue
+        collapsed = re.sub(r"[ \t]{2,}", " ", ln)
+        lines.append(collapsed.lstrip())
+    return "\n".join(lines)
 
 
 # Inner token without brackets, e.g. TITLE, LAST_NAME_3 — for slot detection.
@@ -529,20 +835,94 @@ def _merge_precedent_codes_in_ooxml_zip(src_bytes: bytes, fields: dict[str, str]
 
 
 def _rewrite_paragraph_to_single_run(para: Any, replaced: str) -> None:
-    """Replace paragraph content with plain text in one run.
+    """Replace paragraph content with plain text (supports embedded ``\\n`` as Word line breaks).
 
     Word often puts merge tokens in hyperlinked or oddly split runs. Clearing only ``para.runs``
     can leave ``w:hyperlink`` / nested ``w:t`` behind, so the old token still appears next to
     the merged text (e.g. surname twice with a gap). We strip non-``w:pPr`` children and add
-    a single run — same approach as a clean retype of the paragraph.
+    fresh runs — same approach as a clean retype of the paragraph.
     """
+    from docx.enum.text import WD_BREAK
     from docx.oxml.ns import qn
 
     p_el = para._p
     for child in list(p_el):
         if child.tag != qn("w:pPr"):
             p_el.remove(child)
-    para.add_run(replaced)
+    parts = replaced.split("\n")
+    for i, part in enumerate(parts):
+        if i > 0:
+            para.add_run().add_break(WD_BREAK.LINE)
+        para.add_run(part)
+
+
+def _copy_section_page_geometry(src_section: Any, tgt_section: Any) -> None:
+    """Apply letterhead section ``w:pgSz`` / ``w:pgMar`` onto the precedent section.
+
+    Header/footer blocks alone do not define vertical padding: the section's page margins and
+    ``header`` / ``footer`` distances (python-docx: ``header_distance``, ``footer_distance``)
+    reserve space for header/footer content above and below the body. Without copying these,
+    the precedent's geometry wins and letterhead spacing set in Word disappears in compose
+    (especially noticeable in ONLYOFFICE).
+    """
+
+    for attr in (
+        "page_width",
+        "page_height",
+        "orientation",
+        "left_margin",
+        "right_margin",
+        "top_margin",
+        "bottom_margin",
+        "header_distance",
+        "footer_distance",
+        "gutter",
+    ):
+        try:
+            val = getattr(src_section, attr)
+        except AttributeError:
+            continue
+        if val is None:
+            continue
+        setattr(tgt_section, attr, val)
+
+
+def apply_digital_letterhead_headers_footers(precedent_bytes: bytes, letterhead_bytes: bytes) -> bytes:
+    """Copy header and footer XML from the letterhead .docx onto every section of the precedent .docx.
+
+    Intended for “typical” letterhead: logos and firm lines live in headers/footers; precedent body
+    stays in the document story so page 1 shows letterhead + letter content together. Embedded
+    images in the letterhead may require the letterhead and precedent packages to share ``word/media``
+    parts — text-only or simply structured letterheads work most reliably.
+
+    Also copies **section page geometry** (margins, header/footer offsets, page size) from the
+    letterhead's first section onto every precedent section so padding matches the uploaded template.
+    """
+    import io
+    from copy import deepcopy
+
+    from docx import Document
+
+    lh = Document(io.BytesIO(letterhead_bytes))
+    prec = Document(io.BytesIO(precedent_bytes))
+
+    def _copy_hf(src_section: Any, tgt_section: Any, *, header: bool) -> None:
+        src_el = (src_section.header if header else src_section.footer)._element
+        tgt_el = (tgt_section.header if header else tgt_section.footer)._element
+        for child in list(tgt_el):
+            tgt_el.remove(child)
+        for child in src_el:
+            tgt_el.append(deepcopy(child))
+
+    src_sec = lh.sections[0]
+    for tgt_sec in prec.sections:
+        _copy_section_page_geometry(src_sec, tgt_sec)
+        _copy_hf(src_sec, tgt_sec, header=True)
+        _copy_hf(src_sec, tgt_sec, header=False)
+
+    out = io.BytesIO()
+    prec.save(out)
+    return out.getvalue()
 
 
 def merge_precedent_codes(
@@ -601,6 +981,7 @@ def _merge_precedent_codes_via_python_docx(
         # merged cells can still be processed on a later distinct visit (should not happen, but safe).
         seen_wp.add(wp)
         replaced = _replace_in_text(full, fields)
+        replaced = _normalize_post_merge_whitespace(replaced)
         _rewrite_paragraph_to_single_run(para, replaced)
         # Remove the paragraph if it's now blank (was code-only, value was empty)
         return not replaced.strip()
@@ -652,11 +1033,76 @@ def _merge_precedent_codes_via_python_docx(
     return buf.getvalue()
 
 
+_W_MAIN_NS = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+
+
+def _styles_et_ensure_doc_defaults_lang_en_gb(root: Any) -> None:
+    """Ensure ``w:docDefaults/w:rPrDefault/w:rPr/w:lang`` is en-GB (creates nodes if absent)."""
+
+    import xml.etree.ElementTree as ET
+
+    W = _W_MAIN_NS
+    dd = root.find(f"{W}docDefaults")
+    if dd is None:
+        dd = ET.Element(f"{W}docDefaults")
+        root.insert(0, dd)
+    rpd = dd.find(f"{W}rPrDefault")
+    if rpd is None:
+        rpd = ET.Element(f"{W}rPrDefault")
+        dd.insert(0, rpd)
+    rpr = rpd.find(f"{W}rPr")
+    if rpr is None:
+        rpr = ET.Element(f"{W}rPr")
+        rpd.append(rpr)
+    lang = rpr.find(f"{W}lang")
+    if lang is None:
+        lang = ET.Element(f"{W}lang")
+        rpr.append(lang)
+    lang.set(f"{W}val", "en-GB")
+    lang.set(f"{W}eastAsia", "en-GB")
+    lang.set(f"{W}bidi", "en-GB")
+
+
+def ensure_docx_proofing_language_en_gb_bytes(src_bytes: bytes) -> bytes:
+    """Patch ``word/styles.xml`` so default document language is en-GB (Word / ONLYOFFICE status bar)."""
+
+    import io
+    import zipfile
+    import xml.etree.ElementTree as ET
+
+    try:
+        zin = zipfile.ZipFile(io.BytesIO(src_bytes), "r")
+    except zipfile.BadZipFile:
+        return src_bytes
+    try:
+        raw = zin.read("word/styles.xml")
+    except KeyError:
+        zin.close()
+        return src_bytes
+    try:
+        root = ET.fromstring(raw)
+    except ET.ParseError:
+        zin.close()
+        return src_bytes
+    _styles_et_ensure_doc_defaults_lang_en_gb(root)
+    new_styles = ET.tostring(root, encoding="utf-8", xml_declaration=True)
+
+    out_buf = io.BytesIO()
+    with zipfile.ZipFile(out_buf, "w", zipfile.ZIP_DEFLATED) as zout:
+        for info in zin.infolist():
+            data = zin.read(info.filename)
+            if info.filename == "word/styles.xml":
+                data = new_styles
+            zout.writestr(info, data)
+    zin.close()
+    return out_buf.getvalue()
+
+
 def _set_default_proofing_language_en_gb(doc: Any) -> None:
     """Set OOXML default run language to en-GB for new documents.
 
-    ONLYOFFICE/Word use this for the default *document* proofing language (spell check).
-    Editor JWT ``lang``/``region`` do not replace language embedded in existing .docx files.
+    ONLYOFFICE/Word use ``w:docDefaults`` for default document / proofing language. python-docx often
+    omits ``docDefaults`` until we create it.
     """
     from docx.oxml import OxmlElement
     from docx.oxml.ns import qn
@@ -664,10 +1110,12 @@ def _set_default_proofing_language_en_gb(doc: Any) -> None:
     styles_el = doc.styles.element
     dd = styles_el.find(qn("w:docDefaults"))
     if dd is None:
-        return
+        dd = OxmlElement("w:docDefaults")
+        styles_el.insert(0, dd)
     rpd = dd.find(qn("w:rPrDefault"))
     if rpd is None:
-        return
+        rpd = OxmlElement("w:rPrDefault")
+        dd.insert(0, rpd)
     rpr = rpd.find(qn("w:rPr"))
     if rpr is None:
         rpr = OxmlElement("w:rPr")

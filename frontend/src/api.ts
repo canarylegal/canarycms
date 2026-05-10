@@ -149,24 +149,36 @@ export function formatApiErrorDetail(body: unknown, fallback: string): string {
   return fallback
 }
 
+/** Some reverse proxies drop ``Authorization`` on multipart/form-data; backend also accepts this header. */
+export const CANARY_TOKEN_HEADER = 'X-Canary-Token'
+
+export function applyAuthHeaders(headers: Headers, authTrimmed: string): void {
+  if (!authTrimmed) return
+  headers.set('Authorization', `Bearer ${authTrimmed}`)
+  headers.set(CANARY_TOKEN_HEADER, authTrimmed)
+}
+
 export async function apiFetch<T>(
   path: string,
   opts: RequestInit & { token?: string; json?: unknown } = {},
 ): Promise<T> {
-  const headers = new Headers(opts.headers ?? {})
-  if (opts.token) headers.set('Authorization', `Bearer ${opts.token}`)
-  if (opts.json !== undefined) headers.set('Content-Type', 'application/json')
+  const { token, json, ...rest } = opts
+  const headers = new Headers(rest.headers ?? {})
+  /** Starlette HTTPBearer treats ``Bearer `` with no token as *missing* auth — avoid sending that. */
+  const auth = token != null ? String(token).trim() : ''
+  if (auth) applyAuthHeaders(headers, auth)
+  if (json !== undefined) headers.set('Content-Type', 'application/json')
 
-  const method = (opts.method ?? (opts.json !== undefined ? 'POST' : 'GET')).toUpperCase()
+  const method = (rest.method ?? (json !== undefined ? 'POST' : 'GET')).toUpperCase()
   const body =
     method === 'GET' || method === 'HEAD'
       ? undefined
-      : opts.json !== undefined
-        ? JSON.stringify(opts.json)
-        : opts.body
+      : json !== undefined
+        ? JSON.stringify(json)
+        : rest.body
 
   const res = await fetch(apiUrl(path), {
-    ...opts,
+    ...rest,
     method,
     headers,
     body,

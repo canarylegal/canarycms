@@ -8,6 +8,7 @@ from sqlalchemy import (
     Boolean,
     Date,
     DateTime,
+    LargeBinary,
     Time,
     Enum,
     ForeignKey,
@@ -283,6 +284,13 @@ class CasePropertyDetails(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
 
 
+class LetterheadStyle(str, enum.Enum):
+    """Letter compose: physical pre-printed stock vs digital header/footer template."""
+
+    preprinted = "preprinted"
+    digital = "digital"
+
+
 class PrecedentKind(str, enum.Enum):
     letter = "letter"
     email = "email"
@@ -300,6 +308,73 @@ class PrecedentCategory(Base):
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+
+
+class FirmSettings(Base):
+    """Singleton firm-wide configuration (id must always be 1)."""
+
+    __tablename__ = "firm_settings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
+    trading_name: Mapped[str] = mapped_column(String(300), nullable=False, default="")
+    registered_company_name: Mapped[str | None] = mapped_column(String(400), nullable=True)
+    addr_line1: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    addr_line2: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    town_city: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    county: Mapped[str | None] = mapped_column(String(150), nullable=True)
+    postcode: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    letterhead_style: Mapped[LetterheadStyle] = mapped_column(
+        Enum(LetterheadStyle, name="letterhead_style"),
+        nullable=False,
+        default=LetterheadStyle.preprinted,
+    )
+    letterhead_file_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("file.id", ondelete="SET NULL"), nullable=True
+    )
+    mandate_two_factor: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+
+
+class WebAuthnChallenge(Base):
+    """Short-lived WebAuthn ceremony challenges (registration / passkey login)."""
+
+    __tablename__ = "webauthn_challenge"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    subject: Mapped[str] = mapped_column(String(320), nullable=False, index=True)
+    challenge_b64: Mapped[str] = mapped_column(Text, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class WebAuthnCredential(Base):
+    """Registered passkey / WebAuthn credential for a user."""
+
+    __tablename__ = "webauthn_credential"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("user.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    credential_id: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    public_key: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    sign_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    transports: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    label: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (UniqueConstraint("credential_id", name="uq_webauthn_credential_credential_id"),)
+
+
+class MergeCodeCatalog(Base):
+    """Editable descriptions for precedent merge tokens; keys mirror ``docx_util.PRECEDENT_CODES``."""
+
+    __tablename__ = "merge_code_catalog"
+
+    code: Mapped[str] = mapped_column(String(160), primary_key=True)
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
 
 
@@ -416,6 +491,7 @@ class FileCategory(str, enum.Enum):
     case_document = "case_document"
     precedent = "precedent"
     system = "system"
+    firm_letterhead = "firm_letterhead"
 
 
 class File(Base):
@@ -471,6 +547,8 @@ class File(Base):
     outlook_web_link: Mapped[str | None] = mapped_column(Text, nullable=True)
     # True for new docs from compose-office until the user finishes OnlyOffice "Save & Close" (published).
     oo_compose_pending: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # Set while /oo-force-save waits for DS callback; cleared when bytes are saved or unchanged save is ack'd.
+    oo_force_save_pending: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)

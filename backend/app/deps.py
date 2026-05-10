@@ -2,35 +2,97 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db import get_db
 from app.models import Case, CaseAccessMode, CaseAccessRule, CaseLockMode, User
+from app.org_security import firm_mandates_second_factor, user_meets_second_factor_policy
 from app.security import decode_access_token
 from app.admin_access import user_effective_admin
 
 
 _bearer = HTTPBearer(auto_error=False)
 
+_SECOND_FACTOR_SETUP_PATH_EXACT = frozenset(
+    {
+        "/auth/me",
+        "/auth/change-password",
+    }
+)
+_SECOND_FACTOR_SETUP_PREFIXES = (
+    "/auth/2fa/",
+    "/auth/webauthn/register",
+    "/auth/webauthn/credentials",
+)
+
+
+def _path_allows_second_factor_setup(path: str) -> bool:
+    if path in _SECOND_FACTOR_SETUP_PATH_EXACT:
+        return True
+    return any(path.startswith(p) for p in _SECOND_FACTOR_SETUP_PREFIXES)
+
+
+def _jwt_raw_from_request(request: Request, creds: HTTPAuthorizationCredentials | None) -> str | None:
+    """Prefer ``Authorization: Bearer``, then ``X-Canary-Token`` (some proxies strip Bearer on multipart POST)."""
+
+    if creds is not None and creds.scheme.lower() == "bearer":
+        c = (creds.credentials or "").strip()
+        if c:
+            return c
+    alt = request.headers.get("x-canary-token")
+    if alt:
+        t = alt.strip()
+        if t:
+            return t
+    return None
+
 
 def get_current_user(
+    request: Request,
     creds: HTTPAuthorizationCredentials | None = Depends(_bearer),
     db: Session = Depends(get_db),
 ) -> User:
-    if creds is None or creds.scheme.lower() != "bearer":
+    raw = _jwt_raw_from_request(request, creds)
+    if raw is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing bearer token")
 
     try:
-        payload = decode_access_token(creds.credentials)
+        payload = decode_access_token(raw)
     except ValueError:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
 
     user = db.get(User, payload.user_id)
     if not user or not user.is_active:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User inactive or not found")
+
+    # Mandate applies to non-admins only so firm admins can recover settings and manage users without locking
+    # themselves out when rolling out passkeys / authenticator 2FA org-wide.
+    if not user_effective_admin(user, db):
+        if firm_mandates_second_factor(db):
+            db_ok = user_meets_second_factor_policy(db, user.id, is_2fa_enabled=user.is_2fa_enabled)
+            if not db_ok:
+                if not _path_allows_second_factor_setup(request.url.path):
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail=(
+                            "Your organisation requires two-factor authentication (authenticator app) or a registered passkey. "
+                            "Finish the security setup screen first — you cannot use the rest of Canary until enrolment is complete."
+                        ),
+                    )
+            elif payload.mfa_verified is not True:
+                # Password-only JWTs are issued with mfa_verified=False so users cannot bypass mandate by owning passkeys
+                # they never present at sign-in.
+                if not _path_allows_second_factor_setup(request.url.path):
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail=(
+                            "Your organisation requires a verified second factor at sign-in. "
+                            "Use Sign in with passkey, or sign in with password and enter your authenticator code when prompted."
+                        ),
+                    )
     return user
 
 

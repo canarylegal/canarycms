@@ -3,6 +3,9 @@
 Looks for ``manifest.json`` under ``PRECEDENTS_SEED_DIR`` (default ``/app/precedents_seed``).
 When the ``precedent`` table is empty, imports categories, files, and precedent rows so new
 environments match matter sub-types by name (see manifest format from ``export_precedent_seed``).
+
+Entries with ``"global": true`` become firm-wide precedents (no matter head/sub/category), e.g.
+the reserved blank letter template (``reference``: ``BLANK_LETTER``).
 """
 
 from __future__ import annotations
@@ -20,6 +23,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.file_storage import ensure_files_root, precedent_file_paths
+from app.precedent_constants import BLANK_LETTER_PRECEDENT_REFERENCE
 from app.models import (
     File as DbFile,
     FileCategory,
@@ -138,14 +142,6 @@ def apply_precedent_seed_if_empty(db: Session) -> bool:
 
         inserted = 0
         for p in precedents_payload:
-            head_name = (p.get("matter_head_type_name") or "").strip()
-            sub_name = (p.get("matter_sub_type_name") or "").strip()
-            cat_name = (p.get("category_name") or "").strip()
-            cid = cat_key_to_id.get((head_name, sub_name, cat_name))
-            if not cid:
-                log.warning("Precedent seed: skip precedent %r — category not resolved.", p.get("name"))
-                continue
-
             fname = (p.get("bundle_file") or "").strip()
             if not fname:
                 continue
@@ -153,6 +149,26 @@ def apply_precedent_seed_if_empty(db: Session) -> bool:
             if not src.is_file():
                 log.warning("Precedent seed: missing file %s — skip %r", fname, p.get("name"))
                 continue
+
+            is_global = bool(p.get("global"))
+            mh_id: uuid.UUID | None = None
+            ms_id: uuid.UUID | None = None
+            cid: uuid.UUID | None = None
+
+            if is_global:
+                pass  # firm-wide scope — all None
+            else:
+                head_name = (p.get("matter_head_type_name") or "").strip()
+                sub_name = (p.get("matter_sub_type_name") or "").strip()
+                cat_name = (p.get("category_name") or "").strip()
+                cid = cat_key_to_id.get((head_name, sub_name, cat_name))
+                if not cid:
+                    log.warning("Precedent seed: skip precedent %r — category not resolved.", p.get("name"))
+                    continue
+                pc = db.get(PrecedentCategory, cid)
+                ms_id = pc.matter_sub_type_id if pc else None
+                sub = db.get(MatterSubType, ms_id) if ms_id else None
+                mh_id = sub.head_type_id if sub else None
 
             prec_id = uuid.uuid4()
             file_id = uuid.uuid4()
@@ -164,6 +180,11 @@ def apply_precedent_seed_if_empty(db: Session) -> bool:
                 kind = PrecedentKind(kind_s)
             except ValueError:
                 kind = PrecedentKind.document
+
+            ref = (p.get("reference") or "SEED").strip()[:200]
+            if ref == BLANK_LETTER_PRECEDENT_REFERENCE and kind != PrecedentKind.letter:
+                log.warning("Precedent seed: %s must be kind=letter — got %s", ref, kind)
+                continue
 
             paths = precedent_file_paths(precedent_id=prec_id, file_id=file_id, original_filename=original_filename)
             shutil.copy2(src, paths.abs_path)
@@ -189,15 +210,11 @@ def apply_precedent_seed_if_empty(db: Session) -> bool:
                     updated_at=now,
                 )
             )
-            pc = db.get(PrecedentCategory, cid)
-            ms_id = pc.matter_sub_type_id if pc else None
-            sub = db.get(MatterSubType, ms_id) if ms_id else None
-            mh_id = sub.head_type_id if sub else None
             db.add(
                 Precedent(
                     id=prec_id,
                     name=(p.get("name") or original_filename)[:300],
-                    reference=(p.get("reference") or "SEED")[:200],
+                    reference=ref,
                     kind=kind,
                     file_id=file_id,
                     matter_head_type_id=mh_id,

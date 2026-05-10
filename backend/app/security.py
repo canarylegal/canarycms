@@ -31,11 +31,13 @@ JWT_ALG = "HS256"
 JWT_TTL_SECONDS = int(os.getenv("JWT_TTL_SECONDS", "28800"))  # 8h
 
 
-def create_access_token(*, user_id: str, role: str) -> str:
+def create_access_token(*, user_id: str, role: str, mfa_verified: bool = True) -> str:
     now = int(time.time())
     payload = {
         "sub": user_id,
         "role": role,
+        # Under org mandate, API access requires mfa_verified=True (passkey sign-in or password+authenticator).
+        "mfa": bool(mfa_verified),
         "iat": now,
         "exp": now + JWT_TTL_SECONDS,
     }
@@ -46,6 +48,8 @@ def create_access_token(*, user_id: str, role: str) -> str:
 class TokenPayload:
     user_id: str
     role: str
+    """Present on newer JWTs only; ``None`` means legacy token without an ``mfa`` claim."""
+    mfa_verified: bool | None = None
 
 
 EML_OPEN_TTL_SECONDS = int(os.getenv("EML_OPEN_TTL_SECONDS", "120"))
@@ -97,7 +101,15 @@ def decode_access_token(token: str) -> TokenPayload:
     role = payload.get("role")
     if not isinstance(sub, str) or not isinstance(role, str):
         raise ValueError("Invalid token payload")
-    return TokenPayload(user_id=sub, role=role)
+    mfa_raw = payload.get("mfa")
+    mfa_verified: bool | None
+    if mfa_raw is True:
+        mfa_verified = True
+    elif mfa_raw is False:
+        mfa_verified = False
+    else:
+        mfa_verified = None
+    return TokenPayload(user_id=sub, role=role, mfa_verified=mfa_verified)
 
 
 def generate_totp_secret() -> str:
