@@ -44,6 +44,7 @@ function eventRowChanged(was: CaseEventOut | undefined, ev: CaseEventOut): boole
   const et = ev.event_start_time?.slice(0, 8) ?? ''
   if (wt !== et) return true
   if (was.name !== ev.name) return true
+  if ((was.email_alert_enabled ?? false) !== (ev.email_alert_enabled ?? false)) return true
   return false
 }
 
@@ -132,6 +133,7 @@ async function syncCalendarsForCaseEvents(
 
     const title = `${label}: ${ev.name}`.slice(0, 500)
     const desc = `Canary tracked case event (${label}).`
+    const tid = ev.template_id ?? null
     const calBody = timed
       ? {
           title,
@@ -139,6 +141,7 @@ async function syncCalendarsForCaseEvents(
           end: ev.calendar_block_end,
           all_day: false,
           description: desc,
+          matter_sub_type_event_template_id: tid,
         }
       : {
           title,
@@ -146,6 +149,7 @@ async function syncCalendarsForCaseEvents(
           end: rangeAllDay!.end,
           all_day: true,
           description: desc,
+          matter_sub_type_event_template_id: tid,
         }
 
     if (ev.calendar_event_uid) {
@@ -285,6 +289,7 @@ export function EventsPage({
             event_all_day: allDay,
             event_start_time: timeApi,
             track_in_calendar: ev.track_in_calendar ?? false,
+            email_alert: ev.email_alert_enabled ?? false,
           },
         })
       }
@@ -553,6 +558,19 @@ export function EventsPage({
                   }
                 />
                 <span>Track in calendar</span>
+              </label>
+              <label className="row" style={{ gap: 8, alignItems: 'center', cursor: 'pointer' }}>
+                <input
+                  type="checkbox"
+                  checked={eventDetail.email_alert_enabled ?? false}
+                  disabled={busy}
+                  onChange={(e) =>
+                    setEventDetail((prev) =>
+                      prev ? { ...prev, email_alert_enabled: e.target.checked } : prev,
+                    )
+                  }
+                />
+                <span>E-mail reminders (requires Admin → E-mail → SMTP)</span>
               </label>
             </div>
             <div className="row" style={{ justifyContent: 'flex-end', gap: 8, marginTop: 20 }}>

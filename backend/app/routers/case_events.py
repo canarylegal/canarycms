@@ -36,7 +36,7 @@ def read_case_events(
     db: Session = Depends(get_db),
 ) -> CaseEventsOut:
     require_case_access(case_id, user, db)
-    result = get_case_events(case_id, db)
+    result = get_case_events(case_id, db, viewer=user)
     db.commit()
     return result
 

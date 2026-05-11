@@ -801,7 +801,7 @@ class FinanceItem(Base):
 
 
 class MatterSubTypeEventTemplate(Base):
-    """Admin-defined event label for a matter sub-type (order + name)."""
+    """Admin-defined event label for a matter sub-type (order + name + e-mail reminder defaults)."""
 
     __tablename__ = "matter_sub_type_event_template"
 
@@ -811,6 +811,9 @@ class MatterSubTypeEventTemplate(Base):
     )
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    notify_on_day: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    notify_every_n: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    notify_every_unit: Mapped[str | None] = mapped_column(String(12), nullable=True)  # days | weeks | months
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
 
@@ -868,6 +871,60 @@ class EmailIntegrationSettings(Base):
     graph_client_secret_enc: Mapped[str | None] = mapped_column(Text, nullable=True)
     outlook_web_mail_base: Mapped[str | None] = mapped_column(Text, nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+
+
+class SmtpNotificationSettings(Base):
+    """Singleton (id=1): outbound SMTP for calendar (and future) e-mail alerts."""
+
+    __tablename__ = "smtp_notification_settings"
+
+    id: Mapped[int] = mapped_column(SmallInteger, primary_key=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    host: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    port: Mapped[int] = mapped_column(Integer, nullable=False, default=587)
+    use_tls: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    username: Mapped[str | None] = mapped_column(String(320), nullable=True)
+    password_enc: Mapped[str | None] = mapped_column(Text, nullable=True)
+    from_email: Mapped[str | None] = mapped_column(String(320), nullable=True)
+    from_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+
+
+class CalendarEventEmailAlertSubscription(Base):
+    """Per-user opt-in to e-mail reminders for one calendar row (Radicale UID or synthetic case event)."""
+
+    __tablename__ = "calendar_event_email_alert_subscription"
+    __table_args__ = (UniqueConstraint("user_id", "event_key", name="uq_cal_ev_mail_sub_user_event"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("user.id", ondelete="CASCADE"), nullable=False)
+    event_key: Mapped[str] = mapped_column(String(512), nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    anchor_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    anchor_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    all_day: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    title_snapshot: Mapped[str] = mapped_column(String(600), nullable=False, default="")
+    matter_template_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("matter_sub_type_event_template.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+
+
+class CalendarEventNotificationSent(Base):
+    """Dedupe bucket for one reminder send (user + logical event + UTC day + kind)."""
+
+    __tablename__ = "calendar_event_notification_sent"
+    __table_args__ = (
+        UniqueConstraint("user_id", "event_key", "sent_day", "kind", name="uq_cal_ev_notif_sent_dedupe"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("user.id", ondelete="CASCADE"), nullable=False)
+    event_key: Mapped[str] = mapped_column(String(512), nullable=False)
+    sent_day: Mapped[date] = mapped_column(Date, nullable=False)
+    kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
 
 
 class BillingLineTemplate(Base):

@@ -6,11 +6,14 @@ import {
 } from '@simplewebauthn/browser'
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { AdminBilling } from './AdminBilling'
+import { AdminDeploy } from './AdminDeploy'
+import { AdminLoginUpdatePrompt } from './AdminLoginUpdatePrompt'
 import { AdminEmail } from './AdminEmail'
 import { AdminFirmDetails } from './AdminFirmDetails'
 import { AdminSubMenus } from './AdminSubMenus'
 import { AdminTasks } from './AdminTasks'
 import { CalendarPage } from './CalendarPage'
+import { ReportsPage } from './ReportsPage'
 import { TaskCreateModal } from './TaskCreateModal'
 import { TasksTable } from './TasksTable'
 import {
@@ -746,14 +749,7 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
     if (view === 'contacts') return <Contacts token={token} />
 
     if (view === 'reports') {
-      return (
-        <div className="mainMenuShell mainMenuShell--mainMenu">
-          <div className="card casesTableCard reportsPageShell">
-            <h1 className="reportsPageTitle">Reports</h1>
-            <p className="muted reportsPageLead">Reporting features to follow.</p>
-          </div>
-        </div>
-      )
+      return <ReportsPage token={token} me={auth.me} />
     }
 
     if (view === 'case-menu') {
@@ -1197,6 +1193,7 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
 
   return (
     <div className="appShell">
+      <AdminLoginUpdatePrompt token={auth.token} me={auth.me} canAdmin={canAdminConsole} />
       <header className="topbar">
         <div className="topbarMain">
           <nav className="topNav" aria-label="Primary">
@@ -4526,6 +4523,7 @@ function AdminConsole({ token, refreshMe }: { token: string; refreshMe: () => Pr
     | 'matters'
     | 'billing'
     | 'email'
+    | 'deploy'
     | 'submenus'
     | 'tasks'
     | 'contacts'
@@ -4537,7 +4535,9 @@ function AdminConsole({ token, refreshMe }: { token: string; refreshMe: () => Pr
       ? 'Trading name, registered name, and firm address for precedent merge codes.'
       : tab === 'email'
       ? 'Org-wide e-mail integration (mailto vs Microsoft 365).'
-      : tab === 'audit'
+      : tab === 'deploy'
+        ? 'Request GitHub Actions to rebuild and restart this stack (admin only).'
+        : tab === 'audit'
         ? 'Activity and audit trail.'
         : tab === 'users'
           ? 'User accounts and permission categories.'
@@ -4580,6 +4580,9 @@ function AdminConsole({ token, refreshMe }: { token: string; refreshMe: () => Pr
           <button type="button" className={`navBtn ${tab === 'email' ? 'active' : ''}`} onClick={() => setTab('email')}>
             E-mail
           </button>
+          <button type="button" className={`navBtn ${tab === 'deploy' ? 'active' : ''}`} onClick={() => setTab('deploy')}>
+            Deploy
+          </button>
           <button type="button" className={`navBtn ${tab === 'submenus' ? 'active' : ''}`} onClick={() => setTab('submenus')}>
             Sub-Menus
           </button>
@@ -4608,6 +4611,8 @@ function AdminConsole({ token, refreshMe }: { token: string; refreshMe: () => Pr
           <AdminBilling token={token} />
         ) : tab === 'email' ? (
           <AdminEmail token={token} onSaved={() => void refreshMe()} />
+        ) : tab === 'deploy' ? (
+          <AdminDeploy token={token} />
         ) : tab === 'submenus' ? (
           <AdminSubMenus token={token} />
         ) : tab === 'tasks' ? (

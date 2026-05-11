@@ -24,3 +24,9 @@ def test_auth_me_rejects_bad_bearer() -> None:
     client = TestClient(app)
     res = client.get("/auth/me", headers={"Authorization": "Bearer not-a-real-jwt"})
     assert res.status_code == 401
+
+
+def test_reports_fee_earners_requires_auth() -> None:
+    client = TestClient(app)
+    res = client.get("/reports/fee-earners")
+    assert res.status_code == 401

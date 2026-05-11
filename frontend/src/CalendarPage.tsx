@@ -279,6 +279,7 @@ function buildCaseEventApiPayload(d: {
   startHour: number
   startMinute: number
   trackInCalendar: boolean
+  emailAlert?: boolean
 }): Record<string, unknown> {
   const datePart = localYmdFromDate(startOfLocalDay(d.start))
   const body: Record<string, unknown> = {
@@ -286,6 +287,7 @@ function buildCaseEventApiPayload(d: {
     event_date: datePart,
     event_all_day: d.allDay,
     track_in_calendar: d.trackInCalendar,
+    email_alert: d.emailAlert ?? false,
   }
   if (!d.allDay) {
     body.event_start_time = `${pad2(d.startHour)}:${pad2(d.startMinute)}:00`
@@ -462,6 +464,7 @@ export function CalendarPage({
         /** Same as ``CaseEventCreateModal``: ``custom`` or existing case event row id. */
         eventCategory: 'custom' | string
         trackInCalendar: boolean
+        emailAlert: boolean
       }
     | {
         kind: 'edit'
@@ -486,6 +489,9 @@ export function CalendarPage({
         caseId?: string
         caseEventId?: string
         trackInCalendar?: boolean
+        emailAlert: boolean
+        /** CalDAV: optional matter template UUID stored on the event (X-CANARY-TEMPLATE-ID). */
+        matterTemplateId?: string | null
       }
   >(null)
 
@@ -733,6 +739,8 @@ export function CalendarPage({
               case_id: r.case_id ?? null,
               case_event_id: r.case_event_id ?? null,
               track_in_calendar: r.track_in_calendar ?? null,
+              email_alert_enabled: r.email_alert_enabled ?? false,
+              matter_template_id: r.matter_template_id ?? null,
             },
           }
           }),
@@ -789,6 +797,7 @@ export function CalendarPage({
       caseId: '',
       eventCategory: 'custom',
       trackInCalendar: true,
+      emailAlert: false,
     })
     selectInfo.view.calendar.unselect()
   }
@@ -825,6 +834,7 @@ export function CalendarPage({
       caseId: '',
       eventCategory: 'custom',
       trackInCalendar: true,
+      emailAlert: false,
     })
     try {
       calRef.current?.getApi().unselect()
@@ -847,6 +857,8 @@ export function CalendarPage({
       case_id?: string | null
       case_event_id?: string | null
       track_in_calendar?: boolean | null
+      email_alert_enabled?: boolean
+      matter_template_id?: string | null
     }
     let startHour = 9
     let startMinute = 0
@@ -884,6 +896,7 @@ export function CalendarPage({
         caseId: ep.case_id,
         caseEventId: ep.case_event_id,
         trackInCalendar: Boolean(ep.track_in_calendar),
+        emailAlert: Boolean(ep.email_alert_enabled),
       })
       return
     }
@@ -905,6 +918,8 @@ export function CalendarPage({
       calendarId: String(ep.calendar_id ?? ''),
       categoryId: ep.category_id ? String(ep.category_id) : null,
       categoryLabel: ep.category_name != null && ep.category_name !== '' ? String(ep.category_name) : null,
+      emailAlert: Boolean(ep.email_alert_enabled),
+      matterTemplateId: ep.matter_template_id != null && ep.matter_template_id !== '' ? String(ep.matter_template_id) : null,
     })
   }
 
@@ -966,6 +981,7 @@ export function CalendarPage({
         startHour: draft.startHour,
         startMinute: draft.startMinute,
         trackInCalendar: draft.trackInCalendar,
+        emailAlert: draft.emailAlert,
       })
       if (draft.eventCategory === 'custom') {
         await apiFetch(`/cases/${cid}/events`, {
@@ -1018,6 +1034,7 @@ export function CalendarPage({
           startHour: draft.startHour,
           startMinute: draft.startMinute,
           trackInCalendar: Boolean(draft.trackInCalendar),
+          emailAlert: draft.emailAlert,
         })
         await apiFetch(`/cases/${cid}/events/${encodeURIComponent(eid)}`, {
           method: 'PATCH',
@@ -1053,6 +1070,8 @@ export function CalendarPage({
             end: bodyEnd,
             all_day: allDay,
             category_id: draft.categoryId,
+            email_alert: draft.emailAlert,
+            matter_sub_type_event_template_id: draft.matterTemplateId ?? null,
           },
         })
       }
@@ -1279,6 +1298,7 @@ export function CalendarPage({
                               eventCategory: 'custom',
                               title: '',
                               trackInCalendar: true,
+                              emailAlert: false,
                             })
                           }}
                         >
@@ -1326,6 +1346,7 @@ export function CalendarPage({
                                           eventCategory: 'custom',
                                           title: '',
                                           trackInCalendar: true,
+                                          emailAlert: false,
                                         })
                                       }}
                                     >
@@ -1360,7 +1381,7 @@ export function CalendarPage({
                     onChange={(e) => {
                       const v = e.target.value as 'custom' | string
                       if (v === 'custom') {
-                        setDraft({ ...draft, eventCategory: 'custom', title: '', trackInCalendar: true })
+                        setDraft({ ...draft, eventCategory: 'custom', title: '', trackInCalendar: true, emailAlert: false })
                       } else {
                         setDraft({ ...draft, eventCategory: v })
                       }
@@ -1434,6 +1455,19 @@ export function CalendarPage({
                   </span>
                 </label>
               ) : null}
+              {draft.kind === 'create' ? (
+                <label className="row" style={{ gap: 8, alignItems: 'flex-start' }}>
+                  <input
+                    type="checkbox"
+                    checked={draft.emailAlert}
+                    disabled={busy}
+                    onChange={(e) => setDraft({ ...draft, emailAlert: e.target.checked })}
+                  />
+                  <span className="muted" style={{ lineHeight: 1.4 }}>
+                    E-mail reminders for this event (requires Admin → E-mail → SMTP). Other users can opt in separately.
+                  </span>
+                </label>
+              ) : null}
               {draft.kind === 'edit' && draft.editSource === 'case' && draft.canEdit ? (
                 <label className="row" style={{ gap: 8, alignItems: 'flex-start' }}>
                   <input
@@ -1447,6 +1481,19 @@ export function CalendarPage({
                   </span>
                 </label>
               ) : null}
+              {draft.kind === 'edit' && draft.editSource === 'case' && draft.canEdit ? (
+                <label className="row" style={{ gap: 8, alignItems: 'flex-start' }}>
+                  <input
+                    type="checkbox"
+                    checked={draft.emailAlert}
+                    disabled={busy}
+                    onChange={(e) => setDraft({ ...draft, emailAlert: e.target.checked })}
+                  />
+                  <span className="muted" style={{ lineHeight: 1.4 }}>
+                    E-mail reminders for this event (requires Admin → E-mail → SMTP). Other users can opt in separately.
+                  </span>
+                </label>
+              ) : null}
               {draft.kind === 'edit' && draft.editSource === 'caldav' ? (
                 <label className="field">
                   <span>Description</span>
@@ -1456,6 +1503,19 @@ export function CalendarPage({
                     onChange={(e) => setDraft({ ...draft, description: e.target.value })}
                     disabled={busy || !draft.canEdit}
                   />
+                </label>
+              ) : null}
+              {draft.kind === 'edit' && draft.editSource === 'caldav' && draft.canEdit ? (
+                <label className="row" style={{ gap: 8, alignItems: 'flex-start' }}>
+                  <input
+                    type="checkbox"
+                    checked={draft.emailAlert}
+                    disabled={busy}
+                    onChange={(e) => setDraft({ ...draft, emailAlert: e.target.checked })}
+                  />
+                  <span className="muted" style={{ lineHeight: 1.4 }}>
+                    E-mail reminders for this event (requires Admin → E-mail → SMTP). Other users can opt in separately.
+                  </span>
                 </label>
               ) : null}
               {draft.kind === 'create' || (draft.kind === 'edit' && draft.canEdit) ? (

@@ -11,7 +11,14 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.deps import get_case_if_accessible
-from app.models import Case, CaseEvent, MatterSubType, MatterSubTypeEventTemplate, User
+from app.models import (
+    CalendarEventEmailAlertSubscription,
+    Case,
+    CaseEvent,
+    MatterSubType,
+    MatterSubTypeEventTemplate,
+    User,
+)
 from app.schemas import (
     CalendarEventTemplatePickOut,
     CaseEventCreate,
@@ -58,6 +65,11 @@ def list_calendar_event_template_picks(db: Session) -> list[CalendarEventTemplat
                 matter_sub_type_name=st_name,
                 name=t.name,
                 sort_order=t.sort_order,
+                notify_on_day=bool(t.notify_on_day),
+                notify_every_n=t.notify_every_n,
+                notify_every_unit=t.notify_every_unit
+                if t.notify_every_unit in ("days", "weeks", "months")
+                else None,
             )
         )
     return out
@@ -87,6 +99,9 @@ def create_event_template(
         matter_sub_type_id=payload.matter_sub_type_id,
         name=payload.name.strip(),
         sort_order=payload.sort_order,
+        notify_on_day=payload.notify_on_day,
+        notify_every_n=payload.notify_every_n,
+        notify_every_unit=payload.notify_every_unit,
         created_at=now,
         updated_at=now,
     )
@@ -106,6 +121,12 @@ def update_event_template(
         row.name = data["name"].strip()
     if "sort_order" in data and data["sort_order"] is not None:
         row.sort_order = data["sort_order"]
+    if "notify_on_day" in data and data["notify_on_day"] is not None:
+        row.notify_on_day = bool(data["notify_on_day"])
+    if "notify_every_n" in data:
+        row.notify_every_n = data["notify_every_n"]
+    if "notify_every_unit" in data:
+        row.notify_every_unit = data["notify_every_unit"]
     row.updated_at = datetime.utcnow()
     db.add(row)
     db.flush()
@@ -137,7 +158,7 @@ def _calendar_block_for_event(e: CaseEvent) -> tuple[str | None, str | None, boo
     return s, en, False
 
 
-def _event_out(e: CaseEvent) -> CaseEventOut:
+def _event_out(e: CaseEvent, *, email_alert_enabled: bool = False) -> CaseEventOut:
     cs, ce, cad = _calendar_block_for_event(e)
     return CaseEventOut(
         id=e.id,
@@ -153,6 +174,7 @@ def _event_out(e: CaseEvent) -> CaseEventOut:
         calendar_block_all_day=cad,
         track_in_calendar=e.track_in_calendar,
         calendar_event_uid=e.calendar_event_uid,
+        email_alert_enabled=email_alert_enabled,
         created_at=e.created_at,
         updated_at=e.updated_at,
     )
@@ -208,9 +230,29 @@ def _get_or_init_case_events(case_id: uuid.UUID, db: Session) -> list[CaseEvent]
     return out
 
 
-def get_case_events(case_id: uuid.UUID, db: Session) -> CaseEventsOut:
+def get_case_events(case_id: uuid.UUID, db: Session, *, viewer: User) -> CaseEventsOut:
+    from app.calendar_email_alert_service import case_event_key
+
     rows = _get_or_init_case_events(case_id, db)
-    return CaseEventsOut(case_id=case_id, events=[_event_out(e) for e in rows])
+    if not rows:
+        return CaseEventsOut(case_id=case_id, events=[])
+    keys = [case_event_key(e.id) for e in rows]
+    enabled_keys = set(
+        db.execute(
+            select(CalendarEventEmailAlertSubscription.event_key).where(
+                CalendarEventEmailAlertSubscription.user_id == viewer.id,
+                CalendarEventEmailAlertSubscription.enabled.is_(True),
+                CalendarEventEmailAlertSubscription.event_key.in_(keys),
+            )
+        )
+        .scalars()
+        .all()
+    )
+    out_events: list[CaseEventOut] = []
+    for e in rows:
+        ek = case_event_key(e.id)
+        out_events.append(_event_out(e, email_alert_enabled=ek in enabled_keys))
+    return CaseEventsOut(case_id=case_id, events=out_events)
 
 
 def create_custom_case_event(
@@ -250,7 +292,10 @@ def create_custom_case_event(
     if case:
         sync_tracked_case_event_task(db, case=case, case_event=ce, actor_user_id=actor_user_id)
     db.flush()
-    return _event_out(ce)
+    from app.calendar_email_alert_service import case_event_key, sync_case_event_subscription, user_has_email_alert
+
+    sync_case_event_subscription(db, viewer_id=actor_user_id, case_event=ce, email_alert=payload.email_alert)
+    return _event_out(ce, email_alert_enabled=user_has_email_alert(db, actor_user_id, case_event_key(ce.id)))
 
 
 def update_case_event(
@@ -297,7 +342,13 @@ def update_case_event(
     if case:
         sync_tracked_case_event_task(db, case=case, case_event=e, actor_user_id=actor_user_id)
     db.flush()
-    return _event_out(e)
+
+    from app.calendar_email_alert_service import case_event_key, refresh_case_event_subscription_snapshot, sync_case_event_subscription, user_has_email_alert
+
+    if "email_alert" in data:
+        sync_case_event_subscription(db, viewer_id=actor_user_id, case_event=e, email_alert=data["email_alert"])
+    refresh_case_event_subscription_snapshot(db, viewer_id=actor_user_id, case_event=e)
+    return _event_out(e, email_alert_enabled=user_has_email_alert(db, actor_user_id, case_event_key(e.id)))
 
 
 def _case_event_intersects_window(ce: CaseEvent, rs: datetime, re: datetime) -> bool:
@@ -371,6 +422,7 @@ def list_tracked_case_events_for_calendar_merge(
                 "case_id": case.id,
                 "case_event_id": ev.id,
                 "track_in_calendar": ev.track_in_calendar,
+                "matter_template_id": str(ev.template_id) if ev.template_id else None,
             }
         )
     return out
