@@ -6,10 +6,12 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app import models  # noqa: F401
 from app.canary_public_url import get_canary_public_base
+from app.calendar_notification_job import start_calendar_notification_job
 from app.event_tracked_task_job import start_event_tracked_task_job
 from app.webdav_cors_middleware import WebdavPublicCORSMiddleware
 from app.routers import (
     admin_audit,
+    admin_deploy,
     admin_billing,
     admin_email_integration,
     admin_firm_settings,
@@ -41,6 +43,7 @@ from app.routers import (
     onlyoffice,
     outlook_plugin,
     precedents,
+    reports,
     users,
     webauthn,
     webdav,
@@ -81,6 +84,7 @@ async def lifespan(app: FastAPI):
         db_merge.close()
 
     start_event_tracked_task_job()
+    start_calendar_notification_job()
     yield
 
 
@@ -165,6 +169,7 @@ app.include_router(admin_merge_codes.router)
 app.include_router(admin_matter_contact_types.router)
 app.include_router(admin_permission_categories.router)
 app.include_router(admin_audit.router)
+app.include_router(admin_deploy.router)
 app.include_router(matter_contact_types.router)
 app.include_router(matter_types.router)
 app.include_router(cases.router)
@@ -192,7 +197,9 @@ app.include_router(webdav.router)
 app.include_router(users.router)
 app.include_router(me_calendar_events.router)
 app.include_router(me_calendars.router)
+app.include_router(reports.router)
 
 @app.get("/health")
 def health():
-    return {"status": "ok"}
+    commit = (os.getenv("CANARY_BUILD_COMMIT") or "").strip()
+    return {"status": "ok", "build_commit": commit or None}

@@ -215,6 +215,9 @@ def list_merged_events(
 
     enrich_events_with_categories(db, out)
     out.extend(list_tracked_case_events_for_calendar_merge(db, requesting, range_start, range_end))
+    from app.calendar_email_alert_service import enrich_merged_calendar_events
+
+    enrich_merged_calendar_events(db, requesting, out)
     return out
 
 

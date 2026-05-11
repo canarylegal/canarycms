@@ -42,7 +42,7 @@ export function ConfirmModal({
   return (
     <div
       className="modalOverlay"
-      style={{ zIndex: 30 }}
+      style={{ zIndex: 100 }}
       role="dialog"
       aria-modal="true"
       aria-labelledby="confirmModalTitle"

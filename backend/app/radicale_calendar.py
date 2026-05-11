@@ -17,6 +17,9 @@ from icalendar import Event as ICalEvent
 from app.email_crypt import decrypt_password
 from app.models import User
 
+# Sentinel: omit ``matter_template_id`` so an update leaves X-CANARY-TEMPLATE-ID unchanged.
+_MATTER_TEMPLATE_ID_UNSET = object()
+
 
 def _internal_base() -> str:
     return (os.getenv("RADICALE_INTERNAL_URL") or "http://radicale:5232").strip().rstrip("/")
@@ -244,6 +247,20 @@ def parse_caldav_event(
     }
     if calendar_id:
         out["calendar_id"] = calendar_id
+
+    matter_template_id: uuid.UUID | None = None
+    for key in vevent.keys():
+        if str(key).upper() == "X-CANARY-TEMPLATE-ID":
+            raw_tid = vevent.get(key)
+            if raw_tid is not None:
+                try:
+                    matter_template_id = uuid.UUID(str(raw_tid))
+                except ValueError:
+                    matter_template_id = None
+            break
+    if matter_template_id is not None:
+        out["matter_template_id"] = str(matter_template_id)
+
     return out
 
 
@@ -314,6 +331,7 @@ def create_event_on_calendar(
     description: str | None,
     calendar_display_name: str,
     calendar_id: str,
+    matter_sub_type_event_template_id: uuid.UUID | None = None,
 ) -> dict[str, Any]:
     try:
         cal = get_caldav_calendar(dav_user, slug)
@@ -326,6 +344,8 @@ def create_event_on_calendar(
         ve.add("summary", title)
         if description:
             ve.add("description", description)
+        if matter_sub_type_event_template_id is not None:
+            ve.add("X-CANARY-TEMPLATE-ID", str(matter_sub_type_event_template_id))
         if all_day:
             sd = start if isinstance(start, date) else start.date()
             ed = end if isinstance(end, date) else end.date()
@@ -375,6 +395,7 @@ def update_event_on_principal(
     description: str | None = None,
     calendar_display_name: str | None = None,
     calendar_id: str | None = None,
+    matter_template_id: Any = _MATTER_TEMPLATE_ID_UNSET,
 ) -> dict[str, Any]:
     ev = load_event_on_principal(owner, href)
     try:
@@ -398,6 +419,13 @@ def update_event_on_principal(
                     del vevent["description"]
             else:
                 vevent["description"] = description
+
+        if matter_template_id is not _MATTER_TEMPLATE_ID_UNSET:
+            for k in list(vevent.keys()):
+                if str(k).upper() == "X-CANARY-TEMPLATE-ID":
+                    del vevent[k]
+            if matter_template_id is not None:
+                vevent.add("X-CANARY-TEMPLATE-ID", str(matter_template_id))
 
         use_all = cur_all if all_day is None else all_day
         if start is not None or end is not None or all_day is not None:

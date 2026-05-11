@@ -107,6 +107,8 @@ class CalendarEventOut(BaseModel):
     case_id: uuid.UUID | None = None
     case_event_id: uuid.UUID | None = None
     track_in_calendar: bool | None = None
+    matter_template_id: uuid.UUID | None = None
+    email_alert_enabled: bool = False
 
 
 class CalendarEventCreate(BaseModel):
@@ -117,6 +119,8 @@ class CalendarEventCreate(BaseModel):
     description: str | None = Field(default=None, max_length=20000)
     calendar_id: uuid.UUID | None = None
     category_id: uuid.UUID | None = None
+    email_alert: bool = False
+    matter_sub_type_event_template_id: uuid.UUID | None = None
 
 
 class CalendarEventPatch(BaseModel):
@@ -126,6 +130,8 @@ class CalendarEventPatch(BaseModel):
     all_day: bool | None = None
     description: str | None = Field(default=None, max_length=20000)
     category_id: uuid.UUID | None = None
+    email_alert: bool | None = None
+    matter_sub_type_event_template_id: uuid.UUID | None = None
 
 
 class CalendarCategoryOut(BaseModel):
@@ -608,6 +614,77 @@ class EmailIntegrationSettingsUpdate(BaseModel):
     graph_client_id: str | None = Field(default=None, max_length=2000)
     graph_client_secret: str | None = Field(default=None, max_length=2000)
     outlook_web_mail_base: str | None = Field(default=None, max_length=2000)
+
+
+class SmtpNotificationSettingsOut(BaseModel):
+    enabled: bool
+    host: str | None
+    port: int
+    use_tls: bool
+    username: str | None
+    password_configured: bool
+    from_email: str | None
+    from_name: str | None
+
+
+class SmtpNotificationSettingsUpdate(BaseModel):
+    enabled: bool | None = None
+    host: str | None = Field(default=None, max_length=300)
+    port: int | None = Field(default=None, ge=1, le=65535)
+    use_tls: bool | None = None
+    username: str | None = Field(default=None, max_length=320)
+    password: str | None = Field(default=None, max_length=500)
+    from_email: str | None = Field(default=None, max_length=320)
+    from_name: str | None = Field(default=None, max_length=200)
+
+
+class SmtpNotificationTestIn(BaseModel):
+    to_email: EmailStr
+
+
+class AdminDeployStatusOut(BaseModel):
+    """Whether GitHub Actions deploy trigger is configured (no secrets exposed)."""
+
+    configured: bool
+    owner: str | None = None
+    repo: str | None = None
+    workflow: str | None = None
+    default_ref: str | None = None
+
+
+class AdminDeployTriggerIn(BaseModel):
+    """Optional overrides for ``workflow_dispatch`` (ref defaults from env)."""
+
+    ref: str | None = Field(default=None, max_length=260)
+    environment: str | None = Field(default=None, max_length=120)
+
+    model_config = {"extra": "forbid"}
+
+
+class AdminDeployTriggerOut(BaseModel):
+    ok: bool = True
+    message: str
+
+
+class AdminDeployUpdateCheckOut(BaseModel):
+    """Admin-only: compare running image commit to GitHub default branch + optional release notes."""
+
+    github_repo_configured: bool
+    deploy_trigger_configured: bool = False
+    prompt_enabled: bool
+    current_commit: str
+    current_commit_short: str
+    remote_ref: str
+    remote_commit: str
+    remote_commit_short: str
+    update_available: bool
+    build_commit_unknown: bool
+    compare_html_url: str | None = None
+    latest_release_tag: str | None = None
+    latest_release_name: str | None = None
+    latest_release_body: str | None = None
+    commit_messages: list[str] = []
+    note: str | None = None
 
 
 class ContactCreate(BaseModel):
@@ -1291,6 +1368,9 @@ class MatterSubTypeEventTemplateOut(BaseModel):
     matter_sub_type_id: uuid.UUID
     name: str
     sort_order: int
+    notify_on_day: bool = True
+    notify_every_n: int | None = None
+    notify_every_unit: Literal["days", "weeks", "months"] | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -1303,17 +1383,26 @@ class CalendarEventTemplatePickOut(BaseModel):
     matter_sub_type_name: str
     name: str
     sort_order: int
+    notify_on_day: bool = True
+    notify_every_n: int | None = None
+    notify_every_unit: Literal["days", "weeks", "months"] | None = None
 
 
 class MatterSubTypeEventTemplateCreate(BaseModel):
     matter_sub_type_id: uuid.UUID
     name: str = Field(min_length=1, max_length=200)
     sort_order: int = 0
+    notify_on_day: bool = True
+    notify_every_n: int | None = Field(default=None, ge=1, le=365)
+    notify_every_unit: Literal["days", "weeks", "months"] | None = None
 
 
 class MatterSubTypeEventTemplateUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=200)
     sort_order: int | None = None
+    notify_on_day: bool | None = None
+    notify_every_n: int | None = Field(default=None, ge=1, le=365)
+    notify_every_unit: Literal["days", "weeks", "months"] | None = None
 
 
 class CaseEventOut(BaseModel):
@@ -1331,6 +1420,7 @@ class CaseEventOut(BaseModel):
     calendar_block_all_day: bool | None = None
     track_in_calendar: bool = False
     calendar_event_uid: str | None = None
+    email_alert_enabled: bool = False
     created_at: datetime
     updated_at: datetime
 
@@ -1346,6 +1436,7 @@ class CaseEventCreate(BaseModel):
     event_all_day: bool = True
     event_start_time: time | None = None
     track_in_calendar: bool = False
+    email_alert: bool = False
 
     @field_validator("event_date", mode="before")
     @classmethod
@@ -1362,6 +1453,7 @@ class CaseEventUpdate(BaseModel):
     event_start_time: time | None = None
     track_in_calendar: bool | None = None
     calendar_event_uid: str | None = Field(default=None, max_length=512)
+    email_alert: bool | None = None
 
     @field_validator("event_date", mode="before")
     @classmethod
@@ -1369,4 +1461,65 @@ class CaseEventUpdate(BaseModel):
         if v == "" or v is None:
             return None
         return v
+
+
+# ---------------------------------------------------------------------------
+# Reports (ribbon)
+# ---------------------------------------------------------------------------
+
+
+class ReportFeeEarnerIdsIn(BaseModel):
+    fee_earner_user_ids: list[uuid.UUID] = Field(min_length=1)
+
+    model_config = {"extra": "forbid"}
+
+
+class BillingReportIn(ReportFeeEarnerIdsIn):
+    date_from: date | None = None
+    date_to: date | None = None
+
+    @model_validator(mode="after")
+    def _dates(self) -> BillingReportIn:
+        if self.date_from is not None and self.date_to is not None and self.date_from > self.date_to:
+            raise ValueError("date_from must be on or before date_to")
+        return self
+
+
+class CasesReportIn(ReportFeeEarnerIdsIn):
+    """Optional workflow status filter; omit or empty for all statuses."""
+
+    statuses: list[str] | None = None
+
+
+class CasesOpenedReportIn(ReportFeeEarnerIdsIn):
+    date_from: date
+    date_to: date
+    include_quote: bool = True
+    include_active: bool = True
+
+    @model_validator(mode="after")
+    def _dates(self) -> CasesOpenedReportIn:
+        if self.date_from > self.date_to:
+            raise ValueError("date_from must be on or before date_to")
+        return self
+
+
+class EventsReportIn(ReportFeeEarnerIdsIn):
+    date_from: date | None = None
+    date_to: date | None = None
+    template_ids: list[uuid.UUID] | None = None
+
+    @model_validator(mode="after")
+    def _dates(self) -> EventsReportIn:
+        if self.date_from is not None and self.date_to is not None and self.date_from > self.date_to:
+            raise ValueError("date_from must be on or before date_to")
+        return self
+
+
+class FeeEarnerPickOut(BaseModel):
+    id: uuid.UUID
+    display_name: str
+    email: EmailStr
+
+    model_config = {"from_attributes": True}
 

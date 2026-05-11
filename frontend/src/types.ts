@@ -195,6 +195,8 @@ export type CalendarEventOut = {
   case_id?: string | null
   case_event_id?: string | null
   track_in_calendar?: boolean | null
+  matter_template_id?: string | null
+  email_alert_enabled?: boolean
 }
 
 export type CalendarCategoryOut = {
@@ -671,6 +673,9 @@ export type MatterSubTypeEventTemplateOut = {
   matter_sub_type_id: string
   name: string
   sort_order: number
+  notify_on_day?: boolean
+  notify_every_n?: number | null
+  notify_every_unit?: 'days' | 'weeks' | 'months' | null
   created_at: string
   updated_at: string
 }
@@ -682,6 +687,39 @@ export type CalendarEventTemplatePickOut = {
   matter_sub_type_name: string
   name: string
   sort_order: number
+  notify_on_day?: boolean
+  notify_every_n?: number | null
+  notify_every_unit?: 'days' | 'weeks' | 'months' | null
+}
+
+export type AdminDeployUpdateCheckOut = {
+  github_repo_configured: boolean
+  deploy_trigger_configured: boolean
+  prompt_enabled: boolean
+  current_commit: string
+  current_commit_short: string
+  remote_ref: string
+  remote_commit: string
+  remote_commit_short: string
+  update_available: boolean
+  build_commit_unknown: boolean
+  compare_html_url?: string | null
+  latest_release_tag?: string | null
+  latest_release_name?: string | null
+  latest_release_body?: string | null
+  commit_messages: string[]
+  note?: string | null
+}
+
+export type SmtpNotificationSettingsOut = {
+  enabled: boolean
+  host: string | null
+  port: number
+  use_tls: boolean
+  username: string | null
+  password_configured: boolean
+  from_email: string | null
+  from_name: string | null
 }
 
 export type CaseEventOut = {
@@ -698,6 +736,7 @@ export type CaseEventOut = {
   calendar_block_all_day?: boolean | null
   track_in_calendar?: boolean
   calendar_event_uid?: string | null
+  email_alert_enabled?: boolean
   created_at: string
   updated_at: string
 }

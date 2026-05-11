@@ -27,7 +27,7 @@ export function AlertModal({ open, title, message, onClose }: Props) {
   return (
     <div
       className="modalOverlay"
-      style={{ zIndex: 35 }}
+      style={{ zIndex: 101 }}
       role="alertdialog"
       aria-modal="true"
       aria-labelledby="alertModalTitle"

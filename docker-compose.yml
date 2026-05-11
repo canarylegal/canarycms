@@ -37,7 +37,10 @@ services:
       start_period: 15s
 
   backend:
-    build: ./backend
+    build:
+      context: ./backend
+      args:
+        GIT_COMMIT: ${GIT_COMMIT:-unknown}
     container_name: canary-backend
     networks: [canary]
     dns:
@@ -94,6 +97,14 @@ services:
       CANARY_MS_GRAPH_CLIENT_SECRET: ${CANARY_MS_GRAPH_CLIENT_SECRET:-}
       CANARY_OUTLOOK_WEB_MAIL_BASE: ${CANARY_OUTLOOK_WEB_MAIL_BASE:-}
       CANARY_OUTLOOK_CATEGORY_NAME: ${CANARY_OUTLOOK_CATEGORY_NAME:-Canary}
+      # Optional: admin-only “Deploy” triggers GitHub Actions workflow_dispatch (see .github/workflows/deploy-canary.yml).
+      CANARY_GITHUB_DEPLOY_TOKEN: ${CANARY_GITHUB_DEPLOY_TOKEN:-}
+      CANARY_GITHUB_DEPLOY_OWNER: ${CANARY_GITHUB_DEPLOY_OWNER:-}
+      CANARY_GITHUB_DEPLOY_REPO: ${CANARY_GITHUB_DEPLOY_REPO:-}
+      CANARY_GITHUB_DEPLOY_WORKFLOW: ${CANARY_GITHUB_DEPLOY_WORKFLOW:-deploy-canary.yml}
+      CANARY_GITHUB_DEPLOY_REF: ${CANARY_GITHUB_DEPLOY_REF:-main}
+      # When not "0"/"false": admins may see an update prompt after login if GitHub is ahead of this build.
+      CANARY_UPDATE_PROMPT_ON_LOGIN: ${CANARY_UPDATE_PROMPT_ON_LOGIN:-1}
     volumes:
       - ./data/files:/data/files
       - radicale-data:/radicale-data
