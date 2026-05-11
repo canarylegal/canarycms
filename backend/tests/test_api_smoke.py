@@ -11,7 +11,9 @@ def test_health() -> None:
     client = TestClient(app)
     res = client.get("/health")
     assert res.status_code == 200
-    assert res.json() == {"status": "ok"}
+    data = res.json()
+    assert data.get("status") == "ok"
+    assert "build_commit" in data
 
 
 def test_auth_me_requires_bearer() -> None:
