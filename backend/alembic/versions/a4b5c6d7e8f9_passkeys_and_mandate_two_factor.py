@@ -4,6 +4,9 @@ Revision ID: a4b5c6d7e8f9
 Revises: z2a3b4c5d6e7
 Create Date: 2026-05-10
 
+Cross-branch: ``firm_settings`` is created in ``q9w0e1r2t3y4`` (parallel to ``z2a3b4c5d6e7``).
+``depends_on`` ensures that revision runs before this one on fresh databases (Alembic >= 1.10).
+
 """
 
 from __future__ import annotations
@@ -15,7 +18,7 @@ from sqlalchemy.dialects import postgresql
 revision = "a4b5c6d7e8f9"
 down_revision = "z2a3b4c5d6e7"
 branch_labels = None
-depends_on = None
+depends_on = ("q9w0e1r2t3y4",)
 
 
 def upgrade() -> None:
