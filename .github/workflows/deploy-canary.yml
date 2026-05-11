@@ -1,0 +1,44 @@
+# Deploy Canary on a host where a GitHub **self-hosted** runner is registered for this repository.
+# Admins trigger this workflow from the app (Admin → Deploy) via POST /admin/deploy/trigger, which calls
+# GitHub’s workflow_dispatch API (see CANARY_GITHUB_DEPLOY_* in .env.example and backend ``github_deploy``).
+#
+# Prerequisites on the runner machine:
+#   - Docker and Docker Compose v2
+#   - Runner default working directory = repository root (contains docker-compose.yml and .env)
+#   - COMPOSE_PROFILES in the environment or in .env (e.g. prod)
+name: Deploy Canary
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Deployment label (informational)
+        required: false
+        default: production
+        type: string
+
+concurrency:
+  group: deploy-canary-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: self-hosted
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Docker Compose
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Deploy label: ${{ inputs.environment }}"
+          if ! command -v docker >/dev/null 2>&1; then
+            echo "docker not found on runner" >&2
+            exit 1
+          fi
+          # Honour host/runner env or .env (see COMPOSE_PROFILES in repo .env.example); default prod UI profile.
+          profile="${COMPOSE_PROFILES:-prod}"
+          docker compose --profile "$profile" build
+          docker compose --profile "$profile" up -d
