@@ -643,9 +643,11 @@ class SmtpNotificationTestIn(BaseModel):
 
 
 class AdminDeployStatusOut(BaseModel):
-    """Whether GitHub Actions deploy trigger is configured (no secrets exposed)."""
+    """Deploy/update capabilities exposed to admins (no secrets)."""
 
     configured: bool
+    compose_update_enabled: bool = False
+    github_actions_configured: bool = False
     owner: str | None = None
     repo: str | None = None
     workflow: str | None = None
@@ -653,10 +655,14 @@ class AdminDeployStatusOut(BaseModel):
 
 
 class AdminDeployTriggerIn(BaseModel):
-    """Optional overrides for ``workflow_dispatch`` (ref defaults from env)."""
+    """Trigger deploy: Docker Compose on host (default for self-host) or GitHub Actions."""
 
     ref: str | None = Field(default=None, max_length=260)
     environment: str | None = Field(default=None, max_length=120)
+    method: Literal["auto", "compose", "github"] = Field(
+        default="auto",
+        description="auto: Compose if enabled, else GitHub Actions; force one path with compose|github.",
+    )
 
     model_config = {"extra": "forbid"}
 
@@ -671,6 +677,8 @@ class AdminDeployUpdateCheckOut(BaseModel):
 
     github_repo_configured: bool
     deploy_trigger_configured: bool = False
+    compose_update_enabled: bool = False
+    github_actions_configured: bool = False
     prompt_enabled: bool
     current_commit: str
     current_commit_short: str
