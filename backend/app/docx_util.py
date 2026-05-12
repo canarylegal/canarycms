@@ -887,6 +887,127 @@ def _copy_section_page_geometry(src_section: Any, tgt_section: Any) -> None:
         setattr(tgt_section, attr, val)
 
 
+PRECEDENT_BODY_MARKER = "[PRECEDENT_BODY]"
+
+
+def strip_precedent_body_marker(doc_bytes: bytes) -> bytes:
+    """Remove any leftover ``[PRECEDENT_BODY]`` token from a .docx so it never renders literally.
+
+    Replaces the token text with an empty string inside any paragraph whose combined run-text
+    contains it (keeps the surrounding paragraph for layout / spacing). Used as a safety net for
+    the blank-letter compose path where the splice is skipped, and as defence-in-depth after the
+    splice. Handles the marker even when split across multiple ``w:t`` runs (a common artefact of
+    editing in ONLYOFFICE / Word).
+    """
+    import io
+    from docx import Document
+    from docx.oxml.ns import qn
+
+    doc = Document(io.BytesIO(doc_bytes))
+    body = doc.element.body
+    p_tag = qn("w:p")
+    t_tag = qn("w:t")
+    changed = False
+    for el in list(body.iter(p_tag)):
+        runs_text = "".join((t.text or "") for t in el.iter(t_tag))
+        if PRECEDENT_BODY_MARKER not in runs_text:
+            continue
+        cleaned = runs_text.replace(PRECEDENT_BODY_MARKER, "")
+        for r in list(el.findall(qn("w:r"))):
+            el.remove(r)
+        if cleaned:
+            r = el.makeelement(qn("w:r"), {})
+            t = el.makeelement(qn("w:t"), {qn("xml:space"): "preserve"})
+            t.text = cleaned
+            r.append(t)
+            el.append(r)
+        changed = True
+    if not changed:
+        return doc_bytes
+    out = io.BytesIO()
+    doc.save(out)
+    return out.getvalue()
+
+
+def splice_precedent_into_blank_letter(blank_letter_bytes: bytes, precedent_bytes: bytes) -> bytes:
+    """Use BLANK_LETTER as the scaffold and inject the chosen precedent's body content into it.
+
+    BLANK_LETTER provides the letter shell: headers, footers, page geometry, and the body merge-code
+    scaffold (e.g. recipient address block, date, ``Your Ref`` / ``Our Ref``, salutation, ``Re:``).
+    The chosen precedent contributes only its body block elements (paragraphs + tables); its own
+    headers/footers/page geometry and any trailing ``w:sectPr`` are discarded.
+
+    Insertion point:
+      - If BLANK_LETTER contains a paragraph whose visible text includes ``[PRECEDENT_BODY]``,
+        that paragraph is **replaced** with the precedent body elements. This is the recommended
+        way to position the precedent body precisely (e.g. between salutation and a static signature
+        block that lives in BLANK_LETTER).
+      - Otherwise the precedent body is appended at the **end of BLANK_LETTER's body**, just before
+        the trailing ``w:sectPr`` page-setup element. For a typical scaffold that ends with
+        ``Re: …``, this puts the chosen precedent's content immediately after the subject line.
+
+    Caveats:
+      - Style references in the precedent body (e.g. ``Heading 1``) resolve against BLANK_LETTER's
+        ``word/styles.xml``. Common built-in styles work; precedent-only custom styles fall back to
+        defaults.
+      - Numbering definitions and embedded images in the precedent body may not transfer (numbered
+        lists can lose their numbering format; image rels may dangle). For anything that must always
+        render correctly, put it in BLANK_LETTER.
+      - Merge-code substitution must run on the combined result (caller's responsibility).
+    """
+    import io
+    from copy import deepcopy
+
+    from docx import Document
+
+    W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+    p_tag = f"{{{W}}}p"
+    tbl_tag = f"{{{W}}}tbl"
+    t_tag = f"{{{W}}}t"
+    sect_pr_tag = f"{{{W}}}sectPr"
+
+    base = Document(io.BytesIO(blank_letter_bytes))
+    src = Document(io.BytesIO(precedent_bytes))
+
+    base_body = base.element.body
+    src_body = src.element.body
+
+    src_elements = [deepcopy(el) for el in src_body if el.tag in (p_tag, tbl_tag)]
+    if not src_elements:
+        out_empty = io.BytesIO()
+        base.save(out_empty)
+        return out_empty.getvalue()
+
+    marker_para = None
+    for el in base_body:
+        if el.tag != p_tag:
+            continue
+        text = "".join((t.text or "") for t in el.iter(t_tag))
+        if PRECEDENT_BODY_MARKER in text:
+            marker_para = el
+            break
+
+    if marker_para is not None:
+        parent = marker_para.getparent()
+        idx = list(parent).index(marker_para)
+        for offset, new_el in enumerate(src_elements):
+            parent.insert(idx + offset, new_el)
+        parent.remove(marker_para)
+    else:
+        sect_pr = next((el for el in base_body if el.tag == sect_pr_tag), None)
+        if sect_pr is not None:
+            idx = list(base_body).index(sect_pr)
+            for offset, new_el in enumerate(src_elements):
+                base_body.insert(idx + offset, new_el)
+        else:
+            for new_el in src_elements:
+                base_body.append(new_el)
+
+    out = io.BytesIO()
+    base.save(out)
+    return out.getvalue()
+
+
 def apply_digital_letterhead_headers_footers(precedent_bytes: bytes, letterhead_bytes: bytes) -> bytes:
     """Copy header and footer XML from the letterhead .docx onto every section of the precedent .docx.
 

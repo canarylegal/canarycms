@@ -18,6 +18,8 @@ from app.docx_util import (
     ensure_docx_proofing_language_en_gb_bytes,
     is_invalid_ooxml_merge_exception,
     merge_precedent_codes,
+    splice_precedent_into_blank_letter,
+    strip_precedent_body_marker,
     validate_docx_package_bytes,
     write_blank_docx,
 )
@@ -65,7 +67,16 @@ def _resolve_blank_letter_precedent_body(db: Session, body: ComposeOfficeDocumen
         return body
     if _effective_compose_office_role(body) != "letter":
         return body
-    blank = db.execute(
+    blank = _load_blank_letter_precedent(db)
+    if blank is None:
+        return body
+    return body.model_copy(update={"precedent_id": blank.id})
+
+
+def _load_blank_letter_precedent(db: Session) -> Precedent | None:
+    """Return the reserved ``BLANK_LETTER`` precedent row, or ``None`` if absent."""
+
+    return db.execute(
         select(Precedent)
         .where(
             Precedent.reference == BLANK_LETTER_PRECEDENT_REFERENCE,
@@ -74,9 +85,25 @@ def _resolve_blank_letter_precedent_body(db: Session, body: ComposeOfficeDocumen
         .order_by(Precedent.created_at.asc())
         .limit(1)
     ).scalars().first()
+
+
+def _load_blank_letter_bytes(db: Session) -> bytes | None:
+    """Read the reserved blank-letter .docx off disk, or ``None`` if missing/unreadable."""
+
+    blank = _load_blank_letter_precedent(db)
     if blank is None:
-        return body
-    return body.model_copy(update={"precedent_id": blank.id})
+        return None
+    bfile = db.get(DbFile, blank.file_id)
+    if bfile is None:
+        return None
+    abs_path = (FILES_ROOT / bfile.storage_path).resolve()
+    if not str(abs_path).startswith(str(FILES_ROOT)) or not abs_path.is_file():
+        return None
+    try:
+        return abs_path.read_bytes()
+    except OSError as exc:
+        log.warning("blank-letter overlay: cannot read %s: %s", abs_path, exc)
+        return None
 
 
 def merge_compose_docx_bytes(
@@ -110,6 +137,37 @@ def merge_compose_docx_bytes(
             validate_docx_package_bytes(src_bytes)
         except ValueError as ve:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(ve)) from ve
+
+        # BLANK_LETTER acts as the universal scaffold for every letter precedent. We use BLANK_LETTER
+        # as the base document (so its headers/footers, page geometry, AND body merge codes — address
+        # block, date, refs, salutation, Re: line, etc. — all carry through) and splice the chosen
+        # precedent's body block elements into it. Merge-code substitution then resolves every token
+        # in the combined document in one pass. Skipped when the chosen precedent IS the blank letter
+        # (no-op) or when no blank-letter template exists. Document/email composes are unaffected.
+        if prec.kind == PrecedentKind.letter and prec.reference != BLANK_LETTER_PRECEDENT_REFERENCE:
+            blank_bytes = _load_blank_letter_bytes(db)
+            if blank_bytes is not None:
+                try:
+                    src_bytes = splice_precedent_into_blank_letter(blank_bytes, src_bytes)
+                except Exception as overlay_exc:
+                    log.warning(
+                        "blank-letter scaffold splice failed precedent_id=%s: %s",
+                        prec.id,
+                        overlay_exc,
+                    )
+
+        # Defensive: ensure no literal [PRECEDENT_BODY] token survives into the composed letter. This
+        # covers the "Blank (no precedent)" path (splice skipped) and any edge case where the splice
+        # didn't find/replace the marker.
+        if prec.kind == PrecedentKind.letter:
+            try:
+                src_bytes = strip_precedent_body_marker(src_bytes)
+            except Exception as strip_exc:
+                log.warning(
+                    "strip_precedent_body_marker failed precedent_id=%s: %s",
+                    prec.id,
+                    strip_exc,
+                )
 
         firm_row = db.execute(select(FirmSettings).where(FirmSettings.id == 1)).scalar_one_or_none()
 

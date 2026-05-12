@@ -4642,6 +4642,7 @@ function AdminUsers({ token, embedded }: { token: string; embedded?: boolean }) 
   const [newInitials, setNewInitials] = useState('')
   const [newJobTitle, setNewJobTitle] = useState('')
   const [newUserCategoryId, setNewUserCategoryId] = useState('')
+  const [creatingUser, setCreatingUser] = useState(false)
   const [editingUser, setEditingUser] = useState<AdminUserPublic | null>(null)
   const [editEmail, setEditEmail] = useState('')
   const [editDisplayName, setEditDisplayName] = useState('')
@@ -4994,8 +4995,10 @@ function AdminUsers({ token, embedded }: { token: string; embedded?: boolean }) 
           </label>
           <button
             className="btn primary"
+            style={creatingUser ? { cursor: 'wait' } : undefined}
             disabled={
               busy ||
+              creatingUser ||
               !email ||
               !displayName ||
               !(newInitials ?? '').trim() ||
@@ -5003,8 +5006,11 @@ function AdminUsers({ token, embedded }: { token: string; embedded?: boolean }) 
               !newUserCategoryId
             }
             onClick={async () => {
+              setCreatingUser(true)
               setBusy(true)
               setErr(null)
+              const prevBodyCursor = document.body.style.cursor
+              document.body.style.cursor = 'wait'
               try {
                 await apiFetch('/admin/users', {
                   token,
@@ -5028,11 +5034,13 @@ function AdminUsers({ token, embedded }: { token: string; embedded?: boolean }) 
                 const msg = ((e as ApiError).message ?? '').trim()
                 setErr(msg || 'Create failed')
               } finally {
+                document.body.style.cursor = prevBodyCursor
                 setBusy(false)
+                setCreatingUser(false)
               }
             }}
           >
-            Create
+            {creatingUser ? 'Creating…' : 'Create'}
           </button>
         </div>
       </div>
