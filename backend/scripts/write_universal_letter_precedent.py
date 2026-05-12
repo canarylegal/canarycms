@@ -1,4 +1,16 @@
-"""Emit a sample Letter precedent .docx with merge tokens (run manually; not used by the app)."""
+"""Emit the canonical Letter precedent .docx scaffold used as the reserved BLANK_LETTER template.
+
+Produces the full universal letter shell: recipient names + org/address block, date, refs,
+salutation, ``Re:`` subject line, the ``[PRECEDENT_BODY]`` insertion-point marker (where the
+chosen precedent's body is spliced in at compose time — see
+:func:`app.docx_util.splice_precedent_into_blank_letter`), and the signature block
+(``Yours sincerely,`` / ``[FEE_EARNER]`` / ``[FIRM_TRADING_NAME]``).
+
+Run manually; not invoked by the running app. The canonical seed copy lives at
+``backend/precedents_seed/bundle/g0_blank_letter.docx`` — exact vertical spacing in the
+generated output may differ from that file (the bundled copy is hand-tuned). Use this script
+to regenerate from scratch or as a starting point for custom firm scaffolds.
+"""
 
 from __future__ import annotations
 
@@ -31,6 +43,13 @@ def main() -> None:
         "",
         "Re: [MATTER_DESCRIPTION]",
         "",
+        "[PRECEDENT_BODY]",
+        "",
+        "Yours sincerely,",
+        "",
+        "",
+        "[FEE_EARNER]",
+        "[FIRM_TRADING_NAME]",
     ]
     for line in body:
         doc.add_paragraph(line)
