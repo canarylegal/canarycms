@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { apiFetch } from './api'
 import { useDialogs } from './DialogProvider'
 import type { ApiError } from './api'
+import type { AdminDeployUpdateCheckOut } from './types'
 
 export type AdminDeployStatusOut = {
   configured: boolean
@@ -21,6 +22,10 @@ export function AdminDeploy({ token }: { token: string }) {
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const [ok, setOk] = useState<string | null>(null)
+  const [updateCheck, setUpdateCheck] = useState<AdminDeployUpdateCheckOut | null>(null)
+  const [updateCheckBusy, setUpdateCheckBusy] = useState(false)
+  const [updateCheckErr, setUpdateCheckErr] = useState<string | null>(null)
+  const [updateCheckAt, setUpdateCheckAt] = useState<Date | null>(null)
 
   const load = useCallback(async () => {
     setErr(null)
@@ -35,9 +40,25 @@ export function AdminDeploy({ token }: { token: string }) {
     }
   }, [token])
 
+  const checkForUpdates = useCallback(async () => {
+    setUpdateCheckBusy(true)
+    setUpdateCheckErr(null)
+    try {
+      const d = await apiFetch<AdminDeployUpdateCheckOut>('/admin/deploy/update-check', { token })
+      setUpdateCheck(d)
+      setUpdateCheckAt(new Date())
+    } catch (e) {
+      setUpdateCheck(null)
+      setUpdateCheckErr((e as ApiError).message ?? 'Update check failed')
+    } finally {
+      setUpdateCheckBusy(false)
+    }
+  }, [token])
+
   useEffect(() => {
     void load()
-  }, [load])
+    void checkForUpdates()
+  }, [load, checkForUpdates])
 
   async function triggerCompose() {
     const confirmed = await askConfirm({
@@ -104,6 +125,106 @@ export function AdminDeploy({ token }: { token: string }) {
     <div className="stack" style={{ maxWidth: 560 }}>
       {err ? <div className="error">{err}</div> : null}
       {ok ? <div className="muted">{ok}</div> : null}
+
+      <div className="card">
+        <h3 style={{ marginTop: 0 }}>Check for updates</h3>
+        <p className="muted" style={{ lineHeight: 1.55 }}>
+          Compares the running backend image against the tip of the configured GitHub branch. The post-login
+          prompt only runs once per session (and is silenced for any version dismissed with “Skip this version”);
+          use this button to re-check at any time without logging out.
+        </p>
+
+        {updateCheckErr ? <div className="error" style={{ marginBottom: 10 }}>{updateCheckErr}</div> : null}
+
+        {updateCheck ? (
+          <ul className="muted" style={{ marginTop: 12, lineHeight: 1.6, fontSize: '0.95em' }}>
+            <li>
+              Running commit:{' '}
+              <strong>
+                {updateCheck.build_commit_unknown ? 'unknown' : updateCheck.current_commit_short}
+              </strong>
+              {updateCheck.build_commit_unknown ? (
+                <span> — image was built without the <code>GIT_COMMIT</code> build-arg, so updates cannot be detected.</span>
+              ) : null}
+            </li>
+            {updateCheck.github_repo_configured ? (
+              <>
+                <li>
+                  Remote ref: <strong>{updateCheck.remote_ref || '(default)'}</strong>
+                </li>
+                <li>
+                  Remote tip:{' '}
+                  <strong>{updateCheck.remote_commit_short || '—'}</strong>
+                </li>
+                <li>
+                  Update available:{' '}
+                  <strong style={{ color: updateCheck.update_available ? 'var(--accent, #b45309)' : undefined }}>
+                    {updateCheck.update_available ? 'yes' : 'no'}
+                  </strong>
+                </li>
+                <li>
+                  Login prompt: <strong>{updateCheck.prompt_enabled ? 'enabled' : 'disabled'}</strong>
+                </li>
+                <li>
+                  Deploy trigger configured:{' '}
+                  <strong>{updateCheck.deploy_trigger_configured ? 'yes' : 'no'}</strong>
+                  {' '}({updateCheck.compose_update_enabled ? 'Compose' : 'no Compose'},{' '}
+                  {updateCheck.github_actions_configured ? 'GitHub Actions' : 'no GitHub Actions'})
+                </li>
+              </>
+            ) : (
+              <li>
+                GitHub repo for update checks: <strong>not configured</strong>. Set{' '}
+                <code>CANARY_GITHUB_DEPLOY_OWNER</code> and <code>CANARY_GITHUB_DEPLOY_REPO</code> (see{' '}
+                <code>.env.example</code>).
+              </li>
+            )}
+          </ul>
+        ) : (
+          <p className="muted" style={{ marginTop: 12 }}>
+            {updateCheckBusy ? 'Checking…' : 'No data yet.'}
+          </p>
+        )}
+
+        {updateCheck?.note ? (
+          <p className="muted" style={{ marginTop: 8, fontSize: 13, lineHeight: 1.55 }}>{updateCheck.note}</p>
+        ) : null}
+
+        {updateCheck && updateCheck.update_available && updateCheck.commit_messages.length > 0 ? (
+          <div style={{ marginTop: 12 }}>
+            <div style={{ fontWeight: 600, marginBottom: 6 }}>Commits on GitHub since this build</div>
+            <ul style={{ margin: 0, paddingLeft: 18, maxHeight: 200, overflow: 'auto', fontSize: 13 }}>
+              {updateCheck.commit_messages.map((m, i) => (
+                <li key={i} style={{ marginBottom: 4 }}>
+                  {m}
+                </li>
+              ))}
+            </ul>
+            {updateCheck.compare_html_url ? (
+              <a href={updateCheck.compare_html_url} target="_blank" rel="noreferrer" style={{ fontSize: 13 }}>
+                View full compare on GitHub
+              </a>
+            ) : null}
+          </div>
+        ) : null}
+
+        <div className="row" style={{ gap: 8, marginTop: 16, flexWrap: 'wrap', alignItems: 'center' }}>
+          <button
+            type="button"
+            className="btn primary"
+            style={updateCheckBusy ? { cursor: 'wait' } : undefined}
+            disabled={updateCheckBusy}
+            onClick={() => void checkForUpdates()}
+          >
+            {updateCheckBusy ? 'Checking…' : 'Check now'}
+          </button>
+          {updateCheckAt ? (
+            <span className="muted" style={{ fontSize: 13 }}>
+              Last checked {updateCheckAt.toLocaleTimeString()}
+            </span>
+          ) : null}
+        </div>
+      </div>
 
       <div className="card">
         <h3 style={{ marginTop: 0 }}>Update this server (Docker Compose)</h3>
