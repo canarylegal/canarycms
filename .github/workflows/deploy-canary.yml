@@ -30,10 +30,16 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Docker Compose
+        # GIT_COMMIT is consumed by docker-compose.yml's backend build-args and baked into the image as
+        # CANARY_BUILD_COMMIT (see backend/Dockerfile). Without it the image reports commit "unknown" and
+        # the in-app update prompt (/admin/deploy/update-check) silently refuses to detect new commits.
+        env:
+          GIT_COMMIT: ${{ github.sha }}
         shell: bash
         run: |
           set -euo pipefail
           echo "Deploy label: ${{ inputs.environment }}"
+          echo "GIT_COMMIT: ${GIT_COMMIT}"
           if ! command -v docker >/dev/null 2>&1; then
             echo "docker not found on runner" >&2
             exit 1
