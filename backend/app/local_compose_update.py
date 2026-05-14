@@ -55,6 +55,11 @@ def compose_update_configured() -> bool:
     return load_compose_update_config() is not None
 
 
+def _git_trust_repo_args(repo: Path) -> list[str]:
+    """Skip Git 2.35+ "dubious ownership" when the repo is bind-mounted (host uid ≠ container user)."""
+    return ["-c", f"safe.directory={repo.resolve()}"]
+
+
 def _inject_git_commit_for_compose_build(env: dict[str, str], project_dir: Path) -> None:
     """Set GIT_COMMIT for ``docker compose build`` so the backend image bakes the checkout SHA.
 
@@ -69,7 +74,7 @@ def _inject_git_commit_for_compose_build(env: dict[str, str], project_dir: Path)
         return
     try:
         r = subprocess.run(
-            [git, "-C", str(project_dir), "rev-parse", "HEAD"],
+            [git, "-C", str(project_dir), *_git_trust_repo_args(project_dir), "rev-parse", "HEAD"],
             check=True,
             capture_output=True,
             text=True,
@@ -107,7 +112,7 @@ def run_compose_update() -> None:
             raise RuntimeError("CANARY_COMPOSE_GIT_PULL is set but project dir has no .git directory.")
         try:
             subprocess.run(
-                [git, "-C", project_dir, "pull", "--ff-only"],
+                [git, "-C", project_dir, *_git_trust_repo_args(cfg.project_dir), "pull", "--ff-only"],
                 check=True,
                 timeout=300,
                 capture_output=True,
