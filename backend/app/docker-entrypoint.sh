@@ -14,4 +14,10 @@ if [ -z "${DATABASE_URL:-}" ]; then
   export DATABASE_URL="postgresql+psycopg://${POSTGRES_USER}:${ENCODED_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}"
 fi
 
+# GUI Compose updates run git in-repo; bind-mounted checkouts are often "dubious ownership" (host uid ≠
+# container user). Register the mount once at startup so all git versions used in the image accept it.
+if command -v git >/dev/null 2>&1 && [ -n "${CANARY_COMPOSE_PROJECT_DIR:-}" ] && [ -d "${CANARY_COMPOSE_PROJECT_DIR}/.git" ]; then
+  git config --global --replace-all safe.directory "${CANARY_COMPOSE_PROJECT_DIR}" >/dev/null 2>&1 || true
+fi
+
 exec "$@"
