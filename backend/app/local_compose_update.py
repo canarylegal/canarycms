@@ -56,8 +56,12 @@ def compose_update_configured() -> bool:
 
 
 def _git_trust_repo_args(repo: Path) -> list[str]:
-    """Skip Git 2.35+ "dubious ownership" when the repo is bind-mounted (host uid ≠ container user)."""
-    return ["-c", f"safe.directory={repo.resolve()}"]
+    """Skip Git 2.35+ "dubious ownership" when the repo is bind-mounted (host uid ≠ container user).
+
+    ``-c`` must come before ``-C`` so Git applies ``safe.directory`` before entering the repo.
+    """
+    root = str(repo.resolve())
+    return ["-c", f"safe.directory={root}", "-C", root]
 
 
 def _inject_git_commit_for_compose_build(env: dict[str, str], project_dir: Path) -> None:
@@ -74,7 +78,7 @@ def _inject_git_commit_for_compose_build(env: dict[str, str], project_dir: Path)
         return
     try:
         r = subprocess.run(
-            [git, "-C", str(project_dir), *_git_trust_repo_args(project_dir), "rev-parse", "HEAD"],
+            [git, *_git_trust_repo_args(project_dir), "rev-parse", "HEAD"],
             check=True,
             capture_output=True,
             text=True,
@@ -112,7 +116,7 @@ def run_compose_update() -> None:
             raise RuntimeError("CANARY_COMPOSE_GIT_PULL is set but project dir has no .git directory.")
         try:
             subprocess.run(
-                [git, "-C", project_dir, *_git_trust_repo_args(cfg.project_dir), "pull", "--ff-only"],
+                [git, *_git_trust_repo_args(cfg.project_dir), "pull", "--ff-only"],
                 check=True,
                 timeout=300,
                 capture_output=True,
