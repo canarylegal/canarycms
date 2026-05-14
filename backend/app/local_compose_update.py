@@ -55,6 +55,33 @@ def compose_update_configured() -> bool:
     return load_compose_update_config() is not None
 
 
+def _inject_git_commit_for_compose_build(env: dict[str, str], project_dir: Path) -> None:
+    """Set GIT_COMMIT for ``docker compose build`` so the backend image bakes the checkout SHA.
+
+    Without this, Compose variable substitution often falls back to ``${GIT_COMMIT:-unknown}`` from a
+    stale host ``.env`` or an empty environment, so the running app keeps reporting an old commit and
+    the admin UI falsely shows an update available.
+    """
+    if not (project_dir / ".git").exists():
+        return
+    git = shutil.which("git")
+    if not git:
+        return
+    try:
+        r = subprocess.run(
+            [git, "-C", str(project_dir), "rev-parse", "HEAD"],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        sha = (r.stdout or "").strip()
+        if len(sha) >= 7:
+            env["GIT_COMMIT"] = sha
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError):
+        return
+
+
 def _compose_base_cmd(cfg: ComposeUpdateConfig) -> list[str]:
     exe = shutil.which("docker-compose") or "docker-compose"
     cmd: list[str] = [exe]
@@ -92,6 +119,7 @@ def run_compose_update() -> None:
 
     base = _compose_base_cmd(cfg)
     env = os.environ.copy()
+    _inject_git_commit_for_compose_build(env, cfg.project_dir)
 
     def _run(step: list[str], timeout: int) -> None:
         try:

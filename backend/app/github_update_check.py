@@ -7,6 +7,7 @@ from typing import Any
 
 import httpx
 
+from app.build_metadata import effective_build_commit
 from app.github_deploy import load_github_deploy_config, load_github_repo_for_api
 from app.local_compose_update import compose_update_configured
 
@@ -41,7 +42,7 @@ def _same_commit(a: str, b: str) -> bool:
 def build_update_check_payload() -> dict[str, Any]:
     """Data for ``GET /admin/deploy/update-check`` (no secrets)."""
     prompt = (os.getenv("CANARY_UPDATE_PROMPT_ON_LOGIN") or "1").strip().lower() not in ("0", "false", "no", "off")
-    current = (os.getenv("CANARY_BUILD_COMMIT") or "").strip() or "unknown"
+    current = effective_build_commit() or "unknown"
 
     gh_deploy = load_github_deploy_config() is not None
     compose_deploy = compose_update_configured()
