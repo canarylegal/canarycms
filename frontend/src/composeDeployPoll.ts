@@ -12,12 +12,16 @@ function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms))
 }
 
-/** ``docker compose up`` may briefly recreate nginx/backend; tolerate 502/503 and network errors. */
-async function apiFetchWithRetry<T>(path: string, token: string): Promise<T> {
+/** Transient proxy errors while the stack is being recreated. */
+async function apiFetchWithRetry<T>(
+  path: string,
+  token: string,
+  init?: RequestInit & { json?: unknown },
+): Promise<T> {
   let last: unknown
   for (let attempt = 0; attempt < POLL_FETCH_RETRIES; attempt++) {
     try {
-      return await apiFetch<T>(path, { token })
+      return await apiFetch<T>(path, { token, ...init })
     } catch (e) {
       last = e
       const err = e as { status?: number; message?: string }
@@ -25,6 +29,7 @@ async function apiFetchWithRetry<T>(path: string, token: string): Promise<T> {
         err?.status === 502 ||
         err?.status === 503 ||
         err?.status === 504 ||
+        err?.status === 520 ||
         (typeof err?.message === 'string' && /failed to fetch|networkerror|load failed/i.test(err.message))
       if (!retry || attempt === POLL_FETCH_RETRIES - 1) throw e
       await sleep(POLL_FETCH_RETRY_MS)
@@ -41,8 +46,7 @@ export async function postDeployTriggerAndWaitForCompose(
   token: string,
   body: { method: 'auto' | 'compose' | 'github'; ref?: string | null; environment?: string | null },
 ): Promise<{ message: string; usedComposeAsync: boolean }> {
-  const out = await apiFetch<AdminDeployTriggerOut>('/admin/deploy/trigger', {
-    token,
+  const out = await apiFetchWithRetry<AdminDeployTriggerOut>('/admin/deploy/trigger', token, {
     method: 'POST',
     json: body,
   })

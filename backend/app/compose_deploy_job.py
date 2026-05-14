@@ -1,8 +1,9 @@
 """Background Docker Compose updates for admin GUI (avoids long HTTP requests / proxy timeouts).
 
-State is written to ``<CANARY_COMPOSE_PROJECT_DIR>/.canary-compose-job-state.json`` so it survives
-**backend container recreation** during ``docker compose up -d`` (otherwise polling would see 502
-and in-memory job state would be lost).
+Job status is persisted to JSON so it survives **backend container recreation** during
+``docker compose up -d``. We write to both the compose project mount (if configured) and
+``FILES_ROOT`` (typically ``/data/files``, a Docker volume) so a bind-mount permission quirk
+cannot silently drop updates.
 
 Use a **single** API worker process (default ``uvicorn`` without ``--workers``).
 """
@@ -10,6 +11,7 @@ Use a **single** API worker process (default ``uvicorn`` without ``--workers``).
 from __future__ import annotations
 
 import json
+import logging
 import os
 import threading
 import uuid
@@ -21,6 +23,8 @@ from typing import Any, Literal
 from app.audit import log_event
 from app.db import SessionLocal
 from app.local_compose_update import load_compose_update_config, run_compose_update
+
+log = logging.getLogger(__name__)
 
 _PHASE = Literal["idle", "running", "succeeded", "failed"]
 
@@ -48,35 +52,57 @@ def _host_boot_id() -> str:
         return ""
 
 
-def _state_path() -> Path | None:
+def _state_paths() -> list[Path]:
+    """All locations we mirror job state (first writable wins for reads by mtime)."""
+    paths: list[Path] = []
     cfg = load_compose_update_config()
-    if cfg is None:
-        return None
-    return cfg.project_dir / _STATE_NAME
+    if cfg is not None:
+        paths.append(cfg.project_dir / _STATE_NAME)
+    files_root = (os.getenv("FILES_ROOT") or "/data/files").strip()
+    if files_root:
+        p = Path(files_root) / _STATE_NAME
+        if p not in paths:
+            paths.append(p)
+    return paths
 
 
-def _read_disk_state() -> dict[str, Any] | None:
-    p = _state_path()
-    if p is None or not p.is_file():
+def _read_one(path: Path) -> dict[str, Any] | None:
+    if not path.is_file():
         return None
     try:
-        raw = json.loads(p.read_text(encoding="utf-8"))
+        raw = json.loads(path.read_text(encoding="utf-8"))
         return raw if isinstance(raw, dict) else None
     except (OSError, json.JSONDecodeError):
         return None
 
 
+def _read_disk_state() -> dict[str, Any] | None:
+    best: dict[str, Any] | None = None
+    best_mtime = -1.0
+    for p in _state_paths():
+        row = _read_one(p)
+        if not row:
+            continue
+        try:
+            mt = p.stat().st_mtime
+        except OSError:
+            mt = 0.0
+        if mt > best_mtime:
+            best_mtime = mt
+            best = row
+    return best
+
+
 def _write_disk_state(data: dict[str, Any]) -> None:
-    p = _state_path()
-    if p is None:
-        return
-    try:
-        p.parent.mkdir(parents=True, exist_ok=True)
-        tmp = p.with_suffix(".json.tmp")
-        tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-        tmp.replace(p)
-    except OSError:
-        pass
+    text = json.dumps(data, ensure_ascii=False, indent=2)
+    for p in _state_paths():
+        try:
+            p.parent.mkdir(parents=True, exist_ok=True)
+            tmp = p.with_suffix(".json.tmp")
+            tmp.write_text(text, encoding="utf-8")
+            tmp.replace(p)
+        except OSError as e:
+            log.warning("compose job state write failed (%s): %s", p, e)
 
 
 def _memory_public() -> dict[str, Any]:
@@ -102,7 +128,7 @@ def get_compose_job_public() -> dict[str, Any]:
     if disk:
         dst = str(disk.get("status") or "")
         disk_boot = str(disk.get("host_boot_id") or "")
-        if dst == "running" and disk_boot and current_boot and disk_boot != current_boot:
+        if dst == "running" and current_boot and disk_boot and disk_boot != current_boot:
             return {
                 "status": "failed",
                 "job_id": disk.get("job_id"),
@@ -126,7 +152,6 @@ def get_compose_job_public() -> dict[str, Any]:
                 "log_excerpt": disk.get("log_excerpt"),
             }
         if dst == "running" and disk_boot == current_boot:
-            # Same container: in-memory fields are authoritative while the worker runs.
             return mem
 
     return mem
