@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { apiFetch } from './api'
+import { postDeployTriggerAndWaitForCompose } from './composeDeployPoll'
 import { useDialogs } from './DialogProvider'
 import type { ApiError } from './api'
 import type { AdminDeployUpdateCheckOut } from './types'
@@ -73,12 +74,8 @@ export function AdminDeploy({ token }: { token: string }) {
     setErr(null)
     setOk(null)
     try {
-      const out = await apiFetch<{ ok: boolean; message: string }>('/admin/deploy/trigger', {
-        token,
-        method: 'POST',
-        json: { method: 'compose' },
-      })
-      setOk(out.message ?? 'Done.')
+      const { message } = await postDeployTriggerAndWaitForCompose(token, { method: 'compose' })
+      setOk(message)
       await load()
     } catch (e) {
       setErr((e as ApiError).message ?? 'Compose update failed')
@@ -100,16 +97,12 @@ export function AdminDeploy({ token }: { token: string }) {
     setErr(null)
     setOk(null)
     try {
-      const out = await apiFetch<{ ok: boolean; message: string }>('/admin/deploy/trigger', {
-        token,
-        method: 'POST',
-        json: {
-          method: 'github',
-          ref: ref.trim() || null,
-          environment: environment.trim() || null,
-        },
+      const { message } = await postDeployTriggerAndWaitForCompose(token, {
+        method: 'github',
+        ref: ref.trim() || null,
+        environment: environment.trim() || null,
       })
-      setOk(out.message ?? 'Requested.')
+      setOk(message)
       await load()
     } catch (e) {
       setErr((e as ApiError).message ?? 'Deploy request failed')
@@ -231,7 +224,9 @@ export function AdminDeploy({ token }: { token: string }) {
         <p className="muted" style={{ lineHeight: 1.55 }}>
           Recommended for self-hosting: administrators run Compose on the host without any GitHub token. Requires{' '}
           <code>CANARY_COMPOSE_UPDATE_ENABLED</code>, a mounted Docker socket, and the compose project directory (see{' '}
-          <code>.env.example</code>). Granting Docker socket access is powerful — restrict who has Admin.
+          <code>.env.example</code>). The initial request returns immediately; the page polls until{' '}
+          <code>docker compose build</code>/<code>up</code> finish (works behind short proxy timeouts). Granting Docker
+          socket access is powerful — restrict who has Admin.
         </p>
         {composeOn ? (
           <p className="muted" style={{ marginTop: 12 }}>
