@@ -72,7 +72,7 @@ async function parseJsonSafe(res: Response): Promise<unknown> {
 const API_ERROR_BODY_SNIP_LEN = 2000
 
 /** When proxies (Cloudflare, nginx) return HTML for API errors, show a short message instead of the full document. */
-function humanizeHtmlErrorBody(text: string, httpFallback: string): string {
+function humanizeHtmlErrorBody(text: string, httpFallback: string, requestUrl?: string): string {
   const t = text.trim()
   const looksHtml =
     /^<\!DOCTYPE\b/i.test(t) ||
@@ -97,19 +97,27 @@ function humanizeHtmlErrorBody(text: string, httpFallback: string): string {
   let msg: string
   if (cloudflare) {
     msg =
-      'Cloudflare returned an HTML error page instead of the Canary API — the origin server is usually unreachable, crashed, timed out, or the request was routed to the wrong host (common with HTTP 502).'
+      'Cloudflare returned an HTML error page instead of the Canary API — the origin behind Cloudflare is often unreachable, crashed, timed out, or not forwarding /api to the backend (common with HTTP 502).'
+    if (requestUrl) {
+      msg += ` Request: ${requestUrl}.`
+    }
+    msg += ` (${httpFallback})`
   } else if (nginx) {
     msg =
       'A reverse proxy returned an HTML error page instead of JSON — the upstream API may be down or misconfigured.'
+    if (title) {
+      msg += ` (${title.length > 140 ? `${title.slice(0, 140)}…` : title})`
+    } else {
+      msg += ` (${httpFallback})`
+    }
   } else {
     msg =
       'The API returned an HTML error page instead of JSON — a proxy or CDN likely could not reach your backend or the route is wrong.'
-  }
-
-  if (title) {
-    msg += ` (${title.length > 140 ? `${title.slice(0, 140)}…` : title})`
-  } else {
-    msg += ` (${httpFallback})`
+    if (title) {
+      msg += ` (${title.length > 140 ? `${title.slice(0, 140)}…` : title})`
+    } else {
+      msg += ` (${httpFallback})`
+    }
   }
 
   msg +=
@@ -119,12 +127,12 @@ function humanizeHtmlErrorBody(text: string, httpFallback: string): string {
 }
 
 /** Readable message from error responses: FastAPI `{ detail: ... }`, plain text, or non-JSON bodies. */
-export function formatApiErrorDetail(body: unknown, fallback: string): string {
+export function formatApiErrorDetail(body: unknown, fallback: string, requestUrl?: string): string {
   if (body == null) return fallback
   if (typeof body === 'string') {
     const t = body.trim()
     if (!t) return fallback
-    return humanizeHtmlErrorBody(t, fallback)
+    return humanizeHtmlErrorBody(t, fallback, requestUrl)
   }
   if (typeof body !== 'object' || body === null || !('detail' in body)) return fallback
   const d = (body as { detail: unknown }).detail
@@ -202,7 +210,11 @@ export async function apiFetch<T>(
     }
     const body = await parseJsonSafe(res)
     const statusFallback = (res.statusText || '').trim() || `HTTP ${res.status}`
-    const msg = (formatApiErrorDetail(body, statusFallback).trim() || statusFallback)
+    const resolvedUrl =
+      typeof window !== 'undefined'
+        ? new URL(apiUrl(path), window.location.origin).href
+        : apiUrl(path)
+    const msg = (formatApiErrorDetail(body, statusFallback, resolvedUrl).trim() || statusFallback)
     const err: ApiError = { status: res.status, message: msg, body }
     throw err
   }
