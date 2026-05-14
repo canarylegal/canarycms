@@ -252,8 +252,9 @@ export function AdminDeploy({ token }: { token: string }) {
       <div className="card" style={{ marginTop: 16 }}>
         <h3 style={{ marginTop: 0 }}>Deploy via GitHub Actions</h3>
         <p className="muted" style={{ lineHeight: 1.55 }}>
-          Optional: trigger <code>deploy-canary.yml</code> with <code>CANARY_GITHUB_DEPLOY_*</code> and a self-hosted runner.
-          If both Compose and GitHub are configured, the post-login “Update now” button uses Compose first.
+          Optional: request <code>deploy-canary.yml</code> from here when the server has a PAT and self-hosted runner wired
+          (see <code>.github/workflows/deploy-canary.yml</code>). If both Compose and GitHub are configured, the post-login
+          “Update now” button uses Compose first.
         </p>
 
         {ghOn ? (
@@ -315,7 +316,8 @@ export function AdminDeploy({ token }: { token: string }) {
 
       {!status?.configured ? (
         <p className="muted" style={{ marginTop: 12 }}>
-          Neither update path is configured — set Compose env vars and mounts and/or <code>CANARY_GITHUB_DEPLOY_*</code>.
+          Neither apply-update path is configured — set Compose env vars and mounts (see <code>.env.example</code>), or
+          configure GitHub Actions dispatch on the server (PAT + runner — see workflow file).
         </p>
       ) : null}
     </div>
