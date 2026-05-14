@@ -16,6 +16,7 @@ services:
   db:
     image: postgres:16.6
     container_name: canary-db
+    restart: unless-stopped
     networks: [canary]
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-canary}
@@ -42,6 +43,7 @@ services:
       args:
         GIT_COMMIT: ${GIT_COMMIT:-unknown}
     container_name: canary-backend
+    restart: unless-stopped
     networks: [canary]
     dns:
       - 8.8.8.8
@@ -116,15 +118,16 @@ services:
     volumes:
       - ./data/files:/data/files
       - radicale-data:/radicale-data
-      # Optional: enable CANARY_COMPOSE_* in `.env` then uncomment — exposes host Docker to the backend (powerful; admin-only UI).
-      # - /var/run/docker.sock:/var/run/docker.sock
-      # - ./:/canary-compose:rw
+      # CANARY_COMPOSE_* in `.env` — exposes host Docker to the backend (powerful; restrict Admin access).
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./:/canary-compose:rw
     ports:
       - "${BACKEND_PORT_PUBLISH:-8000:8000}"
 
   radicale:
     image: tomsquest/docker-radicale:3.1.3.0
     container_name: canary-radicale
+    restart: unless-stopped
     networks: [canary]
     entrypoint:
       [
@@ -147,6 +150,7 @@ services:
   onlyoffice:
     image: onlyoffice/documentserver:7.5
     container_name: canary-onlyoffice
+    restart: unless-stopped
     networks: [canary]
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -187,6 +191,7 @@ services:
         VITE_ONLYOFFICE_DIRECT_PORT: ${VITE_ONLYOFFICE_DIRECT_PORT:-}
         VITE_ONLYOFFICE_DIRECT_URL: ${VITE_ONLYOFFICE_DIRECT_URL:-}
     container_name: canary-frontend
+    restart: unless-stopped
     networks: [canary]
     depends_on:
       backend:
@@ -205,6 +210,7 @@ services:
       dockerfile: Dockerfile
       target: development
     container_name: canary-frontend-dev
+    restart: unless-stopped
     networks: [canary]
     depends_on:
       backend:
