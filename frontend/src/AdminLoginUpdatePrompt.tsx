@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { apiFetch } from './api'
+import { postDeployTriggerAndWaitForCompose } from './composeDeployPoll'
 import { useDialogs } from './DialogProvider'
 import type { ApiError } from './api'
 import type { AdminDeployUpdateCheckOut, UserPublic } from './types'
@@ -115,23 +116,16 @@ export function AdminLoginUpdatePrompt({
     setBusy(true)
     setErr(null)
     try {
-      await apiFetch('/admin/deploy/trigger', {
-        token,
-        method: 'POST',
-        json: {
-          ref: data.remote_ref,
-          environment: 'production',
-          method: 'auto',
-        },
+      const { message, usedComposeAsync } = await postDeployTriggerAndWaitForCompose(token, {
+        ref: data.remote_ref,
+        environment: 'production',
+        method: 'auto',
       })
       setDeployConfirm(false)
       setOpen(false)
-      const composeFirst = data.compose_update_enabled
       await alert(
-        composeFirst
-          ? 'Docker Compose finished updating images and restarting containers. Reload the app if it does not recover on its own.'
-          : 'GitHub Actions has been asked to run the deploy workflow. Open the repository on GitHub → Actions to watch the run.',
-        composeFirst ? 'Update applied' : 'Deployment requested',
+        message,
+        usedComposeAsync ? 'Update applied' : 'Deployment requested',
       )
     } catch (e) {
       setErr((e as ApiError).message ?? 'Deploy request failed')

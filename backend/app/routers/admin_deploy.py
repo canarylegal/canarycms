@@ -9,13 +9,20 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
 from app.audit import log_event
+from app.compose_deploy_job import get_compose_job_public, start_or_busy
 from app.db import get_db
 from app.deps import require_admin
 from app.github_deploy import github_deploy_status_public, load_github_deploy_config, trigger_workflow_dispatch
 from app.github_update_check import build_update_check_payload
-from app.local_compose_update import compose_update_configured, run_compose_update
+from app.local_compose_update import compose_update_configured
 from app.models import User
-from app.schemas import AdminDeployStatusOut, AdminDeployTriggerIn, AdminDeployTriggerOut, AdminDeployUpdateCheckOut
+from app.schemas import (
+    AdminDeployComposeJobOut,
+    AdminDeployStatusOut,
+    AdminDeployTriggerIn,
+    AdminDeployTriggerOut,
+    AdminDeployUpdateCheckOut,
+)
 
 router = APIRouter(prefix="/admin/deploy", tags=["admin-deploy"])
 
@@ -45,27 +52,25 @@ def deploy_status_public() -> dict:
     }
 
 
-def _run_compose_trigger(request: Request, admin: User, db: Session) -> AdminDeployTriggerOut:
-    try:
-        run_compose_update()
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=str(e) or "Docker Compose update failed",
-        ) from e
-    log_event(
-        db,
+def _enqueue_compose_trigger(request: Request, admin: User) -> AdminDeployTriggerOut:
+    started = start_or_busy(
         actor_user_id=admin.id,
-        action="admin_compose_update",
-        entity_type="docker_compose",
-        entity_id="compose_pull_build_up",
         ip=_client_ip(request),
         user_agent=request.headers.get("user-agent"),
-        meta={"profiles": (os.getenv("CANARY_COMPOSE_PROFILES") or "prod")},
     )
+    if started == "busy":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "A Docker Compose update is already running. Wait for it to finish or open Admin → Deploy "
+                "to watch status."
+            ),
+        )
     return AdminDeployTriggerOut(
         ok=True,
-        message="Docker Compose finished (git pull if enabled, build --pull, up -d). Refresh the app after containers restart.",
+        async_mode=True,
+        job_id=started.job_id,
+        message="Compose update started in the background. The app will poll until it finishes.",
     )
 
 
@@ -109,6 +114,8 @@ def _trigger_github(
     )
     return AdminDeployTriggerOut(
         ok=True,
+        async_mode=False,
+        job_id=None,
         message="Deployment workflow was requested. Check GitHub Actions on the repository for progress.",
     )
 
@@ -121,6 +128,12 @@ def deploy_status(_admin: User = Depends(require_admin)) -> AdminDeployStatusOut
 @router.get("/update-check", response_model=AdminDeployUpdateCheckOut)
 def deploy_update_check(_admin: User = Depends(require_admin)) -> AdminDeployUpdateCheckOut:
     return AdminDeployUpdateCheckOut.model_validate(build_update_check_payload())
+
+
+@router.get("/compose-job", response_model=AdminDeployComposeJobOut)
+def compose_job_status(_admin: User = Depends(require_admin)) -> AdminDeployComposeJobOut:
+    """Poll background compose update (returns immediately; run from Admin UI after POST /trigger)."""
+    return AdminDeployComposeJobOut.model_validate(get_compose_job_public())
 
 
 @router.post("/trigger", response_model=AdminDeployTriggerOut)
@@ -144,7 +157,7 @@ def deploy_trigger(
                     "/var/run/docker.sock and that directory into the backend — see .env.example."
                 ),
             )
-        return _run_compose_trigger(request, admin, db)
+        return _enqueue_compose_trigger(request, admin)
 
     if method == "github":
         if not gh_ok:
@@ -156,7 +169,7 @@ def deploy_trigger(
 
     # auto: prefer Compose for self-host parity with GUI expectations
     if co:
-        return _run_compose_trigger(request, admin, db)
+        return _enqueue_compose_trigger(request, admin)
     if gh_ok:
         return _trigger_github(request, body, admin, db)
 

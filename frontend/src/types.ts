@@ -713,6 +713,23 @@ export type AdminDeployUpdateCheckOut = {
   note?: string | null
 }
 
+export type AdminDeployTriggerOut = {
+  ok: boolean
+  message: string
+  async_mode?: boolean
+  job_id?: string | null
+}
+
+export type AdminDeployComposeJobOut = {
+  status: 'idle' | 'running' | 'succeeded' | 'failed'
+  job_id?: string | null
+  started_at?: string | null
+  finished_at?: string | null
+  message?: string | null
+  error_detail?: string | null
+  log_excerpt?: string | null
+}
+
 export type SmtpNotificationSettingsOut = {
   enabled: boolean
   host: string | null

@@ -670,6 +670,20 @@ class AdminDeployTriggerIn(BaseModel):
 class AdminDeployTriggerOut(BaseModel):
     ok: bool = True
     message: str
+    async_mode: bool = False
+    job_id: str | None = None
+
+
+class AdminDeployComposeJobOut(BaseModel):
+    """Background compose job status (in-process; single worker recommended)."""
+
+    status: Literal["idle", "running", "succeeded", "failed"]
+    job_id: str | None = None
+    started_at: str | None = None
+    finished_at: str | None = None
+    message: str | None = None
+    error_detail: str | None = None
+    log_excerpt: str | None = None
 
 
 class AdminDeployUpdateCheckOut(BaseModel):

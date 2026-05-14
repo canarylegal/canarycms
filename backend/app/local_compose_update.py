@@ -7,6 +7,7 @@ import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
+from typing import MutableSequence
 
 
 @dataclass(frozen=True)
@@ -101,13 +102,19 @@ def _compose_base_cmd(cfg: ComposeUpdateConfig) -> list[str]:
     return cmd
 
 
-def run_compose_update() -> None:
+def _journal(journal: MutableSequence[str] | None, line: str) -> None:
+    if journal is not None:
+        journal.append(line)
+
+
+def run_compose_update(*, journal: MutableSequence[str] | None = None) -> None:
     cfg = load_compose_update_config()
     if cfg is None:
         raise RuntimeError("Docker Compose update is not enabled or project dir is invalid.")
 
     project_dir = str(cfg.project_dir)
     if cfg.git_pull:
+        _journal(journal, "git: pull --ff-only (starting)")
         git = shutil.which("git")
         if not git:
             raise RuntimeError("CANARY_COMPOSE_GIT_PULL is enabled but git is not installed in this container.")
@@ -125,12 +132,14 @@ def run_compose_update() -> None:
         except subprocess.CalledProcessError as e:
             err = ((e.stderr or "") + (e.stdout or "")).strip()[-4000:]
             raise RuntimeError(f"git pull failed: {err or e.returncode}") from e
+        _journal(journal, "git: pull finished")
 
     base = _compose_base_cmd(cfg)
     env = os.environ.copy()
     _inject_git_commit_for_compose_build(env, cfg.project_dir)
 
     def _run(step: list[str], timeout: int) -> None:
+        _journal(journal, f"docker-compose: {' '.join(step)} (starting)")
         try:
             subprocess.run(
                 base + step,
@@ -144,6 +153,7 @@ def run_compose_update() -> None:
         except subprocess.CalledProcessError as e:
             err = ((e.stderr or "") + (e.stdout or "")).strip()[-8000:]
             raise RuntimeError(f"docker-compose {' '.join(step)} failed: {err or e.returncode}") from e
+        _journal(journal, f"docker-compose: {' '.join(step)} (finished)")
 
     _run(["build", "--pull"], 3600)
     _run(["up", "-d"], 900)
