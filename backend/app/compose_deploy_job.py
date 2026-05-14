@@ -1,21 +1,26 @@
 """Background Docker Compose updates for admin GUI (avoids long HTTP requests / proxy timeouts).
 
-State is kept in-process. Use a **single** API worker process (default ``uvicorn`` without ``--workers``)
-so job status and POST /trigger stay consistent. Multiple workers would each have separate job memory.
+State is written to ``<CANARY_COMPOSE_PROJECT_DIR>/.canary-compose-job-state.json`` so it survives
+**backend container recreation** during ``docker compose up -d`` (otherwise polling would see 502
+and in-memory job state would be lost).
+
+Use a **single** API worker process (default ``uvicorn`` without ``--workers``).
 """
 
 from __future__ import annotations
 
+import json
 import os
 import threading
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Literal
 
 from app.audit import log_event
 from app.db import SessionLocal
-from app.local_compose_update import run_compose_update
+from app.local_compose_update import load_compose_update_config, run_compose_update
 
 _PHASE = Literal["idle", "running", "succeeded", "failed"]
 
@@ -28,9 +33,103 @@ _message: str | None = None
 _error_detail: str | None = None
 _log_excerpt: str | None = None
 
+_STATE_NAME = ".canary-compose-job-state.json"
+
 
 def _utc_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _host_boot_id() -> str:
+    """Linux container boot id; changes when this container is recreated."""
+    try:
+        return Path("/proc/sys/kernel/random/boot_id").read_text().strip()
+    except OSError:
+        return ""
+
+
+def _state_path() -> Path | None:
+    cfg = load_compose_update_config()
+    if cfg is None:
+        return None
+    return cfg.project_dir / _STATE_NAME
+
+
+def _read_disk_state() -> dict[str, Any] | None:
+    p = _state_path()
+    if p is None or not p.is_file():
+        return None
+    try:
+        raw = json.loads(p.read_text(encoding="utf-8"))
+        return raw if isinstance(raw, dict) else None
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def _write_disk_state(data: dict[str, Any]) -> None:
+    p = _state_path()
+    if p is None:
+        return
+    try:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        tmp = p.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        tmp.replace(p)
+    except OSError:
+        pass
+
+
+def _memory_public() -> dict[str, Any]:
+    return {
+        "status": _phase,
+        "job_id": _job_id,
+        "started_at": _started_at,
+        "finished_at": _finished_at,
+        "message": _message,
+        "error_detail": _error_detail,
+        "log_excerpt": _log_excerpt,
+    }
+
+
+def get_compose_job_public() -> dict[str, Any]:
+    """Safe fields for ``GET /admin/deploy/compose-job`` (no secrets)."""
+    disk = _read_disk_state()
+    current_boot = _host_boot_id()
+
+    with _lock:
+        mem = _memory_public()
+
+    if disk:
+        dst = str(disk.get("status") or "")
+        disk_boot = str(disk.get("host_boot_id") or "")
+        if dst == "running" and disk_boot and current_boot and disk_boot != current_boot:
+            return {
+                "status": "failed",
+                "job_id": disk.get("job_id"),
+                "started_at": disk.get("started_at"),
+                "finished_at": _utc_iso(),
+                "message": None,
+                "error_detail": (
+                    "This API container restarted during the update (expected when Docker recreates "
+                    "the backend). Check ``docker compose ps`` on the host; reload the app if services are healthy."
+                ),
+                "log_excerpt": None,
+            }
+        if dst in ("succeeded", "failed"):
+            return {
+                "status": dst,
+                "job_id": disk.get("job_id"),
+                "started_at": disk.get("started_at"),
+                "finished_at": disk.get("finished_at"),
+                "message": disk.get("message"),
+                "error_detail": disk.get("error_detail"),
+                "log_excerpt": disk.get("log_excerpt"),
+            }
+        if dst == "running" and disk_boot == current_boot:
+            # Same container: in-memory fields are authoritative while the worker runs.
+            return mem
+
+    return mem
 
 
 def _excerpt_from_journal(journal: list[str], extra: str | None = None) -> str:
@@ -45,18 +144,18 @@ def _excerpt_from_journal(journal: list[str], extra: str | None = None) -> str:
     return raw
 
 
-def get_compose_job_public() -> dict[str, Any]:
-    """Safe fields for ``GET /admin/deploy/compose-job`` (no secrets)."""
-    with _lock:
-        return {
-            "status": _phase,
-            "job_id": _job_id,
-            "started_at": _started_at,
-            "finished_at": _finished_at,
-            "message": _message,
-            "error_detail": _error_detail,
-            "log_excerpt": _log_excerpt,
-        }
+def _persist_from_globals() -> None:
+    payload = {
+        "status": _phase,
+        "job_id": _job_id,
+        "started_at": _started_at,
+        "finished_at": _finished_at,
+        "message": _message,
+        "error_detail": _error_detail,
+        "log_excerpt": _log_excerpt,
+        "host_boot_id": _host_boot_id(),
+    }
+    _write_disk_state(payload)
 
 
 def try_start_compose_job(
@@ -79,6 +178,7 @@ def try_start_compose_job(
         _message = None
         _error_detail = None
         _log_excerpt = None
+        _persist_from_globals()
 
     meta = {"profiles": list(profiles)}
 
@@ -96,6 +196,7 @@ def try_start_compose_job(
                 _message = None
                 _error_detail = err_s[:4000]
                 _log_excerpt = excerpt or None
+                _persist_from_globals()
             return
 
         excerpt = _excerpt_from_journal(journal, None)
@@ -108,6 +209,7 @@ def try_start_compose_job(
             )
             _error_detail = None
             _log_excerpt = excerpt or None
+            _persist_from_globals()
 
         db = SessionLocal()
         try:
