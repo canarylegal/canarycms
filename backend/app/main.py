@@ -5,6 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app import models  # noqa: F401
+from app.build_metadata import effective_build_commit
 from app.canary_public_url import get_canary_public_base
 from app.calendar_notification_job import start_calendar_notification_job
 from app.event_tracked_task_job import start_event_tracked_task_job
@@ -201,5 +202,5 @@ app.include_router(reports.router)
 
 @app.get("/health")
 def health():
-    commit = (os.getenv("CANARY_BUILD_COMMIT") or "").strip()
+    commit = effective_build_commit()
     return {"status": "ok", "build_commit": commit or None}

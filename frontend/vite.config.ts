@@ -66,15 +66,30 @@ function onlyofficeProxyTarget(): string {
 
 const onlyofficeTarget = onlyofficeProxyTarget()
 
+function radicaleProxyTarget(): string {
+  const fromEnv = process.env.RADICALE_PROXY_TARGET?.trim()
+  if (fromEnv) return fromEnv
+  try {
+    if (fs.existsSync('/.dockerenv')) return 'http://radicale:5232'
+  } catch {
+    /* ignore */
+  }
+  const port = process.env.RADICALE_HOST_PORT?.trim() || '5232'
+  return `http://127.0.0.1:${port}`
+}
+
+const radicaleTarget = radicaleProxyTarget()
+
 // One-line hint in `docker compose logs frontend` when debugging 502 / connection errors.
 console.log(
-  `[Canary vite] proxy: /api /webdav → ${proxyTarget} | ONLYOFFICE /office-ds + root DS paths → ${onlyofficeTarget}`,
+  `[Canary vite] proxy: /api /webdav → ${proxyTarget} | /.well-known + CalDAV UUID paths → ${radicaleTarget} | ONLYOFFICE /office-ds + root DS paths → ${onlyofficeTarget}`,
 )
 
 /*
  * Production (no Vite): your reverse proxy must forward the same paths to Document Server:
  *   /office-ds, /coauthoring, /doc, /web-apps, /sdkjs, /sdkjs-plugins, /fonts, /dictionaries, /cache, /printfile,
- *   /ConvertService.ashx, and paths starting with /\\d+.\\d+.\\d+ (versioned DS assets).
+ *   /ConvertService.ashx, paths starting with /.well-known/, Radicale principal paths /^[uuid]/, and paths starting
+ *   with /\\d+.\\d+.\\d+ (versioned DS assets).
  * Set X-Forwarded-Host and X-Forwarded-Proto on those proxies so ONLYOFFICE builds correct URLs.
  */
 
@@ -171,6 +186,21 @@ export default defineConfig({
               proxyReq.setHeader('X-Forwarded-Proto', 'http')
             }
           })
+        },
+      },
+      // Radicale (CalDAV): discovery + principal URLs must not hit the SPA fallback.
+      '/.well-known': {
+        target: radicaleTarget,
+        changeOrigin: true,
+        configure(proxy) {
+          logProxyUpstreamErrors(proxy, '/.well-known', radicaleTarget)
+        },
+      },
+      '^/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}': {
+        target: radicaleTarget,
+        changeOrigin: true,
+        configure(proxy) {
+          logProxyUpstreamErrors(proxy, 'CalDAV principal', radicaleTarget)
         },
       },
       /**
