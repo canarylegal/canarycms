@@ -102,7 +102,7 @@ export function AdminLoginUpdatePrompt({
   function beginDeployConfirm() {
     if (!data?.deploy_trigger_configured) {
       setErr(
-        'Updates from the UI are not configured. Set Docker Compose env + mounts (see .env.example) and/or CANARY_GITHUB_DEPLOY_*.',
+        'Updates from the UI are not configured. Set Docker Compose env + mounts (see .env.example), or GitHub Actions deploy (PAT + runner — see deploy workflow).',
       )
       return
     }
@@ -255,12 +255,12 @@ export function AdminLoginUpdatePrompt({
                 title={
                   data.deploy_trigger_configured
                     ? undefined
-                    : 'Configure Docker Compose updates and/or GitHub deploy (Admin → Deploy). See .env.example.'
+                    : 'Configure Docker Compose updates or GitHub Actions deploy (Admin → Deploy). See .env.example.'
                 }
                 onClick={() => {
                   if (!data.deploy_trigger_configured) {
                     setErr(
-                      'Configure Docker Compose updates (socket + CANARY_COMPOSE_*) and/or CANARY_GITHUB_DEPLOY_* — see .env.example.',
+                      'Configure Docker Compose updates (socket + CANARY_COMPOSE_* — see .env.example), or GitHub Actions deploy (PAT + runner).',
                     )
                     return
                   }

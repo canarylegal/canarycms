@@ -150,7 +150,7 @@ def deploy_trigger(
         if not gh_ok:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="GitHub deploy is not configured. Set CANARY_GITHUB_DEPLOY_TOKEN, OWNER, and REPO on the server.",
+                detail="GitHub deploy is not configured. Set CANARY_GITHUB_DEPLOY_TOKEN plus OWNER and REPO (see .github/workflows/deploy-canary.yml).",
             )
         return _trigger_github(request, body, admin, db)
 
@@ -164,6 +164,6 @@ def deploy_trigger(
         status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
         detail=(
             "No deploy path configured. For typical self-hosting set CANARY_COMPOSE_UPDATE_ENABLED=1 and "
-            "CANARY_COMPOSE_PROJECT_DIR (see .env.example), or set CANARY_GITHUB_DEPLOY_* for GitHub Actions."
+            "CANARY_COMPOSE_PROJECT_DIR (see .env.example), or configure CANARY_GITHUB_DEPLOY_TOKEN + OWNER + REPO to trigger GitHub Actions."
         ),
     )
