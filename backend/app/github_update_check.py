@@ -8,20 +8,17 @@ from typing import Any
 import httpx
 
 from app.build_metadata import effective_build_commit
-from app.github_deploy import load_github_deploy_config, load_github_repo_for_api
+from app.github_deploy import load_github_repo_for_api
 from app.local_compose_update import compose_update_configured
 
 GITHUB_API = "https://api.github.com"
 
 
-def _api_headers(token: str | None) -> dict[str, str]:
-    h: dict[str, str] = {
+def _api_headers() -> dict[str, str]:
+    return {
         "Accept": "application/vnd.github+json",
         "X-GitHub-Api-Version": "2022-11-28",
     }
-    if token:
-        h["Authorization"] = f"Bearer {token}"
-    return h
 
 
 def _short_sha(sha: str) -> str:
@@ -44,14 +41,11 @@ def build_update_check_payload() -> dict[str, Any]:
     prompt = (os.getenv("CANARY_UPDATE_PROMPT_ON_LOGIN") or "1").strip().lower() not in ("0", "false", "no", "off")
     current = effective_build_commit() or "unknown"
 
-    gh_deploy = load_github_deploy_config() is not None
     compose_deploy = compose_update_configured()
-    deploy_ok = compose_deploy or gh_deploy
     base: dict[str, Any] = {
         "github_repo_configured": False,
-        "deploy_trigger_configured": deploy_ok,
+        "deploy_trigger_configured": compose_deploy,
         "compose_update_enabled": compose_deploy,
-        "github_actions_configured": gh_deploy,
         "prompt_enabled": prompt,
         "current_commit": current,
         "current_commit_short": _short_sha(current) if current != "unknown" else "unknown",
@@ -73,23 +67,22 @@ def build_update_check_payload() -> dict[str, Any]:
         base["note"] = "Set CANARY_GITHUB_DEPLOY_OWNER and CANARY_GITHUB_DEPLOY_REPO to check for updates."
         return base
 
-    owner, repo, ref, token = ident
+    owner, repo, ref = ident
     base["github_repo_configured"] = True
     base["remote_ref"] = ref
 
-    if not token:
-        base["note"] = (
-            "Without CANARY_GITHUB_DEPLOY_TOKEN, only public API limits apply; "
-            "set a token if GitHub returns rate limits or the repository is private."
-        )
-
-    headers = _api_headers(token)
+    headers = _api_headers()
     timeout = httpx.Timeout(20.0, connect=10.0)
 
     with httpx.Client(timeout=timeout) as client:
         tip = client.get(f"{GITHUB_API}/repos/{owner}/{repo}/commits/{ref}", headers=headers)
         if tip.status_code != 200:
-            base["note"] = f"Could not read branch tip ({tip.status_code})."
+            msg = f"Could not read branch tip ({tip.status_code})."
+            if tip.status_code in (401, 403, 404):
+                msg += (
+                    " Update checks use the public GitHub API only; private or unavailable repositories are not supported."
+                )
+            base["note"] = msg
             return base
         tip_j = tip.json()
         remote_sha = str(tip_j.get("sha") or "")

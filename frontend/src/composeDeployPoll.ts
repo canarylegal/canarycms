@@ -45,7 +45,7 @@ async function apiFetchWithRetry<T>(
  */
 export async function postDeployTriggerAndWaitForCompose(
   token: string,
-  body: { method: 'auto' | 'compose' | 'github'; ref?: string | null; environment?: string | null },
+  body: { method: 'auto' | 'compose' },
 ): Promise<{ message: string; usedComposeAsync: boolean }> {
   const out = await apiFetchWithRetry<AdminDeployTriggerOut>('/admin/deploy/trigger', token, {
     method: 'POST',

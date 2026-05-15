@@ -696,7 +696,6 @@ export type AdminDeployUpdateCheckOut = {
   github_repo_configured: boolean
   deploy_trigger_configured: boolean
   compose_update_enabled: boolean
-  github_actions_configured: boolean
   prompt_enabled: boolean
   current_commit: string
   current_commit_short: string
