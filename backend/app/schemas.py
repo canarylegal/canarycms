@@ -647,21 +647,14 @@ class AdminDeployStatusOut(BaseModel):
 
     configured: bool
     compose_update_enabled: bool = False
-    github_actions_configured: bool = False
-    owner: str | None = None
-    repo: str | None = None
-    workflow: str | None = None
-    default_ref: str | None = None
 
 
 class AdminDeployTriggerIn(BaseModel):
-    """Trigger deploy: Docker Compose on host (default for self-host) or GitHub Actions."""
+    """Trigger a Docker Compose pull/build/up on the host (self-host)."""
 
-    ref: str | None = Field(default=None, max_length=260)
-    environment: str | None = Field(default=None, max_length=120)
-    method: Literal["auto", "compose", "github"] = Field(
+    method: Literal["auto", "compose"] = Field(
         default="auto",
-        description="auto: Compose if enabled, else GitHub Actions; force one path with compose|github.",
+        description="Both values run the Compose update path; ``auto`` is kept for older clients.",
     )
 
     model_config = {"extra": "forbid"}
@@ -692,7 +685,6 @@ class AdminDeployUpdateCheckOut(BaseModel):
     github_repo_configured: bool
     deploy_trigger_configured: bool = False
     compose_update_enabled: bool = False
-    github_actions_configured: bool = False
     prompt_enabled: bool
     current_commit: str
     current_commit_short: str

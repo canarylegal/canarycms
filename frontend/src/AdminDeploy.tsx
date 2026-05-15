@@ -8,18 +8,11 @@ import type { AdminDeployUpdateCheckOut } from './types'
 export type AdminDeployStatusOut = {
   configured: boolean
   compose_update_enabled?: boolean
-  github_actions_configured?: boolean
-  owner?: string | null
-  repo?: string | null
-  workflow?: string | null
-  default_ref?: string | null
 }
 
 export function AdminDeploy({ token }: { token: string }) {
   const { askConfirm } = useDialogs()
   const [status, setStatus] = useState<AdminDeployStatusOut | null>(null)
-  const [ref, setRef] = useState('')
-  const [environment, setEnvironment] = useState('production')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const [ok, setOk] = useState<string | null>(null)
@@ -34,7 +27,6 @@ export function AdminDeploy({ token }: { token: string }) {
     try {
       const s = await apiFetch<AdminDeployStatusOut>('/admin/deploy/status', { token })
       setStatus(s)
-      setRef((prev) => (prev.trim() !== '' ? prev : (s.default_ref ?? 'main').trim()))
     } catch (e) {
       setStatus(null)
       setErr((e as ApiError).message ?? 'Failed to load deploy status')
@@ -84,35 +76,7 @@ export function AdminDeploy({ token }: { token: string }) {
     }
   }
 
-  async function triggerGithub() {
-    const confirmed = await askConfirm({
-      title: 'Run deployment',
-      message:
-        'This requests a GitHub Actions workflow on the repository. A self-hosted runner on your server must execute Docker Compose. Continue?',
-      danger: true,
-      confirmLabel: 'Request deploy',
-    })
-    if (!confirmed) return
-    setBusy(true)
-    setErr(null)
-    setOk(null)
-    try {
-      const { message } = await postDeployTriggerAndWaitForCompose(token, {
-        method: 'github',
-        ref: ref.trim() || null,
-        environment: environment.trim() || null,
-      })
-      setOk(message)
-      await load()
-    } catch (e) {
-      setErr((e as ApiError).message ?? 'Deploy request failed')
-    } finally {
-      setBusy(false)
-    }
-  }
-
   const composeOn = Boolean(status?.compose_update_enabled)
-  const ghOn = Boolean(status?.github_actions_configured)
 
   return (
     <div className="stack" style={{ maxWidth: 560 }}>
@@ -122,9 +86,9 @@ export function AdminDeploy({ token }: { token: string }) {
       <div className="card">
         <h3 style={{ marginTop: 0 }}>Check for updates</h3>
         <p className="muted" style={{ lineHeight: 1.55 }}>
-          Compares the running backend image against the tip of the configured GitHub branch. The post-login
-          prompt only runs once per session (and is silenced for any version dismissed with “Skip this version”);
-          use this button to re-check at any time without logging out.
+          Compares the running backend against the tip of the configured public GitHub branch. The post-login prompt
+          only runs once per session (and is silenced for any version dismissed with “Skip this version”); use this
+          button to re-check at any time without logging out.
         </p>
 
         {updateCheckErr ? <div className="error" style={{ marginBottom: 10 }}>{updateCheckErr}</div> : null}
@@ -159,10 +123,8 @@ export function AdminDeploy({ token }: { token: string }) {
                   Login prompt: <strong>{updateCheck.prompt_enabled ? 'enabled' : 'disabled'}</strong>
                 </li>
                 <li>
-                  Deploy trigger configured:{' '}
-                  <strong>{updateCheck.deploy_trigger_configured ? 'yes' : 'no'}</strong>
-                  {' '}({updateCheck.compose_update_enabled ? 'Compose' : 'no Compose'},{' '}
-                  {updateCheck.github_actions_configured ? 'GitHub Actions' : 'no GitHub Actions'})
+                  Compose update from UI:{' '}
+                  <strong>{updateCheck.compose_update_enabled ? 'enabled' : 'not configured'}</strong>
                 </li>
               </>
             ) : (
@@ -222,7 +184,7 @@ export function AdminDeploy({ token }: { token: string }) {
       <div className="card">
         <h3 style={{ marginTop: 0 }}>Update this server (Docker Compose)</h3>
         <p className="muted" style={{ lineHeight: 1.55 }}>
-          Recommended for self-hosting: administrators run Compose on the host without any GitHub token. Requires{' '}
+          Administrators run Compose on the host from here (no GitHub token). Requires{' '}
           <code>CANARY_COMPOSE_UPDATE_ENABLED</code>, a mounted Docker socket, and the compose project directory (see{' '}
           <code>.env.example</code>). The initial request returns immediately; the page polls until{' '}
           <code>docker compose build</code>/<code>up</code> finish (works behind short proxy timeouts). Granting Docker
@@ -241,68 +203,6 @@ export function AdminDeploy({ token }: { token: string }) {
           <button type="button" className="btn primary" disabled={busy || !composeOn} onClick={() => void triggerCompose()}>
             {busy ? 'Working…' : 'Run Compose update'}
           </button>
-        </div>
-      </div>
-
-      <div className="card" style={{ marginTop: 16 }}>
-        <h3 style={{ marginTop: 0 }}>Deploy via GitHub Actions</h3>
-        <p className="muted" style={{ lineHeight: 1.55 }}>
-          Optional: request <code>deploy-canary.yml</code> from here when the server has a PAT and self-hosted runner wired
-          (see <code>.github/workflows/deploy-canary.yml</code>). If both Compose and GitHub are configured, the post-login
-          “Update now” button uses Compose first.
-        </p>
-
-        {ghOn ? (
-          <ul className="muted" style={{ marginTop: 12, lineHeight: 1.6, fontSize: '0.95em' }}>
-            <li>
-              Repository:{' '}
-              <strong>
-                {status?.owner}/{status?.repo}
-              </strong>
-            </li>
-            <li>
-              Workflow file: <strong>{status?.workflow}</strong>
-            </li>
-            <li>
-              Default branch/ref: <strong>{status?.default_ref}</strong>
-            </li>
-          </ul>
-        ) : (
-          <p className="muted" style={{ marginTop: 12 }}>
-            GitHub Actions deploy is <strong>not configured</strong> on this server.
-          </p>
-        )}
-
-        <div className="stack" style={{ marginTop: 16, gap: 12 }}>
-          <label className="field">
-            <span>Git ref (branch or tag)</span>
-            <input
-              value={ref}
-              onChange={(e) => setRef(e.target.value)}
-              disabled={busy || !ghOn}
-              placeholder="main"
-              autoComplete="off"
-            />
-          </label>
-          <label className="field">
-            <span>Environment label</span>
-            <input
-              value={environment}
-              onChange={(e) => setEnvironment(e.target.value)}
-              disabled={busy || !ghOn}
-              placeholder="production"
-              autoComplete="off"
-            />
-            <span className="muted" style={{ fontSize: '0.85em' }}>
-              Passed to the workflow as an input (for logs / concurrency); does not select Docker Compose profile.
-            </span>
-          </label>
-        </div>
-
-        <div className="row" style={{ gap: 8, marginTop: 16, flexWrap: 'wrap' }}>
-          <button type="button" className="btn primary" disabled={busy || !ghOn} onClick={() => void triggerGithub()}>
-            {busy ? 'Requesting…' : 'Request GitHub deploy'}
-          </button>
           <button type="button" className="btn" disabled={busy} onClick={() => void load()}>
             Reload
           </button>
@@ -311,8 +211,8 @@ export function AdminDeploy({ token }: { token: string }) {
 
       {!status?.configured ? (
         <p className="muted" style={{ marginTop: 12 }}>
-          Neither apply-update path is configured — set Compose env vars and mounts (see <code>.env.example</code>), or
-          configure GitHub Actions dispatch on the server (PAT + runner — see workflow file).
+          Compose updates are not configured — set <code>CANARY_COMPOSE_*</code> env vars and mounts (see{' '}
+          <code>.env.example</code>).
         </p>
       ) : null}
     </div>

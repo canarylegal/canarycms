@@ -102,9 +102,7 @@ export function AdminLoginUpdatePrompt({
 
   function beginDeployConfirm() {
     if (!data?.deploy_trigger_configured) {
-      setErr(
-        'Updates from the UI are not configured. Set Docker Compose env + mounts (see .env.example), or GitHub Actions deploy (PAT + runner — see deploy workflow).',
-      )
+      setErr('Updates from the UI are not configured. Set Docker Compose env + mounts (see .env.example).')
       return
     }
     setErr(null)
@@ -116,17 +114,10 @@ export function AdminLoginUpdatePrompt({
     setBusy(true)
     setErr(null)
     try {
-      const { message, usedComposeAsync } = await postDeployTriggerAndWaitForCompose(token, {
-        ref: data.remote_ref,
-        environment: 'production',
-        method: 'auto',
-      })
+      const { message, usedComposeAsync } = await postDeployTriggerAndWaitForCompose(token, { method: 'auto' })
       setDeployConfirm(false)
       setOpen(false)
-      await alert(
-        message,
-        usedComposeAsync ? 'Update applied' : 'Deployment requested',
-      )
+      await alert(message, usedComposeAsync ? 'Update applied' : 'Update')
     } catch (e) {
       setErr((e as ApiError).message ?? 'Deploy request failed')
     } finally {
@@ -135,8 +126,6 @@ export function AdminLoginUpdatePrompt({
   }
 
   if (!open || !data) return null
-
-  const confirmUsesCompose = data.compose_update_enabled
 
   return (
     <div
@@ -148,20 +137,12 @@ export function AdminLoginUpdatePrompt({
     >
       <div className="modal card" style={{ maxWidth: 560, padding: 20 }} onClick={(e) => e.stopPropagation()}>
         <h2 id="canary-update-prompt-title" style={{ margin: '0 0 8px', fontSize: 18 }}>
-          {deployConfirm ? (confirmUsesCompose ? 'Apply update' : 'Request deployment') : 'Update available'}
+          {deployConfirm ? 'Apply update' : 'Update available'}
         </h2>
         {deployConfirm ? (
           <p style={{ margin: '0 0 12px', lineHeight: 1.45 }}>
-            {confirmUsesCompose ? (
-              <>
-                This runs Docker Compose on the server (<code>build --pull</code> then <code>up -d</code>). The backend must
-                have the Docker socket and compose project mounted — see <code>.env.example</code>. Continue?
-              </>
-            ) : (
-              <>
-                This starts the GitHub Actions deploy workflow (self-hosted runner required). Continue?
-              </>
-            )}
+            This runs Docker Compose on the server (<code>build --pull</code> then <code>up -d</code>). The backend must
+            have the Docker socket and compose project mounted — see <code>.env.example</code>. Continue?
           </p>
         ) : (
           <>
@@ -230,7 +211,7 @@ export function AdminLoginUpdatePrompt({
                 Back
               </button>
               <button type="button" className="btn danger" disabled={busy} onClick={() => void executeDeploy()}>
-                {busy ? 'Working…' : confirmUsesCompose ? 'Apply update' : 'Request deploy'}
+                {busy ? 'Working…' : 'Apply update'}
               </button>
             </>
           ) : (
@@ -249,13 +230,11 @@ export function AdminLoginUpdatePrompt({
                 title={
                   data.deploy_trigger_configured
                     ? undefined
-                    : 'Configure Docker Compose updates or GitHub Actions deploy (Admin → Deploy). See .env.example.'
+                    : 'Configure Docker Compose updates (Admin → Deploy). See .env.example.'
                 }
                 onClick={() => {
                   if (!data.deploy_trigger_configured) {
-                    setErr(
-                      'Configure Docker Compose updates (socket + CANARY_COMPOSE_* — see .env.example), or GitHub Actions deploy (PAT + runner).',
-                    )
+                    setErr('Configure Docker Compose updates (socket + CANARY_COMPOSE_* — see .env.example).')
                     return
                   }
                   beginDeployConfirm()

@@ -1,6 +1,5 @@
 # Deploy Canary on a host where a GitHub **self-hosted** runner is registered for this repository.
-# Admins trigger this workflow from the app (Admin → Deploy) via POST /admin/deploy/trigger, which calls
-# GitHub’s workflow_dispatch API (see backend ``github_deploy``; optional PAT env vars on the server if you trigger this from the app).
+# Trigger manually from the Actions tab or via the GitHub API / other automation (the Canary app no longer dispatches workflows).
 #
 # Prerequisites on the runner machine:
 #   - Docker and Docker Compose v2
