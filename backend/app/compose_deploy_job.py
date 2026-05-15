@@ -13,7 +13,9 @@ from __future__ import annotations
 import json
 import logging
 import os
+import subprocess
 import threading
+import time
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -22,7 +24,13 @@ from typing import Any, Literal
 
 from app.audit import log_event
 from app.db import SessionLocal
-from app.local_compose_update import load_compose_update_config, run_compose_update
+from app.local_compose_update import (
+    compose_runner_container_name,
+    compose_up_marker_path,
+    docker_inspect_container_state,
+    load_compose_update_config,
+    run_compose_update,
+)
 
 log = logging.getLogger(__name__)
 
@@ -36,12 +44,149 @@ _finished_at: str | None = None
 _message: str | None = None
 _error_detail: str | None = None
 _log_excerpt: str | None = None
+_runner_expected: bool = False
 
 _STATE_NAME = ".canary-compose-job-state.json"
 
 
 def _utc_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _started_age_seconds(started_at: str | None) -> float | None:
+    if not started_at:
+        return None
+    try:
+        dt = datetime.fromisoformat(started_at.replace("Z", "+00:00"))
+        return (datetime.now(timezone.utc) - dt).total_seconds()
+    except ValueError:
+        return None
+
+
+def _running_payload_from_disk(disk: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "status": "running",
+        "job_id": disk.get("job_id"),
+        "started_at": disk.get("started_at"),
+        "finished_at": None,
+        "message": None,
+        "error_detail": None,
+        "log_excerpt": None,
+    }
+
+
+def reconcile_compose_job_state() -> None:
+    """Finalize a job from detached-runner marker files or stale ``running`` disk rows."""
+    global _job_id, _phase, _started_at, _finished_at, _message, _error_detail, _log_excerpt, _runner_expected
+
+    disk = _read_disk_state()
+    if not disk or str(disk.get("status") or "") != "running":
+        return
+    jid = str(disk.get("job_id") or "").strip()
+    if not jid:
+        return
+
+    with _lock:
+        guard_worker = _phase == "running" and _job_id == jid
+
+    marker = compose_up_marker_path(jid)
+    name = compose_runner_container_name(jid)
+    runner_on_disk = bool(disk.get("runner_expected"))
+
+    def _persist_terminal(*, ok: bool, err: str | None, excerpt: str | None) -> None:
+        global _job_id, _phase, _started_at, _finished_at, _message, _error_detail, _log_excerpt, _runner_expected
+        with _lock:
+            _job_id = jid
+            _runner_expected = False
+            _phase = "succeeded" if ok else "failed"
+            _finished_at = _utc_iso()
+            if _started_at is None:
+                sa = disk.get("started_at")
+                if sa:
+                    _started_at = str(sa)
+            if ok:
+                _message = (
+                    "Docker Compose finished (git pull if enabled, build --pull, up -d). "
+                    "Reload the app after containers restart."
+                )
+                _error_detail = None
+            else:
+                _message = None
+                _error_detail = (err or "Compose update failed")[:4000]
+            _log_excerpt = excerpt
+            _persist_from_globals()
+            if ok:
+                try:
+                    from app.build_metadata import invalidate_live_compose_repo_head_cache
+
+                    invalidate_live_compose_repo_head_cache()
+                except Exception:
+                    pass
+
+    if marker.is_file():
+        try:
+            row = json.loads(marker.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            row = {}
+        # Do not let an in-process "running" job block consuming a **success** marker: the worker may be
+        # sleeping in its poll loop, or another request may reconcile first. Failure markers are left to
+        # the worker so it can attach logs / raise.
+        if guard_worker and not bool(row.get("ok")):
+            return
+        try:
+            marker.unlink()
+        except OSError:
+            pass
+        subprocess.run(["docker", "rm", "-f", name], check=False, capture_output=True, text=True, timeout=30)
+        ok = bool(row.get("ok"))
+        err = None if ok else f"docker compose up -d failed (rc={row.get('rc')})"
+        _persist_terminal(ok=ok, err=err, excerpt=None)
+        return
+
+    if guard_worker:
+        return
+
+    st = docker_inspect_container_state(name)
+    if st is not None and st[0] in ("created", "running"):
+        return
+
+    if st is not None and st[0] == "exited":
+        lg = subprocess.run(
+            ["docker", "logs", "--tail", "200", name],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        tail = ((lg.stdout or "") + (lg.stderr or "")).strip()[-8000:]
+        _persist_terminal(
+            ok=False,
+            err="Compose runner exited without writing a result marker.",
+            excerpt=tail or None,
+        )
+        return
+
+    age = _started_age_seconds(str(disk.get("started_at") or ""))
+    if age is None:
+        return
+    if not runner_on_disk and age > 4000:
+        _persist_terminal(
+            ok=False,
+            err="Compose update did not dispatch an isolated ``up`` runner (build may have stalled).",
+            excerpt=None,
+        )
+        return
+    if runner_on_disk and age > 180 and st is None:
+        for _ in range(5):
+            if compose_up_marker_path(jid).is_file():
+                reconcile_compose_job_state()
+                return
+            time.sleep(1.0)
+        _persist_terminal(
+            ok=False,
+            err="Compose runner container disappeared before reporting completion. Check ``docker compose ps``.",
+            excerpt=None,
+        )
 
 
 def _host_boot_id() -> str:
@@ -77,8 +222,12 @@ def _read_one(path: Path) -> dict[str, Any] | None:
 
 
 def _read_disk_state() -> dict[str, Any] | None:
-    best: dict[str, Any] | None = None
-    best_mtime = -1.0
+    """Return the best job row from all mirrored state files.
+
+    If one mirror still says ``running`` while another already has ``succeeded``/``failed`` (partial
+    write failure or race), prefer the terminal row so the UI cannot stay stuck on ``running``.
+    """
+    rows: list[tuple[float, dict[str, Any]]] = []
     for p in _state_paths():
         row = _read_one(p)
         if not row:
@@ -87,10 +236,18 @@ def _read_disk_state() -> dict[str, Any] | None:
             mt = p.stat().st_mtime
         except OSError:
             mt = 0.0
-        if mt > best_mtime:
-            best_mtime = mt
-            best = row
-    return best
+        rows.append((mt, row))
+    if not rows:
+        return None
+    terminal = [(mt, r) for mt, r in rows if str(r.get("status") or "") in ("succeeded", "failed")]
+    if terminal:
+        return max(terminal, key=lambda x: x[0])[1]
+    return max(rows, key=lambda x: x[0])[1]
+
+
+def compose_job_disk_says_running() -> bool:
+    d = _read_disk_state()
+    return bool(d and str(d.get("status") or "") == "running")
 
 
 def _write_disk_state(data: dict[str, Any]) -> None:
@@ -119,41 +276,61 @@ def _memory_public() -> dict[str, Any]:
 
 def get_compose_job_public() -> dict[str, Any]:
     """Safe fields for ``GET /admin/deploy/compose-job`` (no secrets)."""
+    reconcile_compose_job_state()
     disk = _read_disk_state()
-    current_boot = _host_boot_id()
+    # Marker can land just after a reconcile pass (slow volume / runner tail). Peek once more.
+    if disk and str(disk.get("status") or "") == "running":
+        jid = str(disk.get("job_id") or "").strip()
+        if jid:
+            mp = compose_up_marker_path(jid)
+            if mp.is_file():
+                try:
+                    if bool(json.loads(mp.read_text(encoding="utf-8")).get("ok")):
+                        time.sleep(0.2)
+                        reconcile_compose_job_state()
+                        disk = _read_disk_state()
+                except (OSError, json.JSONDecodeError):
+                    pass
 
     with _lock:
         mem = _memory_public()
 
-    if disk:
-        dst = str(disk.get("status") or "")
-        disk_boot = str(disk.get("host_boot_id") or "")
-        if dst == "running" and current_boot and disk_boot and disk_boot != current_boot:
-            return {
-                "status": "failed",
-                "job_id": disk.get("job_id"),
-                "started_at": disk.get("started_at"),
-                "finished_at": _utc_iso(),
-                "message": None,
-                "error_detail": (
-                    "This API container restarted during the update (expected when Docker recreates "
-                    "the backend). Check ``docker compose ps`` on the host; reload the app if services are healthy."
-                ),
-                "log_excerpt": None,
-            }
-        if dst in ("succeeded", "failed"):
-            return {
-                "status": dst,
-                "job_id": disk.get("job_id"),
-                "started_at": disk.get("started_at"),
-                "finished_at": disk.get("finished_at"),
-                "message": disk.get("message"),
-                "error_detail": disk.get("error_detail"),
-                "log_excerpt": disk.get("log_excerpt"),
-            }
-        if dst == "running" and disk_boot == current_boot:
-            return mem
+    if not disk:
+        return mem
 
+    dst = str(disk.get("status") or "")
+    # Prefer in-process terminal state if disk mirrors are stale (e.g. one path write failed).
+    if (
+        mem.get("job_id")
+        and str(mem.get("job_id")) == str(disk.get("job_id") or "")
+        and str(mem.get("status") or "") in ("succeeded", "failed")
+        and dst == "running"
+    ):
+        ms = str(mem.get("status") or "")
+        return {
+            "status": ms,
+            "job_id": mem.get("job_id"),
+            "started_at": mem.get("started_at") or disk.get("started_at"),
+            "finished_at": mem.get("finished_at"),
+            "message": mem.get("message"),
+            "error_detail": mem.get("error_detail"),
+            "log_excerpt": mem.get("log_excerpt"),
+        }
+
+    if dst in ("succeeded", "failed"):
+        return {
+            "status": dst,
+            "job_id": disk.get("job_id"),
+            "started_at": disk.get("started_at"),
+            "finished_at": disk.get("finished_at"),
+            "message": disk.get("message"),
+            "error_detail": disk.get("error_detail"),
+            "log_excerpt": disk.get("log_excerpt"),
+        }
+    if dst == "running":
+        if str(mem.get("status") or "") == "running":
+            return mem
+        return _running_payload_from_disk(disk)
     return mem
 
 
@@ -179,6 +356,7 @@ def _persist_from_globals() -> None:
         "error_detail": _error_detail,
         "log_excerpt": _log_excerpt,
         "host_boot_id": _host_boot_id(),
+        "runner_expected": _runner_expected,
     }
     _write_disk_state(payload)
 
@@ -191,10 +369,21 @@ def try_start_compose_job(
     profiles: tuple[str, ...],
 ) -> str | None:
     """Start a background compose update if idle. Returns ``job_id`` or ``None`` if busy."""
-    global _job_id, _phase, _started_at, _finished_at, _message, _error_detail, _log_excerpt
+    global _job_id, _phase, _started_at, _finished_at, _message, _error_detail, _log_excerpt, _runner_expected
+
+    reconcile_compose_job_state()
+
     with _lock:
         if _phase == "running":
             return None
+        d = _read_disk_state()
+        if d and str(d.get("status") or "") == "running":
+            other = str(d.get("job_id") or "").strip()
+            if other:
+                st = docker_inspect_container_state(compose_runner_container_name(other))
+                if st is not None and st[0] in ("created", "running"):
+                    return None
+
         jid = uuid.uuid4().hex[:12]
         _job_id = jid
         _phase = "running"
@@ -203,19 +392,31 @@ def try_start_compose_job(
         _message = None
         _error_detail = None
         _log_excerpt = None
+        _runner_expected = False
         _persist_from_globals()
 
     meta = {"profiles": list(profiles)}
 
+    def _after_build() -> None:
+        global _runner_expected
+        with _lock:
+            _runner_expected = True
+            _persist_from_globals()
+
     def _worker() -> None:
-        global _phase, _finished_at, _message, _error_detail, _log_excerpt
+        global _phase, _finished_at, _message, _error_detail, _log_excerpt, _runner_expected
         journal: list[str] = []
         try:
-            run_compose_update(journal=journal)
+            run_compose_update(
+                journal=journal,
+                compose_job_id=jid,
+                on_after_build_before_compose_up=_after_build,
+            )
         except BaseException as e:
             err_s = str(e).strip() or type(e).__name__
             excerpt = _excerpt_from_journal(journal, err_s)
             with _lock:
+                _runner_expected = False
                 _phase = "failed"
                 _finished_at = _utc_iso()
                 _message = None
@@ -226,6 +427,7 @@ def try_start_compose_job(
 
         excerpt = _excerpt_from_journal(journal, None)
         with _lock:
+            _runner_expected = False
             _phase = "succeeded"
             _finished_at = _utc_iso()
             _message = (
@@ -235,6 +437,12 @@ def try_start_compose_job(
             _error_detail = None
             _log_excerpt = excerpt or None
             _persist_from_globals()
+        try:
+            from app.build_metadata import invalidate_live_compose_repo_head_cache
+
+            invalidate_live_compose_repo_head_cache()
+        except Exception:
+            pass
 
         db = SessionLocal()
         try:

@@ -12,6 +12,7 @@ data/
 
 # Compose GUI job state (written under CANARY_COMPOSE_PROJECT_DIR on the host mount)
 .canary-compose-job-state.json
+.canary-compose-up-*.json
 
 # Stray artifacts
 backend/=2.8.0

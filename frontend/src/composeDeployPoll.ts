@@ -5,8 +5,9 @@ const POLL_MS = 2500
 /** Slightly longer than backend compose build timeout (3600s). */
 const MAX_WAIT_MS = 2 * 3600 * 1000 + 120_000
 
-const POLL_FETCH_RETRIES = 6
-const POLL_FETCH_RETRY_MS = 3000
+/** Longer retry window while nginx/Cloudflare returns 502 during container recreate. */
+const POLL_FETCH_RETRIES = 18
+const POLL_FETCH_RETRY_MS = 2500
 
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms))

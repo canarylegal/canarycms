@@ -137,9 +137,20 @@ def build_update_check_payload() -> dict[str, Any]:
                     if isinstance(msg, str) and msg.strip():
                         msgs.append(msg.strip().split("\n", 1)[0].strip()[:500])
                 base["commit_messages"] = msgs
-            elif cmp.status_code == 404:
+            else:
                 prev = (base.get("note") or "").strip()
-                tail = "Could not load commit list (compare 404)."
+                tail = f"Could not load commit list (compare {cmp.status_code})."
+                tip_cur = client.get(
+                    f"{GITHUB_API}/repos/{owner}/{repo}/commits/{current}",
+                    headers=headers,
+                )
+                if tip_cur.status_code != 200:
+                    tail = (
+                        f"{tail} This deployment reports {_short_sha(current)}, which GitHub does not expose on "
+                        f"{owner}/{repo}. The update banner compares this install to that repository's {ref} tip "
+                        f"({_short_sha(remote_sha)}). Point CANARY_GITHUB_DEPLOY_OWNER / REPO / REF at the remote "
+                        "that contains this commit, or push your checkout to the configured repository."
+                    )
                 base["note"] = f"{prev} {tail}".strip() if prev else tail
 
     return base
