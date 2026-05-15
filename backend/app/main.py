@@ -86,6 +86,19 @@ async def lifespan(app: FastAPI):
 
     start_event_tracked_task_job()
     start_calendar_notification_job()
+    import time
+
+    from app.compose_deploy_job import compose_job_disk_says_running, reconcile_compose_job_state
+
+    for _ in range(4):
+        try:
+            reconcile_compose_job_state()
+        except Exception as e:
+            _log.warning("compose job reconcile on startup skipped: %s", e)
+            break
+        if not compose_job_disk_says_running():
+            break
+        time.sleep(2.5)
     yield
 
 

@@ -107,10 +107,12 @@ services:
       CANARY_GITHUB_DEPLOY_REF: ${CANARY_GITHUB_DEPLOY_REF:-main}
       # GUI “Update now” via Docker Compose on the host (mount docker.sock + project dir — see .env.example).
       CANARY_COMPOSE_UPDATE_ENABLED: ${CANARY_COMPOSE_UPDATE_ENABLED:-}
-      CANARY_COMPOSE_PROJECT_DIR: ${CANARY_COMPOSE_PROJECT_DIR:-}
+      CANARY_COMPOSE_PROJECT_DIR: ${CANARY_COMPOSE_PROJECT_DIR:-/canary-compose}
       CANARY_COMPOSE_PROFILES: ${CANARY_COMPOSE_PROFILES:-prod}
       CANARY_COMPOSE_FILES: ${CANARY_COMPOSE_FILES:-docker-compose.yml}
       CANARY_COMPOSE_GIT_PULL: ${CANARY_COMPOSE_GIT_PULL:-}
+      # Prefer git HEAD on the mounted compose project for /health + Deploy (auto when unset — see .env.example).
+      CANARY_RUNTIME_COMMIT_FROM_COMPOSE_REPO: ${CANARY_RUNTIME_COMMIT_FROM_COMPOSE_REPO:-}
       # When not "0"/"false": admins may see an update prompt after login if GitHub is ahead of this build.
       CANARY_UPDATE_PROMPT_ON_LOGIN: ${CANARY_UPDATE_PROMPT_ON_LOGIN:-1}
       # Optional: override the commit shown in /health and update checks (e.g. dev bind-mount vs stale image label).
