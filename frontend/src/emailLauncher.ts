@@ -132,6 +132,18 @@ export function buildOutlookWebComposeUrl(
 }
 
 /**
+ * Build a ``mailto:`` URL with optional to, subject, and body (RFC 6068).
+ */
+export function buildMailtoComposeUrl(params: { to: string; subject: string; body: string }): string {
+  const to = (params.to || '').trim()
+  const q: string[] = []
+  if (params.subject) q.push(`subject=${encodeURIComponent(params.subject)}`)
+  if (params.body) q.push(`body=${encodeURIComponent(params.body)}`)
+  const query = q.length ? `?${q.join('&')}` : ''
+  return `mailto:${to}${query}`
+}
+
+/**
  * Opens the user's preferred e-mail experience: OS default mail client (`mailto:`) or a web URL.
  */
 export function openCanaryEmailLauncher(me: UserPublic | null | undefined): void {

@@ -158,7 +158,7 @@ export type InvoiceBillingDefaultsUser = {
 
 export type InvoiceBillingDefaultsOut = {
   default_vat_percent: number
-  fee_earner_user_id?: string | null
+  fee_earner_user_id: string
   fee_templates: BillingLineTemplateOut[]
   disbursement_templates: BillingLineTemplateOut[]
   users: InvoiceBillingDefaultsUser[]
@@ -283,7 +283,7 @@ export type CaseOut = {
   case_number: string
   client_name?: string | null
   matter_description: string
-  fee_earner_user_id?: string | null
+  fee_earner_user_id: string
   status: CaseWorkflowStatus
   practice_area?: string | null
   matter_sub_type_id?: string | null
@@ -478,6 +478,14 @@ export type CaseEmailDraftM365Out = {
   open_url: string
   graph_message_id?: string | null
   draft_compose_web_link?: string | null
+}
+
+/** Response from ``POST /cases/{id}/files/email-compose-handoff`` (Thunderbird / mail clients). */
+export type CaseEmailComposeHandoffOut = {
+  handoff_token: string
+  case_id: string
+  expires_in_seconds: number
+  thunderbird_hint: string
 }
 
 /** Response from ``POST /cases/{id}/files/email-mailto``. */

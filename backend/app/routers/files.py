@@ -36,7 +36,12 @@ from app.canary_public_url import canary_public_url, onlyoffice_browser_public_b
 from app.onlyoffice_ssrf_url import default_internal_base_for_ds, normalize_onlyoffice_ssrf_base
 from app.desktop_edit_session import acquire_file_edit_session
 from app.graph_outbound_service import link_outlook_graph_metadata_for_eml_file, repair_outlook_web_link_on_file
-from app.security import create_eml_open_token, decode_eml_open_token
+from app.security import (
+    COMPOSE_HANDOFF_TTL_SECONDS,
+    create_compose_handoff_token,
+    create_eml_open_token,
+    decode_eml_open_token,
+)
 from app.schemas import (
     CaseFileMoveUpdate,
     CaseFileRenameUpdate,
@@ -46,6 +51,7 @@ from app.schemas import (
     CaseFolderRenameUpdate,
     CaseEmailDraftM365In,
     CaseEmailDraftM365Out,
+    CaseEmailComposeHandoffOut,
     CaseEmailMailtoOut,
     CommentFileUpdate,
     ComposeOfficeDocumentIn,
@@ -374,8 +380,12 @@ def upload_case_file(
     upload: UploadFile = FastAPIFile(...),
     folder: str = Form(default=""),
     parent_file_id: uuid.UUID | None = Form(default=None),
+    compose_precedent_id: uuid.UUID | None = Form(default=None),
+    compose_case_contact_id: uuid.UUID | None = Form(default=None),
+    compose_global_contact_id: uuid.UUID | None = Form(default=None),
     source_imap_mbox: str | None = Form(default=None),
     source_imap_uid: str | None = Form(default=None),
+    source_internet_message_id: str | None = Form(default=None),
     outlook_item_id: str | None = Form(default=None),
     outlook_conversation_id: str | None = Form(default=None),
     user: User = Depends(get_current_user),
@@ -428,8 +438,8 @@ def upload_case_file(
         outlook_rest_id = None
         outlook_conv_id = None
 
-    internet_mid: str | None = None
-    if parent_file_id is None:
+    internet_mid: str | None = (source_internet_message_id or "").strip() or None
+    if parent_file_id is None and not internet_mid:
         low = original.lower()
         if mime_base == "message/rfc822" or low.endswith(".eml"):
             internet_mid = _eml_parse_message_id_from_header(paths.abs_path)
@@ -489,7 +499,16 @@ def upload_case_file(
         action="case.file.upload",
         entity_type="file",
         entity_id=str(row.id),
-        meta={"case_id": str(case_id), "filename": row.original_filename, "size_bytes": row.size_bytes},
+        meta={
+            "case_id": str(case_id),
+            "filename": row.original_filename,
+            "size_bytes": row.size_bytes,
+            "folder": paths.folder_path,
+            "parent_file_id": str(parent_file_id) if parent_file_id else None,
+            "compose_precedent_id": str(compose_precedent_id) if compose_precedent_id else None,
+            "compose_case_contact_id": str(compose_case_contact_id) if compose_case_contact_id else None,
+            "compose_global_contact_id": str(compose_global_contact_id) if compose_global_contact_id else None,
+        },
     )
 
     if parent_file_id is None and (mime_base == "message/rfc822" or original.lower().endswith(".eml")):
@@ -626,11 +645,18 @@ def _case_email_compose_bundle(
         pr = db.get(Precedent, body.precedent_id)
         if pr:
             prec_name = (pr.name or "").strip()
+    contact_ref = ""
+    if body.case_contact_id and not body.precedent_merge_all_clients:
+        cc_subj = db.get(CaseContact, body.case_contact_id)
+        if cc_subj and cc_subj.case_id == case_id:
+            contact_ref = (cc_subj.matter_contact_reference or "").strip()
     case_row = db.get(CaseRow, case_id)
     subject_bits: list[str] = []
     if case_row and (case_row.case_number or "").strip():
         subject_bits.append(case_row.case_number.strip())
-    if prec_name:
+    if contact_ref:
+        subject_bits.append(contact_ref)
+    elif prec_name:
         subject_bits.append(prec_name)
     subject = " — ".join(subject_bits) if subject_bits else "E-mail"
 
@@ -658,6 +684,40 @@ def _case_email_compose_bundle(
         attachments.append((fn, mt, raw))
 
     return to_addr, subject, body_text, attachments
+
+
+@router.post("/email-compose-handoff", response_model=CaseEmailComposeHandoffOut)
+def create_case_email_compose_handoff(
+    case_id: uuid.UUID,
+    body: CaseEmailDraftM365In,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> CaseEmailComposeHandoffOut:
+    """Build merge + attachments and return a short-lived JWT for Thunderbird ``compose.beginNew``."""
+    require_case_access(case_id, user, db)
+    to_addr, subject, body_text, attachments = _case_email_compose_bundle(case_id, body, user, db)
+    att_ids = [str(fid) for fid in body.attachment_file_ids]
+    token = create_compose_handoff_token(
+        user_id=str(user.id),
+        case_id=str(case_id),
+        to=to_addr,
+        subject=subject,
+        body=body_text,
+        attachment_file_ids=att_ids,
+    )
+    log_event(
+        db,
+        actor_user_id=user.id,
+        action="case.file.email_compose_handoff",
+        entity_type="case",
+        entity_id=str(case_id),
+        meta={"attachment_count": len(att_ids), "has_to": bool(to_addr.strip())},
+    )
+    return CaseEmailComposeHandoffOut(
+        handoff_token=token,
+        case_id=case_id,
+        expires_in_seconds=COMPOSE_HANDOFF_TTL_SECONDS,
+    )
 
 
 @router.post("/email-mailto", response_model=CaseEmailMailtoOut)

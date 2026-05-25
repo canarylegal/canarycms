@@ -1,0 +1,244 @@
+* {
+  box-sizing: border-box;
+}
+[hidden] {
+  display: none !important;
+}
+body {
+  margin: 0;
+  font: 14px/1.45 system-ui, 'Segoe UI', Roboto, sans-serif;
+  color: #0f172a;
+  background: #fff;
+}
+.wrap {
+  padding: 12px 14px 16px;
+  max-width: 420px;
+}
+.pane-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.pane-head h1 {
+  margin: 0;
+  flex: 1;
+}
+h1 {
+  font-size: 1.1rem;
+  font-weight: 600;
+  margin: 0 0 4px;
+}
+.subhead {
+  margin: 0 0 10px;
+  font-size: 0.8rem;
+  color: #64748b;
+  line-height: 1.35;
+}
+.field {
+  display: block;
+  margin-bottom: 10px;
+}
+.field > span {
+  display: block;
+  font-size: 0.75rem;
+  font-weight: 600;
+  margin-bottom: 4px;
+  color: #334155;
+}
+.field.is-disabled {
+  opacity: 0.55;
+  pointer-events: none;
+}
+.field.is-disabled select,
+.field.is-disabled button,
+.field.is-disabled input {
+  cursor: not-allowed;
+}
+input,
+select,
+textarea {
+  width: 100%;
+  font: inherit;
+  padding: 8px 10px;
+  border: 1px solid #94a3b8;
+  border-radius: 4px;
+}
+.case-results {
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  max-height: 120px;
+  overflow: auto;
+  margin-bottom: 8px;
+}
+.case-result-row {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 6px 10px;
+  border: none;
+  background: #fff;
+  cursor: pointer;
+  font: inherit;
+}
+.case-result-row:hover {
+  background: #f1f5f9;
+}
+.case-result-row.is-selected {
+  background: #e0f2fe;
+}
+.attach-section-title {
+  font-size: 0.8rem;
+  font-weight: 600;
+  margin: 0 0 4px;
+  color: #334155;
+}
+.attach-section-hint {
+  font-size: 0.75rem;
+  color: #64748b;
+  margin: 0 0 6px;
+  line-height: 1.35;
+}
+.attach-crumbs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px;
+  margin-bottom: 6px;
+  font-size: 0.75rem;
+}
+.attach-crumb {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--canary-brand);
+  text-decoration: underline;
+  cursor: pointer;
+  font: inherit;
+  font-size: inherit;
+}
+.attach-crumb:hover {
+  color: var(--canary-brand-dark);
+}
+.attach-crumb-sep {
+  color: #94a3b8;
+}
+.attach-picker-list {
+  max-height: min(220px, 40vh);
+  overflow: auto;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+.attach-picker-row {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+  padding: 6px 10px;
+  border-bottom: 1px solid #e2e8f0;
+  margin: 0;
+  min-width: 0;
+  font-size: 0.82rem;
+}
+.attach-picker-row:last-child {
+  border-bottom: none;
+}
+.attach-picker-row--file {
+  cursor: pointer;
+}
+.attach-picker-row--folder {
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+}
+.attach-picker-row--folder:hover {
+  background: #f1f5f9;
+}
+.attach-picker-check-spacer {
+  display: block;
+  width: 14px;
+}
+.attach-picker-empty {
+  padding: 8px 10px;
+  margin: 0;
+}
+.row-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+  align-items: center;
+}
+.row-actions button {
+  flex: 0 0 auto;
+}
+button.primary {
+  padding: 8px 14px;
+  border-radius: 6px;
+  border: 1px solid var(--canary-brand-border);
+  background: var(--canary-brand);
+  color: #fff;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 600;
+  font-size: 0.95rem;
+}
+button.ghost {
+  background: transparent;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  padding: 8px 12px;
+  font: inherit;
+  cursor: pointer;
+  color: #334155;
+}
+button.ghost:hover {
+  background: #f1f5f9;
+}
+button.secondary {
+  display: block;
+  width: 100%;
+  margin-top: 4px;
+  padding: 8px 12px;
+  border-radius: 4px;
+  border: 1px solid #94a3b8;
+  background: linear-gradient(#fff, #f1f5f9);
+  font: inherit;
+  cursor: pointer;
+  color: #0f172a;
+  text-align: left;
+}
+button.secondary:hover {
+  background: #e8f4fc;
+  border-color: #64748b;
+}
+#attach-selected-summary {
+  margin: 6px 0 0;
+}
+#out {
+  margin-top: 8px;
+  font-size: 0.8rem;
+  min-height: 1.2em;
+}
+#out.err {
+  color: #b91c1c;
+}
+#out.ok {
+  color: var(--canary-brand-dark);
+}
+.prefill-hint {
+  color: var(--canary-brand-text);
+  background: var(--canary-brand-muted);
+  border: 1px solid var(--canary-brand-light);
+  border-radius: 6px;
+  padding: 8px 10px;
+}
+.muted {
+  color: #64748b;
+  font-size: 0.75rem;
+}

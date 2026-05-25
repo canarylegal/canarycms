@@ -31,6 +31,16 @@ from app.ledger_service import get_ledger
 router = APIRouter(prefix="/cases", tags=["cases"])
 
 
+def _require_active_fee_earner(db: Session, fee_earner_user_id: uuid.UUID) -> User:
+    fe = db.get(User, fee_earner_user_id)
+    if not fe or not fe.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Fee earner must be an active user.",
+        )
+    return fe
+
+
 def _raise_if_hidden_matter_head_for_user(
     matter_sub_type_id: uuid.UUID | None,
     matter_head_type_id: uuid.UUID | None,
@@ -145,6 +155,7 @@ def create_case(
     _raise_if_hidden_matter_head_for_user(sub.id, None, user, db)
     resolved_sub = sub.id
     resolved_head = sub.head_type_id
+    _require_active_fee_earner(db, payload.fee_earner_user_id)
 
     case = Case(
         case_number=case_number,
@@ -154,6 +165,7 @@ def create_case(
         practice_area=payload.practice_area,
         matter_sub_type_id=resolved_sub,
         matter_head_type_id=resolved_head,
+        fee_earner_user_id=payload.fee_earner_user_id,
         created_by=user.id,
         is_locked=False,
         lock_mode=CaseLockMode.whitelist,
@@ -279,6 +291,14 @@ def update_case(
     # Map API field to DB field
     if "matter_description" in data:
         data["title"] = data.pop("matter_description")
+
+    if "fee_earner_user_id" in data:
+        if data["fee_earner_user_id"] is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Fee earner is required; it cannot be cleared.",
+            )
+        _require_active_fee_earner(db, data["fee_earner_user_id"])
 
     access_mode_keys = {"lock_mode", "is_locked"}
     if access_mode_keys & set(data.keys()):

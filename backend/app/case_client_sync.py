@@ -14,6 +14,8 @@ def sync_case_client_name(db: Session, case_id: uuid.UUID) -> None:
     case = db.get(Case, case_id)
     if not case:
         return
+    # Pending CaseContact adds in the same transaction are not visible until flush.
+    db.flush()
     rows = (
         db.execute(select(CaseContact).where(CaseContact.case_id == case_id).order_by(CaseContact.created_at.asc()))
         .scalars()

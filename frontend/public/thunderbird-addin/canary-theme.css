@@ -1,0 +1,9 @@
+/* Canary brand (matches toolbar icon — dark blue). */
+:root {
+  --canary-brand: #1d4ed8;
+  --canary-brand-dark: #1e3a8a;
+  --canary-brand-border: #1e40af;
+  --canary-brand-light: #dbeafe;
+  --canary-brand-muted: #eff6ff;
+  --canary-brand-text: #1e3a8a;
+}

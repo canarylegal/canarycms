@@ -244,7 +244,7 @@ class Case(Base):
     title: Mapped[str] = mapped_column(String(300), nullable=False)
     # Client name(s) denormalized for the main menu; snapshots still live in case_contact.
     client_name: Mapped[str | None] = mapped_column(String(300), nullable=True)
-    fee_earner_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("user.id"), nullable=True)
+    fee_earner_user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("user.id"), nullable=False)
     status: Mapped[CaseStatus] = mapped_column(Enum(CaseStatus, name="case_status"), nullable=False, default=CaseStatus.open)
     practice_area: Mapped[str | None] = mapped_column(String(200), nullable=True)
     matter_head_type_id: Mapped[uuid.UUID | None] = mapped_column(

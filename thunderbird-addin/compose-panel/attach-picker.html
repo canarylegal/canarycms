@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Attach from Canary</title>
+    <link rel="stylesheet" href="../canary-theme.css" />
+    <link rel="stylesheet" href="panel.css" />
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="pane-head">
+        <h1>Attach from Canary</h1>
+        <button type="button" class="ghost" id="btn-close">Close</button>
+      </div>
+      <p class="subhead">Open folders to browse; tick files to attach (up to 25).</p>
+      <p id="matter-line" class="muted"></p>
+      <div id="attach-picker-root"></div>
+      <div class="row-actions">
+        <button type="button" class="primary" id="btn-done">Done</button>
+      </div>
+      <div id="out" role="status"></div>
+    </div>
+    <script src="../canary-shared.js"></script>
+    <script src="../compose-store.js"></script>
+    <script src="../compose-attach-ui.js"></script>
+    <script src="attach-picker.js"></script>
+  </body>
+</html>

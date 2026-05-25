@@ -14,6 +14,7 @@ import {
   OWA_MAIL_WINDOW_NAME,
 } from '../emailClient'
 import {
+  buildMailtoComposeUrl,
   buildOutlookWebComposeUrl,
   buildOutlookWebMessageSearchUrl,
   extractInternetMessageIdFromEmlText,
@@ -25,7 +26,7 @@ import { TaskCreateModal } from '../TaskCreateModal'
 import { CANARY_FOLLOW_UP_STANDARD_TASK_ID } from '../standardTasks'
 import { TextPromptModal } from '../TextPromptModal'
 import { LedgerPage } from '../LedgerPage'
-import { onlyofficeCaseEditorWindowTarget } from '../onlyofficeEditorWindow'
+import { openOnlyOfficeCaseEditor } from '../onlyofficeEditorWindow'
 import { caseHasRevokedUserAccess, formatCaseStatusLabel, type CaseWorkflowStatus } from '../types'
 import type {
   CaseContactOut,
@@ -59,7 +60,7 @@ import { matterContactTypeLabel } from './matterLabels'
 import { PropertyDetailsForm } from './PropertyDetailsForm'
 import { propertyTenureLabel } from './propertyLabels'
 import { EmlPreviewModal, parseEmlForPreview, type EmlPreviewData } from './emlPreview'
-import { isEmlLikeFileSummary, isOfficeLikeFile } from './officeFiles'
+import { isEmlLikeFileSummary, isEmlLikeUploadFile, isOfficeLikeFile } from './officeFiles'
 import {
   decodeFolderPathForDisplay,
   decodeFolderPathSegment,
@@ -344,7 +345,7 @@ export function CaseDetail({
     return String(selectedCaseId) === String(caseId) ? caseId : null
   }, [caseId, selectedCaseId])
 
-  /** Mailto / OWA compose URLs cannot carry case-file attachments; only Graph drafts support that. */
+  /** Graph drafts (M365) vs Thunderbird handoff when integration is mailto/desktop. */
   const m365EmailDraftsEnabled = useMemo(
     () =>
       currentUser?.email_integration_mode === 'microsoft_graph' &&
@@ -820,7 +821,7 @@ export function CaseDetail({
     if (caseDocPanel !== 'edit-details') return
     setEditMatterDescription(caseDetail?.matter_description ?? '')
     setEditPracticeArea(caseDetail?.matter_sub_type_id ?? '')
-    setEditFeeEarner(caseDetail?.fee_earner_user_id ?? '')
+    setEditFeeEarner(caseDetail?.fee_earner_user_id ? String(caseDetail.fee_earner_user_id) : '')
     setEditCaseStatus(caseDetail?.status ?? 'open')
   }, [caseDocPanel, caseDetail])
 
@@ -966,7 +967,12 @@ export function CaseDetail({
   const filteredFiles = useMemo(() => {
     const s = docSearch.trim().toLowerCase()
     if (!s) return files
-    const matches = (f: FileSummary) => f.original_filename.toLowerCase().includes(s)
+    const matches = (f: FileSummary) => {
+      if ((f.original_filename || '').toLowerCase().includes(s)) return true
+      if ((f.source_mail_from_name || '').toLowerCase().includes(s)) return true
+      if ((f.source_mail_from_email || '').toLowerCase().includes(s)) return true
+      return false
+    }
     const expanded = new Set<string>(files.filter(matches).map((f) => f.id))
     let changed = true
     while (changed) {
@@ -1216,7 +1222,7 @@ export function CaseDetail({
   }
 
   async function uploadLocalFilesForEmailAttach(incomingFiles: File[]) {
-    if (!caseId || incomingFiles.length === 0 || !m365EmailDraftsEnabled) return
+    if (!caseId || incomingFiles.length === 0) return
     setBusy(true)
     setActionErr(null)
     try {
@@ -1307,7 +1313,7 @@ export function CaseDetail({
           compose_office_role: composeOfficeRole ?? null,
         },
       })
-      window.open(`/editor/${caseId}/${res.id}`, onlyofficeCaseEditorWindowTarget(caseId, res.id))
+      openOnlyOfficeCaseEditor(caseId, res.id)
     } catch (e: any) {
       setActionErr(e?.message ?? 'Could not create document')
     } finally {
@@ -1350,7 +1356,7 @@ export function CaseDetail({
         return
       }
       try {
-        await apiFetch(`/outlook-plugin/pending-send`, {
+        await apiFetch(`/mail-plugin/pending-send`, {
           token,
           method: 'PUT',
           json: { case_id: caseId, ttl_seconds: 86400 },
@@ -1382,7 +1388,7 @@ export function CaseDetail({
     }
   }
 
-  async function composeMailtoEmailDraft(
+  async function composeEmailMailto(
     precedentId: string | null,
     caseContactId: string | null,
     globalContactId: string | null,
@@ -1390,11 +1396,6 @@ export function CaseDetail({
     attachmentFileIds: string[],
   ) {
     if (!caseId) return
-    const launchPrefEarly = currentUser?.email_launch_preference ?? 'desktop'
-    const handoffTab =
-      launchPrefEarly === 'outlook_web'
-        ? window.open('about:blank', OWA_MAIL_WINDOW_NAME, OWA_MESSAGE_WINDOW_FEATURES)
-        : window.open('about:blank', '_blank')
     setBusy(true)
     setActionErr(null)
     try {
@@ -1409,39 +1410,33 @@ export function CaseDetail({
           attachment_file_ids: attachmentFileIds,
         },
       })
-      const toAddr = (res.to || '').trim()
       const launchPref = currentUser?.email_launch_preference ?? 'desktop'
       if (launchPref === 'outlook_web') {
-        const owa =
-          buildOutlookWebComposeUrl(currentUser?.email_outlook_web_url ?? null, {
-            to: toAddr,
-            subject: res.subject,
-            body: res.body,
-          })
-        const href = appendOutlookWebAuthHintsForNav(owa, currentUser?.email?.trim() || null)
-        if (handoffTab) {
-          handoffTab.location.replace(href)
-        } else {
-          window.location.href = href
+        let url = buildOutlookWebComposeUrl(currentUser?.email_outlook_web_url, {
+          to: res.to,
+          subject: res.subject,
+          body: res.body,
+        })
+        url = appendOutlookWebAuthHintsForNav(url, currentUser?.email?.trim() || null)
+        const w = window.open(url, OWA_MAIL_WINDOW_NAME, OWA_MESSAGE_WINDOW_FEATURES)
+        if (!w) {
+          setActionErr('Your browser blocked opening Outlook. Allow pop-ups for this site.')
+          return
         }
       } else {
-        const query = new URLSearchParams({ subject: res.subject, body: res.body }).toString()
-        const href = toAddr ? `mailto:${toAddr}?${query}` : `mailto:?${query}`
-        if (handoffTab) {
-          handoffTab.location.href = href
-        } else {
-          window.location.href = href
-        }
+        const a = document.createElement('a')
+        a.href = buildMailtoComposeUrl({ to: res.to, subject: res.subject, body: res.body })
+        a.rel = 'noopener'
+        document.body.appendChild(a)
+        a.click()
+        document.body.removeChild(a)
       }
-      if (res.attachment_count > 0) {
-        window.setTimeout(() => {
-          window.alert(res.note)
-        }, 400)
+      if (res.attachment_count > 0 && res.note) {
+        window.alert(res.note)
       }
     } catch (e: unknown) {
-      const msg = formatHandoffCaughtError(e)
-      showHandoffTabError(handoffTab, msg)
-      setActionErr(msg)
+      const err = e as { message?: string }
+      setActionErr(err?.message ?? 'Could not prepare e-mail')
     } finally {
       setBusy(false)
     }
@@ -1512,7 +1507,7 @@ export function CaseDetail({
     }
 
     if (isOfficeLikeFile(file)) {
-      window.open(`/editor/${caseId}/${file.id}`, onlyofficeCaseEditorWindowTarget(caseId, file.id))
+      openOnlyOfficeCaseEditor(caseId, file.id)
       return
     }
 
@@ -1589,14 +1584,20 @@ export function CaseDetail({
         return
       }
 
-      /* Desktop / default: never use blob: URLs for message/rfc822 — Chromium often shows an endless
-       * “Loading” tab. Issue a short-lived token and GET .../eml-open (attachment) so the browser
-       * downloads or hands off to the OS mail app. Open a tab synchronously so popup rules still apply.
-       * Avoid `noopener` on this open — see composeM365EmailDraft (must keep Window for location.replace). */
-      const emlHandoffTab = window.open('about:blank', '_blank')
+      /* Desktop / default: hand off to the OS mail app via a one-shot download (no about:blank tab —
+       * attachment responses do not navigate the tab, which left a stray blank page). */
       setBusy(true)
       setActionErr(null)
       try {
+        try {
+          await apiFetch(`/mail-plugin/pending-send`, {
+            token,
+            method: 'PUT',
+            json: { case_id: caseId, source_file_id: file.id, ttl_seconds: 86400 },
+          })
+        } catch {
+          /* Best-effort: Thunderbird reply prefill uses this when relatedMessageId is unavailable. */
+        }
         const data = await apiFetch<{ token: string }>(`/cases/${caseId}/files/${file.id}/eml-open-token`, {
           method: 'POST',
           token,
@@ -1604,14 +1605,14 @@ export function CaseDetail({
         const url = browserAbsoluteApiUrl(
           apiUrl(`/cases/${caseId}/files/${file.id}/eml-open?token=${encodeURIComponent(data.token)}`),
         )
-        if (emlHandoffTab) {
-          emlHandoffTab.location.replace(url)
-        } else {
-          window.location.assign(url)
-        }
+        const a = document.createElement('a')
+        a.href = url
+        a.rel = 'noopener'
+        document.body.appendChild(a)
+        a.click()
+        a.remove()
       } catch (e: unknown) {
         const msg = fetchTimedOutMessage(e) ?? (e as { message?: string }).message ?? 'Could not open e-mail'
-        showHandoffTabError(emlHandoffTab, msg)
         setActionErr(msg)
       } finally {
         setBusy(false)
@@ -1807,7 +1808,7 @@ export function CaseDetail({
 
       const composeKind = contactPickModal.composeKind ?? 'letter'
       if (composeKind === 'email') {
-        const attachmentIdsForCompose = m365EmailDraftsEnabled ? emailAttachIds : []
+        const attachmentIdsForCompose = emailAttachIds
         if (m365EmailDraftsEnabled) {
           await composeM365EmailDraft(
             contactPickModal.precedentId,
@@ -1817,7 +1818,7 @@ export function CaseDetail({
             attachmentIdsForCompose,
           )
         } else {
-          await composeMailtoEmailDraft(
+          await composeEmailMailto(
             contactPickModal.precedentId,
             caseContactIdForMerge,
             globalContactIdForMerge,
@@ -2354,7 +2355,13 @@ export function CaseDetail({
               e.stopPropagation()
               setDocsDragOver(false)
               if (!dndEventHasFiles(e)) return
-              const droppedFiles = Array.from(e.dataTransfer.files ?? [])
+              const droppedFiles = [...e.dataTransfer.files]
+              if (droppedFiles.some(isEmlLikeUploadFile)) {
+                setActionErr(
+                  'To file an e-mail in Canary, please use the add-in appropriate to your e-mail client.',
+                )
+                return
+              }
               await uploadFilesToCurrentFolder(droppedFiles)
             }}
           >
@@ -2737,8 +2744,15 @@ export function CaseDetail({
                       </label>
                       <label className="field">
                         <span>Fee earner</span>
-                        <select value={editFeeEarner} onChange={(e) => setEditFeeEarner(e.target.value)} disabled={busy}>
-                          <option value="">Unassigned</option>
+                        <select
+                          value={editFeeEarner}
+                          onChange={(e) => setEditFeeEarner(e.target.value)}
+                          disabled={busy}
+                          required
+                        >
+                          <option value="" disabled>
+                            Select fee earner
+                          </option>
                           {users
                             .filter((u) => u.is_active)
                             .map((u) => (
@@ -2779,8 +2793,12 @@ export function CaseDetail({
                         </button>
                         <button
                           className="btn primary"
-                          disabled={busy || !editMatterDescription.trim()}
+                          disabled={busy || !editMatterDescription.trim() || !editFeeEarner}
                           onClick={async () => {
+                            if (!editFeeEarner) {
+                              setEditCaseErr('Select a fee earner.')
+                              return
+                            }
                             setBusy(true)
                             setEditCaseErr(null)
                             try {
@@ -2789,7 +2807,7 @@ export function CaseDetail({
                                 method: 'PATCH',
                                 json: {
                                   matter_description: editMatterDescription.trim(),
-                                  fee_earner_user_id: editFeeEarner || null,
+                                  fee_earner_user_id: editFeeEarner,
                                   status: editCaseStatus,
                                   ...(editPracticeArea.trim()
                                     ? { matter_sub_type_id: editPracticeArea.trim() }
@@ -3425,8 +3443,8 @@ export function CaseDetail({
                     {contactPickModal.composeKind === 'email' ? (
                       <>
                         Optional: pick a recipient to pre-fill <strong>To</strong>. If there is no contact, no e-mail on
-                        the contact, or you skip this step, the draft opens with an empty To line so you can type it in
-                        Outlook. You can still use &quot;All clients&quot; for merge fields only.
+                        the contact, or you skip this step, compose opens with an empty To line so you can type it in
+                        your mail program. You can still use &quot;All clients&quot; for merge fields only.
                       </>
                     ) : (
                       <>
@@ -3585,7 +3603,7 @@ export function CaseDetail({
                     </div>
                   </div>
                 ) : null}
-                {contactPickModal.composeKind === 'email' && m365EmailDraftsEnabled ? (
+                {contactPickModal.composeKind === 'email' ? (
                   <>
                     <input
                       ref={emailLocalAttachInputRef}
@@ -3656,12 +3674,6 @@ export function CaseDetail({
                       </div>
                     ) : null}
                   </>
-                ) : contactPickModal.composeKind === 'email' ? (
-                  <p className="muted" style={{ margin: 0, fontSize: 13, lineHeight: 1.45 }}>
-                    File attachments are only available when Admin → E-mail uses <strong>Microsoft 365 (Entra / Graph)</strong>{' '}
-                    with a working app registration. <code>mailto</code> and Outlook on the web compose from here carry
-                    subject and body only.
-                  </p>
                 ) : null}
                 <div className="row" style={{ justifyContent: 'flex-end', marginTop: 12 }}>
                   <button
@@ -3683,7 +3695,7 @@ export function CaseDetail({
           </div>
         ) : null}
 
-        {contactPickModal?.composeKind === 'email' && m365EmailDraftsEnabled && emailAttachCanaryOpen ? (
+        {contactPickModal?.composeKind === 'email' && emailAttachCanaryOpen ? (
           <div
             className="modalOverlay emailAttachCanaryOverlay"
             role="dialog"
@@ -4248,7 +4260,7 @@ export function CaseDetail({
             token={token}
             caseId={caseId}
             users={users}
-            feeEarnerUserId={caseDetail.fee_earner_user_id ?? null}
+            feeEarnerUserId={caseDetail.fee_earner_user_id}
             lockMode={caseDetail.lock_mode}
             canSetLockMode={Boolean(
               currentUser?.admin_console_access ||

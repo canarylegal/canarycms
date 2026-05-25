@@ -42,6 +42,7 @@ from app.routers import (
     me_calendar_events,
     me_calendars,
     onlyoffice,
+    mail_plugin,
     outlook_plugin,
     precedents,
     reports,
@@ -206,6 +207,7 @@ app.include_router(admin_standard_tasks.router)
 app.include_router(admin_sub_menu_events.router)
 app.include_router(files.router)
 app.include_router(outlook_plugin.router)
+app.include_router(mail_plugin.router)
 app.include_router(onlyoffice.router)
 app.include_router(webdav.router)
 app.include_router(users.router)

@@ -5,7 +5,7 @@ import type { ApiError } from './api'
 import { useDialogs } from './DialogProvider'
 import { SearchInput } from './SearchInput'
 import type { CaseOut, FinanceCategoryOut, FinanceItemOut, FinanceOut } from './types'
-import { onlyofficeCaseEditorWindowTarget } from './onlyofficeEditorWindow'
+import { openOnlyOfficeCaseEditor } from './onlyofficeEditorWindow'
 
 interface Props {
   caseId: string
@@ -150,7 +150,7 @@ export function FinancePage({ caseId, token, onClose, embedded = false }: Props)
       const res = await apiFetch<{ id: string }>(`/cases/${caseId}/finance/completion-statement`, {
         token, method: 'POST',
       })
-      window.open(`/editor/${caseId}/${res.id}`, onlyofficeCaseEditorWindowTarget(caseId, res.id))
+      openOnlyOfficeCaseEditor(caseId, res.id)
     } catch (e: any) {
       setError(e?.message ?? 'Failed to generate completion statement')
     } finally {

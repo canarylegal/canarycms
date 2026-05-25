@@ -1,5 +1,12 @@
 import type { FileSummary } from '../types'
 
+/** Local file picked or dropped in the browser (before upload). */
+export function isEmlLikeUploadFile(file: File): boolean {
+  const name = (file.name || '').toLowerCase()
+  const type = (file.type || '').toLowerCase()
+  return name.endsWith('.eml') || type.includes('message/rfc822') || type.includes('rfc822')
+}
+
 /** E-mail stored as .eml / RFC822 — must match backend ``_row_is_eml_like``. */
 export function isEmlLikeFileSummary(f: FileSummary): boolean {
   if ((f.outlook_graph_message_id || '').trim() || (f.outlook_web_link || '').trim()) return true

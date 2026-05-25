@@ -415,6 +415,7 @@ class CaseCreate(BaseModel):
     status: CaseStatus = CaseStatus.open
     practice_area: str | None = Field(default=None, max_length=200)
     matter_sub_type_id: uuid.UUID
+    fee_earner_user_id: uuid.UUID
 
     @field_validator("status")
     @classmethod
@@ -445,7 +446,7 @@ class CaseOut(BaseModel):
     case_number: str
     client_name: str | None
     matter_description: str
-    fee_earner_user_id: uuid.UUID | None
+    fee_earner_user_id: uuid.UUID
     status: CaseStatus
     practice_area: str | None
     matter_sub_type_id: uuid.UUID | None
@@ -598,6 +599,33 @@ class CaseEmailMailtoOut(BaseModel):
     note: str = (
         "Standard mailto links cannot attach case files — add attachments manually in your mail program."
     )
+
+
+class CaseEmailComposeHandoffOut(BaseModel):
+    """JWT handoff for Thunderbird (or other mail clients) to open compose with merge + attachments."""
+
+    handoff_token: str
+    case_id: uuid.UUID
+    expires_in_seconds: int
+    thunderbird_hint: str = (
+        "In Thunderbird, open Canary → Compose from matter (or paste the handoff if prompted). "
+        "The compose window will include the merged body and case attachments."
+    )
+
+
+class MailPluginComposeAttachmentOut(BaseModel):
+    file_id: uuid.UUID
+    filename: str
+    mime_type: str
+    content_base64: str
+
+
+class MailPluginComposeHandoffOut(BaseModel):
+    case_id: uuid.UUID
+    to: str
+    subject: str
+    body: str
+    attachments: list[MailPluginComposeAttachmentOut] = Field(default_factory=list)
 
 
 class EmailIntegrationSettingsOut(BaseModel):
@@ -966,6 +994,8 @@ class OutlookPluginLinkedCaseResolveIn(BaseModel):
     outlook_item_id: str | None = None
     internet_message_id: str | None = None
     conversation_id: str | None = None
+    source_imap_mbox: str | None = None
+    source_imap_uid: str | None = None
 
 
 class OutlookPluginPendingSendPutIn(BaseModel):
@@ -992,6 +1022,18 @@ class OutlookPluginLinkedCaseOut(BaseModel):
 
 class OutlookPluginLinkedCaseResolveOut(BaseModel):
     linked_case: OutlookPluginLinkedCaseOut | None = None
+
+
+class MailPluginMessageContextOut(BaseModel):
+    """Matter + parent e-mail file for a message already filed in Canary (Thunderbird reply prefill)."""
+
+    found: bool = False
+    case_id: uuid.UUID | None = None
+    file_id: uuid.UUID | None = None
+    folder_path: str = ""
+    case_number: str | None = None
+    client_name: str | None = None
+    matter_description: str | None = None
 
 
 class OutlookPluginEnsureMasterCategoryIn(BaseModel):

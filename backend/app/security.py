@@ -76,6 +76,76 @@ def create_eml_open_token(*, user_id: str, case_id: str, file_id: str) -> str:
     return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALG)
 
 
+COMPOSE_HANDOFF_TTL_SECONDS = int(os.getenv("COMPOSE_HANDOFF_TTL_SECONDS", "900"))
+
+
+@dataclass(frozen=True)
+class ComposeHandoffTokenPayload:
+    user_id: str
+    case_id: str
+    to: str
+    subject: str
+    body: str
+    attachment_file_ids: tuple[str, ...]
+
+
+def create_compose_handoff_token(
+    *,
+    user_id: str,
+    case_id: str,
+    to: str,
+    subject: str,
+    body: str,
+    attachment_file_ids: list[str],
+) -> str:
+    """Short-lived JWT for Thunderbird (or other clients) to fetch a compose bundle."""
+    now = int(time.time())
+    payload = {
+        "sub": user_id,
+        "purpose": "compose_handoff",
+        "case_id": case_id,
+        "to": to,
+        "subject": subject,
+        "body": body,
+        "attachment_file_ids": attachment_file_ids,
+        "iat": now,
+        "exp": now + COMPOSE_HANDOFF_TTL_SECONDS,
+    }
+    return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALG)
+
+
+def decode_compose_handoff_token(token: str) -> ComposeHandoffTokenPayload:
+    try:
+        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALG])
+    except JWTError as e:
+        raise ValueError("Invalid or expired token") from e
+    if payload.get("purpose") != "compose_handoff":
+        raise ValueError("Invalid token")
+    sub = payload.get("sub")
+    case_id = payload.get("case_id")
+    if not isinstance(sub, str) or not isinstance(case_id, str):
+        raise ValueError("Invalid token payload")
+    to = payload.get("to")
+    subject = payload.get("subject")
+    body = payload.get("body")
+    raw_ids = payload.get("attachment_file_ids")
+    if not isinstance(to, str) or not isinstance(subject, str) or not isinstance(body, str):
+        raise ValueError("Invalid token payload")
+    ids: list[str] = []
+    if isinstance(raw_ids, list):
+        for x in raw_ids:
+            if isinstance(x, str) and x.strip():
+                ids.append(x.strip())
+    return ComposeHandoffTokenPayload(
+        user_id=sub,
+        case_id=case_id,
+        to=to,
+        subject=subject,
+        body=body,
+        attachment_file_ids=tuple(ids),
+    )
+
+
 def decode_eml_open_token(token: str) -> EmlOpenTokenPayload:
     try:
         payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALG])

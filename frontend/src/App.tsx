@@ -44,7 +44,7 @@ import {
   saveThemePreferences,
 } from './theme'
 import { AppLogo } from './AppLogo'
-import { onlyofficePrecedentEditorWindowTarget } from './onlyofficeEditorWindow'
+import { openOnlyOfficePrecedentEditor } from './onlyofficeEditorWindow'
 import { DEFAULT_OUTLOOK_WEB_MAIL_URL, openCanaryEmailLauncher } from './emailLauncher'
 import { useDialogs } from './DialogProvider'
 import { SearchInput } from './SearchInput'
@@ -1073,6 +1073,7 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
         {showNewMatter ? (
           <NewMatterModal
             token={token}
+            currentUserId={auth.me?.id ?? ''}
             onClose={() => setShowNewMatter(false)}
             onCreated={async () => {
               setShowNewMatter(false)
@@ -1277,17 +1278,19 @@ type NewMatterPendingClient = {
 
 function NewMatterModal({
   token,
+  currentUserId,
   onClose,
   onCreated,
 }: {
   token: string
+  currentUserId: string
   onClose: () => void
   onCreated: () => void
 }) {
   const { askConfirm } = useDialogs()
   const [matterDescription, setMatterDescription] = useState('')
   const [practiceArea, setPracticeArea] = useState('')
-  const [feeEarner, setFeeEarner] = useState<string>('')
+  const [feeEarner, setFeeEarner] = useState<string>(currentUserId)
   /** Active = open; Quote = quote (only these may be set on create). */
   const [newMatterStatus, setNewMatterStatus] = useState<'open' | 'quote'>('open')
   const [step, setStep] = useState<'details' | 'property' | 'description' | 'contacts'>('details')
@@ -1321,7 +1324,15 @@ function NewMatterModal({
     async function loadUsers() {
       try {
         const data = await apiFetch<UserSummary[]>('/users', { token })
-        if (!cancelled) setUsers((Array.isArray(data) ? data : []).filter((u) => u.is_active))
+        if (!cancelled) {
+          const active = (Array.isArray(data) ? data : []).filter((u) => u.is_active)
+          setUsers(active)
+          setFeeEarner((prev) => {
+            if (prev) return prev
+            if (currentUserId && active.some((u) => u.id === currentUserId)) return currentUserId
+            return active[0]?.id ?? ''
+          })
+        }
       } catch {
         // ignore; keep dropdown empty
       }
@@ -1403,8 +1414,11 @@ function NewMatterModal({
               value={feeEarner}
               onChange={(e) => setFeeEarner(e.target.value)}
               disabled={busy}
+              required
             >
-              <option value="">Unassigned</option>
+              <option value="" disabled>
+                Select fee earner
+              </option>
               {users.map((u) => (
                 <option key={u.id} value={u.id}>
                   {u.display_name} ({u.email})
@@ -1724,6 +1738,10 @@ function NewMatterModal({
                   disabled={busy || !hasClientOnMatter}
                   onClick={async () => {
                     if (!hasClientOnMatter) return
+                    if (!feeEarner) {
+                      setErr('Select a fee earner.')
+                      return
+                    }
                     setBusy(true)
                     setErr(null)
                     setContactErr(null)
@@ -1734,15 +1752,9 @@ function NewMatterModal({
                           matter_description: matterDescription.trim(),
                           status: newMatterStatus,
                           matter_sub_type_id: practiceArea || null,
+                          fee_earner_user_id: feeEarner,
                         },
                       })
-                      if (feeEarner) {
-                        await apiFetch(`/cases/${created.id}`, {
-                          token,
-                          method: 'PATCH',
-                          json: { fee_earner_user_id: feeEarner || null },
-                        })
-                      }
                       for (const p of pendingClientLinks) {
                         await apiFetch(`/cases/${created.id}/contacts`, {
                           token,
@@ -3314,9 +3326,7 @@ function AdminPrecedents({ token }: { token: string }) {
                 type="button"
                 className="btn"
                 disabled={busy}
-                onClick={() =>
-                  window.open(`/editor/precedent/${p.id}`, onlyofficePrecedentEditorWindowTarget(p.id))
-                }
+                onClick={() => openOnlyOfficePrecedentEditor(p.id)}
               >
                 Edit in OnlyOffice
               </button>

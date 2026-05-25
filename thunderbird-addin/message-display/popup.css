@@ -1,0 +1,28 @@
+* {
+  box-sizing: border-box;
+}
+html,
+body {
+  margin: 0;
+  font: 14px/1.45 system-ui, 'Segoe UI', Roboto, sans-serif;
+  color: #0f172a;
+  min-width: 280px;
+  max-width: 380px;
+}
+code {
+  font-size: 0.9em;
+  background: #f1f5f9;
+  padding: 0 0.2em;
+  border-radius: 2px;
+}
+.wrap {
+  padding: 12px 14px 14px;
+}
+p {
+  margin: 0 0 10px;
+  font-size: 0.85rem;
+  line-height: 1.45;
+}
+p:last-child {
+  margin-bottom: 0;
+}
