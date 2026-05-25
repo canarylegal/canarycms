@@ -45,7 +45,7 @@ import {
 } from './theme'
 import { AppLogo } from './AppLogo'
 import { openOnlyOfficePrecedentEditor } from './onlyofficeEditorWindow'
-import { DEFAULT_OUTLOOK_WEB_MAIL_URL, openCanaryEmailLauncher } from './emailLauncher'
+import { DEFAULT_OUTLOOK_WEB_MAIL_URL } from './emailLauncher'
 import { useDialogs } from './DialogProvider'
 import { SearchInput } from './SearchInput'
 import type { ApiError } from './api'
@@ -1204,14 +1204,6 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
               onClick={() => setView('main-menu')}
             >
               Main Menu
-            </button>
-            <button
-              type="button"
-              className="navBtn"
-              title="Open e-mail"
-              onClick={() => openCanaryEmailLauncher(auth.me)}
-            >
-              E-mail
             </button>
             <button type="button" className={`navBtn ${view === 'calendar' ? 'active' : ''}`} onClick={() => setView('calendar')}>
               Calendar
@@ -4144,12 +4136,12 @@ function UserSettingsPage({
         <section className="card" style={{ padding: 16, marginTop: 16 }}>
           <h3 style={{ marginTop: 0 }}>E-mail</h3>
           <p className="muted" style={{ marginTop: 0 }}>
-            Choose what happens when you click <strong>E-mail</strong> in the top bar (next to Main Menu): open your system&apos;s
-            default mail program, or open Outlook on the web in a new browser tab.
+            Choose how <strong>New → E-mail</strong> on a matter opens compose: your system&apos;s default mail program
+            (<code>mailto:</code>), or Outlook on the web in a new browser tab.
           </p>
           <div className="stack" style={{ maxWidth: 560, gap: 14, marginTop: 12 }}>
             <label className="field">
-              <span>Open e-mail with</span>
+              <span>Compose with</span>
               <select
                 value={emailPref}
                 onChange={(e) => {
@@ -4160,7 +4152,7 @@ function UserSettingsPage({
                   }
                 }}
                 disabled={emailBusy}
-                aria-label="How to open e-mail from the top bar"
+                aria-label="How to open e-mail compose from a matter"
               >
                 <option value="desktop">Desktop client (system default)</option>
                 <option value="outlook_web">Outlook web</option>
@@ -4170,8 +4162,8 @@ function UserSettingsPage({
               <label className="field">
                 <span>Outlook web URL</span>
                 <p className="muted" style={{ marginTop: 0, marginBottom: 6, fontSize: 13 }}>
-                  Confirm the page opened for Outlook on the web. The default is Microsoft&apos;s Outlook inbox; change this if
-                  your organisation uses a different address (e.g. a custom Microsoft 365 URL).
+                  Used when composing from a matter with Outlook web selected above. The default is Microsoft&apos;s
+                  Outlook inbox URL; change this if your organisation uses a different address.
                 </p>
                 <input
                   className="allow-select"

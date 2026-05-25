@@ -160,7 +160,7 @@ def put_my_email_handling(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> UserPublic:
-    """Persist how the app top-bar E-mail button opens mail (desktop vs Outlook web)."""
+    """Persist how matter e-mail compose opens (desktop mailto vs Outlook web)."""
     now = datetime.now(timezone.utc)
     user.email_launch_preference = body.email_launch_preference
     if body.email_launch_preference == "outlook_web":

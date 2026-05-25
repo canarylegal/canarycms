@@ -144,7 +144,8 @@ export function buildMailtoComposeUrl(params: { to: string; subject: string; bod
 }
 
 /**
- * Opens the user's preferred e-mail experience: OS default mail client (`mailto:`) or a web URL.
+ * Opens the user's preferred mail handler (desktop ``mailto:`` or Outlook on the web).
+ * Used when opening mail from a matter (e.g. .eml fallback without Message-ID).
  */
 export function openCanaryEmailLauncher(me: UserPublic | null | undefined): void {
   const pref = me?.email_launch_preference ?? 'desktop'

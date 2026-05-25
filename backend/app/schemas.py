@@ -61,7 +61,7 @@ class Verify2FASessionResponse(BaseModel):
 
 
 class UserEmailHandlingUpdate(BaseModel):
-    """How the top-bar E-mail button opens mail: desktop handler vs Outlook on the web."""
+    """How matter e-mail compose opens: desktop mailto vs Outlook on the web."""
 
     email_launch_preference: Literal["desktop", "outlook_web"]
     email_outlook_web_url: str | None = Field(default=None, max_length=2000)

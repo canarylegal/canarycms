@@ -13,7 +13,7 @@ export type UserPublic = {
   /** Organisation policy: user must enable TOTP or register at least one passkey (non-admin enforcement). */
   organization_requires_second_factor?: boolean
   has_passkeys?: boolean
-  /** Top-bar E-mail: `mailto:` vs Outlook web URL */
+  /** Matter compose: `mailto:` vs Outlook web URL */
   email_launch_preference?: 'desktop' | 'outlook_web'
   email_outlook_web_url?: string | null
   /** Org-wide: Admin → E-mail — desktop mailto vs Microsoft 365 Graph drafts. */

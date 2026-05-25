@@ -70,7 +70,7 @@ class User(Base):
     # Fernet-encrypted CalDAV app password (Radicale htpasswd); plaintext shown only on enable/reset.
     caldav_password_enc: Mapped[str | None] = mapped_column(Text, nullable=True)
 
-    # Top-bar "E-mail": open OS default mail client (mailto:) vs Outlook on the web.
+    # Matter e-mail compose: desktop mailto vs Outlook on the web (user setting).
     email_launch_preference: Mapped[str] = mapped_column(String(32), nullable=False, default="desktop")
     email_outlook_web_url: Mapped[str | None] = mapped_column(Text, nullable=True)
 
