@@ -106,12 +106,24 @@
     return { jwt, origin }
   }
 
+  function authErrorHint(err) {
+    const msg = err && err.message ? String(err.message) : ''
+    if (sh().isAuthSessionErrorMessage(msg)) {
+      return 'Session expired or the Canary site changed — open Server & sign-in on the toolbar and sign in again.'
+    }
+    return msg || 'Request failed.'
+  }
+
   async function apiGet(ext, jwt, origin, path) {
     const res = await fetch(sh().apiRoot(origin) + path, { headers: sh().authHeaders(jwt) })
     const body = await res.json().catch(() => null)
     if (!res.ok) {
       const detail = body && body.detail
-      throw new Error(typeof detail === 'string' ? detail : 'Request failed (' + res.status + ')')
+      const msg = typeof detail === 'string' ? detail : 'Request failed (' + res.status + ')'
+      if (res.status === 401 && sh().isAuthSessionErrorMessage(msg)) {
+        await sh().clearStoredJwt(ext)
+      }
+      throw new Error(msg)
     }
     return body
   }
@@ -691,7 +703,7 @@
       await globalThis.canaryApplyComposeAttachments(ext, composeTabId, bundle)
       out('Attached ' + form.attachmentFileIds.length + ' file(s) from Canary.', false)
     } catch (e) {
-      out(e.message || String(e), true)
+      out(authErrorHint(e), true)
     }
   }
 
@@ -742,7 +754,7 @@
       out('', false)
       await updateSetupButtonVisibility(ext)
     } catch (e) {
-      out(e.message || String(e), true)
+      out(authErrorHint(e), true)
       await updateSetupButtonVisibility(ext)
     }
 
@@ -821,7 +833,7 @@
           await sh().syncPendingSend(jwt, origin, form.caseId, form.parentFileId || null)
           await closeComposePanelAfterDone(ext)
         } catch (e) {
-          out(e.message || String(e), true)
+          out(authErrorHint(e), true)
         } finally {
           $('btn-apply').disabled = false
         }

@@ -3603,7 +3603,7 @@ export function CaseDetail({
                     </div>
                   </div>
                 ) : null}
-                {contactPickModal.composeKind === 'email' ? (
+                {contactPickModal.composeKind === 'email' && m365EmailDraftsEnabled ? (
                   <>
                     <input
                       ref={emailLocalAttachInputRef}
@@ -3695,7 +3695,7 @@ export function CaseDetail({
           </div>
         ) : null}
 
-        {contactPickModal?.composeKind === 'email' && emailAttachCanaryOpen ? (
+        {contactPickModal?.composeKind === 'email' && m365EmailDraftsEnabled && emailAttachCanaryOpen ? (
           <div
             className="modalOverlay emailAttachCanaryOverlay"
             role="dialog"

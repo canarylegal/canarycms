@@ -296,7 +296,10 @@
     const ct = (res.headers.get('content-type') || '').toLowerCase()
     const body = await res.json().catch(() => null)
     if (!res.ok) {
-      if (res.status === 401) throw new Error('401 Unauthorized')
+      if (res.status === 401) {
+        const detail = body && typeof body === 'object' && body.detail
+        throw new Error(typeof detail === 'string' ? detail : '401 Unauthorized')
+      }
       const detail = body && typeof body === 'object' && body.detail
       const msg = typeof detail === 'string' ? detail : 'Could not load matters.'
       throw new Error(msg)
@@ -315,7 +318,10 @@
     const ct = (res.headers.get('content-type') || '').toLowerCase()
     const body = await res.json().catch(() => null)
     if (!res.ok) {
-      if (res.status === 401) throw new Error('401 Unauthorized')
+      if (res.status === 401) {
+        const detail = body && typeof body === 'object' && body.detail
+        throw new Error(typeof detail === 'string' ? detail : '401 Unauthorized')
+      }
       const detail = body && typeof body === 'object' && body.detail
       const msg = typeof detail === 'string' ? detail : 'Could not verify session.'
       throw new Error(msg)
@@ -945,7 +951,14 @@
         return
       }
       originInput.value = n
+      let clearedJwt = false
       try {
+        const prevSt = await ext.storage.local.get(ORIGIN_KEY)
+        const prevOrigin = normalizeOrigin((prevSt && prevSt[ORIGIN_KEY]) || '')
+        if (prevOrigin && prevOrigin !== n) {
+          await setJwt(ext, '')
+          clearedJwt = true
+        }
         await ext.storage.local.set({ [ORIGIN_KEY]: n })
       } catch (e) {
         out(outEl, 'Could not save: ' + (e && e.message ? e.message : String(e)), true)
@@ -964,9 +977,12 @@
           /* not JSON */
         }
         if (res.ok) {
+          const signInHint = clearedJwt
+            ? '\n\nSite URL changed — sign in again below.'
+            : ''
           out(
             outEl,
-            'Connected. API answered at /api/health.\n' + 'URL: ' + url + '\n' + 'Response: ' + showBody,
+            'Connected. API answered at /api/health.\n' + 'URL: ' + url + '\n' + 'Response: ' + showBody + signInHint,
             false,
           )
         } else {
@@ -1046,10 +1062,12 @@
       } catch (e) {
         const msg = e && e.message ? String(e.message) : 'Failed to load matters.'
         out($('out'), msg, true)
-        if (msg === '401 Unauthorized') {
+        if (msg === '401 Unauthorized' || (globalThis.canaryShared && globalThis.canaryShared.isAuthSessionErrorMessage(msg))) {
           await setJwt(ext, '')
           if (authEl) authEl.textContent = ''
           setAuthPanels(false)
+          settingsOpen = true
+          loginShowErr('Session expired or the Canary site changed — sign in again.')
         }
         allCases = []
         if (searchInput) {

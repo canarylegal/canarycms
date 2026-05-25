@@ -69,6 +69,21 @@
     }
   }
 
+  async function clearStoredJwt(ext) {
+    await ext.storage.local.remove(JWT_KEY)
+  }
+
+  /** Backend 401 detail strings that mean the saved JWT must be discarded. */
+  function isAuthSessionErrorMessage(msg) {
+    const m = String(msg || '').trim().toLowerCase()
+    return (
+      m === '401 unauthorized' ||
+      m === 'invalid token' ||
+      m === 'missing bearer token' ||
+      m.includes('invalid or expired token')
+    )
+  }
+
   function folderRefFromHeader(header) {
     if (!header || header.folder == null) return null
     const f = header.folder
@@ -433,6 +448,8 @@
     rawToBlob,
     base64ToBlob,
     getStoredAuth,
+    clearStoredJwt,
+    isAuthSessionErrorMessage,
     resolveImapRefs,
     uploadCaseFile,
     syncPendingSend,
