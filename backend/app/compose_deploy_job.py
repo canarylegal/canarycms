@@ -245,13 +245,20 @@ def _read_one(path: Path) -> dict[str, Any] | None:
 
 
 def _read_disk_state() -> dict[str, Any] | None:
-    """Return the best job row from all mirrored state files.
+    """Return the best job row from disk.
 
-    If one mirror still says ``running`` while another already has ``succeeded``/``failed`` (partial
-    write failure or race), prefer the terminal row so the UI cannot stay stuck on ``running``.
+    The primary ``.canary/runtime/compose-job-state.json`` wins when present so stale legacy
+    mirrors (project root or old ``FILES_ROOT`` copies) cannot mask an in-flight job.
     """
+    primary_path = _state_write_path()
+    primary = _read_one(primary_path)
+    if primary is not None:
+        return primary
+
     rows: list[tuple[float, dict[str, Any]]] = []
     for p in _state_read_paths():
+        if p == primary_path:
+            continue
         row = _read_one(p)
         if not row:
             continue
