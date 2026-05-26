@@ -33,6 +33,7 @@ from app.models import CaseContact, Contact as GlobalContactRow
 from app.models import File as DbFile, FileCategory, FileEditSession, Precedent, PrecedentKind, User
 from app.audit import log_event
 from app.canary_public_url import canary_public_url, onlyoffice_browser_public_base
+from app.feature_flags import onlyoffice_pdf_editor_types, open_pdf_in_onlyoffice
 from app.onlyoffice_ssrf_url import default_internal_base_for_ds, normalize_onlyoffice_ssrf_base
 from app.desktop_edit_session import acquire_file_edit_session
 from app.graph_outbound_service import link_outlook_graph_metadata_for_eml_file, repair_outlook_web_link_on_file
@@ -107,6 +108,8 @@ def _onlyoffice_types_for_file(original_filename: str) -> tuple[str, str] | None
         return ("cell", ext)
     if ext in {"ppt", "pptx", "pps", "ppsx", "odp"}:
         return ("slide", ext)
+    if open_pdf_in_onlyoffice() and ext == "pdf":
+        return onlyoffice_pdf_editor_types()
     return None
 
 
@@ -1607,7 +1610,9 @@ def get_onlyoffice_editor_config(
     if not types:
         ext = Path(row.original_filename or "").suffix.lower().lstrip(".")
         mt = (row.mime_type or "").lower()
-        if ext == "pdf" or mt == "application/pdf" or mt.endswith("/pdf"):
+        if not open_pdf_in_onlyoffice() and (
+            ext == "pdf" or mt == "application/pdf" or mt.endswith("/pdf")
+        ):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="PDF files open in your browser from the case documents list, not in the in-browser editor.",

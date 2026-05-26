@@ -16,6 +16,8 @@ interface ImportMetaEnv {
   readonly VITE_ONLYOFFICE_DIRECT_PORT?: string
   /** Full override for direct DS URL (rare; prefer VITE_ONLYOFFICE_DIRECT_PORT for LAN). */
   readonly VITE_ONLYOFFICE_DIRECT_URL?: string
+  /** When `1`/`true`, case PDFs open in ONLYOFFICE instead of the browser PDF viewer. */
+  readonly VITE_CANARY_OPEN_PDF_IN_ONLYOFFICE?: string
 }
 
 interface ImportMeta {
