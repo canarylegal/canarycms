@@ -69,6 +69,7 @@ export function AdminDeploy({ token }: { token: string }) {
       const { message } = await postDeployTriggerAndWaitForCompose(token, { method: 'compose' })
       setOk(message)
       await load()
+      await checkForUpdates()
     } catch (e) {
       setErr((e as ApiError).message ?? 'Compose update failed')
     } finally {
@@ -86,7 +87,7 @@ export function AdminDeploy({ token }: { token: string }) {
       <div className="card">
         <h3 style={{ marginTop: 0 }}>Check for updates</h3>
         <p className="muted" style={{ lineHeight: 1.55 }}>
-          Compares the running backend against the tip of the configured public GitHub branch. The post-login prompt
+          Compares the backend image build commit against the tip of the configured public GitHub branch. The post-login prompt
           only runs once per session (and is silenced for any version dismissed with “Skip this version”); use this
           button to re-check at any time without logging out.
         </p>

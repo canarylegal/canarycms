@@ -14,7 +14,7 @@ function sleep(ms: number): Promise<void> {
 }
 
 /** Transient proxy errors while the stack is being recreated. */
-async function apiFetchWithRetry<T>(
+export async function apiFetchWithRetry<T>(
   path: string,
   token: string,
   init?: RequestInit & { json?: unknown },

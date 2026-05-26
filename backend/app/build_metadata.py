@@ -1,4 +1,4 @@
-"""Reported git SHA for /health and update checks (optional runtime override)."""
+"""Reported git SHA for /health (live mount when enabled) and update checks (image-baked when known)."""
 
 from __future__ import annotations
 
@@ -56,8 +56,16 @@ def _live_compose_repo_head() -> str | None:
     return None
 
 
+def _baked_build_commit() -> str:
+    return (os.getenv("CANARY_BUILD_COMMIT") or "").strip() or "unknown"
+
+
+def _commit_is_known(sha: str) -> bool:
+    return bool(sha and sha != "unknown")
+
+
 def effective_build_commit() -> str:
-    """Return the commit string shown in /health and compared to GitHub for updates.
+    """Return the commit string shown in ``/health``.
 
     Precedence: ``CANARY_BUILD_COMMIT_OVERRIDE`` → live ``git rev-parse HEAD`` on the compose project
     mount (when enabled) → ``CANARY_BUILD_COMMIT`` baked into the image.
@@ -68,4 +76,23 @@ def effective_build_commit() -> str:
     live = _live_compose_repo_head()
     if live:
         return live
-    return (os.getenv("CANARY_BUILD_COMMIT") or "").strip() or "unknown"
+    return _baked_build_commit()
+
+
+def effective_build_commit_for_update_check() -> str:
+    """Commit compared to GitHub for Admin update checks (``/admin/deploy/update-check``).
+
+    Precedence: ``CANARY_BUILD_COMMIT_OVERRIDE`` → image-baked ``CANARY_BUILD_COMMIT`` → live mount
+    ``HEAD`` (only when baked is unknown) → ``unknown``. Prefers the baked SHA so a stale bind-mounted
+    checkout cannot falsely mark the deployment behind GitHub after ``docker compose build``.
+    """
+    override = (os.getenv("CANARY_BUILD_COMMIT_OVERRIDE") or "").strip()
+    if override:
+        return override
+    baked = _baked_build_commit()
+    if _commit_is_known(baked):
+        return baked
+    live = _live_compose_repo_head()
+    if live:
+        return live
+    return "unknown"

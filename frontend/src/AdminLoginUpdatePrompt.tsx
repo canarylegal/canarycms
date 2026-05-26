@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { apiFetch } from './api'
-import { postDeployTriggerAndWaitForCompose } from './composeDeployPoll'
+import { apiFetchWithRetry, postDeployTriggerAndWaitForCompose } from './composeDeployPoll'
 import { useDialogs } from './DialogProvider'
 import type { ApiError } from './api'
 import type { AdminDeployUpdateCheckOut, UserPublic } from './types'
@@ -110,7 +110,7 @@ export function AdminLoginUpdatePrompt({
   }
 
   async function executeDeploy() {
-    if (!data) return
+    if (!data || !me) return
     setBusy(true)
     setErr(null)
     try {
@@ -118,6 +118,17 @@ export function AdminLoginUpdatePrompt({
       setDeployConfirm(false)
       setOpen(false)
       await alert(message, usedComposeAsync ? 'Update applied' : 'Update')
+      const sessionKey = `${me.id}:${token.slice(0, 12)}`
+      try {
+        const d = await apiFetchWithRetry<AdminDeployUpdateCheckOut>('/admin/deploy/update-check', token)
+        fetchedRef.current = sessionKey
+        if (!d.prompt_enabled || !d.update_available) {
+          setData(null)
+        }
+      } catch {
+        fetchedRef.current = sessionKey
+        setData(null)
+      }
     } catch (e) {
       setErr((e as ApiError).message ?? 'Deploy request failed')
     } finally {
