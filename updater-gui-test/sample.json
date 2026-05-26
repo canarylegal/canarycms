@@ -1,0 +1,4 @@
+{
+  "purpose": "GUI updater test",
+  "hint": "Remove updater-gui-test/ after verifying compose deploy + update-check."
+}
