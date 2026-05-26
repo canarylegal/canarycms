@@ -151,6 +151,58 @@ button.case-result-row.is-selected {
   background: #eff6ff;
 }
 
+.field.is-disabled {
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+.field.is-disabled select,
+.field.is-disabled button,
+.field.is-disabled input {
+  cursor: not-allowed;
+}
+
+button.secondary {
+  border: 1px solid #bbb;
+  background: #fff;
+  padding: 8px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  font: inherit;
+  width: 100%;
+}
+
+.attach-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 180px;
+  overflow: auto;
+  padding: 6px;
+  background: #fff;
+  border: 1px solid #e5e5e5;
+  border-radius: 4px;
+}
+
+label.attach-row {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 12px;
+  line-height: 1.35;
+  cursor: pointer;
+}
+
+label.attach-row input {
+  margin-top: 2px;
+  flex-shrink: 0;
+}
+
 .case-selected {
   margin: 0;
+}
+
+.recipient-pick {
+  max-height: 160px;
 }

@@ -8,7 +8,6 @@ import { MATTER_CONTACT_TYPE_OPTIONS_FALLBACK } from '../matterContactTypeOption
 import { apiFetch, apiUrl, applyAuthHeaders, browserAbsoluteApiUrl, formatApiErrorDetail } from '../api'
 import {
   appendOutlookWebAuthHintsForNav,
-  buildOutlookWebReadUrlFromGraphMessageId,
   OWA_MESSAGE_WINDOW_FEATURES,
   openOutlookWebAppFromGraphWebLink,
   OWA_MAIL_WINDOW_NAME,
@@ -16,9 +15,10 @@ import {
 import {
   buildMailtoComposeUrl,
   buildOutlookWebComposeUrl,
-  buildOutlookWebMessageSearchUrl,
-  extractInternetMessageIdFromEmlText,
-  openCanaryEmailLauncher,
+  buildOutlookWebReadItemUrl,
+  isLikelyExchangeRestItemId,
+  isUsableOutlookMessageWebLink,
+  normalizeOutlookWebReadLink,
 } from '../emailLauncher'
 import { useDialogs } from '../DialogProvider'
 import { SearchInput } from '../SearchInput'
@@ -378,6 +378,7 @@ export function CaseDetail({
   }, [])
 
   const [actionErr, setActionErr] = useState<string | null>(null)
+  const [actionNotice, setActionNotice] = useState<string | null>(null)
   const [textPrompt, setTextPrompt] = useState<
     | null
     | {
@@ -1432,7 +1433,10 @@ export function CaseDetail({
         document.body.removeChild(a)
       }
       if (res.attachment_count > 0 && res.note) {
-        window.alert(res.note)
+        window.alert(
+          res.note +
+            ' In Outlook, open a compose message and use the Canary add-in “Compose from matter” to attach case files automatically.',
+        )
       }
     } catch (e: unknown) {
       const err = e as { message?: string }
@@ -1516,64 +1520,62 @@ export function CaseDetail({
       if (pref === 'outlook_web') {
         setBusy(true)
         setActionErr(null)
+        setActionNotice(null)
         try {
           const owaBase = currentUser?.email_outlook_web_url ?? null
-          const loginHint = currentUser?.email?.trim() || null
-          let hints: { outlook_graph_message_id: string | null; outlook_web_link: string | null } | null = null
+          const owaBaseQ = owaBase ? `?owa_base=${encodeURIComponent(owaBase)}` : ''
+          let hints: {
+            outlook_graph_message_id: string | null
+            outlook_web_link: string | null
+            owa_read_url?: string | null
+            open_in_owa_supported?: boolean
+          } | null = null
           try {
             hints = await apiFetch<{
               outlook_graph_message_id: string | null
               outlook_web_link: string | null
-            }>(`/cases/${caseId}/files/${file.id}/outlook-open-hints`, { token })
+              owa_read_url?: string | null
+              open_in_owa_supported?: boolean
+            }>(`/cases/${caseId}/files/${file.id}/outlook-open-hints${owaBaseQ}`, { token })
           } catch {
             hints = null
           }
-          const web = ((hints?.outlook_web_link ?? file.outlook_web_link) || '').trim()
           const gid = (
-            (hints?.outlook_graph_message_id ?? file.outlook_graph_message_id ?? file.source_outlook_item_id) ||
+            (hints?.outlook_graph_message_id ?? file.source_outlook_item_id ?? file.outlook_graph_message_id) ||
             ''
           ).trim()
-          if (web) {
-            const url = appendOutlookWebAuthHintsForNav(browserAbsoluteApiUrl(web), loginHint)
-            const ok = openOutlookWebAppFromGraphWebLink(url, { windowFeatures: OWA_MESSAGE_WINDOW_FEATURES })
-            if (!ok) {
-              setActionErr('Your browser blocked the Outlook window. Allow pop-ups for this site, then try again.')
-            }
-            return
+          const webLink = (hints?.outlook_web_link ?? file.outlook_web_link ?? '').trim()
+          let readUrl = (hints?.owa_read_url || '').trim()
+          if (!readUrl && isUsableOutlookMessageWebLink(webLink)) {
+            readUrl = webLink
           }
-          if (gid) {
-            const readUrl = buildOutlookWebReadUrlFromGraphMessageId(gid, owaBase)
-            const url = appendOutlookWebAuthHintsForNav(browserAbsoluteApiUrl(readUrl), loginHint)
-            const ok = openOutlookWebAppFromGraphWebLink(url, { windowFeatures: OWA_MESSAGE_WINDOW_FEATURES })
-            if (!ok) {
-              setActionErr('Your browser blocked the Outlook window. Allow pop-ups for this site, then try again.')
-            }
-            return
+          if (!readUrl && webLink) {
+            readUrl = normalizeOutlookWebReadLink(webLink, owaBase) || ''
           }
-          const storedMid = (file.source_internet_message_id ?? '').trim()
-          if (storedMid) {
-            const url = buildOutlookWebMessageSearchUrl(owaBase, storedMid)
-            window.open(browserAbsoluteApiUrl(url), OWA_MAIL_WINDOW_NAME, OWA_MESSAGE_WINDOW_FEATURES)
-            return
+          if (!readUrl && gid && isLikelyExchangeRestItemId(gid)) {
+            readUrl = buildOutlookWebReadItemUrl(owaBase, gid, webLink || null)
           }
-          const res = await fetchCaseFileResponse(caseId, file.id, token)
-          if (res.status === 401) {
-            localStorage.removeItem('token')
-            window.location.reload()
-            return
-          }
-          if (!res.ok) throw new Error((await res.text()) || res.statusText)
-          const text = await res.text()
-          const mid = extractInternetMessageIdFromEmlText(text)
-          if (mid) {
-            const url = buildOutlookWebMessageSearchUrl(owaBase, mid)
-            window.open(browserAbsoluteApiUrl(url), OWA_MAIL_WINDOW_NAME, OWA_MESSAGE_WINDOW_FEATURES)
-          } else {
-            openCanaryEmailLauncher(currentUser)
-            setActionErr(
-              'This message has no Message-ID header. Opened your mailbox; use Download or desktop Open to view the file.',
+          const openOwaRead = (url: string) => {
+            const abs = appendOutlookWebAuthHintsForNav(
+              browserAbsoluteApiUrl(url),
+              currentUser?.email?.trim() || null,
             )
+            const ok = openOutlookWebAppFromGraphWebLink(abs, {
+              windowFeatures: OWA_MESSAGE_WINDOW_FEATURES,
+              windowName: OWA_MAIL_WINDOW_NAME,
+            })
+            if (!ok) {
+              setActionErr('Your browser blocked the Outlook window. Allow pop-ups for this site, then try again.')
+            }
           }
+          if (readUrl) {
+            openOwaRead(readUrl)
+            return
+          }
+          await previewEmlFile(file)
+          setActionNotice(
+            'Showing the Canary copy in preview. This filing has no live Outlook message link — file from Outlook read mode, or open the original from your Sent or Inbox.',
+          )
         } catch (e: unknown) {
           const msg = fetchTimedOutMessage(e)
           const err = e as { message?: string }
@@ -1856,6 +1858,7 @@ export function CaseDetail({
     <div className="caseShell">
       {error ? <div className="error">{error}</div> : null}
       {caseDocPanel !== 'edit-details' && actionErr ? <div className="error">{actionErr}</div> : null}
+      {caseDocPanel !== 'edit-details' && actionNotice ? <div className="notice">{actionNotice}</div> : null}
 
       <div
         className="caseGrid"

@@ -36,6 +36,7 @@ from app.canary_public_url import canary_public_url, onlyoffice_browser_public_b
 from app.onlyoffice_ssrf_url import default_internal_base_for_ds, normalize_onlyoffice_ssrf_base
 from app.desktop_edit_session import acquire_file_edit_session
 from app.graph_outbound_service import link_outlook_graph_metadata_for_eml_file, repair_outlook_web_link_on_file
+from app.owa_urls import outlook_graph_message_id_storable as _outlook_graph_message_id_storable
 from app.security import (
     COMPOSE_HANDOFF_TTL_SECONDS,
     create_compose_handoff_token,
@@ -95,20 +96,6 @@ def _canary_public_url() -> str:
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
-
-
-# DB column ``outlook_graph_message_id`` is VARCHAR(450); Office.js REST/EWS ids can be longer.
-_OUTLOOK_GRAPH_MESSAGE_ID_MAX = 450
-
-
-def _outlook_graph_message_id_storable(rest_id: str | None) -> str | None:
-    """Return a value safe for ``outlook_graph_message_id``; long ids remain only in ``source_outlook_item_id`` (Text)."""
-    t = (rest_id or "").strip()
-    if not t:
-        return None
-    if len(t) > _OUTLOOK_GRAPH_MESSAGE_ID_MAX:
-        return None
-    return t
 
 
 def _onlyoffice_types_for_file(original_filename: str) -> tuple[str, str] | None:
@@ -2096,10 +2083,14 @@ def download_eml_for_mail_client(
 def get_case_file_outlook_open_hints(
     case_id: uuid.UUID,
     file_id: uuid.UUID,
+    owa_base: str | None = Query(default=None, max_length=2000),
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> OutlookOpenHintsOut:
     """Return stored Graph / OWA pointers; may backfill ``outlook_web_link`` when Graph is configured."""
+    from app.graph_outlook_categories import resolve_outlook_owa_link_via_conversation
+    from app.owa_urls import effective_owa_base_for_open, is_canary_synthetic_message_id, resolve_owa_read_url_for_file
+
     require_case_access(case_id, user, db)
     row = db.get(DbFile, file_id)
     if not row or row.case_id != case_id:
@@ -2109,12 +2100,79 @@ def get_case_file_outlook_open_hints(
     except Exception:
         log.warning("get_case_file_outlook_open_hints: repair web link failed", exc_info=True)
     row = db.get(DbFile, file_id)
+    if row and row.case_id == case_id:
+        owner = db.get(User, row.owner_id)
+        conv = (row.source_outlook_conversation_id or "").strip()
+        if (
+            owner
+            and (owner.email or "").strip()
+            and conv
+            and not (row.outlook_graph_message_id or row.source_outlook_item_id or "").strip()
+            and is_canary_synthetic_message_id(row.source_internet_message_id)
+        ):
+            try:
+                wl, gid = resolve_outlook_owa_link_via_conversation(
+                    owner.email.strip(),
+                    conv,
+                    db=db,
+                )
+            except Exception:
+                log.warning("get_case_file_outlook_open_hints: conversation Graph lookup failed", exc_info=True)
+                wl, gid = None, None
+            if wl or gid:
+                if wl:
+                    row.outlook_web_link = wl
+                if gid:
+                    row.source_outlook_item_id = gid
+                    storable = _outlook_graph_message_id_storable(gid)
+                    if storable:
+                        row.outlook_graph_message_id = storable
+                row.updated_at = datetime.now(timezone.utc)
+                db.add(row)
+                db.commit()
+    row = db.get(DbFile, file_id)
     if not row or row.case_id != case_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
-    gid = row.outlook_graph_message_id or row.source_outlook_item_id
+    owner = db.get(User, row.owner_id)
+    mid = (row.source_outlook_item_id or row.outlook_graph_message_id or "").strip()
+    if owner and (owner.email or "").strip() and mid and graph_mail_configured(db):
+        from app.graph_outlook_categories import resolve_outlook_owa_link_via_graph
+
+        try:
+            wl, resolved_gid = resolve_outlook_owa_link_via_graph(
+                owner.email.strip(),
+                mid,
+                row.source_internet_message_id,
+                db=db,
+            )
+        except Exception:
+            log.warning("get_case_file_outlook_open_hints: refresh webLink failed", exc_info=True)
+            wl, resolved_gid = None, None
+        if wl or resolved_gid:
+            if wl:
+                row.outlook_web_link = wl
+            if resolved_gid:
+                row.source_outlook_item_id = resolved_gid
+                storable = _outlook_graph_message_id_storable(resolved_gid)
+                if storable:
+                    row.outlook_graph_message_id = storable
+            row.updated_at = datetime.now(timezone.utc)
+            db.add(row)
+            db.commit()
+    gid = row.source_outlook_item_id or row.outlook_graph_message_id
+    base = effective_owa_base_for_open(owa_base, db)
+    read_url = resolve_owa_read_url_for_file(
+        outlook_graph_message_id=row.outlook_graph_message_id,
+        source_outlook_item_id=row.source_outlook_item_id,
+        outlook_web_link=row.outlook_web_link,
+        source_internet_message_id=row.source_internet_message_id,
+        owa_base=base,
+    )
     return OutlookOpenHintsOut(
         outlook_graph_message_id=gid,
         outlook_web_link=row.outlook_web_link,
+        owa_read_url=read_url,
+        open_in_owa_supported=read_url is not None,
     )
 
 

@@ -37,12 +37,24 @@ After changing the manifest, validate with Microsoft’s tooling if needed, e.g.
 
 Use **`manifest.local.xml`** with **Vite** on `https://localhost:5173` (Outlook allows HTTPS localhost for sideloading in many setups; use the dev tools your org documents). It has a different add-in `<Id>` so it does not collide with the testing host manifest.
 
-This add-in gives Outlook on the web and Outlook desktop a **task pane** to save the **currently open message** into a Canary matter, similar in spirit to the Roundcube `canary_file_to_case` plugin:
+This add-in gives Outlook on the web and Outlook desktop:
 
-1. Upload a parent **`.eml`** (here: a **synthetic** RFC822 built from Outlook item fields + body).
+1. **File to Case** (read mode) — save the **currently open message** into a Canary matter.
+2. **Compose from matter** (compose mode, v1.0.8+) — merge a precedent, set recipient, and attach case files via `POST /api/mail-plugin/cases/{id}/compose-bundle` **without Microsoft Graph**.
+
+### File to Case (read)
+
+1. Upload a parent **`.eml`** (a **synthetic** RFC822 built from Outlook item fields + body).
 2. Upload each **file attachment** as a **child** of that parent via `parent_file_id`.
 
-It calls the same backend routes as the main app: `POST /api/auth/login`, `GET /api/cases`, `POST /api/cases/{case_id}/files`.
+### Compose from matter (no Graph)
+
+1. Open or start a **compose** message in Outlook.
+2. Ribbon → **Compose from matter** → sign in, pick matter, precedent, recipient, and case files.
+3. **Apply to message** — uses Office.js `addFileAttachmentFromBase64Async` (same bytes as the Thunderbird add-in).
+4. On send, **OnMessageSend** files the message to the linked matter (via pending-send).
+
+It calls the same backend routes as the main app: `POST /api/auth/login`, `GET /api/cases`, `POST /api/cases/{case_id}/files`, `POST /api/mail-plugin/cases/{case_id}/compose-bundle`.
 
 ## Central deployment (preferred)
 
@@ -56,6 +68,8 @@ It calls the same backend routes as the main app: `POST /api/auth/login`, `GET /
 
 - The site serves HTTPS and these URLs return **200** in a browser:
   - `https://testing.canarylegalsoftware.co.uk/outlook-addin/taskpane.html`
+  - `https://testing.canarylegalsoftware.co.uk/outlook-addin/compose-pane.html`
+  - `https://testing.canarylegalsoftware.co.uk/outlook-addin/attach-picker.html`
   - `https://testing.canarylegalsoftware.co.uk/outlook-addin/canary-login.html`
   - `icons/icon64.png` (manifest ``IconUrl``), `icon128.png` (``HighResolutionIconUrl``), plus `icon16` / `icon32` / `icon80` for the ribbon (generated from `public/favicon.png` via `scripts/generate-outlook-icons.py`)
 - The API is reachable from the same host at `/api` (same pattern as the main Canary web app).

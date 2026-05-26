@@ -3,6 +3,16 @@ import type { UserPublic } from './types'
 /** Default Outlook on the web inbox (user may override in settings). */
 export const DEFAULT_OUTLOOK_WEB_MAIL_URL = 'https://outlook.office.com/mail'
 
+/** Admin → E-mail uses Graph mode with resolvable Entra app credentials (DB or env). */
+export function isOrgMicrosoftGraphConfigured(user: UserPublic | null | undefined): boolean {
+  return (
+    user?.email_integration_mode === 'microsoft_graph' && user?.m365_graph_drafts_configured === true
+  )
+}
+
+export const OUTLOOK_WEB_WITHOUT_GRAPH_CONFIRM_MESSAGE =
+  'Your organisation does not have Microsoft Graph / Entra configured. If you attempt to use Outlook Web, expect significant deficiencies in functionality. We recommend that you use Outlook desktop instead. Do you still want to proceed?'
+
 /**
  * Unfold RFC 822 header lines (continuation lines begin with space or tab).
  */
@@ -57,41 +67,172 @@ function kqlInternetMessageId(messageIdHeaderValue: string): string {
   return `internetmessageid:<${t}>`
 }
 
+/** True when the .eml was built by the Outlook add-in (not a live Exchange Message-ID). */
+export function isCanarySyntheticMessageId(messageIdHeaderValue: string | null | undefined): boolean {
+  const s = (messageIdHeaderValue || '').trim().toLowerCase()
+  return s.includes('@canary-outlook-addin')
+}
+
+/** Graph / REST mailbox message ids are typically long ``AAMk…`` / ``AQMk…`` strings. */
+export function isLikelyExchangeRestItemId(itemId: string | null | undefined): boolean {
+  const s = (itemId || '').trim()
+  if (!s || s.includes('[object')) return false
+  if (/^AAMk/i.test(s) || /^AQMk/i.test(s) || /^AQAA/i.test(s)) return true
+  if (s.includes('@')) return false
+  return s.length >= 40
+}
+
+function normalizeOwaHost(url: string): string {
+  return url.replace(/^https?:\/\/outlook\.office365\.com(?=\/|$)/i, 'https://outlook.office.com')
+}
+
+function owaOriginAndMailPrefix(owaBaseFromUser: string | null | undefined): { origin: string; prefix: string } {
+  const base = (owaBaseFromUser || '').trim() || DEFAULT_OUTLOOK_WEB_MAIL_URL
+  try {
+    const u = new URL(base.includes('://') ? base : `https://${base}`)
+    const origin = normalizeOwaHost(u.origin)
+    const prefix = u.pathname.toLowerCase().includes('/mail/0') ? '/mail/0' : '/mail/0'
+    return { origin, prefix }
+  } catch {
+    return { origin: new URL(DEFAULT_OUTLOOK_WEB_MAIL_URL).origin, prefix: '/mail/0' }
+  }
+}
+
+function owaOriginAndMailPrefixForItemId(
+  owaBaseFromUser: string | null | undefined,
+  outlookWebLink?: string | null,
+): { origin: string; prefix: string } {
+  const wl = (outlookWebLink || '').trim()
+  if (wl) {
+    try {
+      const u = new URL(wl.includes('://') ? wl : `https://${wl}`)
+      if (u.hostname) {
+        return { origin: normalizeOwaHost(u.origin), prefix: '/mail/0' }
+      }
+    } catch {
+      /* fall through */
+    }
+  }
+  return owaOriginAndMailPrefix(owaBaseFromUser)
+}
+
+/** True when the URL is a Graph/OWA single-message open link. */
+export function isUsableOutlookMessageWebLink(url: string | null | undefined): boolean {
+  const trimmed = (url || '').trim()
+  if (!trimmed.startsWith('http://') && !trimmed.startsWith('https://')) return false
+  const low = trimmed.toLowerCase()
+  if (low.includes('deeplink/search')) return false
+  if (low.includes('deeplink/read')) return true
+  if (low.includes('itemid=')) return true
+  if (low.includes('/owa/') && low.includes('viewmodel=readmessageitem')) return true
+  return false
+}
+
+function owaOriginFromBase(owaBaseFromUser: string | null | undefined): string {
+  return owaOriginAndMailPrefix(owaBaseFromUser).origin
+}
+
+/**
+ * Extract an Exchange REST item id from a Graph ``webLink`` or legacy OWA URL.
+ */
+export function extractItemIdFromOutlookWebUrl(url: string): string | null {
+  const trimmed = (url || '').trim()
+  if (!trimmed) return null
+  try {
+    const u = new URL(trimmed.includes('://') ? trimmed : `https://${trimmed}`)
+    for (const key of ['ItemID', 'itemid', 'ItemId']) {
+      const v = u.searchParams.get(key)
+      if (v && v.trim()) return v.trim()
+    }
+    const readPath = /\/deeplink\/read\/([^/?]+)/i.exec(u.pathname)
+    if (readPath?.[1]) {
+      try {
+        return decodeURIComponent(readPath[1]).trim()
+      } catch {
+        return readPath[1].trim()
+      }
+    }
+    const inboxPath = /\/mail\/[^/]+\/id\/([^/?]+)/i.exec(u.pathname)
+    if (inboxPath?.[1]) {
+      try {
+        return decodeURIComponent(inboxPath[1]).trim()
+      } catch {
+        return inboxPath[1].trim()
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+  return null
+}
+
+/**
+ * Rebuild OWA read URLs using the current ``/mail/deeplink/read/{id}`` shape.
+ * Legacy ``/owa/?ItemID=`` and Graph ``webLink`` values often redirect to routes that spin forever.
+ */
+export function normalizeOutlookWebReadLink(
+  url: string,
+  owaBaseFromUser?: string | null,
+): string | null {
+  const itemId = extractItemIdFromOutlookWebUrl(url)
+  if (itemId && isLikelyExchangeRestItemId(itemId)) {
+    return buildOutlookWebReadItemUrl(owaBaseFromUser ?? null, itemId)
+  }
+  if (/deeplink\/search/i.test(url) || /\/owa\/\?/i.test(url)) {
+    return null
+  }
+  return null
+}
+
 /**
  * Build an Outlook on the web URL that opens mailbox search scoped to this Message-ID.
  * The message must exist in the user’s Exchange / M365 mailbox for a result to appear.
  */
 export function buildOutlookWebMessageSearchUrl(owaBaseFromUser: string | null | undefined, messageIdHeaderValue: string): string {
-  const base = (owaBaseFromUser || '').trim() || DEFAULT_OUTLOOK_WEB_MAIL_URL
-  let origin: string
-  try {
-    const u = new URL(base.includes('://') ? base : `https://${base}`)
-    origin = u.origin
-  } catch {
-    origin = new URL(DEFAULT_OUTLOOK_WEB_MAIL_URL).origin
-  }
+  const origin = owaOriginFromBase(owaBaseFromUser)
   const kql = kqlInternetMessageId(messageIdHeaderValue)
   /* “Deeplink search” opens OWA with the search box pre-filled (tenant UI may vary slightly). */
   return `${origin}/mail/deeplink/search?query=${encodeURIComponent(kql)}`
 }
 
 /**
- * Fallback OWA open URL when Graph ``webLink`` is not stored yet.
- * Many tenants ignore ``/mail/deeplink?ItemID=…`` and show the shell only; ``/owa/?ItemID=…`` still opens the item.
- * Prefer ``outlook_web_link`` from the API (filled via Graph when ``CANARY_MS_GRAPH_*`` is configured).
+ * OWA read URL for a Graph / REST message id.
+ * Prefer this over legacy ``/owa/?ItemID=`` (redirects to deeplink routes that can hang on “Loading”).
  */
-export function buildOutlookWebReadItemUrl(owaBaseFromUser: string | null | undefined, restItemId: string): string {
-  const base = (owaBaseFromUser || '').trim() || DEFAULT_OUTLOOK_WEB_MAIL_URL
-  let origin: string
-  try {
-    const u = new URL(base.includes('://') ? base : `https://${base}`)
-    origin = u.origin
-  } catch {
-    origin = new URL(DEFAULT_OUTLOOK_WEB_MAIL_URL).origin
-  }
+export function buildOutlookWebReadItemUrl(
+  owaBaseFromUser: string | null | undefined,
+  restItemId: string,
+  outlookWebLink?: string | null,
+): string {
+  const { origin, prefix } = owaOriginAndMailPrefixForItemId(owaBaseFromUser, outlookWebLink)
   const id = restItemId.trim()
   const encId = encodeURIComponent(id)
-  return `${origin}/owa/?ItemID=${encId}&exvsurl=1&viewmodel=ReadMessageItem&popoutv2=1`
+  return `${origin}${prefix}/deeplink/read/${encId}?ItemID=${encId}&exvsurl=1&viewmodel=ReadMessageItem`
+}
+
+/** OWA folder view for Sent Items (when only a Canary copy is stored, not a deeplink item id). */
+export function buildOutlookWebSentItemsUrl(owaBaseFromUser: string | null | undefined): string {
+  const { origin, prefix } = owaOriginAndMailPrefix(owaBaseFromUser)
+  return `${origin}${prefix}/sentitems/`
+}
+
+/** Whether “Open” in Outlook web can target a live mailbox message (vs Canary-only synthetic .eml). */
+export function canOpenEmlInOutlookWebMailbox(file: {
+  source_internet_message_id?: string | null
+  source_outlook_item_id?: string | null
+  outlook_graph_message_id?: string | null
+  outlook_web_link?: string | null
+}): boolean {
+  const web = (file.outlook_web_link || '').trim()
+  if (web) {
+    const iid = extractItemIdFromOutlookWebUrl(web)
+    if (iid && isLikelyExchangeRestItemId(iid)) return true
+  }
+  const gid = (file.outlook_graph_message_id || file.source_outlook_item_id || '').trim()
+  if (isLikelyExchangeRestItemId(gid)) return true
+  const mid = (file.source_internet_message_id || '').trim()
+  if (!isCanarySyntheticMessageId(mid) && mid) return true
+  return false
 }
 
 /**

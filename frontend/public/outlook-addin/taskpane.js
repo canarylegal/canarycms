@@ -11,7 +11,10 @@
   /** Outlook master + item category applied after a successful file (client-only). */
   const CANARY_CATEGORY = 'Canary'
   /** Bumped when task pane logic changes — shown in error text so you can confirm the browser loaded the new bundle. */
-  const ADDIN_UI_VERSION = '1.0.7.2'
+  const ADDIN_UI_VERSION = '1.0.8.2'
+  const officeMail = function () {
+    return globalThis.canaryOutlookShared || {}
+  }
   const CATEGORY_APPLY_ATTEMPTS = 3
   const CATEGORY_RETRY_DELAY_MS = 450
 
@@ -150,23 +153,29 @@
     const post = $('panel-post-auth')
     if (pre) pre.classList.toggle('panel-hidden', !!signedIn)
     if (post) post.classList.toggle('panel-hidden', !signedIn)
-    if (signedIn) syncMailDescriptionField()
+    if (signedIn) void syncMailDescriptionField()
   }
 
-  function mailItemSubject() {
+  async function mailItemSubject() {
     try {
       const item = Office.context.mailbox && Office.context.mailbox.item
-      return String(item && item.subject ? item.subject : 'email').trim() || 'email'
+      if (!item) return 'email'
+      const subj = officeMail().getSubjectAsync
+        ? await officeMail().getSubjectAsync(item)
+        : typeof item.subject === 'string'
+          ? String(item.subject).trim()
+          : ''
+      return subj || 'email'
     } catch {
       return 'email'
     }
   }
 
-  function syncMailDescriptionField() {
+  async function syncMailDescriptionField() {
     const el = $('mail-description')
     if (!el) return
     if (el.dataset.userEdited === '1') return
-    el.value = mailItemSubject()
+    el.value = await mailItemSubject()
   }
 
   function resetMailDescriptionField() {
@@ -377,7 +386,11 @@
     return body
   }
 
-  async function uploadMultipart(token, caseId, { blob, filename, mime, parentFileId, outlookItemId, outlookConversationId }) {
+  async function uploadMultipart(
+    token,
+    caseId,
+    { blob, filename, mime, parentFileId, outlookItemId, outlookConversationId, internetMessageId },
+  ) {
     const fd = new FormData()
     fd.append('upload', blob, filename)
     fd.append('folder', '')
@@ -385,6 +398,8 @@
     else {
       if (outlookItemId) fd.append('outlook_item_id', outlookItemId)
       if (outlookConversationId) fd.append('outlook_conversation_id', outlookConversationId)
+      const imid = (internetMessageId || '').trim()
+      if (imid) fd.append('source_internet_message_id', imid)
     }
 
     const res = await fetch(apiRoot() + '/cases/' + encodeURIComponent(caseId) + '/files', {
@@ -458,12 +473,14 @@
     const subj =
       displaySubject != null && String(displaySubject).trim() !== ''
         ? String(displaySubject).trim()
-        : String(item.subject || '(no subject)')
+        : '(no subject)'
     const fromDisp = item.from ? formatRecipients([item.from]) : ''
     const toDisp = formatRecipients(item.to || [])
     const ccDisp = formatRecipients(item.cc || [])
     const when = item.dateTimeModified || item.dateTimeCreated || new Date().toISOString()
-    const mid = wrapMessageId(item.internetMessageId)
+    const mid = officeMail().wrapMessageId
+      ? officeMail().wrapMessageId(officeMail().safeInternetMessageId(item))
+      : wrapMessageId('')
 
     let hdr = ''
     hdr += 'From: ' + fromDisp + '\r\n'
@@ -666,7 +683,7 @@
     show('msg', '', true)
     show('ok', '', false)
     resetMailDescriptionField()
-    syncMailDescriptionField()
+    void syncMailDescriptionField()
     var si = $('case-search')
     if (si) si.value = ''
     linkedCaseId = ''
@@ -897,16 +914,18 @@
 
     const descEl = $('mail-description')
     const descRaw = descEl ? String(descEl.value || '').trim() : ''
-    const displayBase = descRaw || mailItemSubject()
+    const displayBase = descRaw || (await mailItemSubject())
     const parentName = sanitizeFilename(displayBase) + '.eml'
     const parentBlob = buildSyntheticEml(item, bodyText, displayBase)
 
     var outlookItemIdForParent = ''
     var outlookConversationIdForParent = ''
+    var internetMessageIdForParent = ''
     try {
       var mailItem = Office.context.mailbox && Office.context.mailbox.item
       if (mailItem) outlookItemIdForParent = primaryOutlookItemIdForApi(mailItem)
       if (mailItem && mailItem.conversationId) outlookConversationIdForParent = String(mailItem.conversationId).trim()
+      if (mailItem && mailItem.internetMessageId) internetMessageIdForParent = String(mailItem.internetMessageId).trim()
     } catch (_) {
       /* ignore */
     }
@@ -917,6 +936,7 @@
       parentFileId: null,
       outlookItemId: outlookItemIdForParent || undefined,
       outlookConversationId: outlookConversationIdForParent || undefined,
+      internetMessageId: internetMessageIdForParent || undefined,
     })
     const parentId = parent.id
 

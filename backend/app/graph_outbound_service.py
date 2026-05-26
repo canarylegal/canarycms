@@ -14,7 +14,11 @@ from pathlib import Path
 from sqlalchemy.orm import Session
 
 from app.graph_mail import graph_mail_configured
-from app.graph_outlook_categories import resolve_outlook_owa_link_via_graph
+from app.graph_outlook_categories import (
+    resolve_outlook_owa_link_via_conversation,
+    resolve_outlook_owa_link_via_graph,
+)
+from app.owa_urls import is_canary_synthetic_message_id
 from app.models import File as DbFile
 from app.models import User
 
@@ -38,6 +42,29 @@ def repair_outlook_web_link_on_file(db: Session, row: DbFile) -> None:
         return
 
     mid = (row.outlook_graph_message_id or row.source_outlook_item_id or "").strip()
+    conv = (row.source_outlook_conversation_id or "").strip()
+    if not mid and conv and is_canary_synthetic_message_id(row.source_internet_message_id):
+        try:
+            wl, gid = resolve_outlook_owa_link_via_conversation(owner.email.strip(), conv, db=db)
+        except Exception:
+            log.warning("repair_outlook_web_link_on_file: conversation lookup failed", exc_info=True)
+            return
+        if not wl and not gid:
+            return
+        if wl:
+            row.outlook_web_link = wl
+        if gid:
+            from app.owa_urls import outlook_graph_message_id_storable
+
+            row.source_outlook_item_id = gid
+            storable = outlook_graph_message_id_storable(gid)
+            if storable:
+                row.outlook_graph_message_id = storable
+        row.updated_at = datetime.now(timezone.utc)
+        db.add(row)
+        db.commit()
+        return
+
     if not mid:
         return
 
@@ -53,7 +80,12 @@ def repair_outlook_web_link_on_file(db: Session, row: DbFile) -> None:
 
     row.outlook_web_link = wl
     if resolved_gid:
-        row.outlook_graph_message_id = resolved_gid[:450]
+        from app.owa_urls import outlook_graph_message_id_storable
+
+        row.source_outlook_item_id = resolved_gid
+        storable = outlook_graph_message_id_storable(resolved_gid)
+        if storable:
+            row.outlook_graph_message_id = storable
     row.updated_at = datetime.now(timezone.utc)
     db.add(row)
     db.commit()

@@ -79,7 +79,7 @@ def mail_plugin_compose_bundle(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> MailPluginComposeHandoffOut:
-    """Thunderbird compose panel: merged body, headers, and attachment bytes (Bearer auth)."""
+    """Mail-plugin compose: merged body, headers, and attachment bytes (Thunderbird + Outlook add-in; Bearer auth)."""
     return build_mail_compose_bundle(db, case_id, body, user)
 
 

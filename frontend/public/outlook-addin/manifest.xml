@@ -13,11 +13,11 @@
            xmlns:mailappor="http://schemas.microsoft.com/office/mailappversionoverrides/1.0"
            xsi:type="MailApp">
   <Id>c4e8f2a1-9b3d-4a7e-8f2c-1d9e3a7b5f6a</Id>
-  <Version>1.0.7.3</Version>
+  <Version>1.0.8.2</Version>
   <ProviderName>Canary</ProviderName>
   <DefaultLocale>en-US</DefaultLocale>
   <DisplayName DefaultValue="Canary - File to Case"/>
-  <Description DefaultValue="Save the selected message and attachments to a Canary matter. Applies an Outlook Canary category after filing (requires mailbox permission)."/>
+  <Description DefaultValue="File mail to a Canary matter; compose from a matter with merge and attachments (no Graph required). Applies an Outlook Canary category after filing."/>
   <IconUrl DefaultValue="https://testing.canarylegalsoftware.co.uk/icons/icon64.png"/>
   <HighResolutionIconUrl DefaultValue="https://testing.canarylegalsoftware.co.uk/icons/icon128.png"/>
   <SupportUrl DefaultValue="https://testing.canarylegalsoftware.co.uk/"/>
@@ -97,11 +97,11 @@
               <OfficeTab id="TabDefault">
                 <Group id="canaryGroupCompose">
                   <Label resid="groupLabel"/>
-                  <Control xsi:type="Button" id="canaryFileToCaseComposeBtn">
-                    <Label resid="buttonLabel"/>
+                  <Control xsi:type="Button" id="canaryComposeFromMatterBtn">
+                    <Label resid="composeButtonLabel"/>
                     <Supertip>
-                      <Title resid="buttonLabel"/>
-                      <Description resid="buttonTip"/>
+                      <Title resid="composeButtonLabel"/>
+                      <Description resid="composeButtonTip"/>
                     </Supertip>
                     <Icon>
                       <bt:Image size="16" resid="icon16"/>
@@ -109,7 +109,7 @@
                       <bt:Image size="80" resid="icon80"/>
                     </Icon>
                     <Action xsi:type="ShowTaskpane">
-                      <SourceLocation resid="taskPaneUrl"/>
+                      <SourceLocation resid="composePaneUrl"/>
                       <SupportsPinning>true</SupportsPinning>
                     </Action>
                   </Control>
@@ -134,16 +134,19 @@
         <bt:Urls>
           <bt:Url id="functionFile" DefaultValue="https://testing.canarylegalsoftware.co.uk/outlook-addin/taskpane.html"/>
           <bt:Url id="taskPaneUrl" DefaultValue="https://testing.canarylegalsoftware.co.uk/outlook-addin/taskpane.html"/>
+          <bt:Url id="composePaneUrl" DefaultValue="https://testing.canarylegalsoftware.co.uk/outlook-addin/compose-pane.html"/>
           <bt:Url id="JSRuntime.Url" DefaultValue="https://testing.canarylegalsoftware.co.uk/outlook-addin/commands.js"/>
           <bt:Url id="WebViewRuntime.Url" DefaultValue="https://testing.canarylegalsoftware.co.uk/outlook-addin/commands.html"/>
         </bt:Urls>
         <bt:ShortStrings>
           <bt:String id="groupLabel" DefaultValue="Canary"/>
           <bt:String id="buttonLabel" DefaultValue="File to Case"/>
+          <bt:String id="composeButtonLabel" DefaultValue="Compose from matter"/>
         </bt:ShortStrings>
         <bt:LongStrings>
-          <bt:String id="residAppDesc" DefaultValue="Save the selected message and attachments to a Canary matter, then tag the message with the Canary Outlook category."/>
+          <bt:String id="residAppDesc" DefaultValue="File mail to a Canary matter; compose from a matter with merge and case attachments without Microsoft Graph."/>
           <bt:String id="buttonTip" DefaultValue="Save this message to a Canary matter and apply the Canary category in Outlook."/>
+          <bt:String id="composeButtonTip" DefaultValue="Merge a precedent, pick a recipient, and attach case files to this compose message."/>
         </bt:LongStrings>
       </Resources>
     </VersionOverrides>

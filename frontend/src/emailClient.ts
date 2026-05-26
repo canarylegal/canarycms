@@ -43,8 +43,12 @@ function consumerMicrosoftMailboxDomain(domain: string): boolean {
  */
 export function openOutlookWebAppFromGraphWebLink(
   url: string,
-  options?: { windowFeatures?: string | null; windowName?: string },
+  options?: { windowFeatures?: string | null; windowName?: string; fullTab?: boolean },
 ): boolean {
+  if (options?.fullTab) {
+    const w = window.open(url, '_blank', 'noopener,noreferrer')
+    return w != null
+  }
   const feat = options?.windowFeatures
   const name = options?.windowName ?? OWA_MAIL_WINDOW_NAME
   const w =

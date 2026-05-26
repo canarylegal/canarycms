@@ -13,7 +13,7 @@
            xmlns:mailappor="http://schemas.microsoft.com/office/mailappversionoverrides/1.0"
            xsi:type="MailApp">
   <Id>e2c9f3b2-0c4e-5b8f-9a3d-2e0f4b8c6d7a</Id>
-  <Version>1.0.7.3</Version>
+  <Version>1.0.8.2</Version>
   <ProviderName>Canary</ProviderName>
   <DefaultLocale>en-US</DefaultLocale>
   <DisplayName DefaultValue="Canary - File to Case (dev)"/>
@@ -97,11 +97,11 @@
               <OfficeTab id="TabDefault">
                 <Group id="canaryGroupComposeDev">
                   <Label resid="groupLabel"/>
-                  <Control xsi:type="Button" id="canaryFileToCaseComposeBtnDev">
-                    <Label resid="buttonLabel"/>
+                  <Control xsi:type="Button" id="canaryComposeFromMatterBtnDev">
+                    <Label resid="composeButtonLabel"/>
                     <Supertip>
-                      <Title resid="buttonLabel"/>
-                      <Description resid="buttonTip"/>
+                      <Title resid="composeButtonLabel"/>
+                      <Description resid="composeButtonTip"/>
                     </Supertip>
                     <Icon>
                       <bt:Image size="16" resid="icon16"/>
@@ -109,7 +109,7 @@
                       <bt:Image size="80" resid="icon80"/>
                     </Icon>
                     <Action xsi:type="ShowTaskpane">
-                      <SourceLocation resid="taskPaneUrl"/>
+                      <SourceLocation resid="composePaneUrl"/>
                       <SupportsPinning>true</SupportsPinning>
                     </Action>
                   </Control>
@@ -134,16 +134,19 @@
         <bt:Urls>
           <bt:Url id="functionFile" DefaultValue="https://dev.canarylegalsoftware.co.uk/outlook-addin/taskpane.html"/>
           <bt:Url id="taskPaneUrl" DefaultValue="https://dev.canarylegalsoftware.co.uk/outlook-addin/taskpane.html"/>
+          <bt:Url id="composePaneUrl" DefaultValue="https://dev.canarylegalsoftware.co.uk/outlook-addin/compose-pane.html"/>
           <bt:Url id="JSRuntime.Url" DefaultValue="https://dev.canarylegalsoftware.co.uk/outlook-addin/commands.js"/>
           <bt:Url id="WebViewRuntime.Url" DefaultValue="https://dev.canarylegalsoftware.co.uk/outlook-addin/commands.html"/>
         </bt:Urls>
         <bt:ShortStrings>
           <bt:String id="groupLabel" DefaultValue="Canary"/>
           <bt:String id="buttonLabel" DefaultValue="File to Case"/>
+          <bt:String id="composeButtonLabel" DefaultValue="Compose from matter"/>
         </bt:ShortStrings>
         <bt:LongStrings>
-          <bt:String id="residAppDesc" DefaultValue="[DEV] Save the selected message and attachments to a Canary matter, then tag the message with the Canary Outlook category."/>
+          <bt:String id="residAppDesc" DefaultValue="[DEV] File mail to a Canary matter; compose from a matter with merge and attachments (no Graph)."/>
           <bt:String id="buttonTip" DefaultValue="Save this message to a Canary matter and apply the Canary category in Outlook."/>
+          <bt:String id="composeButtonTip" DefaultValue="Merge a precedent, pick a recipient, and attach case files to this compose message."/>
         </bt:LongStrings>
       </Resources>
     </VersionOverrides>

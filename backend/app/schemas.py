@@ -988,6 +988,9 @@ class OutlookOpenHintsOut(BaseModel):
 
     outlook_graph_message_id: str | None = None
     outlook_web_link: str | None = None
+    # Preferred one-click OWA read URL (built from item id + user/org mail base).
+    owa_read_url: str | None = None
+    open_in_owa_supported: bool = False
 
 
 class OutlookPluginLinkedCaseResolveIn(BaseModel):

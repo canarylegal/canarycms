@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Attach from Canary</title>
+    <link rel="stylesheet" href="./styles.css?v=1.0.8.1" />
+    <link rel="stylesheet" href="./attach-picker.css?v=1.0.8.1" />
+  </head>
+  <body>
+    <div class="attach-shell">
+      <header class="attach-head">
+        <h1>Attach from Canary</h1>
+        <button type="button" class="ghost" id="btn-cancel">Back</button>
+      </header>
+      <p id="matter-line" class="matter-line muted"></p>
+      <div id="picker-root" class="picker-root" role="listbox" aria-label="Case files"></div>
+      <footer class="attach-foot">
+        <p id="selection-line" class="selection-line muted">No files selected</p>
+        <button type="button" class="primary" id="btn-done" disabled>Done</button>
+      </footer>
+      <p id="err" class="err" style="display: none"></p>
+    </div>
+    <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
+    <script src="./outlook-shared.js?v=1.0.8.1"></script>
+    <script src="./outlook-compose-attach-ui.js?v=1.0.8.1"></script>
+    <script src="./attach-picker.js?v=1.0.8.1"></script>
+  </body>
+</html>

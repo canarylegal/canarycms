@@ -75,23 +75,8 @@
     return n || 'sent-message'
   }
 
-  function randomMessageId() {
-    var id =
-      typeof crypto !== 'undefined' && crypto.randomUUID
-        ? crypto.randomUUID()
-        : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
-            var r = (Math.random() * 16) | 0
-            var v = c === 'x' ? r : (r & 0x3) | 0x8
-            return v.toString(16)
-          })
-    return '<' + id + '@canary-outlook-addin>'
-  }
-
-  function wrapMessageId(id) {
-    var s = String(id || '').trim()
-    if (!s) return randomMessageId()
-    if (s.charAt(0) === '<') return s
-    return '<' + s + '>'
+  function officeMail() {
+    return globalThis.canaryOutlookShared || {}
   }
 
   function formatRecipients(list) {
@@ -136,11 +121,15 @@
     var subj =
       displaySubject != null && String(displaySubject).trim() !== ''
         ? String(displaySubject).trim()
-        : String(item.subject || '(no subject)')
+        : '(no subject)'
     var toDisp = formatRecipients(item.to || [])
     var ccDisp = formatRecipients(item.cc || [])
     var when = new Date().toISOString()
-    var mid = wrapMessageId(item.internetMessageId)
+    var om = officeMail()
+    var mid =
+      om.wrapMessageId && om.safeInternetMessageId
+        ? om.wrapMessageId(om.safeInternetMessageId(item))
+        : '<sent@canary-outlook-addin>'
     var hdr = ''
     hdr += 'From: ' + (fromLine || '') + '\r\n'
     if (toDisp) hdr += 'To: ' + toDisp + '\r\n'
@@ -237,6 +226,8 @@
     else {
       if (payload.outlookItemId) fd.append('outlook_item_id', payload.outlookItemId)
       if (payload.outlookConversationId) fd.append('outlook_conversation_id', payload.outlookConversationId)
+      var imid = (payload.internetMessageId || '').trim()
+      if (imid) fd.append('source_internet_message_id', imid)
     }
 
     var res = await fetch(apiRoot() + '/cases/' + encodeURIComponent(caseId) + '/files', {
@@ -360,22 +351,23 @@
         }
       }
 
-      var subj = ''
-      try {
-        subj = item.subject ? String(item.subject) : ''
-      } catch (_) {}
+      var subj = officeMail().getSubjectAsync
+        ? await officeMail().getSubjectAsync(item)
+        : ''
       var displayBase = subj.trim() || 'sent-message'
       var fromLine = composeFromLine(item)
       var parentBlob = buildSyntheticEmlCompose(item, bodyText, displayBase, fromLine)
       var parentName = sanitizeFilename(displayBase) + '.eml'
 
+      /* Compose item ids are invalid for OWA read after send — store conversation only. */
       var parent = await uploadMultipart(token, caseId, {
         blob: parentBlob,
         filename: parentName,
         mime: 'message/rfc822',
         parentFileId: null,
-        outlookItemId: oid || undefined,
+        outlookItemId: undefined,
         outlookConversationId: conv || undefined,
+        internetMessageId: imid || undefined,
       })
       var parentId = parent.id
 

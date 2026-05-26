@@ -45,7 +45,11 @@ import {
 } from './theme'
 import { AppLogo } from './AppLogo'
 import { openOnlyOfficePrecedentEditor } from './onlyofficeEditorWindow'
-import { DEFAULT_OUTLOOK_WEB_MAIL_URL } from './emailLauncher'
+import {
+  DEFAULT_OUTLOOK_WEB_MAIL_URL,
+  isOrgMicrosoftGraphConfigured,
+  OUTLOOK_WEB_WITHOUT_GRAPH_CONFIRM_MESSAGE,
+} from './emailLauncher'
 import { useDialogs } from './DialogProvider'
 import { SearchInput } from './SearchInput'
 import type { ApiError } from './api'
@@ -3452,9 +3456,23 @@ function UserSettingsPage({
     setOutlookUrl((account.email_outlook_web_url ?? '').trim() || DEFAULT_OUTLOOK_WEB_MAIL_URL)
   }, [account])
 
+  async function confirmOutlookWebWithoutGraph(): Promise<boolean> {
+    if (!account || isOrgMicrosoftGraphConfigured(account)) return true
+    return askConfirm({
+      title: 'Outlook web without Microsoft Graph',
+      message: OUTLOOK_WEB_WITHOUT_GRAPH_CONFIRM_MESSAGE,
+      confirmLabel: 'Yes',
+      cancelLabel: 'Nevermind',
+    })
+  }
+
   async function saveEmailHandling() {
     setEmailSaveErr(null)
     setEmailSaveOk(false)
+    if (emailPref === 'outlook_web') {
+      const proceed = await confirmOutlookWebWithoutGraph()
+      if (!proceed) return
+    }
     setEmailBusy(true)
     try {
       const u = await apiFetch<UserPublic>('/users/me/email-handling', {
@@ -4145,11 +4163,17 @@ function UserSettingsPage({
               <select
                 value={emailPref}
                 onChange={(e) => {
-                  const v = e.target.value as 'desktop' | 'outlook_web'
-                  setEmailPref(v)
-                  if (v === 'outlook_web') {
-                    setOutlookUrl((u) => u.trim() || DEFAULT_OUTLOOK_WEB_MAIL_URL)
-                  }
+                  void (async () => {
+                    const v = e.target.value as 'desktop' | 'outlook_web'
+                    if (v === 'outlook_web') {
+                      const proceed = await confirmOutlookWebWithoutGraph()
+                      if (!proceed) return
+                      setEmailPref('outlook_web')
+                      setOutlookUrl((u) => u.trim() || DEFAULT_OUTLOOK_WEB_MAIL_URL)
+                      return
+                    }
+                    setEmailPref('desktop')
+                  })()
                 }}
                 disabled={emailBusy}
                 aria-label="How to open e-mail compose from a matter"
@@ -4162,8 +4186,9 @@ function UserSettingsPage({
               <label className="field">
                 <span>Outlook web URL</span>
                 <p className="muted" style={{ marginTop: 0, marginBottom: 6, fontSize: 13 }}>
-                  Used when composing from a matter with Outlook web selected above. The default is Microsoft&apos;s
-                  Outlook inbox URL; change this if your organisation uses a different address.
+                  Used when composing from a matter and when opening filed e-mail with Outlook web. Use your tenant&apos;s
+                  mail URL (e.g. <code>https://outlook.office.com/mail</code> or <code>https://outlook.office365.com/mail</code>).
+                  Avoid pasting a specific message or search link here.
                 </p>
                 <input
                   className="allow-select"

@@ -204,6 +204,7 @@ export function AdminEmail({ token, onSaved }: { token: string; onSaved?: () => 
             />
             <span style={{ flex: 1, minWidth: 0 }}>
               <strong>Desktop mailto</strong> — open the default mail program with subject and body (no Microsoft API).
+              Outlook users can attach case files via the add-in <strong>Compose from matter</strong> pane.
             </span>
           </label>
           <label

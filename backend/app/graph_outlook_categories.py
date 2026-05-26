@@ -140,6 +140,83 @@ def _graph_message_base_url(mailbox: str, message_id: str) -> str:
     return f"https://graph.microsoft.com/v1.0/users/{quote(mbox)}/messages/{quote(mid, safe='')}"
 
 
+def _pick_newest_graph_message_row(rows: list[dict[str, Any]]) -> dict[str, Any] | None:
+    best: dict[str, Any] | None = None
+    best_sent = ""
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        sent = row.get("sentDateTime")
+        sent_s = sent.strip() if isinstance(sent, str) else ""
+        if best is None or sent_s > best_sent:
+            best = row
+            best_sent = sent_s
+    return best
+
+
+def _graph_messages_filter_request(
+    url: str,
+    filt: str,
+    token: str,
+    *,
+    top: str = "15",
+) -> list[dict[str, Any]]:
+    headers = {"Authorization": f"Bearer {token}"}
+    params: dict[str, str] = {
+        "$filter": filt,
+        "$select": "id,webLink,sentDateTime",
+        "$top": top,
+    }
+    try:
+        with httpx.Client(timeout=45.0) as client:
+            res = client.get(url, headers=headers, params=params)
+    except httpx.RequestError:
+        return []
+    if res.status_code >= 400:
+        return []
+    try:
+        data = res.json()
+    except json.JSONDecodeError:
+        return []
+    vals = data.get("value") if isinstance(data, dict) else None
+    if not isinstance(vals, list):
+        return []
+    return [x for x in vals if isinstance(x, dict)]
+
+
+def _lookup_graph_message_id_by_conversation_id(
+    mailbox: str,
+    conversation_id: str,
+    token: str,
+) -> tuple[str | None, str | None]:
+    """
+    Resolve the newest Graph message in a thread (e.g. sent copy after compose capture).
+
+    Returns ``(graph_message_id, webLink)`` or ``(None, None)``.
+    """
+    conv = (conversation_id or "").strip()
+    if not conv:
+        return (None, None)
+    esc = conv.replace("'", "''")
+    filt = f"conversationId eq '{esc}' and isDraft eq false"
+    mbox = quote(mailbox.strip())
+    base = f"https://graph.microsoft.com/v1.0/users/{mbox}"
+    rows: list[dict[str, Any]] = []
+    rows.extend(_graph_messages_filter_request(f"{base}/mailFolders/sentitems/messages", filt, token))
+    if not rows:
+        rows.extend(_graph_messages_filter_request(f"{base}/mailFolders/inbox/messages", filt, token))
+    row = _pick_newest_graph_message_row(rows)
+    if not row:
+        return (None, None)
+    gid = row.get("id") if isinstance(row.get("id"), str) else None
+    wl = row.get("webLink") if isinstance(row.get("webLink"), str) else None
+    gid_out = gid.strip() if gid and gid.strip() else None
+    wl_out = None
+    if wl and wl.strip().startswith(("http://", "https://")):
+        wl_out = _normalize_outlook_office365_web_link_to_office_com(wl.strip())
+    return (gid_out, wl_out)
+
+
 def _lookup_graph_message_id_by_internet_message_id(mailbox: str, internet_message_id: str, token: str) -> str | None:
     """Resolve Graph ``id`` when GET by item id fails (OData ``$filter`` on ``internetMessageId``)."""
     imid = (internet_message_id or "").strip()
@@ -277,7 +354,7 @@ def resolve_outlook_owa_link_via_graph(
         wl = data.get("webLink") if isinstance(data, dict) else None
         if isinstance(wl, str) and wl.strip().startswith(("http://", "https://")):
             norm = _normalize_outlook_office365_web_link_to_office_com(wl.strip())
-            return _append_popout_v2_to_outlook_url(norm)
+            return norm
         return None
 
     wl = fetch_web_link(mid_raw)
@@ -290,6 +367,28 @@ def resolve_outlook_owa_link_via_graph(
             wl2 = fetch_web_link(resolved)
             if wl2:
                 return (wl2, resolved)
+    return (None, None)
+
+
+def resolve_outlook_owa_link_via_conversation(
+    mailbox: str,
+    conversation_id: str,
+    *,
+    db: Session,
+) -> tuple[str | None, str | None]:
+    """Find the latest message in a thread and return ``(webLink, graph_message_id)``."""
+    if not graph_mail_configured(db):
+        return (None, None)
+    mbox = mailbox.strip()
+    conv = (conversation_id or "").strip()
+    if not mbox or not conv:
+        return (None, None)
+    token = app_access_token(db)
+    gid, wl = _lookup_graph_message_id_by_conversation_id(mbox, conv, token)
+    if wl:
+        return (wl, gid)
+    if gid:
+        return resolve_outlook_owa_link_via_graph(mbox, gid, None, db=db)
     return (None, None)
 
 

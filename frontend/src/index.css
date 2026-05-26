@@ -721,6 +721,15 @@ html.dark .topbar .btn:not(.primary):not(.danger) {
   border-radius: 12px;
 }
 
+.notice {
+  border: 1px solid rgba(var(--primary-rgb), 0.35);
+  background: rgba(var(--primary-rgb), 0.08);
+  color: var(--text);
+  padding: 10px 12px;
+  border-radius: 12px;
+  font-size: 14px;
+}
+
 .btn {
   border: 1px solid var(--border);
   background: #ffffff;
