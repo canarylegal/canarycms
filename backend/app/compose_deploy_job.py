@@ -29,6 +29,7 @@ from app.local_compose_update import (
     compose_up_marker_path,
     docker_inspect_container_state,
     load_compose_update_config,
+    resolve_compose_up_marker,
     run_compose_update,
 )
 
@@ -101,9 +102,9 @@ def reconcile_compose_job_state() -> None:
         # Worker thread died with the previous container; only the detached runner / marker can finish this job.
         guard_worker = False
 
-    marker = compose_up_marker_path(jid)
     name = compose_runner_container_name(jid)
     runner_on_disk = bool(disk.get("runner_expected"))
+    marker = resolve_compose_up_marker(jid)
 
     def _persist_terminal(*, ok: bool, err: str | None, excerpt: str | None) -> None:
         global _job_id, _phase, _started_at, _finished_at, _message, _error_detail, _log_excerpt, _runner_expected
@@ -135,7 +136,7 @@ def reconcile_compose_job_state() -> None:
                 except Exception:
                     pass
 
-    if marker.is_file():
+    if marker is not None:
         try:
             row = json.loads(marker.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
@@ -191,7 +192,7 @@ def reconcile_compose_job_state() -> None:
     stale_after = 15 if api_restarted else 180
     if runner_on_disk and age > stale_after and st is None:
         for _ in range(5):
-            if compose_up_marker_path(jid).is_file():
+            if resolve_compose_up_marker(jid) is not None:
                 reconcile_compose_job_state()
                 return
             time.sleep(1.0)
@@ -303,8 +304,8 @@ def get_compose_job_public() -> dict[str, Any]:
     if disk and str(disk.get("status") or "") == "running":
         jid = str(disk.get("job_id") or "").strip()
         if jid:
-            mp = compose_up_marker_path(jid)
-            if mp.is_file():
+            mp = resolve_compose_up_marker(jid)
+            if mp is not None:
                 try:
                     if bool(json.loads(mp.read_text(encoding="utf-8")).get("ok")):
                         time.sleep(0.2)

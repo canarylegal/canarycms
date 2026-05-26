@@ -166,12 +166,22 @@ def _host_path_for_compose_project(container_project: Path) -> str:
 
     ``docker run -v`` sources are resolved on the daemon host. When the backend only sees
     ``/canary-compose``, map it via ``/proc/self/mountinfo`` unless ``CANARY_COMPOSE_HOST_PROJECT_DIR``
-    is set.
+    is set (compose project dir only — not ``FILES_ROOT``, which is usually a separate mount).
     """
-    explicit = (os.getenv("CANARY_COMPOSE_HOST_PROJECT_DIR") or "").strip()
-    if explicit:
-        return _normalize_mount_root_for_docker_bind(str(Path(explicit).resolve()))
     target = str(container_project.resolve())
+    explicit = (os.getenv("CANARY_COMPOSE_HOST_PROJECT_DIR") or "").strip()
+    compose_dir_raw = (os.getenv("CANARY_COMPOSE_PROJECT_DIR") or "/canary-compose").strip()
+    if explicit and compose_dir_raw:
+        try:
+            compose_mp = str(Path(compose_dir_raw).resolve())
+            if target == compose_mp or target.startswith(compose_mp.rstrip("/") + "/"):
+                host_root = Path(explicit).resolve()
+                if target == compose_mp:
+                    return _normalize_mount_root_for_docker_bind(str(host_root))
+                rel = Path(target).relative_to(compose_mp)
+                return _normalize_mount_root_for_docker_bind(str(host_root / rel))
+        except (ValueError, OSError):
+            pass
     best_mp = ""
     best_root = ""
     try:
@@ -212,6 +222,29 @@ def _files_root_container() -> Path:
 
 def compose_up_marker_path(job_id: str) -> Path:
     return _files_root_container() / f".canary-compose-up-{job_id}.json"
+
+
+def compose_up_marker_filename(job_id: str) -> str:
+    return f".canary-compose-up-{job_id}.json"
+
+
+def resolve_compose_up_marker(job_id: str) -> Path | None:
+    """Marker from isolated ``compose up`` runner (primary path or legacy project-root mis-mount)."""
+    primary = compose_up_marker_path(job_id)
+    if primary.is_file():
+        return primary
+    name = compose_up_marker_filename(job_id)
+    cfg = load_compose_update_config()
+    if cfg is not None:
+        legacy = cfg.project_dir / name
+        if legacy.is_file():
+            return legacy
+    explicit = (os.getenv("CANARY_COMPOSE_HOST_PROJECT_DIR") or "").strip()
+    if explicit:
+        legacy = Path(explicit) / name
+        if legacy.is_file():
+            return legacy
+    return None
 
 
 def compose_runner_container_name(job_id: str) -> str:
@@ -318,12 +351,13 @@ def _run_compose_up_isolated(
 
     deadline = time.monotonic() + float(timeout)
     while time.monotonic() < deadline:
-        if marker.is_file():
+        found = resolve_compose_up_marker(compose_job_id)
+        if found is not None:
             try:
-                row = json.loads(marker.read_text(encoding="utf-8"))
+                row = json.loads(found.read_text(encoding="utf-8"))
             except (OSError, json.JSONDecodeError) as e:
                 raise RuntimeError(f"invalid compose-up marker file: {e}") from e
-            marker.unlink(missing_ok=True)
+            found.unlink(missing_ok=True)
             subprocess.run(["docker", "rm", "-f", name], check=False, capture_output=True, text=True, timeout=60)
             if not bool(row.get("ok")):
                 rc = row.get("rc")
@@ -335,7 +369,7 @@ def _run_compose_up_isolated(
         if st is not None and st[0] == "exited":
             # Runner exited before marker visible — brief race, or another coroutine consumed the marker.
             time.sleep(0.4)
-            if marker.is_file():
+            if resolve_compose_up_marker(compose_job_id) is not None:
                 continue
             from app.compose_deploy_job import compose_job_disk_says_running, reconcile_compose_job_state
 
