@@ -109,6 +109,8 @@ services:
       CANARY_COMPOSE_PROFILES: ${CANARY_COMPOSE_PROFILES:-prod}
       CANARY_COMPOSE_FILES: ${CANARY_COMPOSE_FILES:-docker-compose.yml}
       CANARY_COMPOSE_GIT_PULL: ${CANARY_COMPOSE_GIT_PULL:-}
+      # Host path for the compose project (required on btrfs when mountinfo shows /@home/... — see .env.example).
+      CANARY_COMPOSE_HOST_PROJECT_DIR: ${CANARY_COMPOSE_HOST_PROJECT_DIR:-}
       # Prefer git HEAD on the mounted compose project for /health + Deploy (auto when unset — see .env.example).
       CANARY_RUNTIME_COMMIT_FROM_COMPOSE_REPO: ${CANARY_RUNTIME_COMMIT_FROM_COMPOSE_REPO:-}
       # When not "0"/"false": admins may see an update prompt after login if GitHub is ahead of this build.
