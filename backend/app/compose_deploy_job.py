@@ -219,9 +219,14 @@ def _host_boot_id() -> str:
         return ""
 
 
-def _state_paths() -> list[Path]:
-    """Primary job state path plus legacy mirrors for reconciliation after upgrade."""
-    primary = compose_job_state_path()
+def _state_write_path() -> Path:
+    """Where new job state is persisted (never ``FILES_ROOT``)."""
+    return compose_job_state_path()
+
+
+def _state_read_paths() -> list[Path]:
+    """Primary path plus legacy locations (read-only reconciliation after upgrade)."""
+    primary = _state_write_path()
     paths = [primary]
     for legacy in legacy_compose_job_state_paths():
         if legacy not in paths:
@@ -246,7 +251,7 @@ def _read_disk_state() -> dict[str, Any] | None:
     write failure or race), prefer the terminal row so the UI cannot stay stuck on ``running``.
     """
     rows: list[tuple[float, dict[str, Any]]] = []
-    for p in _state_paths():
+    for p in _state_read_paths():
         row = _read_one(p)
         if not row:
             continue
@@ -270,14 +275,14 @@ def compose_job_disk_says_running() -> bool:
 
 def _write_disk_state(data: dict[str, Any]) -> None:
     text = json.dumps(data, ensure_ascii=False, indent=2)
-    for p in _state_paths():
-        try:
-            p.parent.mkdir(parents=True, exist_ok=True)
-            tmp = p.with_suffix(".json.tmp")
-            tmp.write_text(text, encoding="utf-8")
-            tmp.replace(p)
-        except OSError as e:
-            log.warning("compose job state write failed (%s): %s", p, e)
+    p = _state_write_path()
+    try:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        tmp = p.with_suffix(".json.tmp")
+        tmp.write_text(text, encoding="utf-8")
+        tmp.replace(p)
+    except OSError as e:
+        log.warning("compose job state write failed (%s): %s", p, e)
 
 
 def _memory_public() -> dict[str, Any]:
