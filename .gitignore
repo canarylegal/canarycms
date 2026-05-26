@@ -10,7 +10,9 @@ __pycache__/
 # Case/user data files
 data/
 
-# Compose GUI job state (written under CANARY_COMPOSE_PROJECT_DIR on the host mount)
+# Compose GUI runtime state (job JSON + compose-up markers; not user uploads)
+.canary/runtime/
+# Legacy compose GUI artifacts (pre-.canary/runtime)
 .canary-compose-job-state.json
 .canary-compose-up-*.json
 

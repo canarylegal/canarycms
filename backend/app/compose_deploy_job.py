@@ -1,9 +1,7 @@
 """Background Docker Compose updates for admin GUI (avoids long HTTP requests / proxy timeouts).
 
-Job status is persisted to JSON so it survives **backend container recreation** during
-``docker compose up -d``. We write to both the compose project mount (if configured) and
-``FILES_ROOT`` (typically ``/data/files``, a Docker volume) so a bind-mount permission quirk
-cannot silently drop updates.
+Job status is persisted to JSON under ``<compose project>/.canary/runtime`` so it survives
+**backend container recreation** during ``docker compose up -d`` (never under ``FILES_ROOT``).
 
 Use a **single** API worker process (default ``uvicorn`` without ``--workers``).
 """
@@ -24,12 +22,15 @@ from typing import Any, Literal
 
 from app.audit import log_event
 from app.db import SessionLocal
+from app.compose_runtime import (
+    compose_job_state_path,
+    legacy_compose_job_state_paths,
+    resolve_compose_up_marker,
+)
 from app.local_compose_update import (
     compose_runner_container_name,
-    compose_up_marker_path,
     docker_inspect_container_state,
     load_compose_update_config,
-    resolve_compose_up_marker,
     run_compose_update,
 )
 
@@ -47,7 +48,6 @@ _error_detail: str | None = None
 _log_excerpt: str | None = None
 _runner_expected: bool = False
 
-_STATE_NAME = ".canary-compose-job-state.json"
 
 
 def _utc_iso() -> str:
@@ -220,16 +220,12 @@ def _host_boot_id() -> str:
 
 
 def _state_paths() -> list[Path]:
-    """All locations we mirror job state (first writable wins for reads by mtime)."""
-    paths: list[Path] = []
-    cfg = load_compose_update_config()
-    if cfg is not None:
-        paths.append(cfg.project_dir / _STATE_NAME)
-    files_root = (os.getenv("FILES_ROOT") or "/data/files").strip()
-    if files_root:
-        p = Path(files_root) / _STATE_NAME
-        if p not in paths:
-            paths.append(p)
+    """Primary job state path plus legacy mirrors for reconciliation after upgrade."""
+    primary = compose_job_state_path()
+    paths = [primary]
+    for legacy in legacy_compose_job_state_paths():
+        if legacy not in paths:
+            paths.append(legacy)
     return paths
 
 

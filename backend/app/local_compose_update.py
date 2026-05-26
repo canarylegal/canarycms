@@ -216,37 +216,6 @@ def _isolated_compose_up_enabled() -> bool:
     return Path("/var/run/docker.sock").exists()
 
 
-def _files_root_container() -> Path:
-    return Path((os.getenv("FILES_ROOT") or "/data/files").strip() or "/data/files")
-
-
-def compose_up_marker_path(job_id: str) -> Path:
-    return _files_root_container() / f".canary-compose-up-{job_id}.json"
-
-
-def compose_up_marker_filename(job_id: str) -> str:
-    return f".canary-compose-up-{job_id}.json"
-
-
-def resolve_compose_up_marker(job_id: str) -> Path | None:
-    """Marker from isolated ``compose up`` runner (primary path or legacy project-root mis-mount)."""
-    primary = compose_up_marker_path(job_id)
-    if primary.is_file():
-        return primary
-    name = compose_up_marker_filename(job_id)
-    cfg = load_compose_update_config()
-    if cfg is not None:
-        legacy = cfg.project_dir / name
-        if legacy.is_file():
-            return legacy
-    explicit = (os.getenv("CANARY_COMPOSE_HOST_PROJECT_DIR") or "").strip()
-    if explicit:
-        legacy = Path(explicit) / name
-        if legacy.is_file():
-            return legacy
-    return None
-
-
 def compose_runner_container_name(job_id: str) -> str:
     return f"canary-compose-up-{job_id}"
 
@@ -288,14 +257,22 @@ def _run_compose_up_isolated(
 
     A foreground ``docker run`` still runs inside this backend process; when Compose recreates the
     backend, this process can be SIGKILL'd before ``docker run`` returns. The detached runner keeps
-    going and writes a JSON marker under ``FILES_ROOT``; :mod:`app.compose_deploy_job` reconciles
+    going and writes a JSON marker under the compose runtime dir; :mod:`app.compose_deploy_job` reconciles
     that on startup and when polling job status.
     """
+    from app.compose_runtime import (
+        compose_runtime_dir,
+        compose_up_marker_basename,
+        compose_up_marker_path,
+        resolve_compose_up_marker,
+    )
+
     inner = _compose_inner_cli_parts(cfg) + ["up", "-d"]
     inner_sh = shlex.join(inner)
     host_project = _host_path_for_compose_project(cfg.project_dir)
-    host_files = _host_path_for_compose_project(_files_root_container())
-    fr = str(_files_root_container())
+    runtime_dir = compose_runtime_dir()
+    runtime_in_container = str(runtime_dir)
+    host_runtime = _host_path_for_compose_project(runtime_dir)
     image = (os.getenv("CANARY_COMPOSE_RUNNER_IMAGE") or "docker:27-cli").strip()
     name = compose_runner_container_name(compose_job_id)
     marker = compose_up_marker_path(compose_job_id)
@@ -303,9 +280,9 @@ def _run_compose_up_isolated(
     subprocess.run(["docker", "rm", "-f", name], check=False, capture_output=True, text=True, timeout=60)
 
     # shell: run compose then write marker (atomic enough for our readers)
-    marker_fn = marker.name
+    marker_fn = compose_up_marker_basename(compose_job_id)
     shell = (
-        f'f="${{FILES_ROOT}}/{marker_fn}"; set +e; {inner_sh}; rc=$?; '
+        f'f="${{CANARY_COMPOSE_RUNTIME_DIR}}/{marker_fn}"; set +e; {inner_sh}; rc=$?; '
         + 'if [ "$rc" -eq 0 ]; then echo \'{"ok":true,"rc":0}\' > "$f"; '
         + 'else printf \'{"ok":false,"rc":%s}\\n\' "$rc" > "$f"; fi; exit "$rc"'
     )
@@ -322,11 +299,11 @@ def _run_compose_up_isolated(
         "-v",
         f"{host_project}:{host_project}",
         "-v",
-        f"{host_files}:{fr}",
+        f"{host_runtime}:{runtime_in_container}",
         "-w",
         host_project,
         "-e",
-        f"FILES_ROOT={fr}",
+        f"CANARY_COMPOSE_RUNTIME_DIR={runtime_in_container}",
     ]
     env_file = cfg.project_dir / ".env"
     if env_file.is_file():
