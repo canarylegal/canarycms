@@ -9,6 +9,7 @@ from pydantic import BaseModel, EmailStr
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.calendar_service import ensure_default_calendar
 from app.db import get_db
 from app.deps import get_current_user
 from app.email_crypt import encrypt_password
