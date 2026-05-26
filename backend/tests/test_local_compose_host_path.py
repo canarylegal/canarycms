@@ -25,14 +25,10 @@ def test_explicit_host_project_dir_for_compose_mount(monkeypatch: pytest.MonkeyP
     assert _host_path_for_compose_project(Path("/canary-compose")) == "/host/proj"
 
 
-def test_runtime_subdir_uses_mountinfo_not_host_override(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Runtime lives under the compose tree; host override applies only to the project root."""
+def test_runtime_subdir_maps_under_host_project_dir(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``.canary/runtime`` is under the compose project mount and maps with the host override."""
     monkeypatch.setenv("CANARY_COMPOSE_HOST_PROJECT_DIR", "/host/proj")
     monkeypatch.setenv("CANARY_COMPOSE_PROJECT_DIR", "/canary-compose")
-    with patch(
-        "app.local_compose_update.open",
-        side_effect=OSError("no mountinfo"),
-    ):
-        assert _host_path_for_compose_project(Path("/canary-compose/.canary/runtime")) == (
-            "/canary-compose/.canary/runtime"
-        )
+    assert _host_path_for_compose_project(Path("/canary-compose/.canary/runtime")) == (
+        "/host/proj/.canary/runtime"
+    )
