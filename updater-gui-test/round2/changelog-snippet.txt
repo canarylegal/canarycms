@@ -1,3 +1,0 @@
-Round 2 updater test payload (2026-05-26)
-- Verify update prompt appears when GitHub is ahead of the baked image.
-- Verify compose pull brings in this directory.

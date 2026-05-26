@@ -1,5 +1,0 @@
-{
-  "round": 2,
-  "expected_local_build_before_update": "c6e9926",
-  "files": ["README.txt", "changelog-snippet.txt", "sample-data.json"]
-}
