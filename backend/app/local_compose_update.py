@@ -149,6 +149,18 @@ def _in_container() -> bool:
     return Path("/.dockerenv").is_file()
 
 
+def _normalize_mount_root_for_docker_bind(path: str) -> str:
+    """Map btrfs (and similar) subvolume roots from mountinfo to host paths Docker can bind-mount.
+
+    On some Linux installs ``/proc/self/mountinfo`` reports e.g. ``/@home/colin/proj`` while the daemon
+    only accepts ``/home/colin/proj`` for ``docker run -v``.
+    """
+    p = path.strip()
+    if p.startswith("/@home"):
+        return "/home" + p[len("/@home") :]
+    return p
+
+
 def _host_path_for_compose_project(container_project: Path) -> str:
     """Path on the Docker host for bind-mounting the compose project into a sibling container.
 
@@ -158,7 +170,7 @@ def _host_path_for_compose_project(container_project: Path) -> str:
     """
     explicit = (os.getenv("CANARY_COMPOSE_HOST_PROJECT_DIR") or "").strip()
     if explicit:
-        return str(Path(explicit).resolve())
+        return _normalize_mount_root_for_docker_bind(str(Path(explicit).resolve()))
     target = str(container_project.resolve())
     best_mp = ""
     best_root = ""
@@ -176,13 +188,13 @@ def _host_path_for_compose_project(container_project: Path) -> str:
                     best_mp = mp
                     best_root = root
     except OSError:
-        return target
+        return _normalize_mount_root_for_docker_bind(target)
     if not best_mp:
-        return target
+        return _normalize_mount_root_for_docker_bind(target)
     if target == best_mp:
-        return str(Path(best_root).resolve())
+        return _normalize_mount_root_for_docker_bind(str(Path(best_root).resolve()))
     rel = target[len(best_mp) :].lstrip("/")
-    return str((Path(best_root) / rel).resolve())
+    return _normalize_mount_root_for_docker_bind(str((Path(best_root) / rel).resolve()))
 
 
 def _isolated_compose_up_enabled() -> bool:

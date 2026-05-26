@@ -75,6 +75,13 @@ def _running_payload_from_disk(disk: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _api_restarted_since_job(disk: dict[str, Any]) -> bool:
+    """True when this API process did not start the in-flight job (e.g. backend recreated during ``compose up``)."""
+    disk_boot = str(disk.get("host_boot_id") or "").strip()
+    current_boot = _host_boot_id()
+    return bool(disk_boot and current_boot and disk_boot != current_boot)
+
+
 def reconcile_compose_job_state() -> None:
     """Finalize a job from detached-runner marker files or stale ``running`` disk rows."""
     global _job_id, _phase, _started_at, _finished_at, _message, _error_detail, _log_excerpt, _runner_expected
@@ -86,8 +93,13 @@ def reconcile_compose_job_state() -> None:
     if not jid:
         return
 
+    api_restarted = _api_restarted_since_job(disk)
+
     with _lock:
         guard_worker = _phase == "running" and _job_id == jid
+    if api_restarted:
+        # Worker thread died with the previous container; only the detached runner / marker can finish this job.
+        guard_worker = False
 
     marker = compose_up_marker_path(jid)
     name = compose_runner_container_name(jid)
@@ -176,15 +188,24 @@ def reconcile_compose_job_state() -> None:
             excerpt=None,
         )
         return
-    if runner_on_disk and age > 180 and st is None:
+    stale_after = 15 if api_restarted else 180
+    if runner_on_disk and age > stale_after and st is None:
         for _ in range(5):
             if compose_up_marker_path(jid).is_file():
                 reconcile_compose_job_state()
                 return
             time.sleep(1.0)
+        if api_restarted:
+            err = (
+                "The API container restarted during the update (normal for Docker Compose). "
+                "Refresh this page and check Admin → Deploy or ``docker compose ps``. "
+                "If the site loads, the update may have finished; otherwise run Compose update again."
+            )
+        else:
+            err = "Compose runner container disappeared before reporting completion. Check ``docker compose ps``."
         _persist_terminal(
             ok=False,
-            err="Compose runner container disappeared before reporting completion. Check ``docker compose ps``.",
+            err=err,
             excerpt=None,
         )
 

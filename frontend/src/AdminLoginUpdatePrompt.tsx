@@ -154,6 +154,12 @@ export function AdminLoginUpdatePrompt({
           <p style={{ margin: '0 0 12px', lineHeight: 1.45 }}>
             This runs Docker Compose on the server (<code>build --pull</code> then <code>up -d</code>). The backend must
             have the Docker socket and compose project mounted — see <code>.env.example</code>. Continue?
+            {busy ? (
+              <span className="muted" style={{ display: 'block', marginTop: 8, fontSize: 13 }}>
+                Build can take several minutes. The backend may restart during <code>up -d</code>; this dialog will finish
+                when the job reports done or failed.
+              </span>
+            ) : null}
           </p>
         ) : (
           <>
