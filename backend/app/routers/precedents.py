@@ -12,7 +12,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, File as FastAPIFile, Form, HTTPException, Request, Response, UploadFile, status
+from fastapi import APIRouter, Depends, File as FastAPIFile, Form, HTTPException, Query, Request, Response, UploadFile, status
+from fastapi.responses import JSONResponse
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
@@ -21,6 +22,13 @@ from app.db import get_db
 from app.deps import get_current_user, require_admin
 from app.docx_util import validate_docx_package_bytes
 from app.file_storage import FILES_ROOT, ensure_files_root, precedent_file_paths
+from app.onlyoffice_force_save import (
+    OoForceSavePhase,
+    oo_force_save_arm,
+    oo_force_save_command_service,
+    oo_force_save_issue_command,
+    oo_force_save_wait,
+)
 from app.precedent_constants import BLANK_LETTER_PRECEDENT_REFERENCE
 
 from app.models import (
@@ -34,7 +42,8 @@ from app.models import (
     PrecedentKind,
     User,
 )
-from app.schemas import OnlyofficeEditorConfigOut, PrecedentOut, PrecedentUpdate
+from app.routers.onlyoffice import persist_onlyoffice_browser_url_to_file
+from app.schemas import OnlyofficeEditorConfigOut, OoPersistDownloadIn, PrecedentOut, PrecedentUpdate
 
 router = APIRouter(prefix="/precedents", tags=["precedents"])
 
@@ -451,6 +460,7 @@ def get_precedent_onlyoffice_config(
     from app.desktop_edit_session import acquire_file_edit_session
     from app.canary_public_url import onlyoffice_browser_public_base
     from app.onlyoffice_ssrf_url import default_internal_base_for_ds, normalize_onlyoffice_ssrf_base
+    from app.feature_flags import onlyoffice_editor_customization
     from app.routers.files import _correct_file_type, _onlyoffice_types_for_file, _ONLYOFFICE_DOC_PERMISSIONS
 
     p = db.get(Precedent, precedent_id)
@@ -499,6 +509,7 @@ def get_precedent_onlyoffice_config(
 
     doc_key = f"prec_{precedent_id}_{row.version or 1}_{secrets.token_hex(6)}"
     jwt_payload: dict = {
+        "documentType": doc_type,
         "document": {
             "title": fn,
             "url": doc_url_for_ds,
@@ -512,7 +523,7 @@ def get_precedent_onlyoffice_config(
             "region": "en-GB",
             "callbackUrl": cb_url,
             "user": {"id": str(user.id), "name": user.display_name or user.email, "group": "Canary"},
-            "customization": {"forcesave": True, "unit": "cm", "compatibleFeatures": True},
+            "customization": onlyoffice_editor_customization(file_type=file_type),
         },
     }
     token = pyjwt.encode(jwt_payload, secret, algorithm="HS256")
@@ -533,10 +544,49 @@ def get_precedent_onlyoffice_config(
     )
 
 
-@router.post("/{precedent_id}/oo-force-save", status_code=status.HTTP_204_NO_CONTENT)
+@router.post("/{precedent_id}/oo-force-save")
 async def oo_force_save_precedent(
     precedent_id: uuid.UUID,
     doc_key: str,
+    phase: OoForceSavePhase = Query("command"),
+    base_version: int | None = Query(None),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    p = db.get(Precedent, precedent_id)
+    if not p:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Precedent not found")
+    row = db.get(DbFile, p.file_id)
+    if not row:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Precedent file missing")
+
+    if phase == "arm":
+        return JSONResponse({"base_version": oo_force_save_arm(db, row)})
+
+    if phase == "wait":
+        if base_version is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="base_version is required when phase=wait",
+            )
+        await oo_force_save_wait(db, row, base_version=base_version)
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+    if phase == "command":
+        await oo_force_save_issue_command(db, row, doc_key=doc_key, file_id=row.id)
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+    if phase == "command_wait":
+        await oo_force_save_command_service(db, row, doc_key=doc_key, file_id=row.id)
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Unknown phase: {phase}")
+
+
+@router.post("/{precedent_id}/oo-persist-download", status_code=status.HTTP_204_NO_CONTENT)
+async def oo_persist_download_precedent(
+    precedent_id: uuid.UUID,
+    body: OoPersistDownloadIn,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> None:
@@ -546,82 +596,30 @@ async def oo_force_save_precedent(
     row = db.get(DbFile, p.file_id)
     if not row:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Precedent file missing")
-    previous_version = row.version or 1
-
-    row.oo_force_save_pending = True
-    db.add(row)
-    db.commit()
-
-    import jwt as pyjwt
-    import httpx
-
-    secret = (os.getenv("ONLYOFFICE_JWT_SECRET") or "").strip()
-    oo_internal = (os.getenv("ONLYOFFICE_DS_INTERNAL_URL") or "http://onlyoffice").strip().rstrip("/")
-    cmd_url = f"{oo_internal}/coauthoring/CommandService.ashx"
-    cmd_body: dict = {"c": "forcesave", "key": doc_key}
-    token_str = pyjwt.encode(cmd_body, secret, algorithm="HS256")
-    if isinstance(token_str, bytes):
-        token_str = token_str.decode("utf-8")
-
-    try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.post(cmd_url, json={**cmd_body, "token": token_str})
-            resp.raise_for_status()
-            body = resp.json()
-            try:
-                cmd_err = int(body.get("error", 0))
-            except (TypeError, ValueError):
-                cmd_err = 0
-            if cmd_err == 4:
-                db.refresh(row)
-                row.version = previous_version + 1
-                row.updated_at = datetime.now(timezone.utc)
-                row.oo_force_save_pending = False
-                db.add(row)
-                db.commit()
-                log_event(
-                    db,
-                    actor_user_id=user.id,
-                    action="precedent.onlyoffice_save_unchanged_cmd4",
-                    entity_type="file",
-                    entity_id=str(row.id),
-                    meta={"precedent_id": str(precedent_id), "version": row.version},
-                )
-                return
-            if cmd_err != 0:
-                raise RuntimeError(f"CommandService error={body.get('error')}")
-    except Exception as exc:
-        db.refresh(row)
-        if row.oo_force_save_pending:
-            row.oo_force_save_pending = False
-            db.add(row)
-            db.commit()
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="Force-save command failed — is the ONLYOFFICE service running?",
-        ) from exc
-
-    for _ in range(40):
-        await asyncio.sleep(0.5)
-        db.refresh(row)
-        if (row.version or 1) > previous_version:
-            return
-    db.refresh(row)
-    if (row.version or 1) > previous_version:
-        return
-    row.version = previous_version + 1
-    row.updated_at = datetime.now(timezone.utc)
-    row.oo_force_save_pending = False
-    db.add(row)
-    db.commit()
-    log_event(
+    await persist_onlyoffice_browser_url_to_file(
         db,
-        actor_user_id=user.id,
-        action="precedent.onlyoffice_save_unchanged_timeout",
-        entity_type="file",
-        entity_id=str(row.id),
-        meta={"precedent_id": str(precedent_id), "version": row.version},
+        row,
+        browser_url=body.browser_url,
+        case_id=None,
+        precedent_id=precedent_id,
     )
+
+
+@router.get("/{precedent_id}/oo-save-status")
+def oo_save_status_precedent(
+    precedent_id: uuid.UUID,
+    base_version: int = Query(...),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict[str, int | bool]:
+    p = db.get(Precedent, precedent_id)
+    if not p:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Precedent not found")
+    row = db.get(DbFile, p.file_id)
+    if not row:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Precedent file missing")
+    version = row.version or 1
+    return {"saved": version > base_version, "version": version}
 
 
 @router.delete("/{precedent_id}", status_code=status.HTTP_204_NO_CONTENT)

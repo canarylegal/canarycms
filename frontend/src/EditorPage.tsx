@@ -52,14 +52,144 @@ function resolveOoScriptBase(apiDocServerUrl: string): string {
   return apiDocServerUrl.replace(/\/$/, '')
 }
 
+type DocsApiGlobal = {
+  DocEditor?: { version?: () => string }
+}
+
+function onlyofficeDsMajor(): number {
+  const g = window as Window & { DocsAPI?: DocsApiGlobal }
+  const ver = g.DocsAPI?.DocEditor?.version?.() ?? ''
+  const n = parseInt(ver.split('.')[0] || '0', 10)
+  return Number.isFinite(n) ? n : 0
+}
+
+/** DocsAPI validates documentType client-side; pre-8 api.js (often CDN-cached) rejects ``pdf``. */
+function isPdfOoConfig(cfg: OoConfig): boolean {
+  const ft = String((cfg.document as { fileType?: string }).fileType || '')
+    .trim()
+    .toLowerCase()
+  const dt = (cfg.document_type || '').trim().toLowerCase()
+  return ft === 'pdf' || dt === 'pdf'
+}
+
+const OO_PERSIST_SAVE_TIMEOUT_MS = 90_000
+const OO_SAVE_POLL_MS = 300
+/** Brief poll after programmatic toolbar Save (matches native OO Save callback). */
+const OO_PDF_TOOLBAR_POLL_MS = 12_000
+const OO_SYNC_WAIT_MS = 3_000
+
+type OoForceSaveArmOut = { base_version: number }
+type OoSaveStatusOut = { saved: boolean; version: number }
+
+const OO_TOOLBAR_SAVE_SELECTORS = [
+  '#id-toolbar-btn-save',
+  '#slot-btn-save',
+  'li[data-id="save"]',
+  'button[data-layout-name="toolbar-save"]',
+  '[data-hint="Save"]',
+  'button[aria-label="Save"]',
+]
+
+/** Walk ONLYOFFICE nested iframes and click the native Save control (forcesave callback path). */
+function triggerOnlyofficeToolbarSave(): boolean {
+  function findSaveButton(doc: Document): HTMLElement | null {
+    for (const sel of OO_TOOLBAR_SAVE_SELECTORS) {
+      const el = doc.querySelector(sel) as HTMLElement | null
+      if (el) return el
+    }
+    for (const iframe of doc.querySelectorAll('iframe')) {
+      try {
+        const nested = iframe.contentDocument
+        if (!nested) continue
+        const found = findSaveButton(nested)
+        if (found) return found
+      } catch {
+        /* cross-origin */
+      }
+    }
+    return null
+  }
+
+  const host = document.getElementById('oo-editor-page')
+  for (const iframe of host?.querySelectorAll('iframe') ?? []) {
+    try {
+      const doc = iframe.contentDocument
+      if (!doc) continue
+      const btn = findSaveButton(doc)
+      if (btn) {
+        btn.click()
+        return true
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+  return false
+}
+
+function ooForceSavePath(base: string, docKey: string, phase: 'arm' | 'command'): string {
+  const q = new URLSearchParams({ doc_key: docKey, phase })
+  return `${base}?${q}`
+}
+
+function ooSaveStatusPath(forceSaveUrl: string, baseVersion: number): string {
+  const url = forceSaveUrl.replace(/\/oo-force-save$/, '/oo-save-status')
+  return `${url}?base_version=${encodeURIComponent(String(baseVersion))}`
+}
+
+async function pollOnlyofficeSaveConfirmed(
+  statusUrl: string,
+  baseVersion: number,
+  token: string | undefined,
+  timeoutMs: number,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    const st = await apiFetch<OoSaveStatusOut>(statusUrl, { token })
+    if (st.saved && st.version > baseVersion) return
+    await new Promise((r) => setTimeout(r, OO_SAVE_POLL_MS))
+  }
+  throw new Error('ONLYOFFICE forcesave did not confirm within the expected time.')
+}
+
+function resolveOoDocumentType(cfg: OoConfig, dsMajor: number): string {
+  const fromApi = (cfg.document_type || '').trim().toLowerCase()
+  if (isPdfOoConfig(cfg) && dsMajor > 0 && dsMajor < 8) return 'word'
+  if (
+    fromApi === 'word' ||
+    fromApi === 'cell' ||
+    fromApi === 'slide' ||
+    fromApi === 'pdf' ||
+    fromApi === 'diagram'
+  ) {
+    return fromApi
+  }
+  if (isPdfOoConfig(cfg)) return dsMajor >= 8 ? 'pdf' : 'word'
+  return fromApi || 'word'
+}
+
+function ooApiScriptUrl(base: string): string {
+  const bust =
+    (import.meta.env.VITE_ONLYOFFICE_API_CACHE_BUST as string | undefined)?.trim() || '9.0.3'
+  return `${base}/web-apps/apps/api/documents/api.js?v=${encodeURIComponent(bust)}`
+}
+
 function loadOoScript(base: string): Promise<void> {
-  const g = window as Window & { DocsAPI?: unknown }
-  if (g.DocsAPI) return Promise.resolve()
-  const url = `${base}/web-apps/apps/api/documents/api.js`
+  const g = window as Window & { DocsAPI?: DocsApiGlobal }
+  if (g.DocsAPI) {
+    try {
+      if (onlyofficeDsMajor() >= 8) return Promise.resolve()
+    } catch {
+      /* drop stale DocsAPI and reload */
+    }
+    delete (window as { DocsAPI?: DocsApiGlobal }).DocsAPI
+  }
+  const url = ooApiScriptUrl(base)
   return new Promise((resolve, reject) => {
     const s = document.createElement('script')
     s.src = url
     s.async = true
+    s.dataset.canaryOoApi = '1'
     s.onload = () => resolve()
     s.onerror = () =>
       reject(
@@ -136,10 +266,20 @@ export default function EditorPage() {
   const hasUncommittedOoEditsRef = useRef(false)
   const [unsavedCloseOpen, setUnsavedCloseOpen] = useState(false)
   const [pdfExportBusy, setPdfExportBusy] = useState(false)
+  const [saveAsPdfNotice, setSaveAsPdfNotice] = useState<string | null>(null)
+  const [saveAsPdfBusy, setSaveAsPdfBusy] = useState(false)
   const apiRef = useRef<DocsApiEditor | null>(null)
   const pdfExportTimeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
-  /** After downloadAs('pdf'): open PDF in new tab (export) vs Canary print-ui tab (print). */
-  const pendingDownloadAsRef = useRef<'export' | 'print' | null>(null)
+  const saveAsPdfNoticeTimeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  /** After downloadAs: print staging, Save as PDF (new file), or persist edits to Canary storage. */
+  const pendingDownloadAsRef = useRef<'print' | 'saveAsPdf' | 'persist' | null>(null)
+  const persistSaveWaitRef = useRef<{
+    resolve: () => void
+    reject: (err: Error) => void
+    timeout: ReturnType<typeof setTimeout>
+  } | null>(null)
+  /** ONLYOFFICE ``onDocumentStateChange``: true while the user is actively typing. */
+  const ooEditorBusyRef = useRef(false)
   const printTabRef = useRef<Window | null>(null)
   const token = localStorage.getItem('token') ?? undefined
 
@@ -247,6 +387,16 @@ export default function EditorPage() {
           return
         }
         apiRef.current?.destroyEditor?.()
+        const dsMajor = onlyofficeDsMajor()
+        const documentType = resolveOoDocumentType(cfg, dsMajor)
+        if (documentType !== (cfg.document_type || '').trim().toLowerCase()) {
+          console.info(
+            '[ONLYOFFICE] documentType %s (api.js DS %s; backend sent %s)',
+            documentType,
+            dsMajor || '?',
+            cfg.document_type,
+          )
+        }
         try {
           apiRef.current = new g.DocsAPI.DocEditor('oo-editor-page', {
           documentServerUrl: `${base.replace(/\/$/, '')}/`,
@@ -254,7 +404,7 @@ export default function EditorPage() {
           document: cfg.document,
           editorConfig: cfg.editor_config,
           type: 'desktop',
-          documentType: cfg.document_type,
+          documentType,
           width: '100%',
           height: '100%',
           events: {
@@ -263,15 +413,18 @@ export default function EditorPage() {
               if (!active) return
               const v = parseOnlyofficeDocumentStateEvent(event)
               if (v === true) {
+                ooEditorBusyRef.current = true
                 hasUncommittedOoEditsRef.current = true
                 setDocumentDirty(true)
               } else if (v === false) {
+                ooEditorBusyRef.current = false
                 setDocumentDirty(hasUncommittedOoEditsRef.current)
               }
             },
             onDocumentReady: () => {
               console.info('[ONLYOFFICE] onDocumentReady — document rendered OK')
               if (active) {
+                ooEditorBusyRef.current = false
                 hasUncommittedOoEditsRef.current = false
                 setDocumentDirty(false)
               }
@@ -282,7 +435,7 @@ export default function EditorPage() {
               console.error('[ONLYOFFICE onError] RAW:', raw)
               if (active) setErr(`${formatOoError(event)} | raw: ${raw}`)
             },
-            // Required for downloadAs(); Canary Print + Export PDF both use conversion URLs under /cache/files/.
+            // Required for downloadAs(); Print + Save as PDF use conversion URLs under /cache/files/.
             onDownloadAs: (event: unknown) => {
               if (pdfExportTimeoutRef.current !== undefined) {
                 clearTimeout(pdfExportTimeoutRef.current)
@@ -294,6 +447,43 @@ export default function EditorPage() {
               pendingDownloadAsRef.current = null
               const printWin = printTabRef.current
               printTabRef.current = null
+
+              if (mode === 'persist') {
+                const wait = persistSaveWaitRef.current
+                persistSaveWaitRef.current = null
+                if (!wait) return
+                if (typeof url !== 'string' || !url.length) {
+                  clearTimeout(wait.timeout)
+                  wait.reject(new Error('ONLYOFFICE did not return a download URL for save.'))
+                  return
+                }
+                if (!params || !token) {
+                  clearTimeout(wait.timeout)
+                  wait.reject(new Error('Sign in again to save.'))
+                  return
+                }
+                const persistPath =
+                  params.mode === 'case'
+                    ? `/cases/${params.caseId}/files/${params.fileId}/oo-persist-download`
+                    : `/precedents/${params.precedentId}/oo-persist-download`
+                void (async () => {
+                  try {
+                    await apiFetch(persistPath, {
+                      method: 'POST',
+                      token,
+                      json: { browser_url: url },
+                    })
+                    clearTimeout(wait.timeout)
+                    wait.resolve()
+                  } catch (err: unknown) {
+                    clearTimeout(wait.timeout)
+                    const msg =
+                      (err as { message?: string }).message ?? 'Could not persist document to Canary storage.'
+                    wait.reject(new Error(msg))
+                  }
+                })()
+                return
+              }
 
               if (mode === 'print') {
                 if (typeof url === 'string' && url.length > 0 && printWin && token) {
@@ -311,7 +501,7 @@ export default function EditorPage() {
                     } catch (err: unknown) {
                       const msg =
                         (err as { message?: string }).message ??
-                        'Print staging failed. Try Export PDF instead.'
+                        'Print staging failed. Try Save as PDF instead.'
                       try {
                         printWin.document.body.textContent = msg
                       } catch {
@@ -334,10 +524,52 @@ export default function EditorPage() {
                 return
               }
 
-              if (typeof url === 'string' && url.length > 0 && mode === 'export') {
-                window.open(url, '_blank', 'noopener,noreferrer')
+              if (mode === 'saveAsPdf') {
+                if (typeof url !== 'string' || !url.length) {
+                  setErr('ONLYOFFICE did not return a PDF URL.')
+                  setPdfExportBusy(false)
+                  setSaveAsPdfBusy(false)
+                  return
+                }
+                if (!params || params.mode !== 'case' || !token) {
+                  setErr('Save as PDF is only available for matter documents while signed in.')
+                  setPdfExportBusy(false)
+                  setSaveAsPdfBusy(false)
+                  return
+                }
+                void (async () => {
+                  try {
+                    const r = await apiFetch<{ file_id: string; original_filename: string }>(
+                      `/cases/${params.caseId}/files/${params.fileId}/oo-export-pdf`,
+                      { method: 'POST', token, json: { browser_url: url } },
+                    )
+                    setErr(null)
+                    const msg = `Saved as ${r.original_filename} in this matter.`
+                    setSaveAsPdfNotice(msg)
+                    if (saveAsPdfNoticeTimeoutRef.current !== undefined) {
+                      clearTimeout(saveAsPdfNoticeTimeoutRef.current)
+                    }
+                    saveAsPdfNoticeTimeoutRef.current = window.setTimeout(() => {
+                      saveAsPdfNoticeTimeoutRef.current = undefined
+                      setSaveAsPdfNotice(null)
+                    }, 10_000)
+                    notifyCaseFilesChangedIfCase()
+                  } catch (err: unknown) {
+                    setSaveAsPdfNotice(null)
+                    setErr(
+                      (err as { message?: string }).message ??
+                        'Could not save PDF to matter storage.',
+                    )
+                  } finally {
+                    setPdfExportBusy(false)
+                    setSaveAsPdfBusy(false)
+                  }
+                })()
+                return
               }
+
               setPdfExportBusy(false)
+              setSaveAsPdfBusy(false)
             },
           },
         })
@@ -375,29 +607,116 @@ export default function EditorPage() {
     signalCaseFilesChanged(params.caseId)
   }
 
+  function saveDocumentViaDownloadAs(format: string): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const editor = apiRef.current
+      if (!editor?.downloadAs) {
+        reject(new Error('ONLYOFFICE editor is not ready. Wait for the document to finish loading.'))
+        return
+      }
+      const timeout = window.setTimeout(() => {
+        if (pendingDownloadAsRef.current === 'persist') {
+          pendingDownloadAsRef.current = null
+          persistSaveWaitRef.current = null
+          reject(new Error('Save timed out waiting for ONLYOFFICE to export the document.'))
+        }
+      }, OO_PERSIST_SAVE_TIMEOUT_MS)
+      persistSaveWaitRef.current = {
+        resolve: () => {
+          clearTimeout(timeout)
+          resolve()
+        },
+        reject: (err: Error) => {
+          clearTimeout(timeout)
+          reject(err)
+        },
+        timeout,
+      }
+      pendingDownloadAsRef.current = 'persist'
+      try {
+        editor.downloadAs(format)
+      } catch (e: unknown) {
+        clearTimeout(timeout)
+        pendingDownloadAsRef.current = null
+        persistSaveWaitRef.current = null
+        reject(e instanceof Error ? e : new Error(String(e)))
+      }
+    })
+  }
+
+  async function waitForOoServerSync(): Promise<void> {
+    const deadline = Date.now() + OO_SYNC_WAIT_MS
+    while (Date.now() < deadline) {
+      if (!ooEditorBusyRef.current && !hasUncommittedOoEditsRef.current) {
+        await new Promise((r) => setTimeout(r, 250))
+        return
+      }
+      await new Promise((r) => setTimeout(r, 100))
+    }
+  }
+
+  /**
+   * PDF save: prefer native toolbar forcesave (correct form appearances). CommandService
+   * forcesave does not bump version for PDFs in practice — do not poll 45s waiting for it.
+   * Fall back quickly to ``downloadAs`` + backend NeedAppearances fix.
+   */
+  async function performPdfSave(): Promise<void> {
+    if (!params || !cfg) return
+    const docKey = String((cfg.document as { key?: string }).key ?? '')
+    if (!docKey) {
+      throw new Error('Editor key missing; cannot save safely. Please reload and try again.')
+    }
+    const saveBase =
+      params.mode === 'case'
+        ? `/cases/${params.caseId}/files/${params.fileId}/oo-force-save`
+        : `/precedents/${params.precedentId}/oo-force-save`
+
+    await waitForOoServerSync()
+
+    if (triggerOnlyofficeToolbarSave()) {
+      const arm = await apiFetch<OoForceSaveArmOut>(ooForceSavePath(saveBase, docKey, 'arm'), {
+        method: 'POST',
+        token,
+      })
+      const statusUrl = ooSaveStatusPath(saveBase, arm.base_version)
+      try {
+        await pollOnlyofficeSaveConfirmed(
+          statusUrl,
+          arm.base_version,
+          token,
+          OO_PDF_TOOLBAR_POLL_MS,
+        )
+        return
+      } catch (pollErr: unknown) {
+        console.warn('[ONLYOFFICE] toolbar forcesave not confirmed; using downloadAs:', pollErr)
+      }
+    } else {
+      console.info('[ONLYOFFICE] toolbar Save not reachable; using downloadAs persist')
+    }
+
+    await saveDocumentViaDownloadAs('pdf')
+  }
+
+  const canUseSaveAsPdf =
+    params?.mode === 'case' && cfg !== null && !isPdfOoConfig(cfg)
+
   async function performSave(): Promise<boolean> {
     if (!params || !cfg) return false
-    const docKey = (cfg.document as { key?: string }).key ?? ''
-    if (!docKey) {
-      setErr('Editor key missing; cannot save safely. Please reload and try again.')
-      return false
-    }
+    const fileType = String((cfg.document as { fileType?: string }).fileType ?? '').toLowerCase()
+    const dlFormat = fileType === 'pdf' ? 'pdf' : fileType || 'docx'
     try {
+      if (isPdfOoConfig(cfg)) {
+        await performPdfSave()
+      } else {
+        await saveDocumentViaDownloadAs(dlFormat)
+      }
+
       if (params.mode === 'case') {
-        await apiFetch(
-          `/cases/${params.caseId}/files/${params.fileId}/oo-force-save?doc_key=${encodeURIComponent(docKey)}`,
-          { method: 'POST', token },
-        )
         await apiFetch(`/cases/${params.caseId}/files/${params.fileId}/publish-compose`, {
           method: 'POST',
           token,
         })
         notifyCaseFilesChangedIfCase()
-      } else {
-        await apiFetch(
-          `/precedents/${params.precedentId}/oo-force-save?doc_key=${encodeURIComponent(docKey)}`,
-          { method: 'POST', token },
-        )
       }
       hasUncommittedOoEditsRef.current = false
       setDocumentDirty(false)
@@ -431,10 +750,16 @@ export default function EditorPage() {
     }
   }
 
+  function tearDownOnlyofficeEditor() {
+    apiRef.current?.destroyEditor?.()
+    apiRef.current = null
+  }
+
   async function performCloseClean() {
     if (!params || closing) return
     setClosing(true)
     try {
+      tearDownOnlyofficeEditor()
       await releaseCaseEditSession()
       notifyCaseFilesChangedIfCase()
       window.close()
@@ -447,6 +772,7 @@ export default function EditorPage() {
     if (!params || closing) return
     setClosing(true)
     try {
+      tearDownOnlyofficeEditor()
       if (params.mode === 'case') {
         try {
           await apiFetch(`/cases/${params.caseId}/files/${params.fileId}/discard-edit`, {
@@ -477,6 +803,7 @@ export default function EditorPage() {
       const ok = await performSave()
       if (!ok) return
       setUnsavedCloseOpen(false)
+      tearDownOnlyofficeEditor()
       await releaseCaseEditSession()
       notifyCaseFilesChangedIfCase()
       window.close()
@@ -522,15 +849,16 @@ export default function EditorPage() {
       >
         <span
           style={{
-            color: '#64748b',
+            color: saveAsPdfNotice ? '#15803d' : '#64748b',
             fontSize: 13,
             overflow: 'hidden',
             textOverflow: 'ellipsis',
             whiteSpace: 'nowrap',
             flex: 1,
           }}
+          title={saveAsPdfNotice ?? filename}
         >
-          {filename}
+          {saveAsPdfNotice ?? filename}
         </span>
         <button
           type="button"
@@ -590,16 +918,37 @@ export default function EditorPage() {
         </button>
         <button
           type="button"
-          title="Download ONLYOFFICE’s PDF in a new tab (browser PDF handler)."
+          title={
+            !cfg
+              ? ''
+              : canUseSaveAsPdf
+                ? 'Save a PDF copy to this matter (does not replace the open document).'
+                : isPdfOoConfig(cfg)
+                  ? 'Already a PDF — use Save Changes to update this file.'
+                  : 'Save as PDF is only available for matter documents.'
+          }
           onClick={() => {
-            if (pdfExportBusy || !apiRef.current?.downloadAs || saving || closing || unsavedSaveBusy) return
-            pendingDownloadAsRef.current = 'export'
+            if (
+              !canUseSaveAsPdf ||
+              pdfExportBusy ||
+              !apiRef.current?.downloadAs ||
+              saving ||
+              closing ||
+              unsavedSaveBusy
+            ) {
+              return
+            }
+            setSaveAsPdfNotice(null)
+            pendingDownloadAsRef.current = 'saveAsPdf'
+            setSaveAsPdfBusy(true)
             setPdfExportBusy(true)
             if (pdfExportTimeoutRef.current !== undefined) clearTimeout(pdfExportTimeoutRef.current)
             pdfExportTimeoutRef.current = window.setTimeout(() => {
               pdfExportTimeoutRef.current = undefined
               pendingDownloadAsRef.current = null
               setPdfExportBusy(false)
+              setSaveAsPdfBusy(false)
+              setErr('Save as PDF timed out waiting for ONLYOFFICE.')
             }, 120_000)
             try {
               apiRef.current.downloadAs('pdf')
@@ -608,23 +957,33 @@ export default function EditorPage() {
               pdfExportTimeoutRef.current = undefined
               pendingDownloadAsRef.current = null
               setPdfExportBusy(false)
+              setSaveAsPdfBusy(false)
+              setErr('Could not start PDF export from ONLYOFFICE.')
             }
           }}
-          disabled={pdfExportBusy || saving || closing || unsavedSaveBusy || !cfg}
+          disabled={
+            !canUseSaveAsPdf || pdfExportBusy || saving || closing || unsavedSaveBusy || !cfg
+          }
           style={{
             background: 'rgba(15,23,42,0.06)',
             border: '1px solid rgba(15,23,42,0.15)',
             color: '#334155',
-            cursor: pdfExportBusy || saving || closing || unsavedSaveBusy || !cfg ? 'default' : 'pointer',
+            cursor:
+              !canUseSaveAsPdf || pdfExportBusy || saving || closing || unsavedSaveBusy || !cfg
+                ? 'default'
+                : 'pointer',
             fontSize: 12,
             padding: '3px 10px',
             borderRadius: 4,
             flexShrink: 0,
-            opacity: pdfExportBusy || saving || closing || unsavedSaveBusy || !cfg ? 0.5 : 1,
+            opacity:
+              !canUseSaveAsPdf || pdfExportBusy || saving || closing || unsavedSaveBusy || !cfg
+                ? 0.5
+                : 1,
             whiteSpace: 'nowrap',
           }}
         >
-          {pdfExportBusy ? 'Preparing PDF…' : 'Export PDF'}
+          {saveAsPdfBusy ? 'Saving PDF…' : 'Save as PDF'}
         </button>
         <button
           type="button"

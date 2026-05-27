@@ -17,6 +17,7 @@ import threading
 import time
 import uuid
 from datetime import datetime, timezone
+from io import BytesIO
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse, urlunparse
@@ -31,8 +32,8 @@ from sqlalchemy.orm import Session
 
 from app.db import get_db
 from app.deps import get_current_user
-from app.file_storage import FILES_ROOT, ensure_files_root
-from app.models import File as DbFile, FileEditSession, Precedent, User
+from app.file_storage import FILES_ROOT, case_file_paths, ensure_files_root
+from app.models import File as DbFile, FileCategory, FileEditSession, Precedent, User
 from app.audit import log_event
 
 router = APIRouter(prefix="/onlyoffice", tags=["onlyoffice"])
@@ -230,6 +231,279 @@ def _internal_fetch_url_from_browser(browser_url: str) -> str:
         log.warning("print-stage: bad URL %r: %s", rewritten, exc)
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="invalid URL") from exc
     return rewritten
+
+
+_OO_PERSIST_MAX_BYTES = int(os.getenv("ONLYOFFICE_PERSIST_MAX_BYTES", str(100 * 1024 * 1024)))
+
+
+def fix_pdf_form_need_appearances(data: bytes) -> bytes:
+    """``downloadAs`` PDFs may store field values without appearance streams.
+
+    Set AcroForm ``/NeedAppearances`` so conforming readers (including ONLYOFFICE on reopen)
+    regenerate visible field content instead of showing blanks until focus.
+    """
+
+    if not data.startswith(b"%PDF"):
+        return data
+    try:
+        import pikepdf
+    except ImportError:
+        log.warning("pikepdf not installed; skipping PDF NeedAppearances fix")
+        return data
+    try:
+        with pikepdf.open(BytesIO(data)) as pdf:
+            if "/AcroForm" not in pdf.Root:
+                return data
+            acro = pdf.Root.AcroForm
+            if acro is None:
+                return data
+            acro["/NeedAppearances"] = True
+            out = BytesIO()
+            pdf.save(out)
+            return out.getvalue()
+    except Exception as exc:
+        log.warning("fix_pdf_form_need_appearances failed: %s", exc)
+        return data
+
+
+def _validate_persist_magic(data: bytes, *, filename: str) -> None:
+    ext = Path(filename).suffix.lower()
+    if not data:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Empty document")
+    if ext == ".pdf":
+        if not data.startswith(b"%PDF"):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Response is not a PDF")
+    elif ext in (
+        ".docx",
+        ".docm",
+        ".xlsx",
+        ".xlsm",
+        ".pptx",
+        ".pptm",
+        ".odt",
+        ".ods",
+        ".odp",
+    ):
+        if data[:2] != b"PK":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Response is not a valid Office document",
+            )
+
+
+async def _fetch_onlyoffice_download_bytes(browser_url: str, *, log_label: str) -> bytes:
+    fetch_url = _internal_fetch_url_from_browser(browser_url)
+    try:
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            r = await client.get(fetch_url)
+            r.raise_for_status()
+            data = r.content
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.exception("%s: fetch failed url=%s", log_label, fetch_url)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Could not fetch document from Document Server",
+        ) from e
+    if len(data) > _OO_PERSIST_MAX_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail="Document exceeds persist size limit",
+        )
+    return data
+
+
+def allocate_pdf_export_filename(
+    db: Session,
+    *,
+    case_id: uuid.UUID,
+    folder_path: str,
+    preferred: str,
+) -> str:
+    """Pick a unique ``.pdf`` name in the same matter folder as the source document."""
+
+    safe = Path(preferred).name
+    if not safe.lower().endswith(".pdf"):
+        safe = f"{Path(safe).stem}.pdf"
+    folder = folder_path or ""
+    existing = {
+        name
+        for (name,) in db.execute(
+            select(DbFile.original_filename).where(
+                DbFile.case_id == case_id,
+                DbFile.folder_path == folder,
+                DbFile.category == FileCategory.case_document,
+            )
+        ).all()
+        if name
+    }
+    if safe not in existing:
+        return safe
+    stem = Path(safe).stem
+    n = 2
+    while True:
+        candidate = f"{stem} ({n}).pdf"
+        if candidate not in existing:
+            return candidate
+        n += 1
+
+
+async def create_case_file_from_onlyoffice_pdf_export(
+    db: Session,
+    source: DbFile,
+    *,
+    browser_url: str,
+    case_id: uuid.UUID,
+    user: User,
+    filename: str | None = None,
+) -> DbFile:
+    """Create a new case PDF from ONLYOFFICE ``downloadAs`` (does not modify ``source``)."""
+
+    if Path(source.original_filename).suffix.lower() == ".pdf":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Source document is already a PDF",
+        )
+
+    data = await _fetch_onlyoffice_download_bytes(browser_url, log_label="oo-export-pdf")
+    _validate_persist_magic(data, filename="export.pdf")
+    data = fix_pdf_form_need_appearances(data)
+
+    preferred = (filename or "").strip() or f"{Path(source.original_filename).stem}.pdf"
+    out_name = allocate_pdf_export_filename(
+        db,
+        case_id=case_id,
+        folder_path=source.folder_path or "",
+        preferred=preferred,
+    )
+
+    new_id = uuid.uuid4()
+    paths = case_file_paths(
+        case_id=case_id,
+        file_id=new_id,
+        original_filename=out_name,
+        folder_path=source.folder_path or "",
+    )
+    ensure_files_root()
+    paths.abs_path.write_bytes(data)
+
+    now = datetime.now(timezone.utc)
+    row = DbFile(
+        id=new_id,
+        case_id=case_id,
+        owner_id=user.id,
+        category=FileCategory.case_document,
+        storage_path=paths.rel_path,
+        folder_path=paths.folder_path,
+        parent_file_id=None,
+        source_imap_mbox=None,
+        source_imap_uid=None,
+        source_mail_from_name=None,
+        source_mail_from_email=None,
+        source_mail_is_outbound=None,
+        source_internet_message_id=None,
+        source_mail_date=None,
+        source_outlook_conversation_id=None,
+        source_outlook_item_id=None,
+        outlook_graph_message_id=None,
+        outlook_web_link=None,
+        is_pinned=False,
+        original_filename=out_name,
+        mime_type="application/pdf",
+        size_bytes=len(data),
+        version=1,
+        checksum=None,
+        created_at=now,
+        updated_at=now,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+
+    log.info(
+        "oo-export-pdf: created file=%s from source=%s name=%s size=%s",
+        row.id,
+        source.id,
+        out_name,
+        len(data),
+    )
+    log_event(
+        db,
+        actor_user_id=user.id,
+        action="case.file.export_pdf",
+        entity_type="file",
+        entity_id=str(row.id),
+        meta={
+            "case_id": str(case_id),
+            "source_file_id": str(source.id),
+            "filename": out_name,
+            "size_bytes": len(data),
+            "folder": paths.folder_path,
+        },
+    )
+    return row
+
+
+async def persist_onlyoffice_browser_url_to_file(
+    db: Session,
+    row: DbFile,
+    *,
+    browser_url: str,
+    case_id: uuid.UUID | None,
+    precedent_id: uuid.UUID | None,
+) -> int:
+    """Fetch a DS ``downloadAs`` / cache URL and write bytes to Canary file storage."""
+
+    data = await _fetch_onlyoffice_download_bytes(browser_url, log_label=f"oo-persist file={row.id}")
+
+    _validate_persist_magic(data, filename=row.original_filename)
+
+    if Path(row.original_filename).suffix.lower() == ".pdf":
+        data = fix_pdf_form_need_appearances(data)
+
+    ensure_files_root()
+    abs_path = (FILES_ROOT / row.storage_path).resolve()
+    if not str(abs_path).startswith(str(FILES_ROOT.resolve())):
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Invalid storage path")
+
+    abs_path.parent.mkdir(parents=True, exist_ok=True)
+    abs_path.write_bytes(data)
+
+    backup_path = Path(str(abs_path) + ".oo_backup")
+    if backup_path.exists():
+        try:
+            backup_path.unlink()
+        except Exception as exc:
+            log.warning("Could not delete backup %s: %s", backup_path, exc)
+
+    row.version = (row.version or 1) + 1
+    row.size_bytes = len(data)
+    row.updated_at = datetime.now(timezone.utc)
+    row.oo_force_save_pending = False
+    db.add(row)
+    db.commit()
+
+    log.info(
+        "oo-persist: saved file=%s version=%s size=%s",
+        row.id,
+        row.version,
+        len(data),
+    )
+    log_event(
+        db,
+        actor_user_id=None,
+        action="precedent.onlyoffice_save" if precedent_id is not None else "case.file.onlyoffice_save",
+        entity_type="file",
+        entity_id=str(row.id),
+        meta={
+            **({"precedent_id": str(precedent_id)} if precedent_id is not None else {"case_id": str(case_id)}),
+            "version": row.version,
+            "size_bytes": len(data),
+            "via": "downloadAs",
+        },
+    )
+    return int(row.version)
 
 
 def _encode_print_staging_jwt(*, sid: str) -> str:

@@ -1133,6 +1133,24 @@ class FileEditSessionStatusOut(BaseModel):
     webdav_file_url: str | None = None
 
 
+class OoPersistDownloadIn(BaseModel):
+    """ONLYOFFICE ``downloadAs`` export URL for persisting edits to Canary storage."""
+
+    browser_url: str = Field(..., min_length=8, max_length=8000)
+
+
+class OoExportPdfIn(BaseModel):
+    """ONLYOFFICE ``downloadAs('pdf')`` URL for saving a new PDF alongside the source document."""
+
+    browser_url: str = Field(..., min_length=8, max_length=8000)
+    filename: str | None = Field(default=None, max_length=512)
+
+
+class OoExportPdfOut(BaseModel):
+    file_id: uuid.UUID
+    original_filename: str
+
+
 class OnlyofficeEditorConfigOut(BaseModel):
     """JWT + plaintext fields for DocsAPI.DocEditor.
 

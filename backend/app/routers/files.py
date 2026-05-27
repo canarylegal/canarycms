@@ -17,7 +17,7 @@ import tempfile
 import zipfile
 import httpx
 from fastapi import APIRouter, Depends, File as FastAPIFile, HTTPException, Query, Request, Response, UploadFile, status, Form
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 from starlette.background import BackgroundTask
@@ -33,7 +33,18 @@ from app.models import CaseContact, Contact as GlobalContactRow
 from app.models import File as DbFile, FileCategory, FileEditSession, Precedent, PrecedentKind, User
 from app.audit import log_event
 from app.canary_public_url import canary_public_url, onlyoffice_browser_public_base
-from app.feature_flags import onlyoffice_pdf_editor_types, open_pdf_in_onlyoffice
+from app.feature_flags import (
+    onlyoffice_editor_customization,
+    onlyoffice_pdf_editor_types,
+    open_pdf_in_onlyoffice,
+)
+from app.onlyoffice_force_save import (
+    OoForceSavePhase,
+    oo_force_save_arm,
+    oo_force_save_command_service,
+    oo_force_save_issue_command,
+    oo_force_save_wait,
+)
 from app.onlyoffice_ssrf_url import default_internal_base_for_ds, normalize_onlyoffice_ssrf_base
 from app.desktop_edit_session import acquire_file_edit_session
 from app.graph_outbound_service import link_outlook_graph_metadata_for_eml_file, repair_outlook_web_link_on_file
@@ -61,7 +72,14 @@ from app.schemas import (
     FileEditSessionStatusOut,
     FilePinUpdate,
     OnlyofficeEditorConfigOut,
+    OoExportPdfIn,
+    OoExportPdfOut,
+    OoPersistDownloadIn,
     OutlookOpenHintsOut,
+)
+from app.routers.onlyoffice import (
+    create_case_file_from_onlyoffice_pdf_export,
+    persist_onlyoffice_browser_url_to_file,
 )
 import jwt as pyjwt
 
@@ -1667,9 +1685,9 @@ def get_onlyoffice_editor_config(
         )
     doc_key = f"{file_id}_{row.version or 1}_{secrets.token_hex(6)}"
 
-    # Strict opening JWT: ONLYOFFICE browser signature docs show only ``document`` + ``editorConfig``.
-    # Extra top-level signed keys (type, width, height, documentType) break validation on many DS builds
-    # → "token not correctly formed", no download, no GET /webdav on Canary.
+    # JWT must mirror the browser config (document + editorConfig + documentType). Omitting
+    # documentType breaks PDF opens when JWT is enabled — DocsAPI reports invalid documentType.
+    # Do not add type/width/height to the JWT (those break validation on some DS builds).
     #
     # ``lang``: Use ``en-GB`` so the editor uses British English (interface + document language defaults on DS 7.2+).
     # Two-letter ``en`` maps to US-centric behaviour and shows “English (United States)” for the document.
@@ -1680,6 +1698,7 @@ def get_onlyoffice_editor_config(
     # Plain document.url = public URL (browser JS uses this; cannot reach Docker-internal hosts).
     # DS extracts document.url from the JWT, so the mismatch is intentional and harmless.
     jwt_payload: dict = {
+        "documentType": doc_type,
         "document": {
             "title": fn,
             "url": doc_url_for_ds,
@@ -1697,12 +1716,7 @@ def get_onlyoffice_editor_config(
                 "name": user.display_name or user.email,
                 "group": "Canary",
             },
-            "customization": {
-                "forcesave": True,
-                "unit": "cm",
-                # Helps some Document Server builds with print/conversion edge cases when integrated behind a path proxy.
-                "compatibleFeatures": True,
-            },
+            "customization": onlyoffice_editor_customization(file_type=file_type),
         },
     }
     # PyJWT matches what ONLYOFFICE Document Server (Node jsonwebtoken) expects better than python-jose.
@@ -1723,6 +1737,7 @@ def get_onlyoffice_editor_config(
     )
     # Visible in browser DevTools → Network → onlyoffice-config → Response headers (token redacted).
     response.headers["X-Canary-Onlyoffice-Webdav-Url"] = _redact_webdav_url_for_log(doc_url_for_browser)
+    response.headers["X-Canary-Onlyoffice-Document-Type"] = doc_type
 
     response.headers["Cache-Control"] = "no-store"
 
@@ -1745,94 +1760,120 @@ def get_onlyoffice_editor_config(
     )
 
 
-@router.post("/{file_id}/oo-force-save", status_code=status.HTTP_204_NO_CONTENT)
+@router.post("/{file_id}/oo-force-save")
 async def oo_force_save(
     case_id: uuid.UUID,
     file_id: uuid.UUID,
     doc_key: str = Query(..., description="OO DS document key from the editor config"),
+    phase: OoForceSavePhase = Query(
+        "command",
+        description=(
+            "``arm``: mark pending save and return base_version; "
+            "``wait``: block until callback (prefer client poll via GET oo-save-status); "
+            "``command``: issue CommandService forcesave only; "
+            "``command_wait``: CommandService + block until callback"
+        ),
+    ),
+    base_version: int | None = Query(
+        None,
+        description="Version from ``phase=arm``; required for ``phase=wait``",
+    ),
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
-) -> None:
-    """Tell OO DS to force-save now. DS will call back with status=6 and the backend will write the file."""
+):
+    """Persist in-browser ONLYOFFICE edits to Canary storage.
+
+    Preferred flow (matches toolbar Save): arm → host ``serviceCommand('save')`` → wait.
+    """
     require_case_access(case_id, user, db)
     row = db.get(DbFile, file_id)
     if not row or row.case_id != case_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
-    previous_version = row.version or 1
 
-    row.oo_force_save_pending = True
-    db.add(row)
-    db.commit()
+    if phase == "arm":
+        return JSONResponse({"base_version": oo_force_save_arm(db, row)})
 
-    secret = (os.getenv("ONLYOFFICE_JWT_SECRET") or "").strip()
-    oo_internal = (os.getenv("ONLYOFFICE_DS_INTERNAL_URL") or "http://onlyoffice").strip().rstrip("/")
-    cmd_url = f"{oo_internal}/coauthoring/CommandService.ashx"
+    if phase == "wait":
+        if base_version is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="base_version is required when phase=wait",
+            )
+        await oo_force_save_wait(db, row, base_version=base_version)
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
 
-    cmd_body: dict = {"c": "forcesave", "key": doc_key}
-    token_str = pyjwt.encode(cmd_body, secret, algorithm="HS256")
-    if isinstance(token_str, bytes):
-        token_str = token_str.decode("utf-8")
+    if phase == "command":
+        await oo_force_save_issue_command(db, row, doc_key=doc_key, file_id=file_id)
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
 
-    try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.post(cmd_url, json={**cmd_body, "token": token_str})
-            resp.raise_for_status()
-            body = resp.json()
-            try:
-                cmd_err = int(body.get("error", 0))
-            except (TypeError, ValueError):
-                cmd_err = 0
-            # ONLYOFFICE CommandService returns error=4 when there is nothing new to persist (unchanged doc).
-            # Treat like a successful save for Canary metadata + compose publish.
-            if cmd_err == 4:
-                log.info(
-                    "oo_force_save: CommandService error=4 (unchanged — nothing to persist) file=%s — metadata save",
-                    file_id,
-                )
-                db.refresh(row)
-                row.version = previous_version + 1
-                row.updated_at = _utcnow()
-                row.oo_force_save_pending = False
-                db.add(row)
-                db.commit()
-                return
-            if cmd_err != 0:
-                raise RuntimeError(f"CommandService error={body.get('error')}")
-        log.info("oo_force_save: issued force-save for file %s doc_key=%s", file_id, doc_key)
-    except Exception as exc:
-        log.warning("oo_force_save: command service failed for file %s: %s", file_id, exc)
-        db.refresh(row)
-        if row.oo_force_save_pending:
-            row.oo_force_save_pending = False
-            db.add(row)
-            db.commit()
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="Force-save command failed — is the ONLYOFFICE service running?",
-        ) from exc
+    if phase == "command_wait":
+        await oo_force_save_command_service(db, row, doc_key=doc_key, file_id=file_id)
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
 
-    # Wait for ONLYOFFICE callback (status 6 / 2 with url, or unchanged ack) to bump version.
-    for _ in range(40):
-        await asyncio.sleep(0.5)
-        db.refresh(row)
-        if (row.version or 1) > previous_version:
-            return
-    db.refresh(row)
-    if (row.version or 1) > previous_version:
-        return
-    # After a successful CommandService forcesave, always complete the save in metadata terms.
-    # DS may omit callbacks, send status=7 without persisting, or clear ``oo_force_save_pending`` without
-    # bumping ``version`` — any of those left users stuck on HTTP 504 here.
-    row.version = previous_version + 1
-    row.updated_at = _utcnow()
-    row.oo_force_save_pending = False
-    db.add(row)
-    db.commit()
-    log.info(
-        "oo_force_save: metadata save complete file=%s version=%s",
-        file_id,
-        row.version,
+    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Unknown phase: {phase}")
+
+
+@router.post("/{file_id}/oo-export-pdf", response_model=OoExportPdfOut)
+async def oo_export_pdf(
+    case_id: uuid.UUID,
+    file_id: uuid.UUID,
+    body: OoExportPdfIn,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> OoExportPdfOut:
+    """Save ONLYOFFICE ``downloadAs('pdf')`` as a new case file (does not replace the source document)."""
+    require_case_access(case_id, user, db)
+    row = db.get(DbFile, file_id)
+    if not row or row.case_id != case_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+    created = await create_case_file_from_onlyoffice_pdf_export(
+        db,
+        row,
+        browser_url=body.browser_url,
+        case_id=case_id,
+        user=user,
+        filename=body.filename,
     )
+    return OoExportPdfOut(file_id=created.id, original_filename=created.original_filename)
+
+
+@router.post("/{file_id}/oo-persist-download", status_code=status.HTTP_204_NO_CONTENT)
+async def oo_persist_download(
+    case_id: uuid.UUID,
+    file_id: uuid.UUID,
+    body: OoPersistDownloadIn,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> None:
+    """Persist ONLYOFFICE ``downloadAs`` export bytes to case file storage (PDF and Office)."""
+    require_case_access(case_id, user, db)
+    row = db.get(DbFile, file_id)
+    if not row or row.case_id != case_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+    await persist_onlyoffice_browser_url_to_file(
+        db,
+        row,
+        browser_url=body.browser_url,
+        case_id=case_id,
+        precedent_id=None,
+    )
+
+
+@router.get("/{file_id}/oo-save-status")
+def oo_save_status(
+    case_id: uuid.UUID,
+    file_id: uuid.UUID,
+    base_version: int = Query(..., description="Version from ``phase=arm`` before triggering ONLYOFFICE save"),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict[str, int | bool]:
+    """Poll whether ONLYOFFICE callback has persisted edits (version bumped past ``base_version``)."""
+    require_case_access(case_id, user, db)
+    row = db.get(DbFile, file_id)
+    if not row or row.case_id != case_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+    version = row.version or 1
+    return {"saved": version > base_version, "version": version}
 
 
 @router.post("/{file_id}/publish-compose", status_code=status.HTTP_204_NO_CONTENT)
