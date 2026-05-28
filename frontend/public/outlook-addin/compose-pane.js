@@ -9,7 +9,7 @@
     return globalThis.canaryOutlookApplyCompose
   }
   const MAX_ATTACH = 25
-  const ADDIN_UI_VERSION = '1.0.8.1'
+  const ADDIN_UI_VERSION = '1.0.10.1'
   const DRAFT_KEY = 'canary_outlook_compose_draft'
   const ATTACH_STORAGE_PREFIX = 'canary_outlook_attach_'
 
@@ -459,17 +459,23 @@
 
   async function syncPendingSend(token, caseId) {
     if (!caseId) {
-      await fetch(sh().apiRoot() + '/mail-plugin/pending-send', {
-        method: 'DELETE',
-        headers: sh().authHeaders(token),
-      }).catch(function () {})
+      await sh().clearPendingSendAsync(token)
       return
     }
-    await fetch(sh().apiRoot() + '/mail-plugin/pending-send', {
+    const res = await fetch(sh().apiRoot() + '/mail-plugin/pending-send', {
       method: 'PUT',
       headers: sh().jsonAuthHeaders(token),
       body: JSON.stringify({ case_id: caseId, source_file_id: null, ttl_seconds: 86400 }),
     })
+    const body = await res.json().catch(function () {
+      return null
+    })
+    if (!res.ok) {
+      const detail = body && body.detail
+      throw new Error(typeof detail === 'string' ? detail : 'Could not set pending send matter.')
+    }
+    await sh().persistPendingSendAsync(caseId, 86400)
+    await sh().mirrorAuthToEventRuntimeAsync(token)
   }
 
   async function applyToMessage() {
@@ -512,9 +518,15 @@
       }
       const added = await applyApi().applyComposeBundle(bundle, { skipTo: isReplyCompose })
       await syncPendingSend(token, String(selectedCase.id))
+      const tagged = applyApi().applyCanaryCategoryAsync
+        ? await applyApi().applyCanaryCategoryAsync(item)
+        : false
       let okMsg = 'Applied merge to this message.'
       if (added) okMsg += ' Attached ' + added + ' file(s).'
-      okMsg += ' Sent mail will file to this matter.'
+      okMsg += ' When you send, this message will file to matter '
+      okMsg +=
+        selectedCase.case_number != null ? String(selectedCase.case_number) : sh().matterLabel(selectedCase)
+      okMsg += tagged ? ' and receive the Canary category.' : '.'
       showStatus('ok', okMsg, false)
     } catch (e) {
       showStatus('msg', (e && e.message ? String(e.message) : 'Apply failed') + ' [' + ADDIN_UI_VERSION + ']', true)

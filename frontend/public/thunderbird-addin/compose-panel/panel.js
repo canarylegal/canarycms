@@ -62,6 +62,19 @@
   async function resolveComposeTabId(ext) {
     const fromUrl = composeTabIdFromUrl()
     if (fromUrl != null) return fromUrl
+    const panelTab = await sh().getComposePanelTabId(ext)
+    if (panelTab != null) {
+      if (ext.compose && typeof ext.compose.getComposeDetails === 'function') {
+        try {
+          await ext.compose.getComposeDetails(panelTab)
+          return panelTab
+        } catch (_) {
+          /* stale session tab id */
+        }
+      } else {
+        return panelTab
+      }
+    }
     if (ext.tabs && typeof ext.tabs.getCurrent === 'function') {
       try {
         const cur = await ext.tabs.getCurrent()
@@ -820,17 +833,45 @@
           await globalThis.canaryApplyComposeBundle(ext, composeTabId, bundle, {
             skipTo: isReplyCompose,
           })
+          let sourceFileId = form.parentFileId || null
+          let filedIncoming = false
+          if (isReplyCompose) {
+            const relatedId = await sh().resolveRelatedMessageIdForCompose(ext, composeTabId)
+            if (relatedId != null) {
+              const filed = await sh().fileTbMessageById(ext, jwt, origin, form.caseId, relatedId, {
+                folder: form.folder,
+                tag: true,
+              })
+              if (filed && filed.fileId) {
+                sourceFileId = String(filed.fileId)
+                filedIncoming = true
+              }
+            }
+          }
           await cs().setTabState(ext, composeTabId, {
             caseId: form.caseId,
             folder: form.folder,
-            parentFileId: form.parentFileId,
+            parentFileId: null,
             precedentId: form.precedentId,
             caseContactId: isReplyCompose ? null : form.caseContactId,
             mergeAllClients: form.mergeAllClients,
             attachmentFileIds: form.attachmentFileIds,
             composeAutoApplied: true,
           })
-          await sh().syncPendingSend(jwt, origin, form.caseId, form.parentFileId || null)
+          await sh().syncPendingSend(jwt, origin, form.caseId, sourceFileId || null)
+          if (filedIncoming) {
+            out(
+              'Applied. Incoming message saved to the matter and tagged. Your sent reply will file to the matter when you send.',
+              false,
+            )
+          } else if (isReplyCompose) {
+            out(
+              'Applied to compose. Could not find the original message to file — your sent reply will still file when you send.',
+              false,
+            )
+          } else {
+            out('Applied. Your message will file to the matter when you send.', false)
+          }
           await closeComposePanelAfterDone(ext)
         } catch (e) {
           out(authErrorHint(e), true)

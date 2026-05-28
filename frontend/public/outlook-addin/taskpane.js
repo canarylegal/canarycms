@@ -11,7 +11,7 @@
   /** Outlook master + item category applied after a successful file (client-only). */
   const CANARY_CATEGORY = 'Canary'
   /** Bumped when task pane logic changes — shown in error text so you can confirm the browser loaded the new bundle. */
-  const ADDIN_UI_VERSION = '1.0.8.2'
+  const ADDIN_UI_VERSION = '1.0.10.1'
   const officeMail = function () {
     return globalThis.canaryOutlookShared || {}
   }
@@ -1074,7 +1074,41 @@
     }
   }
 
-  Office.onReady(() => {
+  function hideBootStatus() {
+    const boot = $('canary-boot-status')
+    if (boot) boot.hidden = true
+  }
+
+  function showBootError(msg) {
+    const boot = $('canary-boot-status')
+    if (!boot) return
+    boot.hidden = false
+    boot.className = 'error'
+    boot.textContent = msg
+  }
+
+  if (typeof Office === 'undefined') {
+    showBootError(
+      'Office.js did not load. Check network / ad blockers, or sideload manifest.xml from ' +
+          pageOrigin() +
+          '/outlook-addin/manifest.xml.',
+    )
+  } else {
+    const bootTimer = setTimeout(function () {
+      showBootError(
+        'Outlook has not initialized this add-in yet. Open a mail message, then try again. If this persists, remove the add-in and sideload a manifest downloaded from ' +
+          pageOrigin() +
+          '/outlook-addin/manifest.xml',
+      )
+    }, 15000)
+    Office.onReady(function () {
+      clearTimeout(bootTimer)
+      hideBootStatus()
+      initTaskPane()
+    })
+  }
+
+  function initTaskPane() {
     const signIn = $('btn-sign-in')
     if (signIn) {
       signIn.onclick = () => {
@@ -1099,7 +1133,8 @@
         mailDesc.dataset.userEdited = '1'
       })
     }
-    $('btn-logout').onclick = () => {
+    const logoutBtn = $('btn-logout')
+    if (logoutBtn) logoutBtn.onclick = () => {
       void (async () => {
         try {
           linkedCaseId = ''
@@ -1163,5 +1198,5 @@
     } catch (_) {
       /* Pinned read pane + ItemChanged (not declared in manifest — schema only allows SupportsPinning, etc.) */
     }
-  })
+  }
 })()

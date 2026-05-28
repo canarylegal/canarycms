@@ -474,10 +474,22 @@ export type FileSummary = {
 }
 
 /** Response from ``POST /cases/{id}/files/email-drafts/m365`` (Microsoft Graph draft). */
+export type CaseEmailDraftM365AttachmentOut = {
+  file_id: string
+  filename: string
+}
+
 export type CaseEmailDraftM365Out = {
+  to?: string
+  subject?: string
+  body?: string
   open_url: string
   graph_message_id?: string | null
   draft_compose_web_link?: string | null
+  compose_prefill_url?: string | null
+  attachment_count?: number
+  compose_handoff_token?: string | null
+  attachment_files?: CaseEmailDraftM365AttachmentOut[]
 }
 
 /** Response from ``POST /cases/{id}/files/email-compose-handoff`` (Thunderbird / mail clients). */

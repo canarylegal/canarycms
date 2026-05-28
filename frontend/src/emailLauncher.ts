@@ -3,7 +3,7 @@ import type { UserPublic } from './types'
 /** Default Outlook on the web inbox (user may override in settings). */
 export const DEFAULT_OUTLOOK_WEB_MAIL_URL = 'https://outlook.office.com/mail'
 
-/** Admin → E-mail uses Graph mode with resolvable Entra app credentials (DB or env). */
+/** Admin → E-mail Graph mode with resolvable Entra credentials (OWA links, Outlook categories — not compose). */
 export function isOrgMicrosoftGraphConfigured(user: UserPublic | null | undefined): boolean {
   return (
     user?.email_integration_mode === 'microsoft_graph' && user?.m365_graph_drafts_configured === true
@@ -241,6 +241,13 @@ export function canOpenEmlInOutlookWebMailbox(file: {
  */
 const OWA_COMPOSE_DEEPLINK_PATH = '/mail/0/deeplink/compose'
 
+/** Outlook treats ``+`` in compose query values as a literal plus, not a space — normalize to ``%20``. */
+export function normalizeComposeQueryPlusAsSpaces(url: string): string {
+  const q = url.indexOf('?')
+  if (q < 0) return url
+  return url.slice(0, q + 1) + url.slice(q + 1).replace(/\+/g, '%20')
+}
+
 /**
  * Outlook on the web “new message” URL (no Graph). When org integration is mailto and the user chose “Outlook web”.
  *
@@ -269,7 +276,7 @@ export function buildOutlookWebComposeUrl(
   q.push(`subject=${encodeURIComponent(params.subject)}`)
   q.push(`body=${encodeURIComponent(params.body)}`)
 
-  return `${origin}${OWA_COMPOSE_DEEPLINK_PATH}?${q.join('&')}`
+  return normalizeComposeQueryPlusAsSpaces(`${origin}${OWA_COMPOSE_DEEPLINK_PATH}?${q.join('&')}`)
 }
 
 /**
@@ -281,7 +288,7 @@ export function buildMailtoComposeUrl(params: { to: string; subject: string; bod
   if (params.subject) q.push(`subject=${encodeURIComponent(params.subject)}`)
   if (params.body) q.push(`body=${encodeURIComponent(params.body)}`)
   const query = q.length ? `?${q.join('&')}` : ''
-  return `mailto:${to}${query}`
+  return normalizeComposeQueryPlusAsSpaces(`mailto:${to}${query}`)
 }
 
 /**

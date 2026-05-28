@@ -158,8 +158,32 @@
     return added
   }
 
+  const CANARY_CATEGORY = 'Canary'
+
+  function applyCanaryCategoryAsync(item) {
+    return new Promise(function (resolve) {
+      if (!item || !item.categories || typeof item.categories.addAsync !== 'function') {
+        resolve(false)
+        return
+      }
+      item.categories.addAsync([CANARY_CATEGORY], function (r) {
+        if (r.status === Office.AsyncResultStatus.Succeeded) {
+          resolve(true)
+          return
+        }
+        const msg = (r.error && r.error.message) || ''
+        if (/already|duplicate|same category|in the list/i.test(msg)) {
+          resolve(true)
+          return
+        }
+        resolve(false)
+      })
+    })
+  }
+
   globalThis.canaryOutlookApplyCompose = {
     getComposeTypeAsync: getComposeTypeAsync,
     applyComposeBundle: applyComposeBundle,
+    applyCanaryCategoryAsync: applyCanaryCategoryAsync,
   }
 })()

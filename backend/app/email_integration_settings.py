@@ -61,6 +61,15 @@ def effective_outlook_web_mail_base(db: Session) -> str:
     return (os.getenv("CANARY_OUTLOOK_WEB_MAIL_BASE") or "https://outlook.office.com/mail").strip().rstrip("/")
 
 
+def effective_outlook_web_mail_base_for_user(db: Session, user: User) -> str:
+    """Org default, overridden by the user's Outlook web URL when they launch mail in the browser."""
+    if (user.email_launch_preference or "").strip() == "outlook_web":
+        personal = (user.email_outlook_web_url or "").strip()
+        if personal:
+            return personal.rstrip("/")
+    return effective_outlook_web_mail_base(db)
+
+
 def graph_mail_effective_configured(db: Session) -> bool:
     if get_email_integration_settings(db).integration_mode != INTEGRATION_MICROSOFT_GRAPH:
         return False

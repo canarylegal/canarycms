@@ -162,6 +162,7 @@
 
   const FILED_MAP_KEY = 'canary_filed_tb_messages'
   const VIEWED_KEY = 'canary_last_viewed_filing_context'
+  const COMPOSE_PANEL_TAB_KEY = 'canary_compose_panel_tab_id'
 
   function internetMessageIdVariants(raw) {
     const t = String(raw || '').trim()
@@ -181,6 +182,126 @@
     if (typeof id === 'number' && !Number.isNaN(id)) return id
     const n = parseInt(String(id), 10)
     return Number.isFinite(n) ? n : null
+  }
+
+  function messageIdForApi(id) {
+    const n = normalizeTbMessageId(id)
+    return n != null ? n : id
+  }
+
+  function sleep(ms) {
+    return new Promise(function (resolve) {
+      setTimeout(resolve, ms)
+    })
+  }
+
+  function formatComposeRecipients(recipients) {
+    if (!recipients) return ''
+    const list = Array.isArray(recipients) ? recipients : [recipients]
+    const parts = []
+    for (let i = 0; i < list.length; i++) {
+      const r = list[i]
+      if (typeof r === 'string' && r.trim()) {
+        parts.push(r.trim())
+      } else if (r && typeof r === 'object') {
+        const name = r.displayName || r.name || ''
+        const email = r.email || r.address || ''
+        if (name && email) parts.push(String(name) + ' <' + String(email) + '>')
+        else if (email) parts.push(String(email))
+        else if (name) parts.push(String(name))
+      }
+    }
+    return parts.join(', ')
+  }
+
+  function buildSyntheticEmlFromComposeDetails(details, headerMessageId) {
+    const d = details || {}
+    const subject = String(d.subject || 'sent-message').replace(/\r?\n/g, ' ')
+    const from = formatComposeRecipients(d.from) || 'unknown@local'
+    const to = formatComposeRecipients(d.to)
+    const cc = formatComposeRecipients(d.cc)
+    const bcc = formatComposeRecipients(d.bcc)
+    const midRaw = String(headerMessageId || '').trim()
+    const mid =
+      midRaw && midRaw.indexOf('@') >= 0
+        ? midRaw.startsWith('<')
+          ? midRaw
+          : '<' + midRaw + '>'
+        : '<' + Date.now() + '.' + Math.random().toString(36).slice(2) + '@canary.local>'
+    const lines = [
+      'From: ' + from,
+      'To: ' + (to || 'undisclosed-recipients:;'),
+      'Subject: ' + subject,
+      'Date: ' + new Date().toUTCString(),
+      'Message-ID: ' + mid,
+      'MIME-Version: 1.0',
+    ]
+    if (cc) lines.push('Cc: ' + cc)
+    if (bcc) lines.push('Bcc: ' + bcc)
+    const plain = String(d.plainTextBody || d.body || '').replace(/\r\n/g, '\n')
+    const isPlain = !!d.isPlainText || !String(d.body || '').trim()
+    if (!isPlain && String(d.body || '').trim()) {
+      lines.push('Content-Type: text/html; charset=utf-8')
+      lines.push('Content-Transfer-Encoding: 8bit')
+      lines.push('')
+      lines.push(String(d.body))
+    } else {
+      lines.push('Content-Type: text/plain; charset=utf-8')
+      lines.push('Content-Transfer-Encoding: 8bit')
+      lines.push('')
+      lines.push(plain)
+    }
+    return lines.join('\r\n')
+  }
+
+  function extractMessagesFromQueryResult(list) {
+    if (!list) return []
+    if (Array.isArray(list)) return list
+    if (Array.isArray(list.messages)) return list.messages
+    return []
+  }
+
+  async function queryAllMessagesByHeaderMessageId(ext, headerMessageId) {
+    if (!ext || !ext.messages || typeof ext.messages.query !== 'function') return []
+    const variants = internetMessageIdVariants(headerMessageId)
+    if (!variants.length) return []
+    const out = []
+    const seen = new Set()
+    for (let v = 0; v < variants.length; v++) {
+      try {
+        let list = await ext.messages.query({ headerMessageId: variants[v] })
+        for (let page = 0; page < 20; page++) {
+          const msgs = extractMessagesFromQueryResult(list)
+          for (let i = 0; i < msgs.length; i++) {
+            const h = msgs[i]
+            if (!h || h.id == null) continue
+            const key = String(h.id)
+            if (seen.has(key)) continue
+            seen.add(key)
+            out.push(h)
+          }
+          if (!list || !list.id || !ext.messages.continueList) break
+          list = await ext.messages.continueList(list.id)
+          const more = extractMessagesFromQueryResult(list)
+          if (!more.length) break
+        }
+      } catch (_) {
+        /* optional */
+      }
+    }
+    return out
+  }
+
+  async function queryMessagesByHeaderMessageId(ext, headerMessageId) {
+    if (!ext || !ext.messages || typeof ext.messages.query !== 'function') return []
+    const variants = internetMessageIdVariants(headerMessageId)
+    if (!variants.length) return []
+    for (let attempt = 0; attempt < 6; attempt++) {
+      if (attempt > 0) await sleep(250 * attempt)
+      const all = await queryAllMessagesByHeaderMessageId(ext, headerMessageId)
+      if (all.length) return all
+    }
+    return []
   }
 
   function extractMessageIdFromHeaders(headers) {
@@ -374,6 +495,17 @@
     return body
   }
 
+  async function fetchPendingSend(token, origin) {
+    const res = await fetch(apiRoot(origin) + '/mail-plugin/pending-send', {
+      headers: authHeaders(token),
+    })
+    const body = await res.json().catch(function () {
+      return null
+    })
+    if (!res.ok || !body || typeof body !== 'object') return { active: false }
+    return body
+  }
+
   async function syncPendingSend(token, origin, caseId, sourceFileId) {
     if (!caseId) {
       await fetch(apiRoot(origin) + '/mail-plugin/pending-send', {
@@ -384,11 +516,121 @@
     }
     const body = { case_id: caseId, ttl_seconds: 86400 }
     if (sourceFileId) body.source_file_id = sourceFileId
-    await fetch(apiRoot(origin) + '/mail-plugin/pending-send', {
+    const res = await fetch(apiRoot(origin) + '/mail-plugin/pending-send', {
       method: 'PUT',
       headers: jsonAuthHeaders(token),
       body: JSON.stringify(body),
-    }).catch(() => {})
+    })
+    const respBody = await res.json().catch(function () {
+      return null
+    })
+    if (!res.ok) {
+      const detail = respBody && respBody.detail
+      throw new Error(typeof detail === 'string' ? detail : 'Could not set pending send matter.')
+    }
+  }
+
+  async function setComposePanelTabId(ext, tabId) {
+    if (!ext || !ext.storage || !ext.storage.session) return
+    if (tabId == null) {
+      await ext.storage.session.remove(COMPOSE_PANEL_TAB_KEY)
+      return
+    }
+    await ext.storage.session.set({ [COMPOSE_PANEL_TAB_KEY]: tabId })
+  }
+
+  async function getComposePanelTabId(ext) {
+    if (!ext || !ext.storage || !ext.storage.session) return null
+    const st = await ext.storage.session.get(COMPOSE_PANEL_TAB_KEY)
+    const id = st && st[COMPOSE_PANEL_TAB_KEY]
+    return id != null ? id : null
+  }
+
+  async function resolveRelatedMessageIdForCompose(ext, composeTabId) {
+    if (composeTabId == null || !ext.compose || typeof ext.compose.getComposeDetails !== 'function') {
+      return null
+    }
+    try {
+      const details = await ext.compose.getComposeDetails(composeTabId)
+      if (details && details.relatedMessageId != null) return details.relatedMessageId
+    } catch (_) {
+      /* optional */
+    }
+    const displayed = await resolveDisplayedMessageHeader(ext)
+    if (displayed && displayed.id != null) return displayed.id
+    return null
+  }
+
+  async function applyFiledTagForMessage(ext, messageId) {
+    if (messageId == null) return { ok: false, detail: 'No message id.' }
+    if (typeof globalThis.canaryRunApplyFiledTag === 'function') {
+      try {
+        return await globalThis.canaryRunApplyFiledTag(messageId)
+      } catch (e) {
+        return { ok: false, detail: (e && e.message) || String(e) }
+      }
+    }
+    if (!ext || !ext.runtime || !ext.runtime.sendMessage) {
+      return { ok: false, detail: 'Tag API not available.' }
+    }
+    return new Promise(function (resolve) {
+      ext.runtime.sendMessage({ type: 'canary-apply-filed-tag', messageId: messageId }, function (resp) {
+        if (ext.runtime.lastError) {
+          resolve({ ok: false, detail: String(ext.runtime.lastError.message) })
+          return
+        }
+        resolve(resp || { ok: true })
+      })
+    })
+  }
+
+  /**
+   * Upload a Thunderbird message (.eml) to a matter, record it, and optionally tag it.
+   * @returns {Promise<{ header: object, fileId: string|null }>}
+   */
+  async function fileTbMessageById(ext, token, origin, caseId, messageId, opts) {
+    opts = opts || {}
+    if (!ext.messages || typeof ext.messages.getRaw !== 'function') {
+      throw new Error('messages.getRaw is not available in this build.')
+    }
+    const header = await resolveMessageHeaderForLookup(ext, messageId)
+    if (!header) throw new Error('Could not load the message to file.')
+    if (header.headersOnly) {
+      throw new Error('Message body not downloaded; wait for the message to load fully, then try again.')
+    }
+    const rawId = normalizeTbMessageId(header.id)
+    if (rawId == null) throw new Error('Invalid message id for filing.')
+    const raw = await ext.messages.getRaw(rawId)
+    const blob = rawToBlob(raw)
+    const subj = (header.subject && String(header.subject).trim()) || 'email'
+    const filename = sanitizeFilename(subj) + '.eml'
+    const imapRefs = await resolveImapRefs(ext, header)
+    let internetMid = header.headerMessageId ? String(header.headerMessageId).trim() : ''
+    if (!internetMid && ext.messages && typeof ext.messages.getFull === 'function') {
+      try {
+        const full = await ext.messages.getFull(rawId, { decodeHeaders: true })
+        internetMid = extractMessageIdFromHeaders(full && full.headers)
+      } catch (_) {
+        /* optional */
+      }
+    }
+    const uploaded = await uploadCaseFile({
+      token,
+      origin,
+      caseId,
+      blob,
+      filename,
+      folder: opts.folder || '',
+      parentFileId: opts.parentFileId || null,
+      imapRefs,
+      internetMessageId: internetMid || null,
+    })
+    const fileId = uploaded && uploaded.id != null ? String(uploaded.id) : null
+    await recordFiledTbMessage(ext, header.id, caseId, fileId, internetMid)
+    if (opts.tag !== false) {
+      await applyFiledTagForMessage(ext, header.id)
+    }
+    return { header: header, fileId: fileId }
   }
 
   function isPopoutWindow() {
@@ -452,7 +694,14 @@
     isAuthSessionErrorMessage,
     resolveImapRefs,
     uploadCaseFile,
+    fetchPendingSend,
     syncPendingSend,
+    setComposePanelTabId,
+    getComposePanelTabId,
+    resolveRelatedMessageIdForCompose,
+    applyFiledTagForMessage,
+    fileTbMessageById,
+    extractMessageIdFromHeaders,
     recordFiledTbMessage,
     lookupFiledTbMessage,
     getViewedFilingContext,
@@ -461,6 +710,13 @@
     resolveMessageHeaderForLookup,
     fetchMessageContext,
     internetMessageIdVariants,
+    messageIdForApi,
+    sleep,
+    formatComposeRecipients,
+    buildSyntheticEmlFromComposeDetails,
+    extractMessagesFromQueryResult,
+    queryMessagesByHeaderMessageId,
+    queryAllMessagesByHeaderMessageId,
     isPopoutWindow,
     closeExtensionWindow,
     wirePopoutCloseButton,

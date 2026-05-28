@@ -4154,8 +4154,9 @@ function UserSettingsPage({
         <section className="card" style={{ padding: 16, marginTop: 16 }}>
           <h3 style={{ marginTop: 0 }}>E-mail</h3>
           <p className="muted" style={{ marginTop: 0 }}>
-            Choose how <strong>New → E-mail</strong> on a matter opens compose: your system&apos;s default mail program
-            (<code>mailto:</code>), or Outlook on the web in a new browser tab.
+            Choose how <strong>New → E-mail</strong> opens compose: your system&apos;s default mail program (
+            <code>mailto:</code>) or Outlook on the web. Attach case files with <strong>Compose from matter</strong> in
+            the Canary Outlook or Thunderbird add-in after compose opens.
           </p>
           <div className="stack" style={{ maxWidth: 560, gap: 14, marginTop: 12 }}>
             <label className="field">

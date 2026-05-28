@@ -181,8 +181,10 @@ export function AdminEmail({ token, onSaved }: { token: string; onSaved?: () => 
       <div className="card">
         <h3 style={{ marginTop: 0 }}>Sending e-mail from Canary</h3>
         <p className="muted" style={{ marginTop: 8, lineHeight: 1.5 }}>
-          Choose how <strong>New → E-mail</strong> opens: the desktop <code>mailto:</code> handler, or an Outlook draft via{' '}
-          <strong>Microsoft Graph</strong> (requires Entra app registration, application permissions, and admin consent).
+          <strong>New → E-mail</strong> always opens compose with merged To, subject, and body (<code>mailto:</code> or
+          Outlook web — see Profile → E-mail). Case file attachments use the Canary add-in{' '}
+          <strong>Compose from matter</strong>, not this page. Optional Microsoft Graph below adds OWA links for filed
+          mail and Outlook category helpers (Entra app + admin consent).
         </p>
 
         <div className="stack" style={{ marginTop: 16, gap: 14 }}>
@@ -203,8 +205,8 @@ export function AdminEmail({ token, onSaved }: { token: string; onSaved?: () => 
               style={{ marginTop: '0.2em', flexShrink: 0 }}
             />
             <span style={{ flex: 1, minWidth: 0 }}>
-              <strong>Desktop mailto</strong> — open the default mail program with subject and body (no Microsoft API).
-              Outlook users can attach case files via the add-in <strong>Compose from matter</strong> pane.
+              <strong>No Microsoft Graph</strong> — compose and attachments rely on the mail program and Canary add-ins
+              only.
             </span>
           </label>
           <label
@@ -224,7 +226,8 @@ export function AdminEmail({ token, onSaved }: { token: string; onSaved?: () => 
               style={{ marginTop: '0.2em', flexShrink: 0 }}
             />
             <span style={{ flex: 1, minWidth: 0 }}>
-              <strong>Microsoft 365 (Entra / Graph)</strong> — create a draft in the user&apos;s Outlook mailbox.
+              <strong>Microsoft 365 (Entra / Graph)</strong> — optional: OWA deep links for filed e-mail, Outlook master
+              category provisioning, and category tagging fallback for the add-in.
             </span>
           </label>
         </div>
@@ -274,7 +277,7 @@ export function AdminEmail({ token, onSaved }: { token: string; onSaved?: () => 
             />
           </label>
           <label className="field">
-            <span>Outlook on the web base (compose links)</span>
+            <span>Outlook on the web base (filed mail links)</span>
             <input
               type="text"
               value={owaBase}

@@ -4,9 +4,28 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Canary — File to Case</title>
-    <link rel="stylesheet" href="./styles.css?v=1.0.7.2" />
+    <link rel="stylesheet" href="./styles.css?v=1.0.9.2" />
   </head>
   <body>
+    <noscript><p class="error">JavaScript is required for this add-in.</p></noscript>
+    <p id="canary-boot-status" class="muted" hidden></p>
+    <script>
+      ;(function () {
+        var el = document.getElementById('canary-boot-status')
+        if (!el) return
+        el.hidden = false
+        el.textContent = 'Loaded from ' + location.origin + ' — waiting for Outlook…'
+        window.addEventListener(
+          'error',
+          function (ev) {
+            var msg = (ev && ev.message) || 'unknown script error'
+            el.className = 'error'
+            el.textContent = 'Add-in script error: ' + msg
+          },
+          true,
+        )
+      })()
+    </script>
     <div class="stack">
       <h1>File to Case</h1>
 
@@ -63,7 +82,7 @@
     </div>
 
     <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
-    <script src="./outlook-shared.js?v=1.0.8.2"></script>
-    <script src="./taskpane.js?v=1.0.8.2"></script>
+    <script src="./outlook-shared.js?v=1.0.10.1"></script>
+    <script src="./taskpane.js?v=1.0.10.1"></script>
   </body>
 </html>

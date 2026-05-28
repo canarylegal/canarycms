@@ -135,6 +135,9 @@
         if (globalThis.canaryComposeStore && typeof globalThis.canaryComposeStore.setActiveComposeTab === 'function') {
           await globalThis.canaryComposeStore.setActiveComposeTab(ext, tabId)
         }
+        if (globalThis.canaryShared && typeof globalThis.canaryShared.setComposePanelTabId === 'function') {
+          await globalThis.canaryShared.setComposePanelTabId(ext, tabId)
+        }
         const q =
           'composeTabId=' +
           encodeURIComponent(String(tabId)) +

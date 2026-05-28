@@ -7,10 +7,17 @@ import json
 import logging
 import os
 import re
-from urllib.parse import parse_qs, parse_qsl, quote, urlencode, urlparse
+from urllib.parse import quote, urlparse
 
 import httpx
 from sqlalchemy.orm import Session
+
+from app.owa_urls import (
+    build_owa_compose_deeplink_from_graph_weblink,
+    build_owa_compose_prefill_url,
+    build_owa_compose_with_graph_attachments,
+    build_owa_open_graph_draft_compose_urls,
+)
 
 log = logging.getLogger(__name__)
 
@@ -73,13 +80,20 @@ def app_access_token(db: Session | None = None) -> str:
     return tok
 
 
-def _owa_mail_base_for_compose_deeplinks(db: Session | None = None) -> str:
+def _owa_mail_base_for_compose_deeplinks(db: Session | None = None, user: object | None = None) -> str:
     if db is None:
         raw = (os.getenv("CANARY_OUTLOOK_WEB_MAIL_BASE") or "https://outlook.office.com/mail").strip().rstrip("/")
     else:
-        from app.email_integration_settings import effective_outlook_web_mail_base
+        from app.email_integration_settings import (
+            effective_outlook_web_mail_base,
+            effective_outlook_web_mail_base_for_user,
+        )
+        from app.models import User
 
-        raw = effective_outlook_web_mail_base(db)
+        if user is not None and isinstance(user, User):
+            raw = effective_outlook_web_mail_base_for_user(db, user)
+        else:
+            raw = effective_outlook_web_mail_base(db)
     try:
         host = (urlparse(raw if "://" in raw else f"https://{raw}").hostname or "").lower()
     except Exception:
@@ -102,57 +116,70 @@ def _normalize_outlook_office365_web_link_to_office_com(url: str) -> str:
     )
 
 
-def _item_web_link_from_create_body(body: dict) -> str | None:
-    wl = body.get("webLink")
-    if not isinstance(wl, str) or not wl.strip().startswith(("http://", "https://")):
-        return None
-    return _normalize_outlook_office365_web_link_to_office_com(wl.strip())
-
-
-def _owa_compose_path_token(body: dict) -> str:
-    draft_id = body.get("id")
-    if not isinstance(draft_id, str) or not draft_id.strip():
-        raise RuntimeError("Microsoft Graph created the draft but did not return an id.")
-    web_link = body.get("webLink")
-    if isinstance(web_link, str) and web_link.strip():
-        try:
-            q = urlparse(web_link.strip()).query
-            if q:
-                pairs = parse_qs(q, keep_blank_values=False)
-                for key in ("ItemID", "itemid", "ItemId"):
-                    vals = pairs.get(key)
-                    if vals and isinstance(vals[0], str) and vals[0].strip():
-                        return vals[0].strip()
-        except Exception:
-            pass
-    return draft_id.strip()
-
-
-def _build_owa_compose_deeplink(owa_base: str, body: dict) -> str:
-    owa_base = owa_base.rstrip("/")
-    web_link = body.get("webLink")
-    if isinstance(web_link, str) and web_link.strip():
-        try:
-            pq = urlparse(web_link.strip())
-            if pq.query:
-                pairs: list[tuple[str, str]] = []
-                for k, v in parse_qsl(pq.query, keep_blank_values=False):
-                    if k.lower() == "viewmodel":
-                        continue
-                    pairs.append((k, v))
-                if any(k.lower() == "itemid" for k, _ in pairs):
-                    pairs = [(k, v) for k, v in pairs if k.lower() != "popoutv2"]
-                    pairs.append(("popoutv2", "1"))
-                    return f"{owa_base}/deeplink/compose?{urlencode(pairs, doseq=True)}"
-        except Exception:
-            pass
-    token = _owa_compose_path_token(body)
-    return f"{owa_base}/deeplink/compose/{quote(token, safe='')}?popoutv2=1"
-
-
 def outlook_category_names() -> list[str]:
     raw = (os.getenv("CANARY_OUTLOOK_CATEGORY_NAME") or "Canary").strip()
     return [raw] if raw else []
+
+
+def _graph_attach_files(
+    client: httpx.Client,
+    *,
+    mailbox: str,
+    draft_id: str,
+    token: str,
+    attachments: list[tuple[str, str, bytes]],
+) -> None:
+    att_base = (
+        f"https://graph.microsoft.com/v1.0/users/{quote(mailbox)}"
+        f"/messages/{quote(draft_id, safe='')}/attachments"
+    )
+    att_headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
+    }
+    for fname, mime, content in attachments:
+        att_payload = {
+            "@odata.type": "#microsoft.graph.fileAttachment",
+            "name": fname,
+            "contentType": mime or "application/octet-stream",
+            "contentBytes": base64.b64encode(content).decode("ascii"),
+        }
+        att_res = client.post(att_base, headers=att_headers, json=att_payload)
+        if att_res.status_code >= 400:
+            txt = (att_res.text or "").strip()
+            raise RuntimeError(
+                f"Microsoft Graph attachment upload failed ({att_res.status_code}) "
+                f"for {fname}: {txt[:600]}",
+            )
+
+
+def _graph_refresh_draft(
+    client: httpx.Client,
+    *,
+    mailbox: str,
+    draft_id: str,
+    token: str,
+) -> dict:
+    get_res = client.get(
+        f"https://graph.microsoft.com/v1.0/users/{quote(mailbox)}"
+        f"/messages/{quote(draft_id, safe='')}"
+        "?$select=id,webLink,hasAttachments,subject,body,toRecipients,internetMessageId",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    if get_res.status_code >= 400:
+        log.warning(
+            "Could not refresh Graph draft after create (%s): %s",
+            get_res.status_code,
+            (get_res.text or "")[:300],
+        )
+        return {"id": draft_id}
+    try:
+        refreshed = get_res.json()
+    except json.JSONDecodeError:
+        return {"id": draft_id}
+    if isinstance(refreshed, dict) and refreshed.get("id"):
+        return refreshed
+    return {"id": draft_id}
 
 
 def create_outlook_draft(
@@ -163,27 +190,31 @@ def create_outlook_draft(
     body_text: str,
     attachments: list[tuple[str, str, bytes]],
     db: Session | None = None,
-) -> tuple[str, str | None, str | None, str | None]:
+    mailbox_user_row: object | None = None,
+) -> tuple[str, str | None, str | None, str | None, str | None]:
     """
-    Create a draft via Graph. Returns
-    (primary_browser_url, graph_message_id, compose_deeplink_or_none, internet_message_id_or_none).
+    Create a draft via Graph (when attachments present) or OWA prefill-only (no attachments).
+
+    Returns
+    (open_url, graph_message_id, compose_fallback_url, internet_message_id, compose_prefill_url).
     """
-    token = app_access_token(db)
     mailbox = mailbox_user.strip()
     if not mailbox:
         raise RuntimeError("Mailbox user principal name is required.")
 
-    att_json: list[dict] = []
-    for fname, mime, content in attachments:
-        b64 = base64.b64encode(content).decode("ascii")
-        att_json.append(
-            {
-                "@odata.type": "#microsoft.graph.fileAttachment",
-                "name": fname,
-                "contentType": mime or "application/octet-stream",
-                "contentBytes": b64,
-            }
+    owa_base = _owa_mail_base_for_compose_deeplinks(db, mailbox_user_row)
+    has_attachments = bool(attachments)
+
+    if not has_attachments:
+        prefill = build_owa_compose_prefill_url(
+            owa_base,
+            to=to_addr,
+            subject=subject,
+            body=body_text,
         )
+        return prefill, None, None, None, prefill
+
+    token = app_access_token(db)
 
     cats = outlook_category_names()
     msg: dict = {
@@ -199,8 +230,6 @@ def create_outlook_draft(
     to_clean = (to_addr or "").strip()
     if to_clean:
         msg["toRecipients"] = [{"emailAddress": {"address": to_clean}}]
-    if att_json:
-        msg["attachments"] = att_json
 
     url = f"https://graph.microsoft.com/v1.0/users/{quote(mailbox)}/messages"
     headers = {
@@ -210,27 +239,61 @@ def create_outlook_draft(
     try:
         with httpx.Client(timeout=90.0) as client:
             res = client.post(url, headers=headers, json=msg)
+            if res.status_code >= 400:
+                txt = (res.text or "").strip()
+                raise RuntimeError(f"Microsoft Graph draft create failed ({res.status_code}): {txt[:1200]}")
+            try:
+                body = res.json()
+            except json.JSONDecodeError:
+                raise RuntimeError(
+                    f"Microsoft Graph returned a non-JSON body after creating the draft ({res.status_code}): "
+                    f"{(res.text or '')[:800]}",
+                ) from None
+            draft_id = body.get("id")
+            if not isinstance(draft_id, str) or not draft_id.strip():
+                raise RuntimeError("Microsoft Graph created the draft but did not return an id.")
+            draft_id = draft_id.strip()
+
+            if attachments:
+                _graph_attach_files(
+                    client,
+                    mailbox=mailbox,
+                    draft_id=draft_id,
+                    token=token,
+                    attachments=attachments,
+                )
+            body = _graph_refresh_draft(client, mailbox=mailbox, draft_id=draft_id, token=token)
+            if attachments and not body.get("hasAttachments"):
+                log.warning(
+                    "Graph draft %s hasAttachments=false after uploading %s file(s)",
+                    draft_id[:48],
+                    len(attachments),
+                )
     except httpx.RequestError as e:
         raise RuntimeError(f"Could not reach Microsoft Graph to create the draft: {e}") from e
-    if res.status_code >= 400:
-        txt = (res.text or "").strip()
-        raise RuntimeError(f"Microsoft Graph draft create failed ({res.status_code}): {txt[:1200]}")
-    try:
-        body = res.json()
-    except json.JSONDecodeError:
-        raise RuntimeError(
-            f"Microsoft Graph returned a non-JSON body after creating the draft ({res.status_code}): "
-            f"{(res.text or '')[:800]}",
-        ) from None
-    draft_id = body.get("id")
-    if not isinstance(draft_id, str) or not draft_id.strip():
-        raise RuntimeError("Microsoft Graph created the draft but did not return an id.")
 
-    owa_base = _owa_mail_base_for_compose_deeplinks(db)
-    compose = _build_owa_compose_deeplink(owa_base, body)
-    item_link = _item_web_link_from_create_body(body)
-    primary = item_link or compose
-    compose_extra = compose if item_link else None
+    prefill_url = build_owa_compose_prefill_url(
+        owa_base,
+        to=to_addr,
+        subject=subject,
+        body=body_text,
+    )
+    compose_open_url = build_owa_compose_with_graph_attachments(
+        body,
+        owa_base,
+        to=to_addr,
+        subject=subject,
+        body=body_text,
+    )
+    draft_item_url = build_owa_compose_deeplink_from_graph_weblink(body, owa_base)
+    draft_path_url, draft_query_url = build_owa_open_graph_draft_compose_urls(body, owa_base)
+    draft_backup_url = draft_item_url or draft_query_url or draft_path_url
     imid_raw = body.get("internetMessageId")
     internet_message_id = imid_raw.strip() if isinstance(imid_raw, str) and imid_raw.strip() else None
-    return primary, draft_id.strip(), compose_extra, internet_message_id
+    return (
+        compose_open_url,
+        draft_id,
+        draft_backup_url,
+        internet_message_id,
+        prefill_url,
+    )

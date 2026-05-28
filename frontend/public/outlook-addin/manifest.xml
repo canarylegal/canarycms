@@ -1,11 +1,13 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  Canary - Outlook add-in (File to Case)
+  Canary - Outlook add-in (File to Case).
 
-  Default UI origin: https://testing.canarylegalsoftware.co.uk
-  Replace that origin everywhere below for another environment (no trailing slash).
-
-  Schema: outer VersionOverridesV1_0 wraps inner VersionOverridesV1_1 (required for SupportsPinning and matches Microsoft samples).
+  Every https:// URL below must match CANARY_PUBLIC_URL in the repo .env (your public app origin).
+  This committed copy uses the placeholder https://YOUR_CANARY_PUBLIC_URL — not a live host.
+  On deploy, the frontend Docker build rewrites dist/outlook-addin/manifest.xml from CANARY_PUBLIC_URL.
+  For local sideload: set CANARY_PUBLIC_URL in .env, then run
+    node frontend/scripts/generate-outlook-manifest.mjs --target public
+  Re-upload or re-sideload the manifest in Outlook after changing the URL.
 -->
 <OfficeApp xmlns="http://schemas.microsoft.com/office/appforoffice/1.1"
            xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
@@ -13,16 +15,16 @@
            xmlns:mailappor="http://schemas.microsoft.com/office/mailappversionoverrides/1.0"
            xsi:type="MailApp">
   <Id>c4e8f2a1-9b3d-4a7e-8f2c-1d9e3a7b5f6a</Id>
-  <Version>1.0.8.2</Version>
+  <Version>1.0.10.1</Version>
   <ProviderName>Canary</ProviderName>
   <DefaultLocale>en-US</DefaultLocale>
   <DisplayName DefaultValue="Canary - File to Case"/>
-  <Description DefaultValue="File mail to a Canary matter; compose from a matter with merge and attachments (no Graph required). Applies an Outlook Canary category after filing."/>
-  <IconUrl DefaultValue="https://testing.canarylegalsoftware.co.uk/icons/icon64.png"/>
-  <HighResolutionIconUrl DefaultValue="https://testing.canarylegalsoftware.co.uk/icons/icon128.png"/>
-  <SupportUrl DefaultValue="https://testing.canarylegalsoftware.co.uk/"/>
+  <Description DefaultValue="File mail to a Canary matter; compose from a matter with merge and attachments (no Graph required)."/>
+  <IconUrl DefaultValue="https://YOUR_CANARY_PUBLIC_URL/icons/icon64.png"/>
+  <HighResolutionIconUrl DefaultValue="https://YOUR_CANARY_PUBLIC_URL/icons/icon128.png"/>
+  <SupportUrl DefaultValue="https://YOUR_CANARY_PUBLIC_URL/"/>
   <AppDomains>
-    <AppDomain>https://testing.canarylegalsoftware.co.uk</AppDomain>
+    <AppDomain>https://YOUR_CANARY_PUBLIC_URL</AppDomain>
   </AppDomains>
 
   <Hosts>
@@ -38,7 +40,7 @@
   <FormSettings>
     <Form xsi:type="ItemRead">
       <DesktopSettings>
-        <SourceLocation DefaultValue="https://testing.canarylegalsoftware.co.uk/outlook-addin/taskpane.html"/>
+        <SourceLocation DefaultValue="https://YOUR_CANARY_PUBLIC_URL/outlook-addin/taskpane.html"/>
         <RequestedHeight>450</RequestedHeight>
       </DesktopSettings>
     </Form>
@@ -118,7 +120,7 @@
             </ExtensionPoint>
             <ExtensionPoint xsi:type="LaunchEvent">
               <LaunchEvents>
-                <LaunchEvent Type="OnMessageSend" FunctionName="onMessageSendHandler" SendMode="PromptUser"/>
+                <LaunchEvent Type="OnMessageSend" FunctionName="onMessageSendHandler" SendMode="SoftBlock"/>
               </LaunchEvents>
               <SourceLocation resid="WebViewRuntime.Url"/>
             </ExtensionPoint>
@@ -127,16 +129,16 @@
       </Hosts>
       <Resources>
         <bt:Images>
-          <bt:Image id="icon16" DefaultValue="https://testing.canarylegalsoftware.co.uk/icons/icon16.png"/>
-          <bt:Image id="icon32" DefaultValue="https://testing.canarylegalsoftware.co.uk/icons/icon32.png"/>
-          <bt:Image id="icon80" DefaultValue="https://testing.canarylegalsoftware.co.uk/icons/icon80.png"/>
+          <bt:Image id="icon16" DefaultValue="https://YOUR_CANARY_PUBLIC_URL/icons/icon16.png"/>
+          <bt:Image id="icon32" DefaultValue="https://YOUR_CANARY_PUBLIC_URL/icons/icon32.png"/>
+          <bt:Image id="icon80" DefaultValue="https://YOUR_CANARY_PUBLIC_URL/icons/icon80.png"/>
         </bt:Images>
         <bt:Urls>
-          <bt:Url id="functionFile" DefaultValue="https://testing.canarylegalsoftware.co.uk/outlook-addin/taskpane.html"/>
-          <bt:Url id="taskPaneUrl" DefaultValue="https://testing.canarylegalsoftware.co.uk/outlook-addin/taskpane.html"/>
-          <bt:Url id="composePaneUrl" DefaultValue="https://testing.canarylegalsoftware.co.uk/outlook-addin/compose-pane.html"/>
-          <bt:Url id="JSRuntime.Url" DefaultValue="https://testing.canarylegalsoftware.co.uk/outlook-addin/commands.js"/>
-          <bt:Url id="WebViewRuntime.Url" DefaultValue="https://testing.canarylegalsoftware.co.uk/outlook-addin/commands.html"/>
+          <bt:Url id="functionFile" DefaultValue="https://YOUR_CANARY_PUBLIC_URL/outlook-addin/commands.html"/>
+          <bt:Url id="WebViewRuntime.Url" DefaultValue="https://YOUR_CANARY_PUBLIC_URL/outlook-addin/commands.html"/>
+          <bt:Url id="JSRuntime.Url" DefaultValue="https://YOUR_CANARY_PUBLIC_URL/outlook-addin/commands.js"/>
+          <bt:Url id="taskPaneUrl" DefaultValue="https://YOUR_CANARY_PUBLIC_URL/outlook-addin/taskpane.html"/>
+          <bt:Url id="composePaneUrl" DefaultValue="https://YOUR_CANARY_PUBLIC_URL/outlook-addin/compose-pane.html"/>
         </bt:Urls>
         <bt:ShortStrings>
           <bt:String id="groupLabel" DefaultValue="Canary"/>
@@ -145,7 +147,7 @@
         </bt:ShortStrings>
         <bt:LongStrings>
           <bt:String id="residAppDesc" DefaultValue="File mail to a Canary matter; compose from a matter with merge and case attachments without Microsoft Graph."/>
-          <bt:String id="buttonTip" DefaultValue="Save this message to a Canary matter and apply the Canary category in Outlook."/>
+          <bt:String id="buttonTip" DefaultValue="Save this message to a Canary matter."/>
           <bt:String id="composeButtonTip" DefaultValue="Merge a precedent, pick a recipient, and attach case files to this compose message."/>
         </bt:LongStrings>
       </Resources>

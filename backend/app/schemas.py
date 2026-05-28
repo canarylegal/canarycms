@@ -585,10 +585,24 @@ class CaseEmailDraftM365In(BaseModel):
     attachment_file_ids: list[uuid.UUID] = Field(default_factory=list)
 
 
+class CaseEmailDraftM365AttachmentOut(BaseModel):
+    file_id: uuid.UUID
+    filename: str
+
+
 class CaseEmailDraftM365Out(BaseModel):
+    to: str = ""
+    subject: str = ""
+    body: str = ""
     open_url: str
+    """OWA compose deeplink for the Graph draft (or prefill compose when there are no attachments)."""
     graph_message_id: str | None = None
     draft_compose_web_link: str | None = None
+    """Graph draft in Drafts (attachments on message; may open as preview until Edit)."""
+    compose_prefill_url: str | None = None
+    attachment_count: int = 0
+    compose_handoff_token: str | None = None
+    attachment_files: list[CaseEmailDraftM365AttachmentOut] = Field(default_factory=list)
 
 
 class CaseEmailMailtoOut(BaseModel):

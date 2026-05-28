@@ -78,6 +78,10 @@
     if (cs && typeof cs().setActiveComposeTab === 'function') {
       await cs().setActiveComposeTab(ext, tabId)
     }
+    const sh = globalThis.canaryShared
+    if (sh && typeof sh.setComposePanelTabId === 'function') {
+      await sh.setComposePanelTabId(ext, tabId)
+    }
 
     const action = ext.composeAction
     if (action && typeof action.openPopup === 'function') {

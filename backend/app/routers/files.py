@@ -53,6 +53,7 @@ from app.security import (
     COMPOSE_HANDOFF_TTL_SECONDS,
     create_compose_handoff_token,
     create_eml_open_token,
+    decode_compose_handoff_token,
     decode_eml_open_token,
 )
 from app.schemas import (
@@ -63,6 +64,7 @@ from app.schemas import (
     CaseFolderMoveUpdate,
     CaseFolderRenameUpdate,
     CaseEmailDraftM365In,
+    CaseEmailDraftM365AttachmentOut,
     CaseEmailDraftM365Out,
     CaseEmailComposeHandoffOut,
     CaseEmailMailtoOut,
@@ -616,7 +618,12 @@ def _resolve_recipient_email_m365(
         cc = db.get(CaseContact, body.case_contact_id)
         if not cc or cc.case_id != case_id:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Matter contact not found")
-        return (cc.email or "").strip()
+        addr = (cc.email or "").strip()
+        if not addr and cc.contact_id:
+            master = db.get(GlobalContactRow, cc.contact_id)
+            if master and master.email:
+                addr = master.email.strip()
+        return addr
     if body.global_contact_id:
         g = db.get(GlobalContactRow, body.global_contact_id)
         if not g:
@@ -692,6 +699,43 @@ def _case_email_compose_bundle(
         attachments.append((fn, mt, raw))
 
     return to_addr, subject, body_text, attachments
+
+
+@router.get("/compose-handoff-attachments/{file_id}")
+def download_compose_handoff_attachment(
+    case_id: uuid.UUID,
+    file_id: uuid.UUID,
+    handoff_token: str = Query(..., min_length=10),
+    db: Session = Depends(get_db),
+):
+    """Download a case file listed in a short-lived M365 compose handoff JWT (for OWA drag-and-drop attach)."""
+    try:
+        payload = decode_compose_handoff_token(handoff_token)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(e)) from e
+    if payload.case_id != str(case_id) or str(file_id) not in payload.attachment_file_ids:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Token does not allow this file.")
+    try:
+        owner_id = uuid.UUID(payload.user_id)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token.") from e
+    owner = db.get(User, owner_id)
+    if not owner:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token.")
+    require_case_access(case_id, owner, db)
+    row = db.get(DbFile, file_id)
+    if not row or row.case_id != case_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+    ensure_files_root()
+    abs_path = (FILES_ROOT / row.storage_path).resolve()
+    if not str(abs_path).startswith(str(FILES_ROOT)) or not abs_path.is_file():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File missing on disk")
+    return FileResponse(
+        path=str(abs_path),
+        media_type=row.mime_type or "application/octet-stream",
+        filename=row.original_filename,
+        content_disposition_type="attachment",
+    )
 
 
 @router.post("/email-compose-handoff", response_model=CaseEmailComposeHandoffOut)
@@ -792,13 +836,14 @@ def _create_case_email_draft_m365_body(
     to_addr, subject, body_text, attachments = _case_email_compose_bundle(case_id, body, user, db)
 
     try:
-        primary, draft_id, compose_extra, _imid = create_outlook_draft(
+        primary, draft_id, compose_extra, _imid, prefill_url = create_outlook_draft(
             mailbox,
             to_addr=to_addr,
             subject=subject,
             body_text=body_text,
             attachments=attachments,
             db=db,
+            mailbox_user_row=user,
         )
     except RuntimeError as e:
         msg = str(e)
@@ -838,10 +883,38 @@ def _create_case_email_draft_m365_body(
             "attachment_count": len(body.attachment_file_ids),
         },
     )
+    handoff_token: str | None = None
+    attachment_files_out: list[CaseEmailDraftM365AttachmentOut] = []
+    if attachments:
+        handoff_token = create_compose_handoff_token(
+            user_id=str(user.id),
+            case_id=str(case_id),
+            to=to_addr,
+            subject=subject,
+            body=body_text,
+            attachment_file_ids=[str(fid) for fid in body.attachment_file_ids],
+        )
+        for fid in body.attachment_file_ids:
+            frow = db.get(DbFile, fid)
+            if frow and frow.case_id == case_id:
+                attachment_files_out.append(
+                    CaseEmailDraftM365AttachmentOut(
+                        file_id=fid,
+                        filename=Path(frow.original_filename).name or "attachment",
+                    ),
+                )
+
     return CaseEmailDraftM365Out(
+        to=to_addr,
+        subject=subject,
+        body=body_text,
         open_url=primary,
         graph_message_id=draft_id,
         draft_compose_web_link=compose_extra,
+        compose_prefill_url=prefill_url,
+        attachment_count=len(attachments),
+        compose_handoff_token=handoff_token,
+        attachment_files=attachment_files_out,
     )
 
 

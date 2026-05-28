@@ -60,26 +60,26 @@ export function openOutlookWebAppFromGraphWebLink(
  * Append ``login_hint`` / ``domain_hint`` so Microsoft identity can pick the right work account without an extra prompt.
  * (Consumer @outlook.com addresses skip ``domain_hint`` — it can confuse live.com / personal flows.)
  */
+/**
+ * Append auth hints without ``URLSearchParams`` — re-serializing the query turns ``%20`` into ``+``,
+ * which Outlook shows literally in subject/body.
+ */
 export function appendOutlookWebAuthHintsForNav(url: string, loginHint: string | null | undefined): string {
   const h = (loginHint || '').trim()
   if (!h) return url
-  try {
-    const base = url.startsWith('http://') || url.startsWith('https://') ? url : `https://${url}`
-    const u = new URL(base)
-    if (!u.searchParams.has('login_hint')) {
-      u.searchParams.set('login_hint', h)
-    }
-    const at = h.indexOf('@')
-    if (at > 0 && at < h.length - 1) {
-      const domain = h.slice(at + 1).trim().toLowerCase()
-      if (domain && !consumerMicrosoftMailboxDomain(domain) && !u.searchParams.has('domain_hint')) {
-        u.searchParams.set('domain_hint', domain)
-      }
-    }
-    return u.toString()
-  } catch {
-    return url
+  const extra: string[] = []
+  if (!/\blogin_hint=/i.test(url)) {
+    extra.push(`login_hint=${encodeURIComponent(h)}`)
   }
+  const at = h.indexOf('@')
+  if (at > 0 && at < h.length - 1) {
+    const domain = h.slice(at + 1).trim().toLowerCase()
+    if (domain && !consumerMicrosoftMailboxDomain(domain) && !/\bdomain_hint=/i.test(url)) {
+      extra.push(`domain_hint=${encodeURIComponent(domain)}`)
+    }
+  }
+  if (!extra.length) return url
+  return `${url}${url.includes('?') ? '&' : '?'}${extra.join('&')}`
 }
 
 export function outlookWebMailBase(owaBaseFromUser: string | null | undefined): string {

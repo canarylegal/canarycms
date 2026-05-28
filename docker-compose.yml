@@ -197,6 +197,7 @@ services:
         VITE_ONLYOFFICE_DIRECT_PORT: ${VITE_ONLYOFFICE_DIRECT_PORT:-}
         VITE_ONLYOFFICE_DIRECT_URL: ${VITE_ONLYOFFICE_DIRECT_URL:-}
         VITE_CANARY_OPEN_PDF_IN_ONLYOFFICE: ${VITE_CANARY_OPEN_PDF_IN_ONLYOFFICE:-}
+        CANARY_PUBLIC_URL: ${CANARY_PUBLIC_URL:-}
     container_name: canary-frontend
     restart: unless-stopped
     networks: [canary]

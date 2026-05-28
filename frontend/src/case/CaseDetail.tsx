@@ -5,7 +5,7 @@ import { FinancePage } from '../FinancePage'
 import { resolveContactNameWithFallback } from '../GlobalContactCreateForm'
 import { ManageCaseAccessModal } from '../ManageCaseAccessModal'
 import { MATTER_CONTACT_TYPE_OPTIONS_FALLBACK } from '../matterContactTypeOptions'
-import { apiFetch, apiUrl, applyAuthHeaders, browserAbsoluteApiUrl, formatApiErrorDetail } from '../api'
+import { apiFetch, apiUrl, applyAuthHeaders, browserAbsoluteApiUrl } from '../api'
 import {
   appendOutlookWebAuthHintsForNav,
   OWA_MESSAGE_WINDOW_FEATURES,
@@ -15,6 +15,7 @@ import {
 import {
   buildMailtoComposeUrl,
   buildOutlookWebComposeUrl,
+  normalizeComposeQueryPlusAsSpaces,
   buildOutlookWebReadItemUrl,
   isLikelyExchangeRestItemId,
   isUsableOutlookMessageWebLink,
@@ -30,7 +31,6 @@ import { openOnlyOfficeCaseEditor } from '../onlyofficeEditorWindow'
 import { caseHasRevokedUserAccess, formatCaseStatusLabel, type CaseWorkflowStatus } from '../types'
 import type {
   CaseContactOut,
-  CaseEmailDraftM365Out,
   CaseEmailMailtoOut,
   CaseEventsOut,
   CaseNoteOut,
@@ -54,7 +54,7 @@ import { TasksTable } from '../TasksTable'
 import { CaseContactsAddDocForm, CaseContactsEditDocForm } from './CaseContactsDocForms'
 import { computeDocContextMenuStyle } from './docContextMenu'
 import { dndEventHasFiles, docListPrimaryDate, formatDocFileSize, formatDocModified, matterTypeDisplayLine } from './docFormat'
-import { DocMimeIcon, DocsFileDescCell, DocsFolderDescCell } from './DocCells'
+import { DocsFileDescCell, DocsFolderDescCell } from './DocCells'
 import { financeCaseTotals, penceGb } from './financeTotals'
 import { matterContactTypeLabel } from './matterLabels'
 import { PropertyDetailsForm } from './PropertyDetailsForm'
@@ -149,60 +149,6 @@ const LAWYERS_TYPE_SLUG = 'lawyers'
 
 function isClientMatterContact(c: CaseContactOut) {
   return (c.matter_contact_type || '').trim().toLowerCase() === CLIENT_TYPE_SLUG
-}
-
-function htmlEscapeForHandoffTab(s: string): string {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;')
-}
-
-function formatHandoffCaughtError(e: unknown): string {
-  if (e && typeof e === 'object' && 'message' in e) {
-    const o = e as { message?: string; status?: number; body?: unknown }
-    const m = typeof o.message === 'string' ? o.message.trim() : ''
-    if (m) return m
-    const fb =
-      typeof o.status === 'number' ? `HTTP ${o.status}` : 'Request failed'
-    if (o.body !== undefined) {
-      const fromBody = formatApiErrorDetail(o.body, fb).trim()
-      if (fromBody) return fromBody
-    }
-  }
-  if (e instanceof Error && e.message.trim()) return e.message.trim()
-  if (typeof e === 'string' && e.trim()) return e.trim()
-  if (e && typeof e === 'object' && 'status' in e) {
-    const st = (e as { status?: number }).status
-    if (typeof st === 'number') {
-      return `Something went wrong (HTTP ${st}). Return to the Canary tab for the full message.`
-    }
-  }
-  return 'Could not create Outlook draft. Return to the Canary tab for details.'
-}
-
-/** Render an error in a tab opened synchronously for async navigation. Avoid `close()` — it looks like the tab flashed away. */
-function showHandoffTabError(tab: Window | null, message: string) {
-  if (!tab || tab.closed) return
-  const detail =
-    (message || '').trim() ||
-    'No additional details are available. Return to the Canary tab and try again.'
-  const esc = htmlEscapeForHandoffTab
-  const doc = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Could not open Outlook</title><style>body{font-family:system-ui,sans-serif;padding:2rem;max-width:40rem;line-height:1.5;color:#111}h1{font-size:1.125rem;font-weight:600;margin:0 0 0.75rem}p.detail{margin:0;white-space:pre-wrap;word-break:break-word}</style></head><body><h1>Could not open Outlook</h1><p class="detail">${esc(detail)}</p></body></html>`
-  try {
-    tab.document.open()
-    tab.document.write(doc)
-    tab.document.close()
-  } catch {
-    try {
-      tab.location.replace(`data:text/html;charset=utf-8,${encodeURIComponent(doc)}`)
-    } catch {
-      try {
-        tab.location.replace(
-          `data:text/plain;charset=utf-8,${encodeURIComponent(`Could not open Outlook\n\n${detail}`)}`,
-        )
-      } catch {
-        /* ignore */
-      }
-    }
-  }
 }
 
 const CASE_DOC_PANEL_ZOOM_MIN = 0.12
@@ -344,14 +290,6 @@ export function CaseDetail({
     if (selectedCaseId === undefined || selectedCaseId === null) return caseId
     return String(selectedCaseId) === String(caseId) ? caseId : null
   }, [caseId, selectedCaseId])
-
-  /** Graph drafts (M365) vs Thunderbird handoff when integration is mailto/desktop. */
-  const m365EmailDraftsEnabled = useMemo(
-    () =>
-      currentUser?.email_integration_mode === 'microsoft_graph' &&
-      currentUser?.m365_graph_drafts_configured === true,
-    [currentUser?.email_integration_mode, currentUser?.m365_graph_drafts_configured],
-  )
 
   const [busy, setBusy] = useState(false)
   useEffect(() => {
@@ -542,10 +480,6 @@ export function CaseDetail({
   const [contactPickModal, setContactPickModal] = useState<null | { precedentId: string | null; composeKind: 'letter' | 'email' }>(
     null,
   )
-  const [emailAttachIds, setEmailAttachIds] = useState<string[]>([])
-  const [emailAttachBrowseFolder, setEmailAttachBrowseFolder] = useState('')
-  const [emailAttachCanaryOpen, setEmailAttachCanaryOpen] = useState(false)
-  const emailLocalAttachInputRef = useRef<HTMLInputElement | null>(null)
   const [pickMatterCcId, setPickMatterCcId] = useState<string>('') // '' | 'none' | case contact id
   const [pickGlobalId, setPickGlobalId] = useState<string | null>(null)
   const [pickLinkGlobal, setPickLinkGlobal] = useState(false)
@@ -1052,40 +986,6 @@ export function CaseDetail({
     return [...childFolders].sort((a, b) => a.localeCompare(b) * dir)
   }, [childFolders, docSortDir])
 
-  const matterFilesNonSystem = useMemo(
-    () => files.filter((f) => f.category !== 'system'),
-    [files],
-  )
-
-  const emailAttachChildFolders = useMemo(() => {
-    const folder = emailAttachBrowseFolder
-    const set = new Set<string>()
-    const basePrefix = folder ? `${folder}/` : ''
-    for (const f of matterFilesNonSystem) {
-      const fp = f.folder_path ?? ''
-      if (fp === folder) continue
-      if (folder && !fp.startsWith(basePrefix)) continue
-      const rest = folder ? fp.slice(basePrefix.length) : fp
-      const [first] = rest.split('/').filter(Boolean)
-      if (first) set.add(first)
-    }
-    return Array.from(set).sort((a, b) => a.localeCompare(b))
-  }, [matterFilesNonSystem, emailAttachBrowseFolder])
-
-  const emailAttachFilesInBrowseFolder = useMemo(() => {
-    const skipComment = (f: FileSummary) =>
-      (f.mime_type || '').toLowerCase().startsWith('text/plain') ||
-      (f.original_filename || '').toLowerCase().endsWith('.txt')
-    return matterFilesNonSystem
-      .filter(
-        (f) =>
-          (f.folder_path ?? '') === emailAttachBrowseFolder &&
-          !f.parent_file_id &&
-          !skipComment(f),
-      )
-      .sort((a, b) => a.original_filename.localeCompare(b.original_filename))
-  }, [matterFilesNonSystem, emailAttachBrowseFolder])
-
   const sortedPinnedInFolder = useMemo(() => {
     const dir = docSortDir === 'asc' ? 1 : -1
     const compare = (a: FileSummary, b: FileSummary) => {
@@ -1222,52 +1122,6 @@ export function CaseDetail({
     }
   }
 
-  async function uploadLocalFilesForEmailAttach(incomingFiles: File[]) {
-    if (!caseId || incomingFiles.length === 0) return
-    setBusy(true)
-    setActionErr(null)
-    try {
-      const collected: string[] = []
-      for (const f of incomingFiles) {
-        const form = new FormData()
-        form.append('upload', f)
-        form.append('folder', docFolder)
-        const r = await fetch(apiUrl(`/cases/${caseId}/files`), {
-          method: 'POST',
-          headers: caseAuthHeaders(token),
-          body: form,
-        })
-        if (r.status === 401) {
-          localStorage.removeItem('token')
-          window.location.reload()
-          return
-        }
-        if (!r.ok) {
-          const t = await r.text()
-          throw new Error(t || r.statusText)
-        }
-        const j = (await r.json()) as { id?: string }
-        if (j.id) collected.push(j.id)
-      }
-      if (collected.length) {
-        setEmailAttachIds((prev) => {
-          const next = [...prev]
-          for (const id of collected) {
-            if (!next.includes(id) && next.length < 25) next.push(id)
-          }
-          return next
-        })
-      }
-      onRefresh()
-    } catch (err: unknown) {
-      const e = err as { message?: string }
-      setActionErr(e?.message ?? 'Upload failed')
-    } finally {
-      setBusy(false)
-      if (emailLocalAttachInputRef.current) emailLocalAttachInputRef.current.value = ''
-    }
-  }
-
   function createFolderAtCurrentPath() {
     setTextPrompt({
       title: 'New folder',
@@ -1322,83 +1176,16 @@ export function CaseDetail({
     }
   }
 
-  async function composeM365EmailDraft(
-    precedentId: string | null,
-    caseContactId: string | null,
-    globalContactId: string | null,
-    precedentMergeAllClients: boolean,
-    attachmentFileIds: string[],
-  ) {
-    if (!caseId) return
-    /* Open a tab synchronously on the click path so popup blockers allow navigation after `await`.
-     * Same window shape as opening an ``.eml`` in Outlook web (see ``openCaseFile``).
-     * Do not pass `noopener` here: with noopener many browsers return `null` while still opening a tab,
-     * so we cannot call `location.replace` and the user sees a blank orphan tab. */
-    const handoffTab = window.open('about:blank', OWA_MAIL_WINDOW_NAME, OWA_MESSAGE_WINDOW_FEATURES)
-    setBusy(true)
-    setActionErr(null)
-    try {
-      const res = await apiFetch<CaseEmailDraftM365Out>(`/cases/${caseId}/files/email-drafts/m365`, {
-        token,
-        json: {
-          folder: docFolder,
-          precedent_id: precedentId,
-          case_contact_id: caseContactId,
-          global_contact_id: globalContactId,
-          precedent_merge_all_clients: precedentMergeAllClients,
-          attachment_file_ids: attachmentFileIds,
-        },
-      })
-      const rawOpen = (res.open_url || '').trim()
-      if (!rawOpen) {
-        const msg = 'The server did not return an Outlook link. Check Microsoft Graph and try again.'
-        showHandoffTabError(handoffTab, msg)
-        setActionErr(msg)
-        return
-      }
-      try {
-        await apiFetch(`/mail-plugin/pending-send`, {
-          token,
-          method: 'PUT',
-          json: { case_id: caseId, ttl_seconds: 86400 },
-        })
-      } catch {
-        /* Best-effort: add-in send capture works without this if user files manually. */
-      }
-      let url = browserAbsoluteApiUrl(rawOpen)
-      const launchPref = currentUser?.email_launch_preference ?? 'desktop'
-      if (launchPref === 'outlook_web') {
-        url = appendOutlookWebAuthHintsForNav(url, currentUser?.email?.trim() || null)
-      }
-      if (handoffTab) {
-        handoffTab.location.replace(url)
-      } else {
-        const w = window.open(url, '_blank')
-        if (!w) {
-          setActionErr(
-            'Your browser blocked opening Outlook. Allow pop-ups for this site, or copy the draft link from the browser network response.',
-          )
-        }
-      }
-    } catch (e: unknown) {
-      const msg = formatHandoffCaughtError(e)
-      showHandoffTabError(handoffTab, msg)
-      setActionErr(msg)
-    } finally {
-      setBusy(false)
-    }
-  }
-
   async function composeEmailMailto(
     precedentId: string | null,
     caseContactId: string | null,
     globalContactId: string | null,
     precedentMergeAllClients: boolean,
-    attachmentFileIds: string[],
   ) {
     if (!caseId) return
     setBusy(true)
     setActionErr(null)
+    setActionNotice(null)
     try {
       const res = await apiFetch<CaseEmailMailtoOut>(`/cases/${caseId}/files/email-mailto`, {
         token,
@@ -1408,9 +1195,18 @@ export function CaseDetail({
           case_contact_id: caseContactId,
           global_contact_id: globalContactId,
           precedent_merge_all_clients: precedentMergeAllClients,
-          attachment_file_ids: attachmentFileIds,
+          attachment_file_ids: [],
         },
       })
+      try {
+        await apiFetch(`/mail-plugin/pending-send`, {
+          token,
+          method: 'PUT',
+          json: { case_id: caseId, ttl_seconds: 86400 },
+        })
+      } catch {
+        /* Best-effort: add-in send capture works without this if user files manually. */
+      }
       const launchPref = currentUser?.email_launch_preference ?? 'desktop'
       if (launchPref === 'outlook_web') {
         let url = buildOutlookWebComposeUrl(currentUser?.email_outlook_web_url, {
@@ -1419,6 +1215,7 @@ export function CaseDetail({
           body: res.body,
         })
         url = appendOutlookWebAuthHintsForNav(url, currentUser?.email?.trim() || null)
+        url = normalizeComposeQueryPlusAsSpaces(url)
         const w = window.open(url, OWA_MAIL_WINDOW_NAME, OWA_MESSAGE_WINDOW_FEATURES)
         if (!w) {
           setActionErr('Your browser blocked opening Outlook. Allow pop-ups for this site.')
@@ -1431,12 +1228,6 @@ export function CaseDetail({
         document.body.appendChild(a)
         a.click()
         document.body.removeChild(a)
-      }
-      if (res.attachment_count > 0 && res.note) {
-        window.alert(
-          res.note +
-            ' In Outlook, open a compose message and use the Canary add-in “Compose from matter” to attach case files automatically.',
-        )
       }
     } catch (e: unknown) {
       const err = e as { message?: string }
@@ -1730,9 +1521,6 @@ export function CaseDetail({
     setPickLinkType('')
     setPickLawyerClientIds([])
     setPickSearch('')
-    setEmailAttachIds([])
-    setEmailAttachBrowseFolder('')
-    setEmailAttachCanaryOpen(false)
   }
 
   function confirmPrecedentPicker() {
@@ -1810,24 +1598,12 @@ export function CaseDetail({
 
       const composeKind = contactPickModal.composeKind ?? 'letter'
       if (composeKind === 'email') {
-        const attachmentIdsForCompose = emailAttachIds
-        if (m365EmailDraftsEnabled) {
-          await composeM365EmailDraft(
-            contactPickModal.precedentId,
-            caseContactIdForMerge,
-            globalContactIdForMerge,
-            mergeAllClients,
-            attachmentIdsForCompose,
-          )
-        } else {
-          await composeEmailMailto(
-            contactPickModal.precedentId,
-            caseContactIdForMerge,
-            globalContactIdForMerge,
-            mergeAllClients,
-            attachmentIdsForCompose,
-          )
-        }
+        await composeEmailMailto(
+          contactPickModal.precedentId,
+          caseContactIdForMerge,
+          globalContactIdForMerge,
+          mergeAllClients,
+        )
         setContactPickModal(null)
         resetContactPickForm()
         return
@@ -3445,9 +3221,9 @@ export function CaseDetail({
                   <div className="muted">
                     {contactPickModal.composeKind === 'email' ? (
                       <>
-                        Optional: pick a recipient to pre-fill <strong>To</strong>. If there is no contact, no e-mail on
-                        the contact, or you skip this step, compose opens with an empty To line so you can type it in
-                        your mail program. You can still use &quot;All clients&quot; for merge fields only.
+                        Optional: pick a recipient to pre-fill <strong>To</strong>. Compose opens in your mail program (or
+                        Outlook on the web) with merged subject and body. Attach case files with{' '}
+                        <strong>Compose from matter</strong> in the Canary Outlook or Thunderbird add-in.
                       </>
                     ) : (
                       <>
@@ -3606,78 +3382,6 @@ export function CaseDetail({
                     </div>
                   </div>
                 ) : null}
-                {contactPickModal.composeKind === 'email' && m365EmailDraftsEnabled ? (
-                  <>
-                    <input
-                      ref={emailLocalAttachInputRef}
-                      type="file"
-                      multiple
-                      style={{ display: 'none' }}
-                      onChange={(e) => {
-                        void uploadLocalFilesForEmailAttach(Array.from(e.target.files ?? []))
-                      }}
-                    />
-                    <div className="field" style={{ marginTop: 4 }}>
-                      <span>Attach</span>
-                      <div className="emailAttachToolbar">
-                        <button
-                          type="button"
-                          className="btn"
-                          disabled={busy}
-                          onClick={() => {
-                            setEmailAttachBrowseFolder('')
-                            setEmailAttachCanaryOpen(true)
-                          }}
-                        >
-                          From Canary
-                        </button>
-                        <button
-                          type="button"
-                          className="btn"
-                          disabled={busy}
-                          onClick={() => emailLocalAttachInputRef.current?.click()}
-                        >
-                          From local drive
-                        </button>
-                      </div>
-                    </div>
-                    {emailAttachIds.length > 0 ? (
-                      <div className="field">
-                        <span className="muted" style={{ fontSize: 13 }}>
-                          Attached ({emailAttachIds.length}/25)
-                        </span>
-                        <div className="emailAttachChips">
-                          {emailAttachIds.map((id) => {
-                            const f = files.find((x) => x.id === id)
-                            return (
-                              <div key={id} className="emailAttachChip">
-                                <span className="docsTypeIcon" aria-hidden>
-                                  {f ? (
-                                    <DocMimeIcon mime={f.mime_type} filename={f.original_filename} />
-                                  ) : (
-                                    <DocMimeIcon mime="application/octet-stream" filename="" />
-                                  )}
-                                </span>
-                                <span className="emailAttachChipName" title={f?.original_filename ?? id}>
-                                  {f?.original_filename ?? `File ${id.slice(0, 8)}…`}
-                                </span>
-                                <button
-                                  type="button"
-                                  className="btn"
-                                  style={{ padding: '2px 8px', fontSize: 12 }}
-                                  onClick={() => setEmailAttachIds((prev) => prev.filter((x) => x !== id))}
-                                  aria-label="Remove attachment"
-                                >
-                                  Remove
-                                </button>
-                              </div>
-                            )
-                          })}
-                        </div>
-                      </div>
-                    ) : null}
-                  </>
-                ) : null}
                 <div className="row" style={{ justifyContent: 'flex-end', marginTop: 12 }}>
                   <button
                     type="button"
@@ -3693,99 +3397,6 @@ export function CaseDetail({
                     Continue
                   </button>
                 </div>
-              </div>
-            </div>
-          </div>
-        ) : null}
-
-        {contactPickModal?.composeKind === 'email' && m365EmailDraftsEnabled && emailAttachCanaryOpen ? (
-          <div
-            className="modalOverlay emailAttachCanaryOverlay"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="email-attach-canary-title"
-            onClick={(e) => {
-              if (e.target === e.currentTarget) setEmailAttachCanaryOpen(false)
-            }}
-          >
-            <div className="modal card modal--scrollBody" style={{ maxWidth: 560 }} onClick={(e) => e.stopPropagation()}>
-              <div className="paneHead">
-                <div>
-                  <h2 id="email-attach-canary-title" style={{ margin: 0, fontSize: 18 }}>
-                    Attach from Canary
-                  </h2>
-                  <div className="muted" style={{ fontSize: 13 }}>
-                    Open folders to browse; tick files to attach (up to 25 total).
-                  </div>
-                </div>
-                <button type="button" className="btn primary" onClick={() => setEmailAttachCanaryOpen(false)}>
-                  Done
-                </button>
-              </div>
-              <div
-                className="muted"
-                style={{ padding: '8px 0', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}
-              >
-                <span
-                  style={{ cursor: 'pointer', textDecoration: 'underline' }}
-                  onClick={() => setEmailAttachBrowseFolder('')}
-                >
-                  Home
-                </span>
-                {splitFolderPath(emailAttachBrowseFolder).map((_seg, idx, arr) => {
-                  const path = arr.slice(0, idx + 1).join('/')
-                  const label = decodeFolderPathSegment(arr[idx] ?? '')
-                  return (
-                    <span key={path} style={{ display: 'inline-flex', gap: 8, alignItems: 'center' }}>
-                      <span aria-hidden> / </span>
-                      <span
-                        style={{ cursor: 'pointer', textDecoration: 'underline' }}
-                        onClick={() => setEmailAttachBrowseFolder(path)}
-                      >
-                        {label}
-                      </span>
-                    </span>
-                  )
-                })}
-              </div>
-              <div className="emailAttachPickerList">
-                {emailAttachChildFolders.map((folderName) => {
-                  const next = emailAttachBrowseFolder ? `${emailAttachBrowseFolder}/${folderName}` : folderName
-                  return (
-                    <button
-                      key={next}
-                      type="button"
-                      className="emailAttachPickerRow emailAttachPickerRow--folder"
-                      onClick={() => setEmailAttachBrowseFolder(next)}
-                    >
-                      <span className="emailAttachPickerCheckSpacer" aria-hidden />
-                      <DocsFolderDescCell name={decodeFolderPathSegment(folderName)} />
-                    </button>
-                  )
-                })}
-                {emailAttachFilesInBrowseFolder.map((f) => (
-                  <label key={f.id} className="emailAttachPickerRow emailAttachPickerRow--file">
-                    <input
-                      type="checkbox"
-                      checked={emailAttachIds.includes(f.id)}
-                      onChange={(e) => {
-                        setEmailAttachIds((prev) => {
-                          if (e.target.checked) {
-                            if (prev.includes(f.id) || prev.length >= 25) return prev
-                            return [...prev, f.id]
-                          }
-                          return prev.filter((x) => x !== f.id)
-                        })
-                      }}
-                    />
-                    <DocsFileDescCell f={f} showPin={false} />
-                  </label>
-                ))}
-                {emailAttachChildFolders.length === 0 && emailAttachFilesInBrowseFolder.length === 0 ? (
-                  <div className="muted" style={{ padding: 12 }}>
-                    No documents in this folder.
-                  </div>
-                ) : null}
               </div>
             </div>
           </div>

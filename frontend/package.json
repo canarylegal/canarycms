@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "postbuild": "node scripts/sync-and-verify-thunderbird-addin.mjs",
+    "postbuild": "node scripts/sync-and-verify-thunderbird-addin.mjs && node scripts/generate-outlook-manifest.mjs --target dist && node scripts/verify-outlook-addin.mjs",
     "lint": "eslint .",
     "preview": "vite preview"
   },

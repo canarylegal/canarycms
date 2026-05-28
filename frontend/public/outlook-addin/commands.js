@@ -282,18 +282,24 @@
     return String(body.linked_case.id)
   }
 
+  function sh() {
+    return globalThis.canaryOutlookShared || {}
+  }
+
   async function captureSendToCanary(event) {
     var finishOk = function () {
       event.completed({ allowEvent: true })
     }
 
     try {
-      var token = getToken()
+      var shared = sh()
+      var token = shared.getTokenAsync ? await shared.getTokenAsync() : getToken()
       if (!token) {
         finishOk()
         return
       }
-      if (!apiRoot()) {
+      var root = shared.apiRoot ? shared.apiRoot() : apiRoot()
+      if (!root) {
         finishOk()
         return
       }
@@ -319,14 +325,18 @@
       } catch (_) {}
 
       var pending = await fetchPending(token)
+      var roamingCaseId = shared.readPendingSendCaseIdSync ? shared.readPendingSendCaseIdSync() : ''
       var linkedCaseId = await resolveLinkedCase(token, oid || '', imid || '', conv || '')
-      var caseId = linkedCaseId || ''
+      var caseId = ''
       var usedPending = false
-      if (caseId) {
-        if (pending && pending.active) await clearPending(token)
-      } else if (pending && pending.active && pending.case_id) {
+      if (pending && pending.active && pending.case_id) {
         caseId = String(pending.case_id)
         usedPending = true
+      } else if (roamingCaseId) {
+        caseId = roamingCaseId
+        usedPending = true
+      } else if (linkedCaseId) {
+        caseId = linkedCaseId
       }
 
       if (!caseId) {
@@ -393,16 +403,97 @@
         }
       }
 
-      if (usedPending) await clearPending(token)
+      if (usedPending) {
+        if (shared.clearPendingSendAsync) await shared.clearPendingSendAsync(token)
+        else await clearPending(token)
+      }
+
+      try {
+        await applyCanaryCategoryToItem(item)
+      } catch (_) {
+        /* category is best-effort */
+      }
+
+      try {
+        await applyGraphCategoryTag(token, item)
+      } catch (_) {
+        /* Graph fallback for sent/reply mail when Office.js categories fail on OWA */
+      }
     } catch (_) {
       /* Never block send — capture is best-effort. */
     }
     finishOk()
   }
 
+  function applyGraphCategoryTag(token, item) {
+    return new Promise(function (resolve) {
+      var mailbox = ''
+      try {
+        var prof = Office.context.mailbox && Office.context.mailbox.userProfile
+        if (prof && prof.emailAddress) mailbox = String(prof.emailAddress).trim()
+      } catch (_) {}
+      var restId = graphRestItemIdFromItem(item)
+      var internetMid = ''
+      try {
+        if (item && item.internetMessageId) internetMid = String(item.internetMessageId).trim()
+      } catch (_) {}
+      if (!mailbox || !restId) {
+        resolve()
+        return
+      }
+      fetch(apiRoot() + '/outlook-plugin/graph-tag-category', {
+        method: 'POST',
+        headers: jsonAuthHeaders(token),
+        body: JSON.stringify({
+          mailbox: mailbox,
+          rest_item_id: restId,
+          internet_message_id: internetMid || null,
+        }),
+      })
+        .then(function () {
+          resolve()
+        })
+        .catch(function () {
+          resolve()
+        })
+    })
+  }
+
+  function applyCanaryCategoryToItem(item) {
+    return new Promise(function (resolve) {
+      if (!item || !item.categories || typeof item.categories.addAsync !== 'function') {
+        resolve()
+        return
+      }
+      item.categories.addAsync(['Canary'], function (r) {
+        if (r.status === Office.AsyncResultStatus.Succeeded) {
+          resolve()
+          return
+        }
+        var msg = (r.error && r.error.message) || ''
+        if (/already|duplicate|same category|in the list/i.test(msg)) {
+          resolve()
+          return
+        }
+        resolve()
+      })
+    })
+  }
+
   function onMessageSendHandler(event) {
     void captureSendToCanary(event)
   }
 
-  Office.actions.associate('onMessageSendHandler', onMessageSendHandler)
+  function registerSendHandler() {
+    try {
+      Office.actions.associate('onMessageSendHandler', onMessageSendHandler)
+    } catch (_) {
+      /* Event-based activation not supported on this host. */
+    }
+  }
+
+  registerSendHandler()
+  Office.onReady(function () {
+    registerSendHandler()
+  })
 })()

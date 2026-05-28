@@ -11,8 +11,6 @@ const root = path.join(__dirname, '..')
 
 const REQUIRED_DIST = [
   'manifest.xml',
-  'manifest.local.xml',
-  'manifest.dev.xml',
   'taskpane.html',
   'taskpane.js',
   'compose-pane.html',
