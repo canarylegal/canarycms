@@ -1,8 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { apiFetch } from './api'
-import { apiFetchWithRetry, postDeployTriggerAndWaitForCompose } from './composeDeployPoll'
+import { postDeployTriggerAndWaitForCompose } from './composeDeployPoll'
 import { ComposeUpdateProgress } from './ComposeUpdateProgress'
-import { useDialogs } from './DialogProvider'
 import type { ApiError } from './api'
 import type { AdminDeployComposeJobOut, AdminDeployUpdateCheckOut, UserPublic } from './types'
 
@@ -18,12 +17,12 @@ export function AdminLoginUpdatePrompt({
   me: UserPublic | null
   canAdmin: boolean
 }) {
-  const { alert } = useDialogs()
   const [data, setData] = useState<AdminDeployUpdateCheckOut | null>(null)
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const [composeProgress, setComposeProgress] = useState<AdminDeployComposeJobOut | null>(null)
+  const [finishing, setFinishing] = useState(false)
   const fetchedRef = useRef<string | null>(null)
 
   useEffect(() => {
@@ -107,30 +106,24 @@ export function AdminLoginUpdatePrompt({
     setBusy(true)
     setErr(null)
     setComposeProgress(null)
+    setFinishing(false)
     try {
-      const { message, usedComposeAsync } = await postDeployTriggerAndWaitForCompose(
+      const { reloadApp } = await postDeployTriggerAndWaitForCompose(
         token,
         { method: 'auto' },
-        { onProgress: setComposeProgress },
+        { onProgress: setComposeProgress, onFinishing: () => setFinishing(true) },
       )
-      setOpen(false)
-      await alert(message, usedComposeAsync ? 'Update applied' : 'Update')
-      const sessionKey = `${me.id}:${token.slice(0, 12)}`
-      try {
-        const d = await apiFetchWithRetry<AdminDeployUpdateCheckOut>('/admin/deploy/update-check', token)
-        fetchedRef.current = sessionKey
-        if (!d.prompt_enabled || !d.update_available) {
-          setData(null)
-        }
-      } catch {
-        fetchedRef.current = sessionKey
-        setData(null)
+      if (reloadApp) {
+        window.location.reload()
+        return
       }
+      setOpen(false)
     } catch (e) {
       setErr((e as ApiError).message ?? 'Deploy request failed')
     } finally {
       setBusy(false)
       setComposeProgress(null)
+      setFinishing(false)
     }
   }
 
@@ -146,16 +139,20 @@ export function AdminLoginUpdatePrompt({
     >
       <div className="modal card" style={{ maxWidth: 560, padding: 20 }} onClick={(e) => e.stopPropagation()}>
         <h2 id="canary-update-prompt-title" style={{ margin: '0 0 8px', fontSize: 18 }}>
-          {busy ? 'Updating…' : 'Update available'}
+          {finishing ? 'Update complete' : busy ? 'Updating…' : 'Update available'}
         </h2>
         {!busy ? (
           <p className="muted" style={{ margin: '0 0 12px', lineHeight: 1.45 }}>
             A newer version is available on GitHub ({data.remote_ref}, tip{' '}
             <code>{data.remote_commit_short}</code>).
           </p>
+        ) : finishing ? (
+          <p className="muted" style={{ margin: '0 0 12px', lineHeight: 1.45, fontSize: 13 }}>
+            Waiting for services to restart, then this page will reload automatically…
+          </p>
         ) : (
           <p className="muted" style={{ margin: '0 0 12px', lineHeight: 1.45, fontSize: 13 }}>
-            This may take several minutes. The page will finish when the update completes.
+            This may take several minutes. Do not close this tab.
           </p>
         )}
         {data.note && !busy ? (
@@ -165,7 +162,7 @@ export function AdminLoginUpdatePrompt({
         ) : null}
         {err ? <div className="error" style={{ marginBottom: 10 }}>{err}</div> : null}
 
-        {busy ? <ComposeUpdateProgress progress={composeProgress} /> : null}
+        {busy && !finishing ? <ComposeUpdateProgress progress={composeProgress} /> : null}
 
         {!busy && (data.latest_release_name || data.latest_release_tag) ? (
           <div style={{ marginBottom: 12 }}>

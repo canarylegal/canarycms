@@ -37,6 +37,8 @@ from app.local_compose_update import (
 
 log = logging.getLogger(__name__)
 
+_COMPOSE_SUCCESS_MESSAGE = "Update complete."
+
 _PHASE = Literal["idle", "running", "succeeded", "failed"]
 
 _lock = threading.Lock()
@@ -149,10 +151,7 @@ def reconcile_compose_job_state() -> None:
             if _journal_lines:
                 _progress_phase = compose_phase_from_journal(_journal_lines)
             if ok:
-                _message = (
-                    "Docker Compose finished (git pull if enabled, build --pull, up -d). "
-                    "Reload the app after containers restart."
-                )
+                _message = _COMPOSE_SUCCESS_MESSAGE
                 _error_detail = None
             else:
                 _message = None
@@ -518,10 +517,7 @@ def try_start_compose_job(
             _runner_expected = False
             _phase = "succeeded"
             _finished_at = _utc_iso()
-            _message = (
-                "Docker Compose finished (git pull/reset if enabled, build --pull, up -d). "
-                "Reload the app after containers restart."
-            )
+            _message = _COMPOSE_SUCCESS_MESSAGE
             _error_detail = None
             _log_excerpt = excerpt or None
             _journal_lines = final_lines

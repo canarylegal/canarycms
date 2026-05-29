@@ -24,6 +24,7 @@ export function AdminDeploy({ token }: { token: string }) {
   const [updateCheckErr, setUpdateCheckErr] = useState<string | null>(null)
   const [updateCheckAt, setUpdateCheckAt] = useState<Date | null>(null)
   const [composeProgress, setComposeProgress] = useState<AdminDeployComposeJobOut | null>(null)
+  const [finishing, setFinishing] = useState(false)
 
   const load = useCallback(async () => {
     setErr(null)
@@ -73,16 +74,21 @@ export function AdminDeploy({ token }: { token: string }) {
     setErr(null)
     setOk(null)
     setComposeProgress(null)
+    setFinishing(false)
     try {
-      const { message } = await postDeployTriggerAndWaitForCompose(
+      const { reloadApp } = await postDeployTriggerAndWaitForCompose(
         token,
         {
           method: 'compose',
           git_strategy: gitStrategy,
         },
-        { onProgress: setComposeProgress },
+        { onProgress: setComposeProgress, onFinishing: () => setFinishing(true) },
       )
-      setOk(message)
+      if (reloadApp) {
+        window.location.reload()
+        return
+      }
+      setOk('Update complete.')
       await load()
       await checkForUpdates()
     } catch (e) {
@@ -90,6 +96,7 @@ export function AdminDeploy({ token }: { token: string }) {
     } finally {
       setBusy(false)
       setComposeProgress(null)
+      setFinishing(false)
     }
   }
 
@@ -249,7 +256,15 @@ export function AdminDeploy({ token }: { token: string }) {
             Reload
           </button>
         </div>
-        {busy ? <ComposeUpdateProgress progress={composeProgress} /> : null}
+        {busy ? (
+          finishing ? (
+            <p className="muted" style={{ marginTop: 16, fontSize: 13 }}>
+              Update complete — waiting for services to restart, then this page will reload…
+            </p>
+          ) : (
+            <ComposeUpdateProgress progress={composeProgress} />
+          )
+        ) : null}
       </div>
 
       {!status?.configured ? (

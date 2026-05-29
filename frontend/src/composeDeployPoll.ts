@@ -1,7 +1,10 @@
-import { apiFetch } from './api'
+import { apiFetch, apiUrl } from './api'
 import type { AdminDeployComposeJobOut, AdminDeployTriggerOut } from './types'
 
 const POLL_MS = 2500
+/** After compose up, wait for API/proxy to answer before reloading the browser. */
+const RESTART_WAIT_MS = 120_000
+const RESTART_POLL_MS = 2000
 /** Slightly longer than backend compose build timeout (3600s). */
 const MAX_WAIT_MS = 2 * 3600 * 1000 + 120_000
 
@@ -39,6 +42,20 @@ export async function apiFetchWithRetry<T>(
   throw last
 }
 
+/** Poll ``/health`` until the stack is reachable again after ``compose up`` recreates containers. */
+export async function waitForAppReadyAfterComposeUpdate(): Promise<void> {
+  const deadline = Date.now() + RESTART_WAIT_MS
+  while (Date.now() < deadline) {
+    try {
+      const res = await fetch(apiUrl('/health'), { cache: 'no-store' })
+      if (res.ok) return
+    } catch {
+      /* proxy or API still restarting */
+    }
+    await sleep(RESTART_POLL_MS)
+  }
+}
+
 /**
  * POST /admin/deploy/trigger then poll GET /admin/deploy/compose-job until the returned job finishes.
  * HTTP returns immediately so reverse proxies (e.g. Cloudflare) do not time out during docker build.
@@ -46,14 +63,17 @@ export async function apiFetchWithRetry<T>(
 export async function postDeployTriggerAndWaitForCompose(
   token: string,
   body: { method: 'auto' | 'compose'; git_strategy?: 'ff-only' | 'reset' },
-  options?: { onProgress?: (st: AdminDeployComposeJobOut) => void },
-): Promise<{ message: string; usedComposeAsync: boolean }> {
+  options?: {
+    onProgress?: (st: AdminDeployComposeJobOut) => void
+    onFinishing?: () => void
+  },
+): Promise<{ message: string; usedComposeAsync: boolean; reloadApp: boolean }> {
   const out = await apiFetchWithRetry<AdminDeployTriggerOut>('/admin/deploy/trigger', token, {
     method: 'POST',
     json: body,
   })
   if (!out.async_mode || !out.job_id) {
-    return { message: out.message, usedComposeAsync: false }
+    return { message: out.message, usedComposeAsync: false, reloadApp: false }
   }
   const expectId = out.job_id
   const deadline = Date.now() + MAX_WAIT_MS
@@ -70,17 +90,16 @@ export async function postDeployTriggerAndWaitForCompose(
         options?.onProgress?.(st)
       }
       if (st.status === 'succeeded') {
-        return { message: st.message ?? out.message, usedComposeAsync: true }
+        options?.onFinishing?.()
+        await waitForAppReadyAfterComposeUpdate()
+        return { message: 'Update complete.', usedComposeAsync: true, reloadApp: true }
       }
       if (st.status === 'failed') {
         const detail = st.error_detail || ''
         if (detail.includes('restarted during the update')) {
-          return {
-            message:
-              'The server restarted the API container during the update (normal for Docker Compose). ' +
-              'Refresh this page. If the site loads, the update likely finished; otherwise check Admin → Deploy or host logs.',
-            usedComposeAsync: true,
-          }
+          options?.onFinishing?.()
+          await waitForAppReadyAfterComposeUpdate()
+          return { message: 'Update complete.', usedComposeAsync: true, reloadApp: true }
         }
         const tail = st.log_excerpt ? `\n\n${st.log_excerpt}` : ''
         throw new Error(`${detail || 'Compose update failed.'}${tail}`)
