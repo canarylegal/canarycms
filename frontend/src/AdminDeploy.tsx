@@ -59,16 +59,16 @@ export function AdminDeploy({ token }: { token: string }) {
 
   async function triggerCompose(gitStrategy: 'ff-only' | 'reset' = 'ff-only') {
     const isReset = gitStrategy === 'reset'
-    const gitRef = status?.compose_git_ref || updateCheck?.compose_git_ref || 'main'
-    const confirmed = await askConfirm({
-      title: isReset ? 'Reset checkout to GitHub and update' : 'Update via Docker Compose',
-      message: isReset
-        ? `This will run git fetch and reset --hard to origin/${gitRef}, discarding any local commits and uncommitted changes to tracked files in the server checkout, then docker compose build --pull and up -d. Custom settings in .env are kept (not tracked by git). Continue?`
-        : 'This runs docker compose build --pull and up -d on the server using the mounted project directory and Docker socket. If CANARY_COMPOSE_GIT_PULL is enabled, git pull --ff-only runs first (fails when the checkout has diverged). Continue?',
-      danger: true,
-      confirmLabel: isReset ? 'Reset and update' : 'Run Compose update',
-    })
-    if (!confirmed) return
+    if (isReset) {
+      const gitRef = status?.compose_git_ref || updateCheck?.compose_git_ref || 'main'
+      const confirmed = await askConfirm({
+        title: 'Reset to GitHub and update',
+        message: `This discards any local changes on the server and updates from GitHub (${gitRef}). Continue?`,
+        danger: true,
+        confirmLabel: 'Reset and update',
+      })
+      if (!confirmed) return
+    }
     setBusy(true)
     setErr(null)
     setOk(null)

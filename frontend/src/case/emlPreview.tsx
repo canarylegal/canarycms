@@ -56,13 +56,33 @@ function decodeQuotedPrintable(input: string): string {
   return t.replace(/=([0-9A-Fa-f]{2})/g, (_, hex) => String.fromCharCode(Number.parseInt(hex, 16)))
 }
 
-function decodeBase64ToUtf8(b64: string): string {
+function extractCharset(contentType: string): string {
+  const m = /charset\s*=\s*("?)([^";\s]+)\1/i.exec(contentType || '')
+  if (!m) return 'utf-8'
+  return m[2].trim().replace(/^utf8$/i, 'utf-8')
+}
+
+function decodeBytesWithCharset(bytes: Uint8Array, charset: string): string {
+  try {
+    return new TextDecoder(charset, { fatal: false }).decode(bytes)
+  } catch {
+    return new TextDecoder('utf-8', { fatal: false }).decode(bytes)
+  }
+}
+
+function latin1Bytes(s: string): Uint8Array {
+  const out = new Uint8Array(s.length)
+  for (let i = 0; i < s.length; i++) out[i] = s.charCodeAt(i) & 0xff
+  return out
+}
+
+function decodeBase64Payload(b64: string, charset: string): string {
   const clean = b64.replace(/\s+/g, '')
   try {
     const bin = atob(clean)
     const bytes = new Uint8Array(bin.length)
     for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
-    return new TextDecoder('utf-8', { fatal: false }).decode(bytes)
+    return decodeBytesWithCharset(bytes, charset)
   } catch {
     return b64
   }
@@ -85,8 +105,18 @@ function htmlToPlainText(html: string): string {
 
 function decodeBodyPayload(headers: Record<string, string>, body: string): string {
   const enc = (headers['content-transfer-encoding'] || '').toLowerCase()
-  if (enc.includes('quoted-printable')) return decodeQuotedPrintable(body)
-  if (enc.includes('base64')) return decodeBase64ToUtf8(body)
+  const charset = extractCharset(headers['content-type'] || '')
+  if (enc.includes('quoted-printable')) {
+    const decoded = decodeQuotedPrintable(body)
+    if (charset && !/^utf-8$/i.test(charset)) {
+      return decodeBytesWithCharset(latin1Bytes(decoded), charset)
+    }
+    return decoded
+  }
+  if (enc.includes('base64')) return decodeBase64Payload(body, charset)
+  if (charset && !/^utf-8$/i.test(charset)) {
+    return decodeBytesWithCharset(latin1Bytes(body), charset)
+  }
   return body
 }
 
@@ -174,7 +204,18 @@ function sanitizeEmlHtml(html: string): string {
     domPurifyLinkHookAdded = true
   }
   /* Default allow-list keeps most mail tags; allow <style> blocks used by HTML e-mail. */
-  return DOMPurify.sanitize(html, { ADD_TAGS: ['style'] })
+  return DOMPurify.sanitize(html, { ADD_TAGS: ['style'], ADD_ATTR: ['target', 'rel'] })
+}
+
+function wrapEmailHtmlDocument(safeBodyHtml: string): string {
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"><base target="_blank"><style>
+body{margin:0;padding:16px 18px;font-family:Segoe UI,Roboto,Helvetica,Arial,sans-serif;font-size:14px;line-height:1.55;color:#111827;background:#fff;word-wrap:break-word;overflow-wrap:break-word;}
+img{max-width:100%;height:auto;}
+table{max-width:100%;border-collapse:collapse;}
+a{color:#2563eb;}
+blockquote{margin:0.5em 0 0.5em 0;padding-left:12px;border-left:3px solid #d1d5db;color:#374151;}
+pre{white-space:pre-wrap;word-wrap:break-word;}
+</style></head><body>${safeBodyHtml}</body></html>`
 }
 
 /**
@@ -206,19 +247,6 @@ export function parseEmlForPreview(raw: string): EmlPreviewData {
   const to = headerDisplay(topHeaders, 'to')
   const cc = headerDisplay(topHeaders, 'cc')
   const date = headerDisplay(topHeaders, 'date')
-
-  const ct0 = (topHeaders['content-type'] || '').toLowerCase()
-  if (ct0.includes('multipart/')) {
-    return {
-      subject,
-      from,
-      to,
-      cc,
-      date,
-      bodyText:
-        'Multipart message — headers are shown above. Use Open or Download for the full body and attachments.',
-    }
-  }
 
   const into: Collected = { plain: [], htmlRaw: [] }
   collectParts(topHeaders, body, 0, into)
@@ -321,6 +349,8 @@ export function EmlPreviewModal({ file, data, loading, error, onClose, onOpenExt
     return sanitizeEmlHtml(data.bodyHtml)
   }, [data?.bodyHtml])
 
+  const iframeDoc = useMemo(() => (safeHtml ? wrapEmailHtmlDocument(safeHtml) : ''), [safeHtml])
+
   const title = data?.subject?.trim() || file.original_filename || 'E-mail preview'
 
   const overlay = (
@@ -347,38 +377,41 @@ export function EmlPreviewModal({ file, data, loading, error, onClose, onOpenExt
 
         {!loading && !error && data ? (
           <div className="emlPreviewModalMain">
-            <dl className="emlPreviewMeta">
+            <div className="emlPreviewHeaderStrip">
               {data.from ? (
-                <>
-                  <dt>From</dt>
-                  <dd>{data.from}</dd>
-                </>
+                <div className="emlPreviewHeaderFrom">
+                  <span className="emlPreviewHeaderLabel">From</span>
+                  <span className="emlPreviewHeaderValue">{data.from}</span>
+                </div>
               ) : null}
-              {data.to ? (
-                <>
-                  <dt>To</dt>
-                  <dd>{data.to}</dd>
-                </>
-              ) : null}
-              {data.cc ? (
-                <>
-                  <dt>Cc</dt>
-                  <dd>{data.cc}</dd>
-                </>
-              ) : null}
-              {data.date ? (
-                <>
-                  <dt>Date</dt>
-                  <dd>{data.date}</dd>
-                </>
-              ) : null}
-            </dl>
-            <div className="emlPreviewBodyWrap">
-              {safeHtml ? (
-                <div
-                  className="emlPreviewHtml"
-                  // Sanitized with DOMPurify
-                  dangerouslySetInnerHTML={{ __html: safeHtml }}
+              <dl className="emlPreviewMeta">
+                {data.to ? (
+                  <>
+                    <dt>To</dt>
+                    <dd>{data.to}</dd>
+                  </>
+                ) : null}
+                {data.cc ? (
+                  <>
+                    <dt>Cc</dt>
+                    <dd>{data.cc}</dd>
+                  </>
+                ) : null}
+                {data.date ? (
+                  <>
+                    <dt>Date</dt>
+                    <dd>{data.date}</dd>
+                  </>
+                ) : null}
+              </dl>
+            </div>
+            <div className={`emlPreviewBodyWrap${iframeDoc ? ' emlPreviewBodyWrapHtml' : ''}`}>
+              {iframeDoc ? (
+                <iframe
+                  className="emlPreviewHtmlFrame"
+                  title="E-mail body"
+                  sandbox="allow-popups allow-popups-to-escape-sandbox"
+                  srcDoc={iframeDoc}
                 />
               ) : (
                 <pre className="emlPreviewBody">{data.bodyText || '—'}</pre>
