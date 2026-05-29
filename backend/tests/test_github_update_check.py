@@ -16,6 +16,8 @@ def test_same_commit_short_sha_prefix() -> None:
     assert _same_commit(short, full)
 
 
+@patch("app.github_update_check.compose_git_reset_enabled", return_value=False)
+@patch("app.github_update_check.load_compose_update_config")
 @patch("app.github_update_check.compose_update_configured", return_value=True)
 @patch("app.github_update_check.load_github_repo_for_api", return_value=("owner", "repo", "main"))
 @patch("app.github_update_check.effective_build_commit_for_update_check", return_value="aaa1111")
@@ -25,7 +27,10 @@ def test_update_not_available_when_current_matches_remote(
     _current: object,
     _repo: object,
     _compose: object,
+    mock_cfg: MagicMock,
+    _reset: object,
 ) -> None:
+    mock_cfg.return_value = MagicMock(git_ref="main")
     sha = "aaa1111" + ("0" * 33)
     mock_client = MagicMock()
     client_cls.return_value.__enter__.return_value = mock_client
@@ -47,6 +52,8 @@ def test_update_not_available_when_current_matches_remote(
     assert payload["remote_commit"] == sha
 
 
+@patch("app.github_update_check.compose_git_reset_enabled", return_value=False)
+@patch("app.github_update_check.load_compose_update_config")
 @patch("app.github_update_check.compose_update_configured", return_value=True)
 @patch("app.github_update_check.load_github_repo_for_api", return_value=("owner", "repo", "main"))
 @patch("app.github_update_check.effective_build_commit_for_update_check", return_value="olddeadbeef")
@@ -56,7 +63,10 @@ def test_update_available_when_remote_ahead(
     _current: object,
     _repo: object,
     _compose: object,
+    mock_cfg: MagicMock,
+    _reset: object,
 ) -> None:
+    mock_cfg.return_value = MagicMock(git_ref="main")
     mock_client = MagicMock()
     client_cls.return_value.__enter__.return_value = mock_client
 

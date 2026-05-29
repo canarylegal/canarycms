@@ -29,6 +29,8 @@ def _reset_in_memory_job() -> None:
         job_mod._error_detail = None
         job_mod._log_excerpt = None
         job_mod._runner_expected = False
+        job_mod._journal_lines = []
+        job_mod._progress_phase = None
 
 
 @pytest.fixture
@@ -173,3 +175,23 @@ def test_reconcile_failure_marker_finalizes_job(
     assert pub["job_id"] == jid
     assert pub["error_detail"] is not None
     assert "rc=1" in pub["error_detail"]
+
+
+def test_running_payload_includes_live_journal_from_disk(
+    compose_state_layout: tuple[Path, Path],
+) -> None:
+    _write_json(
+        compose_job_state_path(),
+        {
+            "status": "running",
+            "job_id": "live1",
+            "started_at": "2026-01-01T00:00:00+00:00",
+            "journal_lines": ["git: pull --ff-only (starting)"],
+            "progress_phase": "git",
+        },
+    )
+    pub = get_compose_job_public()
+    assert pub["status"] == "running"
+    assert pub["journal_lines"] == ["git: pull --ff-only (starting)"]
+    assert pub["progress_phase"] == "git"
+    assert pub["elapsed_seconds"] is not None

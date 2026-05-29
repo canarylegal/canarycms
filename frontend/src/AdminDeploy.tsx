@@ -1,13 +1,16 @@
 import { useCallback, useEffect, useState } from 'react'
 import { apiFetch } from './api'
 import { postDeployTriggerAndWaitForCompose } from './composeDeployPoll'
+import { ComposeUpdateProgress } from './ComposeUpdateProgress'
 import { useDialogs } from './DialogProvider'
 import type { ApiError } from './api'
-import type { AdminDeployUpdateCheckOut } from './types'
+import type { AdminDeployComposeJobOut, AdminDeployUpdateCheckOut } from './types'
 
 export type AdminDeployStatusOut = {
   configured: boolean
   compose_update_enabled?: boolean
+  compose_git_reset_enabled?: boolean
+  compose_git_ref?: string
 }
 
 export function AdminDeploy({ token }: { token: string }) {
@@ -20,6 +23,7 @@ export function AdminDeploy({ token }: { token: string }) {
   const [updateCheckBusy, setUpdateCheckBusy] = useState(false)
   const [updateCheckErr, setUpdateCheckErr] = useState<string | null>(null)
   const [updateCheckAt, setUpdateCheckAt] = useState<Date | null>(null)
+  const [composeProgress, setComposeProgress] = useState<AdminDeployComposeJobOut | null>(null)
 
   const load = useCallback(async () => {
     setErr(null)
@@ -53,20 +57,31 @@ export function AdminDeploy({ token }: { token: string }) {
     void checkForUpdates()
   }, [load, checkForUpdates])
 
-  async function triggerCompose() {
+  async function triggerCompose(gitStrategy: 'ff-only' | 'reset' = 'ff-only') {
+    const isReset = gitStrategy === 'reset'
+    const gitRef = status?.compose_git_ref || updateCheck?.compose_git_ref || 'main'
     const confirmed = await askConfirm({
-      title: 'Update via Docker Compose',
-      message:
-        'This runs docker compose build --pull and up -d on the server using the mounted project directory and Docker socket. Continue?',
+      title: isReset ? 'Reset checkout to GitHub and update' : 'Update via Docker Compose',
+      message: isReset
+        ? `This will run git fetch and reset --hard to origin/${gitRef}, discarding any local commits and uncommitted changes to tracked files in the server checkout, then docker compose build --pull and up -d. Custom settings in .env are kept (not tracked by git). Continue?`
+        : 'This runs docker compose build --pull and up -d on the server using the mounted project directory and Docker socket. If CANARY_COMPOSE_GIT_PULL is enabled, git pull --ff-only runs first (fails when the checkout has diverged). Continue?',
       danger: true,
-      confirmLabel: 'Run Compose update',
+      confirmLabel: isReset ? 'Reset and update' : 'Run Compose update',
     })
     if (!confirmed) return
     setBusy(true)
     setErr(null)
     setOk(null)
+    setComposeProgress(null)
     try {
-      const { message } = await postDeployTriggerAndWaitForCompose(token, { method: 'compose' })
+      const { message } = await postDeployTriggerAndWaitForCompose(
+        token,
+        {
+          method: 'compose',
+          git_strategy: gitStrategy,
+        },
+        { onProgress: setComposeProgress },
+      )
       setOk(message)
       await load()
       await checkForUpdates()
@@ -74,10 +89,12 @@ export function AdminDeploy({ token }: { token: string }) {
       setErr((e as ApiError).message ?? 'Compose update failed')
     } finally {
       setBusy(false)
+      setComposeProgress(null)
     }
   }
 
   const composeOn = Boolean(status?.compose_update_enabled)
+  const resetOn = Boolean(status?.compose_git_reset_enabled)
 
   return (
     <div className="stack" style={{ maxWidth: 560 }}>
@@ -194,6 +211,13 @@ export function AdminDeploy({ token }: { token: string }) {
         {composeOn ? (
           <p className="muted" style={{ marginTop: 12 }}>
             Compose-based updates are <strong>enabled</strong> on this server.
+            {resetOn ? (
+              <>
+                {' '}
+                <strong>Reset to GitHub</strong> is enabled (<code>CANARY_COMPOSE_GIT_RESET_ENABLED</code>) — use when{' '}
+                <code>git pull --ff-only</code> fails because the checkout has local commits or diverged.
+              </>
+            ) : null}
           </p>
         ) : (
           <p className="muted" style={{ marginTop: 12 }}>
@@ -201,13 +225,31 @@ export function AdminDeploy({ token }: { token: string }) {
           </p>
         )}
         <div className="row" style={{ gap: 8, marginTop: 16, flexWrap: 'wrap' }}>
-          <button type="button" className="btn primary" disabled={busy || !composeOn} onClick={() => void triggerCompose()}>
+          <button
+            type="button"
+            className="btn primary"
+            disabled={busy || !composeOn}
+            onClick={() => void triggerCompose('ff-only')}
+          >
             {busy ? 'Working…' : 'Run Compose update'}
           </button>
+          {resetOn ? (
+            <button
+              type="button"
+              className="btn"
+              disabled={busy || !composeOn}
+              title={`git fetch + reset --hard origin/${status?.compose_git_ref || 'main'}, then compose build/up`}
+              style={{ borderColor: 'var(--danger, #dc2626)', color: 'var(--danger, #dc2626)' }}
+              onClick={() => void triggerCompose('reset')}
+            >
+              {busy ? 'Working…' : 'Reset to GitHub & update'}
+            </button>
+          ) : null}
           <button type="button" className="btn" disabled={busy} onClick={() => void load()}>
             Reload
           </button>
         </div>
+        {busy ? <ComposeUpdateProgress progress={composeProgress} /> : null}
       </div>
 
       {!status?.configured ? (

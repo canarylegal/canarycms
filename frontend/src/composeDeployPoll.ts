@@ -45,7 +45,8 @@ export async function apiFetchWithRetry<T>(
  */
 export async function postDeployTriggerAndWaitForCompose(
   token: string,
-  body: { method: 'auto' | 'compose' },
+  body: { method: 'auto' | 'compose'; git_strategy?: 'ff-only' | 'reset' },
+  options?: { onProgress?: (st: AdminDeployComposeJobOut) => void },
 ): Promise<{ message: string; usedComposeAsync: boolean }> {
   const out = await apiFetchWithRetry<AdminDeployTriggerOut>('/admin/deploy/trigger', token, {
     method: 'POST',
@@ -65,6 +66,9 @@ export async function postDeployTriggerAndWaitForCompose(
     }
 
     if (st.job_id === expectId) {
+      if (st.status === 'running') {
+        options?.onProgress?.(st)
+      }
       if (st.status === 'succeeded') {
         return { message: st.message ?? out.message, usedComposeAsync: true }
       }

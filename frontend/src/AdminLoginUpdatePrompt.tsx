@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 import { apiFetch } from './api'
 import { apiFetchWithRetry, postDeployTriggerAndWaitForCompose } from './composeDeployPoll'
+import { ComposeUpdateProgress } from './ComposeUpdateProgress'
 import { useDialogs } from './DialogProvider'
 import type { ApiError } from './api'
-import type { AdminDeployUpdateCheckOut, UserPublic } from './types'
+import type { AdminDeployComposeJobOut, AdminDeployUpdateCheckOut, UserPublic } from './types'
 
 const DISMISS_KEY = 'canary_update_prompt_dismissed_remote_sha'
 const LATER_SESSION_KEY = 'canary_update_prompt_later_remote_sha'
@@ -24,6 +25,7 @@ export function AdminLoginUpdatePrompt({
   const [err, setErr] = useState<string | null>(null)
   /** Inline confirm avoids DialogProvider stacking: update overlay (z≈60) hid ConfirmModal (z≈100). */
   const [deployConfirm, setDeployConfirm] = useState(false)
+  const [composeProgress, setComposeProgress] = useState<AdminDeployComposeJobOut | null>(null)
   const fetchedRef = useRef<string | null>(null)
 
   useEffect(() => {
@@ -113,8 +115,13 @@ export function AdminLoginUpdatePrompt({
     if (!data || !me) return
     setBusy(true)
     setErr(null)
+    setComposeProgress(null)
     try {
-      const { message, usedComposeAsync } = await postDeployTriggerAndWaitForCompose(token, { method: 'auto' })
+      const { message, usedComposeAsync } = await postDeployTriggerAndWaitForCompose(
+        token,
+        { method: 'auto' },
+        { onProgress: setComposeProgress },
+      )
       setDeployConfirm(false)
       setOpen(false)
       await alert(message, usedComposeAsync ? 'Update applied' : 'Update')
@@ -133,6 +140,7 @@ export function AdminLoginUpdatePrompt({
       setErr((e as ApiError).message ?? 'Deploy request failed')
     } finally {
       setBusy(false)
+      setComposeProgress(null)
     }
   }
 
@@ -155,10 +163,13 @@ export function AdminLoginUpdatePrompt({
             This runs Docker Compose on the server (<code>build --pull</code> then <code>up -d</code>). The backend must
             have the Docker socket and compose project mounted — see <code>.env.example</code>. Continue?
             {busy ? (
-              <span className="muted" style={{ display: 'block', marginTop: 8, fontSize: 13 }}>
-                Build can take several minutes. The backend may restart during <code>up -d</code>; this dialog will finish
-                when the job reports done or failed.
-              </span>
+              <>
+                <span className="muted" style={{ display: 'block', marginTop: 8, fontSize: 13 }}>
+                  Build can take several minutes. The backend may restart during <code>up -d</code>; this dialog will finish
+                  when the job reports done or failed.
+                </span>
+                <ComposeUpdateProgress progress={composeProgress} />
+              </>
             ) : null}
           </p>
         ) : (

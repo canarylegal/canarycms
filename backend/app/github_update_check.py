@@ -9,7 +9,7 @@ import httpx
 
 from app.build_metadata import effective_build_commit_for_update_check
 from app.github_deploy import load_github_repo_for_api
-from app.local_compose_update import compose_update_configured
+from app.local_compose_update import compose_git_reset_enabled, compose_update_configured, load_compose_update_config
 
 GITHUB_API = "https://api.github.com"
 
@@ -42,10 +42,13 @@ def build_update_check_payload() -> dict[str, Any]:
     current = effective_build_commit_for_update_check() or "unknown"
 
     compose_deploy = compose_update_configured()
+    compose_cfg = load_compose_update_config()
     base: dict[str, Any] = {
         "github_repo_configured": False,
         "deploy_trigger_configured": compose_deploy,
         "compose_update_enabled": compose_deploy,
+        "compose_git_reset_enabled": compose_git_reset_enabled(),
+        "compose_git_ref": compose_cfg.git_ref if compose_cfg else "main",
         "prompt_enabled": prompt,
         "current_commit": current,
         "current_commit_short": _short_sha(current) if current != "unknown" else "unknown",

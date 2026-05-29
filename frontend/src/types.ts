@@ -716,6 +716,8 @@ export type AdminDeployUpdateCheckOut = {
   github_repo_configured: boolean
   deploy_trigger_configured: boolean
   compose_update_enabled: boolean
+  compose_git_reset_enabled?: boolean
+  compose_git_ref?: string
   prompt_enabled: boolean
   current_commit: string
   current_commit_short: string
@@ -747,6 +749,9 @@ export type AdminDeployComposeJobOut = {
   message?: string | null
   error_detail?: string | null
   log_excerpt?: string | null
+  journal_lines?: string[]
+  progress_phase?: 'git' | 'build' | 'up' | null
+  elapsed_seconds?: number | null
 }
 
 export type SmtpNotificationSettingsOut = {

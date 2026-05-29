@@ -689,6 +689,8 @@ class AdminDeployStatusOut(BaseModel):
 
     configured: bool
     compose_update_enabled: bool = False
+    compose_git_reset_enabled: bool = False
+    compose_git_ref: str = "main"
 
 
 class AdminDeployTriggerIn(BaseModel):
@@ -697,6 +699,14 @@ class AdminDeployTriggerIn(BaseModel):
     method: Literal["auto", "compose"] = Field(
         default="auto",
         description="Both values run the Compose update path; ``auto`` is kept for older clients.",
+    )
+    git_strategy: Literal["ff-only", "reset"] = Field(
+        default="ff-only",
+        description=(
+            "``ff-only``: ``git pull --ff-only`` when ``CANARY_COMPOSE_GIT_PULL`` is set. "
+            "``reset``: ``git fetch`` + ``reset --hard`` to ``CANARY_GITHUB_DEPLOY_REF`` "
+            "(requires ``CANARY_COMPOSE_GIT_RESET_ENABLED``)."
+        ),
     )
 
     model_config = {"extra": "forbid"}
@@ -719,6 +729,9 @@ class AdminDeployComposeJobOut(BaseModel):
     message: str | None = None
     error_detail: str | None = None
     log_excerpt: str | None = None
+    journal_lines: list[str] = Field(default_factory=list)
+    progress_phase: Literal["git", "build", "up"] | None = None
+    elapsed_seconds: float | None = None
 
 
 class AdminDeployUpdateCheckOut(BaseModel):
@@ -727,6 +740,8 @@ class AdminDeployUpdateCheckOut(BaseModel):
     github_repo_configured: bool
     deploy_trigger_configured: bool = False
     compose_update_enabled: bool = False
+    compose_git_reset_enabled: bool = False
+    compose_git_ref: str = "main"
     prompt_enabled: bool
     current_commit: str
     current_commit_short: str

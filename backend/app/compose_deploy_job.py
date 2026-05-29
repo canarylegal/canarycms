@@ -27,6 +27,7 @@ from app.compose_runtime import (
     legacy_compose_job_state_paths,
     resolve_compose_up_marker,
 )
+from app.compose_deploy_progress import LiveComposeJournal, compose_phase_from_journal
 from app.local_compose_update import (
     compose_runner_container_name,
     docker_inspect_container_state,
@@ -47,11 +48,28 @@ _message: str | None = None
 _error_detail: str | None = None
 _log_excerpt: str | None = None
 _runner_expected: bool = False
+_journal_lines: list[str] = []
+_progress_phase: str | None = None
 
 
 
 def _utc_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _persist_journal_progress(job_id: str, lines: list[str]) -> None:
+    """Write live journal + phase to disk and in-process globals."""
+    global _journal_lines, _progress_phase
+    phase = compose_phase_from_journal(lines)
+    _journal_lines = list(lines)
+    _progress_phase = phase
+    disk = _read_disk_state()
+    if (
+        disk
+        and str(disk.get("status") or "") == "running"
+        and str(disk.get("job_id") or "") == job_id
+    ):
+        _write_disk_state({**disk, "journal_lines": lines, "progress_phase": phase})
 
 
 def _started_age_seconds(started_at: str | None) -> float | None:
@@ -65,14 +83,20 @@ def _started_age_seconds(started_at: str | None) -> float | None:
 
 
 def _running_payload_from_disk(disk: dict[str, Any]) -> dict[str, Any]:
+    started = disk.get("started_at")
+    lines = disk.get("journal_lines") or []
+    phase = disk.get("progress_phase") or (compose_phase_from_journal(lines) if lines else "build")
     return {
         "status": "running",
         "job_id": disk.get("job_id"),
-        "started_at": disk.get("started_at"),
+        "started_at": started,
         "finished_at": None,
-        "message": None,
+        "message": disk.get("message"),
         "error_detail": None,
         "log_excerpt": None,
+        "journal_lines": lines,
+        "progress_phase": phase,
+        "elapsed_seconds": _started_age_seconds(str(started) if started else None),
     }
 
 
@@ -86,6 +110,7 @@ def _api_restarted_since_job(disk: dict[str, Any]) -> bool:
 def reconcile_compose_job_state() -> None:
     """Finalize a job from detached-runner marker files or stale ``running`` disk rows."""
     global _job_id, _phase, _started_at, _finished_at, _message, _error_detail, _log_excerpt, _runner_expected
+    global _journal_lines, _progress_phase
 
     disk = _read_disk_state()
     if not disk or str(disk.get("status") or "") != "running":
@@ -108,6 +133,7 @@ def reconcile_compose_job_state() -> None:
 
     def _persist_terminal(*, ok: bool, err: str | None, excerpt: str | None) -> None:
         global _job_id, _phase, _started_at, _finished_at, _message, _error_detail, _log_excerpt, _runner_expected
+        global _journal_lines, _progress_phase
         with _lock:
             _job_id = jid
             _runner_expected = False
@@ -117,6 +143,11 @@ def reconcile_compose_job_state() -> None:
                 sa = disk.get("started_at")
                 if sa:
                     _started_at = str(sa)
+            disk_lines = disk.get("journal_lines") or []
+            if disk_lines and not _journal_lines:
+                _journal_lines = list(disk_lines)
+            if _journal_lines:
+                _progress_phase = compose_phase_from_journal(_journal_lines)
             if ok:
                 _message = (
                     "Docker Compose finished (git pull if enabled, build --pull, up -d). "
@@ -293,6 +324,7 @@ def _write_disk_state(data: dict[str, Any]) -> None:
 
 
 def _memory_public() -> dict[str, Any]:
+    elapsed = _started_age_seconds(_started_at) if _phase == "running" else None
     return {
         "status": _phase,
         "job_id": _job_id,
@@ -301,6 +333,25 @@ def _memory_public() -> dict[str, Any]:
         "message": _message,
         "error_detail": _error_detail,
         "log_excerpt": _log_excerpt,
+        "journal_lines": list(_journal_lines),
+        "progress_phase": _progress_phase,
+        "elapsed_seconds": elapsed,
+    }
+
+
+def _terminal_public_from_disk(disk: dict[str, Any]) -> dict[str, Any]:
+    lines = disk.get("journal_lines") or []
+    return {
+        "status": disk.get("status"),
+        "job_id": disk.get("job_id"),
+        "started_at": disk.get("started_at"),
+        "finished_at": disk.get("finished_at"),
+        "message": disk.get("message"),
+        "error_detail": disk.get("error_detail"),
+        "log_excerpt": disk.get("log_excerpt"),
+        "journal_lines": lines,
+        "progress_phase": disk.get("progress_phase") or (compose_phase_from_journal(lines) if lines else None),
+        "elapsed_seconds": None,
     }
 
 
@@ -345,18 +396,13 @@ def get_compose_job_public() -> dict[str, Any]:
             "message": mem.get("message"),
             "error_detail": mem.get("error_detail"),
             "log_excerpt": mem.get("log_excerpt"),
+            "journal_lines": mem.get("journal_lines") or disk.get("journal_lines") or [],
+            "progress_phase": mem.get("progress_phase") or disk.get("progress_phase"),
+            "elapsed_seconds": None,
         }
 
     if dst in ("succeeded", "failed"):
-        return {
-            "status": dst,
-            "job_id": disk.get("job_id"),
-            "started_at": disk.get("started_at"),
-            "finished_at": disk.get("finished_at"),
-            "message": disk.get("message"),
-            "error_detail": disk.get("error_detail"),
-            "log_excerpt": disk.get("log_excerpt"),
-        }
+        return _terminal_public_from_disk(disk)
     if dst == "running":
         if str(mem.get("status") or "") == "running":
             return mem
@@ -387,6 +433,8 @@ def _persist_from_globals() -> None:
         "log_excerpt": _log_excerpt,
         "host_boot_id": _host_boot_id(),
         "runner_expected": _runner_expected,
+        "journal_lines": list(_journal_lines),
+        "progress_phase": _progress_phase,
     }
     _write_disk_state(payload)
 
@@ -397,9 +445,11 @@ def try_start_compose_job(
     ip: str | None,
     user_agent: str | None,
     profiles: tuple[str, ...],
+    git_strategy: str = "ff-only",
 ) -> str | None:
     """Start a background compose update if idle. Returns ``job_id`` or ``None`` if busy."""
     global _job_id, _phase, _started_at, _finished_at, _message, _error_detail, _log_excerpt, _runner_expected
+    global _journal_lines, _progress_phase
 
     reconcile_compose_job_state()
 
@@ -423,9 +473,11 @@ def try_start_compose_job(
         _error_detail = None
         _log_excerpt = None
         _runner_expected = False
+        _journal_lines = []
+        _progress_phase = "build"
         _persist_from_globals()
 
-    meta = {"profiles": list(profiles)}
+    meta = {"profiles": list(profiles), "git_strategy": git_strategy}
 
     def _after_build() -> None:
         global _runner_expected
@@ -435,16 +487,19 @@ def try_start_compose_job(
 
     def _worker() -> None:
         global _phase, _finished_at, _message, _error_detail, _log_excerpt, _runner_expected
-        journal: list[str] = []
+        global _journal_lines, _progress_phase
+        journal = LiveComposeJournal(jid, _persist_journal_progress)
         try:
             run_compose_update(
                 journal=journal,
                 compose_job_id=jid,
                 on_after_build_before_compose_up=_after_build,
+                git_strategy="reset" if git_strategy == "reset" else "ff-only",
             )
         except BaseException as e:
             err_s = str(e).strip() or type(e).__name__
-            excerpt = _excerpt_from_journal(journal, err_s)
+            final_lines = journal.copy()
+            excerpt = _excerpt_from_journal(final_lines, err_s)
             with _lock:
                 _runner_expected = False
                 _phase = "failed"
@@ -452,20 +507,25 @@ def try_start_compose_job(
                 _message = None
                 _error_detail = err_s[:4000]
                 _log_excerpt = excerpt or None
+                _journal_lines = final_lines
+                _progress_phase = compose_phase_from_journal(final_lines)
                 _persist_from_globals()
             return
 
-        excerpt = _excerpt_from_journal(journal, None)
+        final_lines = journal.copy()
+        excerpt = _excerpt_from_journal(final_lines, None)
         with _lock:
             _runner_expected = False
             _phase = "succeeded"
             _finished_at = _utc_iso()
             _message = (
-                "Docker Compose finished (git pull if enabled, build --pull, up -d). "
+                "Docker Compose finished (git pull/reset if enabled, build --pull, up -d). "
                 "Reload the app after containers restart."
             )
             _error_detail = None
             _log_excerpt = excerpt or None
+            _journal_lines = final_lines
+            _progress_phase = compose_phase_from_journal(final_lines)
             _persist_from_globals()
         try:
             from app.build_metadata import invalidate_live_compose_repo_head_cache
@@ -504,6 +564,7 @@ def start_or_busy(
     actor_user_id: int,
     ip: str | None,
     user_agent: str | None,
+    git_strategy: str = "ff-only",
 ) -> ComposeJobStartResult | Literal["busy"]:
     prof_raw = (os.getenv("CANARY_COMPOSE_PROFILES") or "prod").strip()
     profiles = tuple(p.strip() for p in prof_raw.replace(",", " ").split() if p.strip()) or ("prod",)
@@ -512,6 +573,7 @@ def start_or_busy(
         ip=ip,
         user_agent=user_agent,
         profiles=profiles,
+        git_strategy=git_strategy,
     )
     if jid is None:
         return "busy"

@@ -138,7 +138,9 @@ class ClientOfficeBalanceRow:
     office_balance_pence: int
 
 
-def report_client_office_balances(fee_earner_user_ids: list[uuid.UUID], db: Session) -> list[ClientOfficeBalanceRow]:
+def report_client_office_balances(
+    fee_earner_user_ids: list[uuid.UUID], db: Session
+) -> tuple[list[ClientOfficeBalanceRow], dict[str, int]]:
     rows = (
         db.execute(
             select(Case)
@@ -153,12 +155,15 @@ def report_client_office_balances(fee_earner_user_ids: list[uuid.UUID], db: Sess
         .all()
     )
     if not rows:
-        return []
+        return [], {"client_balance_pence": 0, "office_balance_pence": 0}
     case_ids = [c.id for c in rows]
     bal = balances_by_case_ids(case_ids, db)
     out: list[ClientOfficeBalanceRow] = []
+    tot_client = tot_office = 0
     for c in rows:
         cp, op = bal.get(c.id, (0, 0))
+        tot_client += cp
+        tot_office += op
         out.append(
             ClientOfficeBalanceRow(
                 case_id=c.id,
@@ -171,7 +176,8 @@ def report_client_office_balances(fee_earner_user_ids: list[uuid.UUID], db: Sess
                 office_balance_pence=op,
             )
         )
-    return out
+    totals = {"client_balance_pence": tot_client, "office_balance_pence": tot_office}
+    return out, totals
 
 
 def _invoice_line_split(lines: list[CaseInvoiceLine]) -> tuple[int, int, int]:

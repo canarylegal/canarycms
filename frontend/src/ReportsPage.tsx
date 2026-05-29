@@ -342,6 +342,7 @@ export function ReportsPage({ token, me }: { token: string; me: UserPublic | nul
       client_balance_pence: number
       office_balance_pence: number
     }[]
+    totals?: { client_balance_pence: number; office_balance_pence: number }
   } | null
 
   const previewBilling = previewJson as {
@@ -654,6 +655,19 @@ export function ReportsPage({ token, me }: { token: string; me: UserPublic | nul
                         <td>{formatMoneyPence(r.office_balance_pence)}</td>
                       </tr>
                     ))}
+                    {previewBalances.totals ? (
+                      <tr className="reportsTableTotalRow">
+                        <td colSpan={4}>
+                          <strong>Total</strong>
+                        </td>
+                        <td>
+                          <strong>{formatMoneyPence(previewBalances.totals.client_balance_pence)}</strong>
+                        </td>
+                        <td>
+                          <strong>{formatMoneyPence(previewBalances.totals.office_balance_pence)}</strong>
+                        </td>
+                      </tr>
+                    ) : null}
                   </tbody>
                 </table>
               </div>

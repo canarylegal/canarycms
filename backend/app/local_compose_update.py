@@ -11,7 +11,9 @@ import time
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, MutableSequence
+from typing import Callable, Literal, MutableSequence
+
+GitSyncStrategy = Literal["ff-only", "reset", "none"]
 
 
 @dataclass(frozen=True)
@@ -20,6 +22,8 @@ class ComposeUpdateConfig:
     compose_files: tuple[str, ...]
     profiles: tuple[str, ...]
     git_pull: bool
+    git_reset_enabled: bool
+    git_ref: str
 
 
 def _truthy(v: str | None) -> bool:
@@ -53,7 +57,15 @@ def load_compose_update_config() -> ComposeUpdateConfig | None:
         compose_files=compose_files,
         profiles=profiles,
         git_pull=_truthy(os.getenv("CANARY_COMPOSE_GIT_PULL")),
+        git_reset_enabled=_truthy(os.getenv("CANARY_COMPOSE_GIT_RESET_ENABLED")),
+        git_ref=(os.getenv("CANARY_GITHUB_DEPLOY_REF") or "main").strip() or "main",
     )
+
+
+def compose_git_reset_enabled() -> bool:
+    """True when admins may request ``git fetch`` + ``reset --hard`` before compose (see ``CANARY_COMPOSE_GIT_RESET_ENABLED``)."""
+    cfg = load_compose_update_config()
+    return cfg is not None and cfg.git_reset_enabled
 
 
 def compose_update_configured() -> bool:
@@ -373,38 +385,81 @@ def _journal(journal: MutableSequence[str] | None, line: str) -> None:
         journal.append(line)
 
 
-def run_compose_update(
-    *,
-    journal: MutableSequence[str] | None = None,
-    compose_job_id: str | None = None,
-    on_after_build_before_compose_up: Callable[[], None] | None = None,
-) -> None:
-    cfg = load_compose_update_config()
-    if cfg is None:
-        raise RuntimeError("Docker Compose update is not enabled or project dir is invalid.")
+def _git_sync_error_detail(exc: subprocess.CalledProcessError) -> str:
+    return ((exc.stderr or "") + (exc.stdout or "")).strip()[-4000:]
 
-    project_dir = str(cfg.project_dir)
-    if cfg.git_pull:
+
+def _run_git_sync(cfg: ComposeUpdateConfig, journal: MutableSequence[str] | None, strategy: GitSyncStrategy) -> None:
+    if strategy == "none":
+        return
+    git = shutil.which("git")
+    if not git:
+        raise RuntimeError("git is not installed in this container.")
+    git_dir = cfg.project_dir / ".git"
+    if not git_dir.exists():
+        raise RuntimeError("Compose project dir has no .git directory.")
+    trust = _git_trust_repo_args(cfg.project_dir)
+
+    if strategy == "ff-only":
         _journal(journal, "git: pull --ff-only (starting)")
-        git = shutil.which("git")
-        if not git:
-            raise RuntimeError("CANARY_COMPOSE_GIT_PULL is enabled but git is not installed in this container.")
-        git_dir = cfg.project_dir / ".git"
-        if not git_dir.exists():
-            raise RuntimeError("CANARY_COMPOSE_GIT_PULL is set but project dir has no .git directory.")
         try:
             subprocess.run(
-                [git, *_git_trust_repo_args(cfg.project_dir), "pull", "--ff-only"],
+                [git, *trust, "pull", "--ff-only"],
                 check=True,
                 timeout=300,
                 capture_output=True,
                 text=True,
             )
         except subprocess.CalledProcessError as e:
-            err = ((e.stderr or "") + (e.stdout or "")).strip()[-4000:]
+            err = _git_sync_error_detail(e)
             raise RuntimeError(f"git pull failed: {err or e.returncode}") from e
         _journal(journal, "git: pull finished")
+        return
 
+    ref = cfg.git_ref
+    _journal(journal, f"git: fetch origin {ref} + reset --hard FETCH_HEAD (starting)")
+    try:
+        subprocess.run(
+            [git, *trust, "fetch", "origin", ref],
+            check=True,
+            timeout=300,
+            capture_output=True,
+            text=True,
+        )
+        subprocess.run(
+            [git, *trust, "reset", "--hard", "FETCH_HEAD"],
+            check=True,
+            timeout=120,
+            capture_output=True,
+            text=True,
+        )
+    except subprocess.CalledProcessError as e:
+        err = _git_sync_error_detail(e)
+        raise RuntimeError(f"git reset to origin/{ref} failed: {err or e.returncode}") from e
+    _journal(journal, f"git: reset finished (origin/{ref})")
+
+
+def run_compose_update(
+    *,
+    journal: MutableSequence[str] | None = None,
+    compose_job_id: str | None = None,
+    on_after_build_before_compose_up: Callable[[], None] | None = None,
+    git_strategy: GitSyncStrategy = "ff-only",
+) -> None:
+    cfg = load_compose_update_config()
+    if cfg is None:
+        raise RuntimeError("Docker Compose update is not enabled or project dir is invalid.")
+
+    if git_strategy == "reset":
+        if not cfg.git_reset_enabled:
+            raise RuntimeError(
+                "Git reset is not enabled. Set CANARY_COMPOSE_GIT_RESET_ENABLED=1 (see .env.example)."
+            )
+        _run_git_sync(cfg, journal, "reset")
+    elif cfg.git_pull:
+        _run_git_sync(cfg, journal, "ff-only")
+
+    project_dir = str(cfg.project_dir)
     base = _compose_base_cmd(cfg)
     env = os.environ.copy()
     _inject_git_commit_for_compose_build(env, cfg.project_dir)

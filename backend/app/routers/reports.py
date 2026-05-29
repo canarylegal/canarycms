@@ -72,7 +72,7 @@ def post_client_office_balances(
     format: Annotated[ReportFormat, Query()] = "json",
 ):
     ids = enforce_fee_earner_ids(user, db, body.fee_earner_user_ids)
-    rows = report_client_office_balances(ids, db)
+    rows, totals = report_client_office_balances(ids, db)
     if format == "json":
         return {
             "rows": [
@@ -86,7 +86,8 @@ def post_client_office_balances(
                     "office_balance_pence": r.office_balance_pence,
                 }
                 for r in rows
-            ]
+            ],
+            "totals": totals,
         }
     wb = Workbook()
     ws = wb.active
@@ -112,6 +113,16 @@ def post_client_office_balances(
                 float(pence_to_pounds_str(r.office_balance_pence)),
             ]
         )
+    ws.append(
+        [
+            "",
+            "",
+            "",
+            "Total",
+            float(pence_to_pounds_str(totals["client_balance_pence"])),
+            float(pence_to_pounds_str(totals["office_balance_pence"])),
+        ]
+    )
     return _wb_response(wb, "canary-report-client-office-balances.xlsx")
 
 
