@@ -1023,9 +1023,12 @@ select {
 
 .docsTh {
   background: var(--panel2);
-  position: sticky;
-  top: 0;
-  z-index: 1;
+}
+
+.caseDocsStickyHead .docsTh {
+  position: static;
+  top: auto;
+  z-index: auto;
 }
 
 .docsTh.docsTr {
@@ -1311,6 +1314,20 @@ select {
   --case-main-gap: 12px;
 }
 
+/* Toolbar + column headers stay visible while scrolling the document list. */
+.caseDocsStickyHead {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  flex-shrink: 0;
+  background: var(--panel2);
+  box-shadow: 0 1px 0 var(--border);
+}
+
+.caseDocsStickyHead .caseDocsToolbar {
+  border-bottom: 1px solid var(--border);
+}
+
 /* New / Import / Refresh + search now live in .caseDocsToolbar (inside the documents card). */
 .caseDocsToolbar {
   display: flex;
@@ -1321,9 +1338,9 @@ select {
   justify-content: space-between;
   gap: 12px;
   padding: 10px 12px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: none;
   flex-shrink: 0;
-  background: var(--panel2);
+  background: transparent;
   position: relative;
   z-index: 2;
 }

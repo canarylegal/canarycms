@@ -99,7 +99,7 @@ function fetchTimedOutMessage(e: unknown): string | null {
   return err?.name === 'AbortError' ? 'Request timed out — try again or use Download.' : null
 }
 
-/** Preview only: read up to this many UTF-8 chars so we never wait on multi‑GB .eml bodies. */
+/** Preview only: read up to this cap (octets preserved via ISO-8859-1) so we never wait on multi‑GB .eml bodies. */
 const EML_PREVIEW_STREAM_CAP = 768 * 1024
 
 async function fetchEmlTextForPreview(caseId: string, fileId: string, token: string): Promise<string> {
@@ -118,7 +118,7 @@ async function fetchEmlTextForPreview(caseId: string, fileId: string, token: str
     if (!res.ok) throw new Error((await res.text()) || res.statusText)
     if (!res.body) return await res.text()
     const reader = res.body.getReader()
-    const decoder = new TextDecoder('utf-8', { fatal: false })
+    const decoder = new TextDecoder('iso-8859-1', { fatal: false })
     let out = ''
     while (out.length < EML_PREVIEW_STREAM_CAP) {
       const { done, value } = await reader.read()
@@ -2191,6 +2191,7 @@ export function CaseDetail({
             >
               {caseDocPanel === 'documents' ? (
               <>
+              <div className="caseDocsStickyHead">
               <div
                 className="caseDocsToolbar"
                 role="toolbar"
@@ -2371,6 +2372,7 @@ export function CaseDetail({
                 >
                   User
                 </button>
+              </div>
               </div>
               <div
                 className="muted"

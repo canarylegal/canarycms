@@ -51,41 +51,67 @@ function parseHeaderBlock(block: string): Record<string, string> {
   return out
 }
 
-function decodeQuotedPrintable(input: string): string {
+function decodeQuotedPrintableToBytes(input: string): Uint8Array {
   const t = input.replace(/=\r?\n/g, '')
-  return t.replace(/=([0-9A-Fa-f]{2})/g, (_, hex) => String.fromCharCode(Number.parseInt(hex, 16)))
+  const bytes: number[] = []
+  for (let i = 0; i < t.length; i++) {
+    const ch = t[i]
+    if (ch === '=' && i + 2 < t.length) {
+      const hex = t.slice(i + 1, i + 3)
+      if (/^[0-9A-Fa-f]{2}$/.test(hex)) {
+        bytes.push(Number.parseInt(hex, 16))
+        i += 2
+        continue
+      }
+    }
+    bytes.push(t.charCodeAt(i) & 0xff)
+  }
+  return new Uint8Array(bytes)
+}
+
+function normalizeCharset(charset: string): string {
+  const c = charset.trim().toLowerCase()
+  if (!c) return 'utf-8'
+  if (c === 'utf8' || c === 'utf-8') return 'utf-8'
+  if (c === 'us-ascii' || c === 'ascii') return 'utf-8'
+  if (c === 'iso-8859-1' || c === 'iso8859-1' || c === 'latin1' || c === 'latin-1' || c === 'iso_8859-1') {
+    return 'iso-8859-1'
+  }
+  if (c === 'windows-1252' || c === 'cp1252' || c === 'x-cp1252') return 'windows-1252'
+  return charset.trim()
 }
 
 function extractCharset(contentType: string): string {
   const m = /charset\s*=\s*("?)([^";\s]+)\1/i.exec(contentType || '')
   if (!m) return 'utf-8'
-  return m[2].trim().replace(/^utf8$/i, 'utf-8')
+  return normalizeCharset(m[2])
 }
 
 function decodeBytesWithCharset(bytes: Uint8Array, charset: string): string {
+  const normalized = normalizeCharset(charset)
   try {
-    return new TextDecoder(charset, { fatal: false }).decode(bytes)
+    return new TextDecoder(normalized, { fatal: false }).decode(bytes)
   } catch {
-    return new TextDecoder('utf-8', { fatal: false }).decode(bytes)
+    try {
+      return new TextDecoder('utf-8', { fatal: false }).decode(bytes)
+    } catch {
+      return new TextDecoder('iso-8859-1', { fatal: false }).decode(bytes)
+    }
   }
+}
+
+function base64ToBytes(b64: string): Uint8Array {
+  const clean = b64.replace(/\s+/g, '')
+  const bin = atob(clean)
+  const bytes = new Uint8Array(bin.length)
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
+  return bytes
 }
 
 function latin1Bytes(s: string): Uint8Array {
   const out = new Uint8Array(s.length)
   for (let i = 0; i < s.length; i++) out[i] = s.charCodeAt(i) & 0xff
   return out
-}
-
-function decodeBase64Payload(b64: string, charset: string): string {
-  const clean = b64.replace(/\s+/g, '')
-  try {
-    const bin = atob(clean)
-    const bytes = new Uint8Array(bin.length)
-    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
-    return decodeBytesWithCharset(bytes, charset)
-  } catch {
-    return b64
-  }
 }
 
 function extractBoundary(contentType: string): string | null {
@@ -104,20 +130,58 @@ function htmlToPlainText(html: string): string {
 }
 
 function decodeBodyPayload(headers: Record<string, string>, body: string): string {
-  const enc = (headers['content-transfer-encoding'] || '').toLowerCase()
+  const enc = (headers['content-transfer-encoding'] || '8bit').toLowerCase()
   const charset = extractCharset(headers['content-type'] || '')
-  if (enc.includes('quoted-printable')) {
-    const decoded = decodeQuotedPrintable(body)
-    if (charset && !/^utf-8$/i.test(charset)) {
-      return decodeBytesWithCharset(latin1Bytes(decoded), charset)
+
+  let bytes: Uint8Array
+  if (enc.includes('base64')) {
+    try {
+      bytes = base64ToBytes(body)
+    } catch {
+      return body
     }
-    return decoded
+  } else if (enc.includes('quoted-printable')) {
+    bytes = decodeQuotedPrintableToBytes(body)
+  } else {
+    bytes = latin1Bytes(body)
   }
-  if (enc.includes('base64')) return decodeBase64Payload(body, charset)
-  if (charset && !/^utf-8$/i.test(charset)) {
-    return decodeBytesWithCharset(latin1Bytes(body), charset)
+  return decodeBytesWithCharset(bytes, charset)
+}
+
+function decodeRfc2047Q(payload: string): Uint8Array {
+  const bytes: number[] = []
+  for (let i = 0; i < payload.length; i++) {
+    const ch = payload[i]
+    if (ch === '_') {
+      bytes.push(0x20)
+    } else if (ch === '=' && i + 2 < payload.length) {
+      const hex = payload.slice(i + 1, i + 3)
+      if (/^[0-9A-Fa-f]{2}$/.test(hex)) {
+        bytes.push(Number.parseInt(hex, 16))
+        i += 2
+        continue
+      }
+      bytes.push(ch.charCodeAt(0) & 0xff)
+    } else {
+      bytes.push(ch.charCodeAt(0) & 0xff)
+    }
   }
-  return body
+  return new Uint8Array(bytes)
+}
+
+/** Decode RFC 2047 encoded-words in header values (Subject, From, etc.). */
+function decodeMimeHeaderValue(value: string): string {
+  if (!value || !/=\?/.test(value)) return value
+  const normalized = value.replace(/(\?=)\s+(=\?)/g, '$1$2')
+  return normalized.replace(/=\?([^?]+)\?([BbQq])\?([^?]*)\?=/g, (_, charset, enc, text) => {
+    const cs = extractCharset(`text/plain; charset=${charset}`)
+    try {
+      const bytes = enc.toUpperCase() === 'B' ? base64ToBytes(text) : decodeRfc2047Q(text)
+      return decodeBytesWithCharset(bytes, cs)
+    } catch {
+      return text
+    }
+  })
 }
 
 type Collected = { plain: string[]; htmlRaw: string[] }
@@ -159,30 +223,90 @@ function collectParts(headers: Record<string, string>, body: string, depth: numb
     if (!boundary) return
     const norm = normalizeNewlines(body)
     const segments = splitMultipartSegmentsLinear(norm, boundary)
-    for (const seg of segments) {
-      const t = seg.trim()
-      if (!t || t === '--') continue
-      const sep = t.indexOf('\n\n')
-      if (sep === -1) continue
-      const h = parseHeaderBlock(t.slice(0, sep))
-      const payload = t.slice(sep + 2)
-      collectParts(h, payload, depth + 1, into)
+    const isAlternative = ct.includes('multipart/alternative')
+    const ordered = isAlternative ? [...segments].reverse() : segments
+    for (const seg of ordered) {
+      const parsed = splitHeadersBody(seg)
+      if (!parsed) continue
+      collectParts(parsed.headers, parsed.payload, depth + 1, into)
+      if (isAlternative && (into.htmlRaw.length > 0 || into.plain.length > 0)) {
+        break
+      }
     }
     return
   }
 
+  if (!isBodyTextPart(ct, headers)) return
+
   const decoded = decodeBodyPayload(headers, body)
   if (ct.includes('text/html')) {
-    into.htmlRaw.push(decoded)
-  } else if (ct.includes('text/plain') || !ct) {
-    into.plain.push(decoded.trim())
-  } else {
-    into.plain.push(decoded.trim())
+    if (isLikelyHtml(decoded)) into.htmlRaw.push(decoded)
+  } else if (ct.includes('text/plain')) {
+    const trimmed = decoded.trim()
+    if (isLikelyReadableText(trimmed)) into.plain.push(trimmed)
   }
 }
 
+function splitHeadersBody(segment: string): { headers: Record<string, string>; payload: string } | null {
+  const norm = normalizeNewlines(segment.trim())
+  if (!norm) return null
+  const sep = norm.indexOf('\n\n')
+  if (sep === -1) return null
+  return {
+    headers: parseHeaderBlock(norm.slice(0, sep)),
+    payload: norm.slice(sep + 2),
+  }
+}
+
+function isBodyTextPart(contentType: string, headers: Record<string, string>): boolean {
+  const ct = contentType.toLowerCase()
+  if (ct.includes('multipart/')) return false
+  const disp = (headers['content-disposition'] || '').toLowerCase()
+  if (disp.includes('attachment') && !disp.includes('inline')) return false
+  return ct.includes('text/html') || ct.includes('text/plain')
+}
+
+/** Reject decoded binary blobs mis-labelled or mistaken for plain text (e.g. inline PNG signatures). */
+function isLikelyReadableText(s: string): boolean {
+  const t = s.trim()
+  if (!t) return false
+  if (t.startsWith('\x89PNG') || t.startsWith('PNG\r') || t.includes('IHDR')) return false
+  if (t.startsWith('\xff\xd8\xff') || t.startsWith('GIF8')) return false
+  const sample = t.slice(0, 12_000)
+  let bad = 0
+  for (let i = 0; i < sample.length; i++) {
+    const c = sample.charCodeAt(i)
+    if (c === 0) return false
+    if (c === 9 || c === 10 || c === 13) continue
+    if (c < 32 || c === 127) bad++
+  }
+  return bad / sample.length < 0.03
+}
+
+function isLikelyHtml(s: string): boolean {
+  const t = s.trim().slice(0, 4000).toLowerCase()
+  return (
+    t.includes('<html') ||
+    t.includes('<!doctype') ||
+    t.includes('<body') ||
+    /<\s*(div|p|table|span|br|style)\b/.test(t)
+  )
+}
+
+function pickBestHtml(parts: string[]): string | undefined {
+  const candidates = parts.filter((p) => isLikelyHtml(p))
+  if (!candidates.length) return undefined
+  return candidates.sort((a, b) => b.length - a.length)[0]
+}
+
+function pickBestPlain(parts: string[]): string | undefined {
+  const candidates = parts.filter((p) => isLikelyReadableText(p))
+  if (!candidates.length) return undefined
+  return candidates.sort((a, b) => b.length - a.length)[0]
+}
+
 function headerDisplay(headers: Record<string, string>, key: string): string {
-  return (headers[key.toLowerCase()] ?? '').trim()
+  return decodeMimeHeaderValue((headers[key.toLowerCase()] ?? '').trim())
 }
 
 let domPurifyLinkHookAdded = false
@@ -254,30 +378,39 @@ export function parseEmlForPreview(raw: string): EmlPreviewData {
   let bodyHtml: string | undefined
   let bodyText = ''
 
-  if (into.htmlRaw.length > 0) {
-    bodyHtml = into.htmlRaw.sort((a, b) => b.length - a.length)[0]
+  bodyHtml = pickBestHtml(into.htmlRaw)
+  if (bodyHtml) {
     bodyText = htmlToPlainText(bodyHtml)
   }
-  if (into.plain.length > 0) {
-    const bestPlain = into.plain.sort((a, b) => b.length - a.length)[0]
-    if (!bodyHtml) {
-      bodyText = bestPlain
-    }
+  const bestPlain = pickBestPlain(into.plain)
+  if (bestPlain && !bodyHtml) {
+    bodyText = bestPlain
+  } else if (bestPlain && bodyHtml && !bodyText.trim()) {
+    bodyText = bestPlain
   }
 
-  if (!bodyHtml && into.plain.length === 0 && into.htmlRaw.length === 0) {
+  if (!bodyHtml && !bodyText) {
     const dec = decodeBodyPayload(topHeaders, body)
     const ct = (topHeaders['content-type'] || '').toLowerCase()
-    if (ct.includes('text/html')) {
+    if (ct.includes('text/html') && isLikelyHtml(dec)) {
       bodyHtml = dec.trim()
       bodyText = htmlToPlainText(bodyHtml)
-    } else {
+    } else if (ct.includes('text/plain') && isLikelyReadableText(dec)) {
       bodyText = dec.trim()
     }
   }
 
   if (!bodyHtml && !bodyText) {
-    bodyText = decodeBodyPayload(topHeaders, body).trim()
+    const dec = decodeBodyPayload(topHeaders, body).trim()
+    if (isLikelyReadableText(dec)) bodyText = dec
+    else if (isLikelyHtml(dec)) {
+      bodyHtml = dec
+      bodyText = htmlToPlainText(dec)
+    }
+  }
+
+  if (!bodyHtml && !bodyText) {
+    bodyText = '(No readable message body in preview. Use Open or Download for the full e-mail.)'
   }
 
   if (truncated) {
