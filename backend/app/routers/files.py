@@ -30,7 +30,7 @@ from app.graph_mail import create_outlook_draft, graph_mail_configured
 from app.file_storage import FILES_ROOT, StoredFilePaths, case_file_paths, ensure_files_root, sanitize_folder_path
 from app.models import Case as CaseRow
 from app.models import CaseContact, Contact as GlobalContactRow
-from app.models import File as DbFile, FileCategory, FileEditSession, Precedent, PrecedentKind, User
+from app.models import CaseLockMode, CaseStatus, File as DbFile, FileCategory, FileEditSession, MatterHeadType, MatterSubType, Precedent, PrecedentKind, User
 from app.audit import log_event
 from app.canary_public_url import canary_public_url, onlyoffice_browser_public_base
 from app.feature_flags import (
@@ -1225,6 +1225,164 @@ def _unlink_if_exists(path: str) -> None:
         os.unlink(path)
     except OSError:
         pass
+
+
+def _format_case_status_label(status: CaseStatus) -> str:
+    labels = {
+        CaseStatus.open: "Active",
+        CaseStatus.closed: "Closed",
+        CaseStatus.archived: "Archived",
+        CaseStatus.quote: "Quote",
+        CaseStatus.post_completion: "Post-completion",
+    }
+    return labels.get(status, str(status.value if hasattr(status, "value") else status))
+
+
+def _matter_type_display_line(*, sub_name: str | None, head_name: str | None) -> str:
+    def _clean(s: str | None) -> str:
+        t = (s or "").strip()
+        if not t or t in ("—", "-", "–"):
+            return ""
+        return t
+
+    head = _clean(head_name)
+    sub = _clean(sub_name)
+    if head and sub and head.lower() == sub.lower():
+        return head
+    if head and sub:
+        marker = " — "
+        j = head.find(marker)
+        if j >= 0:
+            tail = head[j + len(marker) :].strip()
+            if tail and tail.lower() == sub.lower():
+                return head
+    parts = [p for p in (head, sub) if p]
+    out = " — ".join(parts)
+    while " — — " in out:
+        out = out.replace(" — — ", " — ")
+    return out or "—"
+
+
+def _case_lock_display(*, lock_mode: CaseLockMode, is_locked: bool) -> str:
+    if lock_mode == CaseLockMode.blacklist:
+        return "Locked"
+    if lock_mode == CaseLockMode.whitelist:
+        return "Locked" if is_locked else "Unlocked"
+    return "Unlocked"
+
+
+def _matter_names_for_case(case: CaseRow, db: Session) -> tuple[str | None, str | None]:
+    if case.matter_sub_type_id:
+        sub = db.get(MatterSubType, case.matter_sub_type_id)
+        if not sub:
+            return None, None
+        head = db.get(MatterHeadType, sub.head_type_id)
+        return sub.name, (head.name if head else None)
+    if case.matter_head_type_id:
+        head = db.get(MatterHeadType, case.matter_head_type_id)
+        return None, (head.name if head else None)
+    return None, None
+
+
+def _case_details_export_text(case: CaseRow, db: Session) -> str:
+    sub_name, head_name = _matter_names_for_case(case, db)
+    fee_earner = db.get(User, case.fee_earner_user_id)
+    fee_label = (fee_earner.display_name if fee_earner else "") or "—"
+    lines = [
+        "Case details",
+        "",
+        f"Reference: {case.case_number}",
+        f"Client: {case.client_name or '—'}",
+        f"Matter type: {_matter_type_display_line(sub_name=sub_name, head_name=head_name)}",
+        f"Description: {case.title}",
+        f"Status: {_format_case_status_label(case.status)}",
+        f"Fee earner: {fee_label}",
+        f"Lock: {_case_lock_display(lock_mode=case.lock_mode, is_locked=case.is_locked)}",
+    ]
+    return "\n".join(lines) + "\n"
+
+
+def _zip_arc_for_case_export(row: DbFile) -> str:
+    fp = (row.folder_path or "").strip()
+    leaf = _safe_zip_path_component(row.original_filename)
+    if not fp:
+        return leaf
+    segs = [_safe_zip_path_component(s) for s in fp.split("/") if s]
+    return "/".join(segs + [leaf])
+
+
+@router.get("/export-zip")
+def download_case_export_zip(
+    case_id: uuid.UUID,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Download all matter files plus ``case-details.txt`` (Case details panel) as a zip."""
+    require_case_access(case_id, user, db)
+    case = db.get(CaseRow, case_id)
+    if not case:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Case not found")
+    ensure_files_root()
+
+    rows = (
+        db.execute(
+            select(DbFile).where(
+                DbFile.case_id == case_id,
+                DbFile.oo_compose_pending.is_(False),
+            )
+        )
+        .scalars()
+        .all()
+    )
+    file_rows = [r for r in rows if (r.mime_type or "") != "application/x-directory"]
+
+    safe_ref = _safe_zip_path_component(case.case_number) or "matter"
+    details_name = "case-details.txt"
+    arc_taken: set[str] = {details_name}
+
+    tmp: str | None = None
+    try:
+        fd, tmp = tempfile.mkstemp(suffix=".zip")
+        os.close(fd)
+        with zipfile.ZipFile(tmp, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr(details_name, _case_details_export_text(case, db).encode("utf-8"))
+            for row in file_rows:
+                abs_path = (FILES_ROOT / row.storage_path).resolve()
+                if not str(abs_path).startswith(str(FILES_ROOT)) or not abs_path.is_file():
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail=f"File missing on disk: {row.original_filename}",
+                    )
+                arc = _zip_arc_for_case_export(row).replace("\\", "/")
+                if arc.startswith("/") or arc.startswith("../") or "/../" in arc:
+                    continue
+                arc = _unique_zip_name(arc_taken, arc)
+                zf.write(abs_path, arcname=arc)
+
+        log_event(
+            db,
+            actor_user_id=user.id,
+            action="case.export_zip",
+            entity_type="case",
+            entity_id=str(case_id),
+            meta={"file_count": len(file_rows)},
+        )
+
+        return FileResponse(
+            path=tmp,
+            media_type="application/zip",
+            filename=f"{safe_ref}-export.zip",
+            content_disposition_type="attachment",
+            background=BackgroundTask(_unlink_if_exists, tmp),
+        )
+    except HTTPException:
+        if tmp:
+            _unlink_if_exists(tmp)
+        raise
+    except Exception:
+        if tmp:
+            _unlink_if_exists(tmp)
+        raise
 
 
 @router.get("/folders/download-zip")

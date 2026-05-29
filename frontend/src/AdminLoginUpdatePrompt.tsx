@@ -162,6 +162,12 @@ export function AdminLoginUpdatePrompt({
         ) : null}
         {err ? <div className="error" style={{ marginBottom: 10 }}>{err}</div> : null}
 
+        {!busy ? (
+          <p className="muted" style={{ margin: '0 0 12px', fontSize: 13, lineHeight: 1.45 }}>
+            To avoid data loss, only run the updater when there is no work currently in progress.
+          </p>
+        ) : null}
+
         {busy && !finishing ? <ComposeUpdateProgress progress={composeProgress} /> : null}
 
         {!busy && (data.latest_release_name || data.latest_release_tag) ? (

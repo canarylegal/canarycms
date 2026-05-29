@@ -231,6 +231,11 @@ export function AdminDeploy({ token }: { token: string }) {
             Compose-based updates are <strong>not configured</strong>.
           </p>
         )}
+        {composeOn ? (
+          <p className="muted" style={{ marginTop: 12, fontSize: 13, lineHeight: 1.45 }}>
+            To avoid data loss, only run the updater when there is no work currently in progress.
+          </p>
+        ) : null}
         <div className="row" style={{ gap: 8, marginTop: 16, flexWrap: 'wrap' }}>
           <button
             type="button"

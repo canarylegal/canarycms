@@ -1470,6 +1470,46 @@ export function CaseDetail({
     }
   }
 
+  async function downloadCaseExportZip() {
+    if (!caseId || !caseDetail) return
+    setBusy(true)
+    setActionErr(null)
+    const ctrl = new AbortController()
+    const tid = window.setTimeout(() => ctrl.abort(), CASE_FILE_FETCH_MS)
+    try {
+      const res = await fetch(apiUrl(`/cases/${caseId}/files/export-zip`), {
+        headers: caseAuthHeaders(token),
+        signal: ctrl.signal,
+      })
+      if (res.status === 401) {
+        localStorage.removeItem('token')
+        window.location.reload()
+        return
+      }
+      if (!res.ok) throw new Error((await res.text()) || res.statusText)
+      const blob = await res.blob()
+      const typed = new Blob([blob], { type: 'application/zip' })
+      const url = URL.createObjectURL(typed)
+      const safeBase =
+        caseDetail.case_number.replace(/[/\\]/g, '_').replace(/^\.+/, '').trim() || 'matter'
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `${safeBase}-export.zip`
+      a.rel = 'noopener'
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      window.setTimeout(() => URL.revokeObjectURL(url), 120_000)
+    } catch (e: unknown) {
+      const msg = fetchTimedOutMessage(e)
+      const err = e as { message?: string }
+      setActionErr(msg ?? err.message ?? 'Export failed')
+    } finally {
+      clearTimeout(tid)
+      setBusy(false)
+    }
+  }
+
   async function downloadCaseFolderZip(folderPath: string) {
     if (!caseId) return
     setBusy(true)
@@ -2256,6 +2296,14 @@ export function CaseDetail({
                   </div>
                   <button type="button" className="btn btnCaseChrome" disabled={busy} onClick={() => importInputRef.current?.click()}>
                     Import
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btnCaseChrome"
+                    disabled={busy || !caseDetail}
+                    onClick={() => void downloadCaseExportZip()}
+                  >
+                    Export
                   </button>
                   <button type="button" className="btn btnCaseChrome" disabled={busy} onClick={() => onRefresh()}>
                     Refresh
