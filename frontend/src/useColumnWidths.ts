@@ -1,56 +1,63 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 
-/** Persisted pixel widths for CSS grid tables (main menu, tasks, contacts). */
-export function useColumnWidths(storageKey: string, defaults: number[], min = 48) {
-  /** Raw JSON last read from localStorage (used to skip a redundant first write after hydrate). */
-  const initialRawRef = useRef<string | null>(null)
+type ColumnWidthsOptions = {
+  /** Persisted pixel widths; omit length or pass undefined to use CSS fr defaults. */
+  widths?: number[]
+  onChange?: (widths: number[]) => void
+  /** Fallback when DOM measure fails on first resize. */
+  fallbackWidths?: number[]
+  min?: number
+}
 
-  const [widths, setWidths] = useState<number[]>(() => {
-    try {
-      const raw = localStorage.getItem(storageKey)
-      initialRawRef.current = raw
-      if (raw) {
-        const parsed = JSON.parse(raw) as unknown
-        if (
-          Array.isArray(parsed) &&
-          parsed.length === defaults.length &&
-          parsed.every((x) => typeof x === 'number' && Number.isFinite(x))
-        ) {
-          return parsed.map((w, i) => Math.max(min, Math.min(2000, w || defaults[i])))
-        }
-      }
-    } catch {
-      /* ignore */
-    }
-    return [...defaults]
-  })
+function measureRowColumnWidths(row: HTMLElement, count: number): number[] {
+  const children = Array.from(row.children).slice(0, count) as HTMLElement[]
+  if (children.length !== count) return []
+  return children.map((el) => Math.round(el.getBoundingClientRect().width))
+}
+
+/** Resizable pixel column widths; uses CSS fr layout until the user resizes once. */
+export function useColumnWidths(columnCount: number, options?: ColumnWidthsOptions) {
+  const min = options?.min ?? 48
+  const fallbacks = options?.fallbackWidths ?? Array.from({ length: columnCount }, () => 120)
+  const externalWidths = options?.widths
+  const customized =
+    externalWidths != null && externalWidths.length === columnCount && options?.onChange != null
+
+  const [pixelWidths, setPixelWidths] = useState<number[] | null>(null)
 
   useEffect(() => {
-    try {
-      const next = JSON.stringify(widths)
-      // Avoid rewriting the same blob on first paint (helps remounts / strict mode / theme toggles).
-      if (initialRawRef.current !== null && initialRawRef.current === next) {
-        initialRawRef.current = null
-        return
-      }
-      initialRawRef.current = null
-      localStorage.setItem(storageKey, next)
-    } catch {
-      /* ignore */
+    if (customized && externalWidths) {
+      setPixelWidths(externalWidths.map((w, i) => Math.max(min, Math.min(2000, w || fallbacks[i]!))))
+      return
     }
-  }, [storageKey, widths])
+    setPixelWidths(null)
+  }, [customized, externalWidths, fallbacks, min])
 
-  const gridTemplateColumns = useMemo(() => widths.map((w) => `${Math.round(w)}px`).join(' '), [widths])
+  const gridTemplateColumns = pixelWidths
+    ? pixelWidths.map((w) => `${Math.round(w)}px`).join(' ')
+    : undefined
 
   const startResize = useCallback(
-    (colIndex: number, startClientX: number) => {
-      const startW = widths[colIndex]
+    (colIndex: number, startClientX: number, measureRow?: HTMLElement | null) => {
+      let base = pixelWidths ?? (customized && externalWidths ? externalWidths : null)
+      if (!base) {
+        const measured = measureRow ? measureRowColumnWidths(measureRow, columnCount) : []
+        base =
+          measured.length === columnCount
+            ? measured
+            : fallbacks.map((w) => Math.max(min, Math.min(2000, w || 120)))
+        setPixelWidths(base)
+        options?.onChange?.(base)
+      }
+      const startW = base[colIndex] ?? fallbacks[colIndex] ?? min
       function onMove(ev: MouseEvent) {
         const dx = ev.clientX - startClientX
-        setWidths((prev) => {
-          const n = [...prev]
-          n[colIndex] = Math.max(min, startW + dx)
-          return n
+        setPixelWidths((prev) => {
+          const current = prev ?? base!
+          const next = [...current]
+          next[colIndex] = Math.max(min, startW + dx)
+          options?.onChange?.(next)
+          return next
         })
       }
       function onUp() {
@@ -64,8 +71,8 @@ export function useColumnWidths(storageKey: string, defaults: number[], min = 48
       document.addEventListener('mousemove', onMove)
       document.addEventListener('mouseup', onUp)
     },
-    [min, widths],
+    [columnCount, customized, externalWidths, fallbacks, min, options, pixelWidths],
   )
 
-  return { widths, gridTemplateColumns, startResize }
+  return { gridTemplateColumns, startResize, customized: customized || pixelWidths != null }
 }

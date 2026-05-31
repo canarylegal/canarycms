@@ -17,11 +17,26 @@ from app.models import (
     UserRole,
 )
 from app.user_initials import normalize_initials
+from app.user_ui_preferences import UserUiPreferencesOut
 
 
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
+
+
+class UserAppearanceOut(BaseModel):
+    font: str = ""
+    accent: str = "#2563eb"
+    mode: Literal["light", "dark"] = "light"
+    page_bg: str = ""
+
+
+class UserAppearanceUpdate(BaseModel):
+    font: str = Field(default="", max_length=500)
+    accent: str = Field(default="#2563eb", max_length=7)
+    mode: Literal["light", "dark"] = "light"
+    page_bg: str = Field(default="", max_length=7)
 
 
 class UserPublic(BaseModel):
@@ -50,6 +65,48 @@ class UserPublic(BaseModel):
             "(password-only session under mandate). Derived from GET /auth/me using the request token."
         ),
     )
+    organization_requires_password_rotation: bool = False
+    password_rotation_days: int | None = None
+    session_password_change_required: bool = Field(
+        default=False,
+        description=(
+            "True when org password rotation policy requires a new password and this JWT was issued before "
+            "the change. Derived from GET /auth/me using the request token."
+        ),
+    )
+    appearance: UserAppearanceOut = Field(default_factory=UserAppearanceOut)
+    ui_preferences: UserUiPreferencesOut = Field(default_factory=UserUiPreferencesOut)
+
+
+class UserUiPreferencesUpdate(BaseModel):
+    """Partial update for per-user UI preferences."""
+
+    calendar_view: Literal["dayGridMonth", "timeGridWeek", "timeGridDay", "listWeek"] | None = None
+    case_calendar_view: Literal["dayGridMonth", "timeGridWeek", "timeGridDay", "listWeek"] | None = None
+    tasks_menu_layout: Literal["list", "kanban"] | None = None
+    case_tasks_layout: Literal["list", "kanban"] | None = None
+    tasks_menu_sort_key: Literal["reference", "client", "matter", "task", "date", "assigned", "priority"] | None = None
+    tasks_menu_sort_dir: Literal["asc", "desc"] | None = None
+    case_tasks_sort_key: Literal["reference", "client", "matter", "task", "date", "assigned", "priority"] | None = None
+    case_tasks_sort_dir: Literal["asc", "desc"] | None = None
+    main_menu_sort_key: Literal["reference", "client", "matter", "feeEarner", "status", "created"] | None = None
+    main_menu_sort_dir: Literal["asc", "desc"] | None = None
+    main_menu_search: str | None = Field(default=None, max_length=500)
+    main_menu_filter_matter_type: str | None = Field(default=None, max_length=200)
+    main_menu_filter_fee_earner_user_id: str | None = Field(default=None, max_length=36)
+    main_menu_filter_case_status: Literal["", "open", "closed", "archived", "quote", "post_completion"] | None = None
+    main_menu_filter_matter_types: list[str] | None = None
+    main_menu_filter_fee_earner_user_ids: list[str] | None = None
+    main_menu_filter_case_statuses: list[Literal["open", "closed", "archived", "quote", "post_completion"]] | None = None
+    tasks_menu_search: str | None = Field(default=None, max_length=500)
+    tasks_menu_filter_matter_type: str | None = Field(default=None, max_length=200)
+    contacts_search: str | None = Field(default=None, max_length=500)
+    contacts_sort_key: Literal["name", "type", "email", "phone"] | None = None
+    contacts_sort_dir: Literal["asc", "desc"] | None = None
+    calendar_selected_calendar_ids: list[str] | None = None
+    main_menu_column_widths: list[int] | None = None
+    tasks_menu_column_widths: list[int] | None = None
+    contacts_column_widths: list[int] | None = None
 
 
 class Verify2FASessionResponse(BaseModel):
@@ -235,6 +292,30 @@ class ChangePasswordRequest(BaseModel):
     new_password: str = Field(min_length=12)
 
 
+class ChangePasswordResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    user: UserPublic
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+
+class ForgotPasswordResponse(BaseModel):
+    message: str
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str = Field(min_length=16, max_length=512)
+    new_password: str = Field(min_length=12)
+
+
+class AdminSendPasswordResetResponse(BaseModel):
+    email_sent: bool
+    message: str | None = None
+
+
 class UserDisable2FARequest(BaseModel):
     password: str
     totp_code: str = Field(min_length=6, max_length=12)
@@ -334,6 +415,8 @@ class FirmSettingsOut(BaseModel):
     letterhead_style: LetterheadStyle = LetterheadStyle.preprinted
     letterhead_original_filename: str | None = None
     mandate_two_factor: bool = False
+    mandate_password_rotation: bool = False
+    password_rotation_days: int | None = None
 
 
 class MergeCodeCatalogOut(BaseModel):
@@ -368,6 +451,8 @@ class FirmSettingsUpdate(BaseModel):
     postcode: str | None = Field(default=None, max_length=50)
     letterhead_style: LetterheadStyle | None = None
     mandate_two_factor: bool | None = None
+    mandate_password_rotation: bool | None = None
+    password_rotation_days: int | None = Field(default=None, ge=1, le=3650)
 
 
 class MatterHeadTypeVisibilityUpdate(BaseModel):
@@ -648,6 +733,13 @@ class EmailIntegrationSettingsOut(BaseModel):
     graph_client_id: str | None
     graph_client_secret_configured: bool
     outlook_web_mail_base: str | None
+    alerts_enabled: bool
+    alert_transport: Literal["auto", "graph", "smtp"]
+    graph_send_mailbox: str | None
+    graph_send_from_name: str | None
+    graph_alert_ready: bool
+    smtp_alert_ready: bool
+    effective_alert_transport: Literal["graph", "smtp"] | None
 
 
 class EmailIntegrationSettingsUpdate(BaseModel):
@@ -656,6 +748,14 @@ class EmailIntegrationSettingsUpdate(BaseModel):
     graph_client_id: str | None = Field(default=None, max_length=2000)
     graph_client_secret: str | None = Field(default=None, max_length=2000)
     outlook_web_mail_base: str | None = Field(default=None, max_length=2000)
+    alerts_enabled: bool | None = None
+    alert_transport: Literal["auto", "graph", "smtp"] | None = None
+    graph_send_mailbox: str | None = Field(default=None, max_length=320)
+    graph_send_from_name: str | None = Field(default=None, max_length=200)
+
+
+class FirmAlertTestIn(BaseModel):
+    to_email: EmailStr
 
 
 class SmtpNotificationSettingsOut(BaseModel):
@@ -756,6 +856,58 @@ class AdminDeployUpdateCheckOut(BaseModel):
     latest_release_body: str | None = None
     commit_messages: list[str] = []
     note: str | None = None
+
+
+class AdminStorageCategoryOut(BaseModel):
+    category: str
+    label: str
+    bytes_used: int = Field(ge=0)
+    file_count: int = Field(ge=0)
+
+
+class AdminStorageDeploymentComponentOut(BaseModel):
+    key: str
+    label: str
+    bytes_used: int = Field(ge=0)
+    detected: bool
+
+
+class AdminStorageOut(BaseModel):
+    tracked_total_bytes: int = Field(ge=0)
+    files_on_disk_bytes: int = Field(ge=0)
+    compose_mount_bytes: int = Field(ge=0)
+    application_checkout_bytes: int = Field(ge=0)
+    database_bytes: int | None = Field(default=None, ge=0)
+    database_logical_bytes: int | None = Field(default=None, ge=0)
+    calendars_bytes: int | None = Field(default=None, ge=0)
+    deployment_total_bytes: int = Field(ge=0)
+    docker_detected: bool = False
+    docker_images_bytes: int = Field(default=0, ge=0)
+    docker_container_writable_bytes: int = Field(default=0, ge=0)
+    docker_dangling_images_bytes: int = Field(default=0, ge=0)
+    docker_build_cache_bytes: int | None = Field(default=None, ge=0)
+    deployment_active_bytes: int = Field(default=0, ge=0)
+    deployment_artifacts_bytes: int = Field(default=0, ge=0)
+    measurement_note: str | None = None
+    deployment_components: list[AdminStorageDeploymentComponentOut]
+    categories: list[AdminStorageCategoryOut]
+    storage_limit_bytes: int | None = None
+    files_root: str
+    host_disk_detected: bool
+    host_disk_total_bytes: int | None = Field(default=None, ge=0)
+    host_disk_used_bytes: int | None = Field(default=None, ge=0)
+    host_disk_free_bytes: int | None = Field(default=None, ge=0)
+
+
+class AdminStorageSettingsPatch(BaseModel):
+    storage_limit_bytes: int | None = Field(
+        default=None,
+        ge=1,
+        le=10_000_000_000_000_000,
+        description="Firm-wide storage quota for tracked files; null clears the limit.",
+    )
+
+    model_config = {"extra": "forbid"}
 
 
 class ContactCreate(BaseModel):
@@ -1130,6 +1282,20 @@ class CaseFileMoveUpdate(BaseModel):
     """Target folder path inside the case (empty string = root)."""
 
     folder_path: str = ""
+
+
+class CasePortalFolderAccessGrantOut(BaseModel):
+    folder_path: str
+    contact_id: uuid.UUID
+    contact_name: str
+
+
+class CasePortalFolderShareContactOut(BaseModel):
+    case_contact_id: uuid.UUID
+    contact_id: uuid.UUID
+    contact_name: str
+    has_grant: bool
+    grant_id: uuid.UUID | None
 
 
 class FileDesktopCheckoutOut(BaseModel):
@@ -1628,4 +1794,106 @@ class FeeEarnerPickOut(BaseModel):
     email: EmailStr
 
     model_config = {"from_attributes": True}
+
+
+class PortalConfigOut(BaseModel):
+    firm_name: str
+
+
+class PortalAuthIn(BaseModel):
+    access_code: str = Field(min_length=8, max_length=64)
+
+
+class PortalGrantSummaryOut(BaseModel):
+    id: uuid.UUID
+    case_id: uuid.UUID
+    case_title: str
+    folder_path: str
+    folder_label: str
+    label: str
+    can_download: bool
+    can_upload: bool
+
+
+class PortalAuthOut(BaseModel):
+    session_token: str
+    contact_name: str
+    grants: list[PortalGrantSummaryOut]
+
+
+class PortalSessionOut(BaseModel):
+    contact_name: str
+    grants: list[PortalGrantSummaryOut]
+
+
+class PortalFileOut(BaseModel):
+    id: uuid.UUID
+    original_filename: str
+    mime_type: str
+    size_bytes: int
+    folder_path: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class ContactPortalAccessOut(BaseModel):
+    enabled: bool
+    expires_at: datetime | None
+    last_login_at: datetime | None
+    locked_until: datetime | None
+    has_access: bool
+    access_code: str | None = None
+    access_record_exists: bool = False
+
+
+class ContactPortalAccessCreateOut(BaseModel):
+    access_code: str
+    enabled: bool
+    expires_at: datetime | None
+    email_sent: bool = False
+
+
+class ContactPortalAccessActionIn(BaseModel):
+    send_email: bool = False
+
+
+class ContactPortalAccessEmailIn(BaseModel):
+    access_code: str = Field(min_length=4, max_length=64)
+
+
+class ContactPortalAccessUpdateIn(BaseModel):
+    enabled: bool | None = None
+    expires_at: datetime | None = None
+
+
+class ContactPortalGrantOut(BaseModel):
+    id: uuid.UUID
+    contact_id: uuid.UUID
+    case_id: uuid.UUID
+    case_title: str
+    folder_path: str
+    label: str | None
+    can_download: bool
+    can_upload: bool
+    expires_at: datetime | None
+    created_at: datetime
+    email_sent: bool = False
+
+
+class ContactPortalGrantCreateIn(BaseModel):
+    case_id: uuid.UUID
+    folder_path: str = ""
+    label: str | None = Field(default=None, max_length=300)
+    can_download: bool = True
+    can_upload: bool = True
+    expires_at: datetime | None = None
+    send_email: bool = False
+
+
+class ContactPortalGrantUpdateIn(BaseModel):
+    folder_path: str | None = None
+    label: str | None = Field(default=None, max_length=300)
+    can_download: bool | None = None
+    can_upload: bool | None = None
+    expires_at: datetime | None = None
 

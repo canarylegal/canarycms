@@ -11,8 +11,10 @@ from sqlalchemy.orm import Session
 from app.admin_access import user_effective_admin
 from app.email_crypt import decrypt_password
 from app.models import EmailIntegrationSettings, User
-from app.org_security import firm_mandates_second_factor, user_has_any_passkey
+from app.org_security import firm_mandates_second_factor, firm_password_rotation_policy, user_has_any_passkey
 from app.schemas import UserPublic
+from app.user_appearance import user_appearance_out
+from app.user_ui_preferences import user_ui_preferences_out
 
 log = logging.getLogger(__name__)
 
@@ -89,6 +91,11 @@ def build_user_public(user: User, db: Session) -> UserPublic:
     base = UserPublic.model_validate(user, from_attributes=True).model_dump()
     base["admin_console_access"] = user_effective_admin(user, db)
     base["organization_requires_second_factor"] = firm_mandates_second_factor(db)
+    rotation_enabled, rotation_days = firm_password_rotation_policy(db)
+    base["organization_requires_password_rotation"] = rotation_enabled
+    base["password_rotation_days"] = rotation_days
     base["has_passkeys"] = user_has_any_passkey(db, user.id)
+    base["appearance"] = user_appearance_out(user)
+    base["ui_preferences"] = user_ui_preferences_out(user.ui_preferences)
     base.update(user_public_email_fields(db))
     return UserPublic(**base)

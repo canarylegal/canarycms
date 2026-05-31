@@ -15,6 +15,7 @@ import { useDialogs } from '../DialogProvider'
 import { SearchInput } from '../SearchInput'
 import type { CaseContactOut, ContactOut } from '../types'
 import { applyCaseContactFieldPatch } from './caseContactPatch'
+import { CaseContactPortalSection } from './CaseContactPortalSection'
 
 const CONTACT_TYPE_REQUIRED_MSG = 'Please select a contact type for this matter.'
 const LAWYERS_TYPE_SLUG = 'lawyers'
@@ -522,6 +523,12 @@ export function CaseContactsEditDocForm({
           <span className="muted">Also update global contact</span>
         </label>
       ) : null}
+      <CaseContactPortalSection
+        token={token}
+        globalContactId={editSnapshot.contact_id}
+        contactName={resolvedEditSnapshotName}
+        contactEmail={editSnapshot.email}
+      />
       <div className="row" style={{ justifyContent: 'space-between', marginTop: 8 }}>
         <button
           type="button"

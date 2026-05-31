@@ -6,7 +6,7 @@ Run from repo root or backend:
   python scripts/generate_sample_firm_letterhead.py /path/out.docx
 
 Canary copies header/footer XML from this file onto composed letters (see ``apply_digital_letterhead_headers_footers``).
-Keep branding text-only for reliability (no embedded logos).
+Embedded header/footer logos are supported.
 """
 
 from __future__ import annotations

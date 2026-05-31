@@ -50,7 +50,12 @@ if (!el) {
   const ledgerCaseId = searchParams.get('ledger')
   const tasksCaseId = searchParams.get('tasks')
 
-  if (window.location.pathname === '/oo-print') {
+  if (window.location.pathname === '/portal') {
+    document.documentElement.style.zoom = '1'
+    void import('./PortalPage.tsx').then(({ default: PortalPage }) => {
+      root.render(<PortalPage />)
+    })
+  } else if (window.location.pathname === '/oo-print') {
     document.documentElement.style.zoom = '1'
     void import('./OnlyOfficePrintPage.tsx').then(({ default: OnlyOfficePrintPage }) => {
       root.render(<OnlyOfficePrintPage />)

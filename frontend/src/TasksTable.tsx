@@ -1,14 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { TASKS_MENU_TABLE_GRID } from './columnGridDefaults'
 import { useDialogs } from './DialogProvider'
 import { apiFetch } from './api'
 import type { CaseTaskOut, TaskMenuRow, UserSummary } from './types'
+
+export { TASKS_MENU_TABLE_GRID }
 
 /**
  * Tasks menu: Date · Priority · Assigned · Task · Description · Client · Reference.
  * Description is 30% of row width (30fr of 100fr); other columns scale with prior proportions on the remaining 70%.
  */
-const TASKS_MENU_TABLE_GRID =
-  'minmax(0, 8.768fr) minmax(0, 6.427fr) minmax(0, 8.768fr) minmax(0, 20.459fr) minmax(0, 30fr) minmax(0, 18.267fr) minmax(0, 7.311fr)'
 
 const TASK_PRI_ORDER: Record<string, number> = { high: 2, normal: 1, low: 0 }
 
@@ -38,6 +39,8 @@ export function TasksTable({
   onInvalidate,
   embedded,
   suppressCaseOpen,
+  gridTemplateColumns,
+  startColumnResize,
 }: {
   token: string
   currentUserId: string
@@ -55,9 +58,13 @@ export function TasksTable({
   embedded?: boolean
   /** Hide “Open matter” actions when tasks are already shown in case context. */
   suppressCaseOpen?: boolean
+  gridTemplateColumns?: string
+  startColumnResize?: (colIndex: number, startClientX: number, measureRow?: HTMLElement | null) => void
 }) {
   const { askConfirm } = useDialogs()
   const [ctx, setCtx] = useState<null | { x: number; y: number; row: TaskMenuRow }>(null)
+  const listGrid = gridTemplateColumns ?? TASKS_MENU_TABLE_GRID
+  const resizeCol = startColumnResize
   const taskCtxRef = useRef<HTMLDivElement | null>(null)
   const [editRow, setEditRow] = useState<TaskMenuRow | null>(null)
   const [editTitle, setEditTitle] = useState('')
@@ -389,7 +396,7 @@ export function TasksTable({
       ) : (
       <div className="casesTableScroll tasksTableScroll">
         <div className="table">
-          <div className="tr th" style={{ gridTemplateColumns: TASKS_MENU_TABLE_GRID }}>
+          <div className="tr th" style={{ gridTemplateColumns: listGrid }}>
             {(
               [
                 ['date', 'Date'],
@@ -400,11 +407,23 @@ export function TasksTable({
                 ['client', 'Client name'],
                 ['reference', 'Reference'],
               ] as const
-            ).map(([k, label]) => (
+            ).map(([k, label], colIndex) => (
               <div key={k} className="thCell">
                 <button type="button" className="thbtn" onClick={() => onSort(k)}>
                   {label}
                 </button>
+                {resizeCol && colIndex < 6 ? (
+                  <div
+                    className="colResizeHandle"
+                    role="separator"
+                    aria-orientation="vertical"
+                    aria-label={`Resize ${label} column`}
+                    onMouseDown={(e) => {
+                      e.preventDefault()
+                      resizeCol(colIndex, e.clientX, e.currentTarget.closest('.tr.th') as HTMLElement | null)
+                    }}
+                  />
+                ) : null}
               </div>
             ))}
           </div>
@@ -421,7 +440,7 @@ export function TasksTable({
                 key={r.id}
                 type="button"
                 className={`tr rowbtn taskMenuRow ${rowCls} ${rowActive ? 'active' : ''}`}
-                style={{ gridTemplateColumns: TASKS_MENU_TABLE_GRID }}
+                style={{ gridTemplateColumns: listGrid }}
                 onClick={() => setTaskRowFocusId(r.id)}
                 onDoubleClick={() => {
                   if (suppressCaseOpen) return

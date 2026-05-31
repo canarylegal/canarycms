@@ -4,14 +4,16 @@ import listPlugin from '@fullcalendar/list'
 import FullCalendar from '@fullcalendar/react'
 import dayGridPlugin from '@fullcalendar/daygrid'
 import timeGridPlugin from '@fullcalendar/timegrid'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { apiFetch } from './api'
 import type { ApiError } from './api'
-import type { CalendarEventOut, CaseEventOut, CaseEventsOut } from './types'
+import { useUserUiPreferences, type CalendarView } from './useUserUiPreferences'
+import type { CalendarEventOut, CaseEventOut, CaseEventsOut, UserPublic } from './types'
 
 interface Props {
   caseId: string
   token: string
+  me?: UserPublic | null
   /** Shown in linked calendar event titles (e.g. case number + short description). */
   caseLabel?: string
   onClose: () => void
@@ -197,11 +199,14 @@ async function syncCalendarsForCaseEvents(
 export function EventsPage({
   caseId,
   token,
+  me,
   caseLabel = '',
   onClose,
   embedded = false,
   onRequestNewEvent,
 }: Props) {
+  const calRef = useRef<FullCalendar>(null)
+  const { prefs, setPreference } = useUserUiPreferences(me, token)
   const [data, setData] = useState<CaseEventsOut | null>(null)
   const [baseline, setBaseline] = useState<CaseEventsOut | null>(null)
   const [busy, setBusy] = useState(false)
@@ -227,6 +232,13 @@ export function EventsPage({
   useEffect(() => {
     void load()
   }, [load])
+
+  useEffect(() => {
+    const api = calRef.current?.getApi()
+    if (api && api.view.type !== prefs.case_calendar_view) {
+      api.changeView(prefs.case_calendar_view)
+    }
+  }, [prefs.case_calendar_view])
 
   useEffect(() => {
     if (!eventDetail) return
@@ -442,12 +454,17 @@ export function EventsPage({
           >
             <div className="canaryCalendarInner" style={{ minHeight: embedded ? 0 : 440 }}>
               <FullCalendar
+                ref={calRef}
                 plugins={[dayGridPlugin, timeGridPlugin, listPlugin, interactionPlugin]}
-                initialView="dayGridMonth"
+                initialView={prefs.case_calendar_view}
                 headerToolbar={{
                   left: 'prev,next today',
                   center: 'title',
                   right: 'dayGridMonth,timeGridWeek,timeGridDay,listWeek',
+                }}
+                datesSet={(arg) => {
+                  const viewType = arg.view.type as CalendarView
+                  if (viewType !== prefs.case_calendar_view) setPreference('case_calendar_view', viewType)
                 }}
                 height={embedded ? '100%' : 440}
                 weekends

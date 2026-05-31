@@ -60,7 +60,32 @@ function caseMailIconOutbound(f: FileSummary): boolean {
   return false
 }
 
-export function DocFolderIcon() {
+export function DocFolderIcon({ shared = false }: { shared?: boolean }) {
+  if (shared) {
+    return (
+      <span className="docsFolderIconWrap docsFolderIconWrap--shared" aria-hidden title="Externally shared via client portal">
+        <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" className="docsFolderIconSvg docsSharedFolderIconSvg">
+          <path fill="#f0b429" d="M3 7.5V19a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-7.2L9.6 5H5a2 2 0 0 0-2 2v.5z" />
+          <path fill="#e07b1a" d="M3 7.5h6.4L9.6 5H5a2 2 0 0 0-2 2v.5z" />
+          {/* Badge — bottom-right corner of folder */}
+          <circle cx="18.4" cy="18.4" r="5.35" fill="#fff" />
+          {/* Conventional share glyph (opens to the right), centred in badge */}
+          <g transform="translate(18.4 18.4)">
+            <circle cx="-2.15" cy="0" r="1.45" fill="#5b9fd4" />
+            <circle cx="2.05" cy="-2.05" r="1.45" fill="#5b9fd4" />
+            <circle cx="2.05" cy="2.05" r="1.45" fill="#5b9fd4" />
+            <path
+              d="M-0.85 -0.65 L1.05 -1.75 M-0.85 0.65 L1.05 1.75"
+              stroke="#5b9fd4"
+              strokeWidth="1.35"
+              strokeLinecap="round"
+              fill="none"
+            />
+          </g>
+        </svg>
+      </span>
+    )
+  }
   return (
     <span className="docsFolderIconWrap" aria-hidden>
       <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" className="docsFolderIconSvg">
@@ -108,44 +133,39 @@ export function DocsFileDescCell({ f, showPin }: { f: FileSummary; showPin: bool
   const displayName = f.parent_file_id ? `↳ ${docsListDisplayFilename(f)}` : docsListDisplayFilename(f)
   return (
     <div className={sub ? 'docsDescWrapper docsDescWrapper--hasSub' : 'docsDescWrapper'}>
-      {mailRoot ? (
-        <span className="docsMailIconSlot" aria-hidden>
-          <DocMailIcon outbound={caseMailIconOutbound(f)} />
-        </span>
-      ) : null}
-      <div
-        className={`docsDescCell${showPin ? ' docsDescCell--pinnedHead' : ''}${sub ? ' docsDescCell--hasSub' : ''}${mailRoot ? ' docsDescCell--mailRoot' : ''}`}
-      >
-        <div className="docsDescStack">
-          <div className="docsDescInner">
-            {showPin ? (
-              <span className="docsPinIcon">
-                <DocPinIcon />
-              </span>
-            ) : null}
-            {mailRoot ? null : (
-              <span className="docsTypeIcon" aria-hidden>
-                <DocMimeIcon mime={f.mime_type} filename={f.original_filename} />
-              </span>
+      <div className="docsDescCell">
+        <div className={sub ? 'docsDescRow docsDescRow--hasSub' : 'docsDescRow'}>
+          {showPin ? (
+            <span className="docsPinIcon">
+              <DocPinIcon />
+            </span>
+          ) : null}
+          <span className="docsTypeIcon" aria-hidden>
+            {mailRoot ? (
+              <DocMailIcon outbound={caseMailIconOutbound(f)} />
+            ) : (
+              <DocMimeIcon mime={f.mime_type} filename={f.original_filename} />
             )}
+          </span>
+          <div className="docsDescTextBlock">
             <span className="docsDescName">{displayName}</span>
+            {sub ? <div className="docsDescSub muted">{sub}</div> : null}
           </div>
-          {sub ? <div className="docsDescSub muted">{sub}</div> : null}
         </div>
       </div>
     </div>
   )
 }
 
-export function DocsFolderDescCell({ name }: { name: string }) {
+export function DocsFolderDescCell({ name, shared = false }: { name: string; shared?: boolean }) {
   return (
     <div className="docsDescWrapper">
       <div className="docsDescCell">
-        <div className="docsDescStack">
-          <div className="docsDescInner">
-            <span className="docsTypeIcon" aria-hidden>
-              <DocFolderIcon />
-            </span>
+        <div className="docsDescRow">
+          <span className="docsTypeIcon" aria-hidden>
+            <DocFolderIcon shared={shared} />
+          </span>
+          <div className="docsDescTextBlock">
             <span className="docsDescName">{name}</span>
           </div>
         </div>

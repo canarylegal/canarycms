@@ -4,17 +4,19 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.db import get_db
 from app.deps import require_admin
 from app.email_crypt import encrypt_password
 from app.email_integration_settings import get_email_integration_settings
+from app.firm_email_service import FirmEmailMessage, firm_email_status, send_firm_email
 from app.models import SmtpNotificationSettings, User
 from app.schemas import (
     EmailIntegrationSettingsOut,
     EmailIntegrationSettingsUpdate,
+    FirmAlertTestIn,
     SmtpNotificationSettingsOut,
     SmtpNotificationSettingsUpdate,
     SmtpNotificationTestIn,
@@ -25,51 +27,71 @@ from app.smtp_send import send_smtp_message
 router = APIRouter(prefix="/admin/email", tags=["admin-email"])
 
 
-def _row_to_out(row) -> EmailIntegrationSettingsOut:
+def _row_to_out(row, db: Session) -> EmailIntegrationSettingsOut:
+    status = firm_email_status(db)
     return EmailIntegrationSettingsOut(
         integration_mode=row.integration_mode,  # type: ignore[arg-type]
         graph_tenant_id=(row.graph_tenant_id or "").strip() or None,
         graph_client_id=(row.graph_client_id or "").strip() or None,
         graph_client_secret_configured=bool((row.graph_client_secret_enc or "").strip()),
         outlook_web_mail_base=(row.outlook_web_mail_base or "").strip() or None,
+        alerts_enabled=bool(row.alerts_enabled),
+        alert_transport=row.alert_transport or "auto",  # type: ignore[arg-type]
+        graph_send_mailbox=(row.graph_send_mailbox or "").strip() or None,
+        graph_send_from_name=(row.graph_send_from_name or "").strip() or None,
+        graph_alert_ready=bool(status["graph_ready"]),
+        smtp_alert_ready=bool(status["smtp_ready"]),
+        effective_alert_transport=status["effective_transport"],  # type: ignore[arg-type]
     )
 
 
 @router.get("/settings", response_model=EmailIntegrationSettingsOut)
 def get_email_settings(_admin: User = Depends(require_admin), db: Session = Depends(get_db)) -> EmailIntegrationSettingsOut:
     row = get_email_integration_settings(db)
-    return _row_to_out(row)
+    return _row_to_out(row, db)
 
 
 @router.put("/settings", response_model=EmailIntegrationSettingsOut)
 def put_email_settings(
     payload: EmailIntegrationSettingsUpdate,
-    _admin: User = Depends(require_admin),
+    admin: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ) -> EmailIntegrationSettingsOut:
     row = get_email_integration_settings(db)
-    if payload.integration_mode is not None:
-        row.integration_mode = payload.integration_mode
-    if payload.graph_tenant_id is not None:
-        t = payload.graph_tenant_id.strip()
+    data = payload.model_dump(exclude_unset=True)
+    if "integration_mode" in data and data["integration_mode"] is not None:
+        row.integration_mode = data["integration_mode"]
+    if "graph_tenant_id" in data:
+        t = (data["graph_tenant_id"] or "").strip()
         row.graph_tenant_id = t if t else None
-    if payload.graph_client_id is not None:
-        c = payload.graph_client_id.strip()
+    if "graph_client_id" in data:
+        c = (data["graph_client_id"] or "").strip()
         row.graph_client_id = c if c else None
-    if payload.graph_client_secret is not None:
-        s = payload.graph_client_secret.strip()
+    if "graph_client_secret" in data:
+        s = (data["graph_client_secret"] or "").strip()
         if s:
             row.graph_client_secret_enc = encrypt_password(s)
         else:
             row.graph_client_secret_enc = None
-    if payload.outlook_web_mail_base is not None:
-        b = payload.outlook_web_mail_base.strip()
+        data.pop("graph_client_secret", None)
+    if "outlook_web_mail_base" in data:
+        b = (data["outlook_web_mail_base"] or "").strip()
         row.outlook_web_mail_base = b if b else None
+    if "alerts_enabled" in data and data["alerts_enabled"] is not None:
+        row.alerts_enabled = bool(data["alerts_enabled"])
+    if "alert_transport" in data and data["alert_transport"] is not None:
+        row.alert_transport = data["alert_transport"]
+    if "graph_send_mailbox" in data:
+        m = (data["graph_send_mailbox"] or "").strip()
+        row.graph_send_mailbox = m if m else None
+    if "graph_send_from_name" in data:
+        n = (data["graph_send_from_name"] or "").strip()
+        row.graph_send_from_name = n if n else None
     row.updated_at = datetime.now(timezone.utc)
     db.add(row)
     db.commit()
     db.refresh(row)
-    return _row_to_out(row)
+    return _row_to_out(row, db)
 
 
 def _smtp_to_out(row: SmtpNotificationSettings) -> SmtpNotificationSettingsOut:
@@ -134,10 +156,34 @@ def post_smtp_test(
     _admin: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ) -> None:
-    send_smtp_message(
-        db,
-        to_email=str(body.to_email),
-        subject="Canary SMTP test",
-        body="This message confirms outbound SMTP from Canary is working.",
-    )
+    try:
+        send_smtp_message(
+            db,
+            to_email=str(body.to_email),
+            subject="Canary SMTP test",
+            body="This message confirms outbound SMTP from Canary is working.",
+        )
+    except RuntimeError as e:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(e)) from e
+    db.commit()
+
+
+@router.post("/alerts-test", status_code=status.HTTP_204_NO_CONTENT)
+def post_alerts_test(
+    body: FirmAlertTestIn,
+    _admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+) -> None:
+    """Send via the configured alert transport (Graph when auto-preferred, else SMTP)."""
+    try:
+        send_firm_email(
+            db,
+            FirmEmailMessage(
+                to_email=str(body.to_email),
+                subject="Canary alert e-mail test",
+                body_text="This message confirms automated alert e-mail from Canary is working.",
+            ),
+        )
+    except RuntimeError as e:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(e)) from e
     db.commit()

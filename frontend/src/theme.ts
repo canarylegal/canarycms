@@ -1,4 +1,6 @@
-/** Client-side appearance preferences (persisted in localStorage). */
+/** Appearance preferences: server is source of truth when signed in; localStorage caches for boot/editor tabs. */
+
+import type { UserAppearanceOut } from './types'
 
 const KEYS = {
   font: 'canary.fontFamily',
@@ -12,6 +14,13 @@ export const DEFAULT_ACCENT = '#2563eb'
 export const DEFAULT_PAGE_BG = '#1e3a8a'
 /** Default dark-theme page backdrop (matches `index.css` `html.dark`). */
 export const DARK_DEFAULT_PAGE_BG = '#0f172a'
+
+export type ThemePreferences = {
+  font: string
+  accent: string
+  mode: 'light' | 'dark'
+  pageBg: string
+}
 
 function hexToRgb(hex: string): { r: number; g: number; b: number } | null {
   const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim())
@@ -37,11 +46,19 @@ function textOnPageBackground(hex: string): string {
   return relativeLuminance(hex) > 0.45 ? '#0f172a' : '#f8fafc'
 }
 
-export function applyStoredTheme(): void {
+export function themeFromAppearance(a: UserAppearanceOut): ThemePreferences {
+  return {
+    font: a.font ?? '',
+    accent: a.accent?.trim() || DEFAULT_ACCENT,
+    mode: a.mode === 'dark' ? 'dark' : 'light',
+    pageBg: a.page_bg ?? '',
+  }
+}
+
+export function applyThemePreferences(p: ThemePreferences): void {
   const root = document.documentElement
-  const font = localStorage.getItem(KEYS.font) ?? ''
-  const accent = localStorage.getItem(KEYS.accent) ?? DEFAULT_ACCENT
-  const mode = localStorage.getItem(KEYS.mode) ?? 'light'
+  const accent = p.accent.trim() || DEFAULT_ACCENT
+  const mode = p.mode === 'dark' ? 'dark' : 'light'
 
   root.style.setProperty('--primary', accent)
   const rgb = hexToRgb(accent)
@@ -49,16 +66,15 @@ export function applyStoredTheme(): void {
     root.style.setProperty('--primary-rgb', `${rgb.r}, ${rgb.g}, ${rgb.b}`)
   }
 
-  if (font) {
-    root.style.setProperty('--app-font-stack', font)
+  if (p.font.trim()) {
+    root.style.setProperty('--app-font-stack', p.font.trim())
   } else {
     root.style.removeProperty('--app-font-stack')
   }
 
   root.classList.toggle('dark', mode === 'dark')
 
-  const pageBg = localStorage.getItem(KEYS.pageBg) ?? ''
-  const pageHex = /^#[0-9a-fA-F]{6}$/.test(pageBg.trim()) ? pageBg.trim() : ''
+  const pageHex = /^#[0-9a-fA-F]{6}$/.test(p.pageBg.trim()) ? p.pageBg.trim() : ''
   if (pageHex) {
     root.style.setProperty('--page-bg', pageHex)
     root.style.setProperty('--bg', pageHex)
@@ -73,7 +89,11 @@ export function applyStoredTheme(): void {
   root.style.setProperty('--text-on-page-bg', textOnPageBackground(effectivePageBg))
 }
 
-export function getThemePreferences(): { font: string; accent: string; mode: 'light' | 'dark'; pageBg: string } {
+export function applyStoredTheme(): void {
+  applyThemePreferences(getThemePreferences())
+}
+
+export function getThemePreferences(): ThemePreferences {
   return {
     font: localStorage.getItem(KEYS.font) ?? '',
     accent: localStorage.getItem(KEYS.accent) ?? DEFAULT_ACCENT,
@@ -82,12 +102,7 @@ export function getThemePreferences(): { font: string; accent: string; mode: 'li
   }
 }
 
-export function saveThemePreferences(p: {
-  font: string
-  accent: string
-  mode: 'light' | 'dark'
-  pageBg: string
-}): void {
+export function saveThemePreferences(p: ThemePreferences): void {
   if (p.font.trim()) localStorage.setItem(KEYS.font, p.font.trim())
   else localStorage.removeItem(KEYS.font)
   localStorage.setItem(KEYS.accent, p.accent.trim() || DEFAULT_ACCENT)
@@ -95,7 +110,7 @@ export function saveThemePreferences(p: {
   const pg = p.pageBg.trim()
   if (pg && /^#[0-9a-fA-F]{6}$/.test(pg)) localStorage.setItem(KEYS.pageBg, pg)
   else localStorage.removeItem(KEYS.pageBg)
-  applyStoredTheme()
+  applyThemePreferences(p)
 }
 
 export const FONT_OPTIONS: { value: string; label: string }[] = [

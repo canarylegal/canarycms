@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { apiFetch } from './api'
 import { postDeployTriggerAndWaitForCompose } from './composeDeployPoll'
 import { ComposeUpdateProgress } from './ComposeUpdateProgress'
+import { AdminStorage } from './AdminStorage'
 import { useDialogs } from './DialogProvider'
 import type { ApiError } from './api'
 import type { AdminDeployComposeJobOut, AdminDeployUpdateCheckOut } from './types'
@@ -104,7 +105,7 @@ export function AdminDeploy({ token }: { token: string }) {
   const resetOn = Boolean(status?.compose_git_reset_enabled)
 
   return (
-    <div className="stack" style={{ maxWidth: 560 }}>
+    <div className="stack" style={{ maxWidth: 720 }}>
       {err ? <div className="error">{err}</div> : null}
       {ok ? <div className="muted">{ok}</div> : null}
 
@@ -271,6 +272,8 @@ export function AdminDeploy({ token }: { token: string }) {
           )
         ) : null}
       </div>
+
+      <AdminStorage token={token} />
 
       {!status?.configured ? (
         <p className="muted" style={{ marginTop: 12 }}>

@@ -19,11 +19,15 @@ from app.radicale_htpasswd import remove_user, upsert_user
 from app.permission_checks import user_may_approve_invoice, user_may_approve_ledger
 from app.schemas import (
     LedgerPermissionsOut,
+    UserAppearanceUpdate,
     UserCalDAVProvisionOut,
     UserCalDAVStatusOut,
     UserEmailHandlingUpdate,
     UserPublic,
+    UserUiPreferencesUpdate,
 )
+from app.user_appearance import normalize_appearance_update
+from app.user_ui_preferences import UserUiPreferencesPatch, merge_ui_preferences_patch, user_ui_preferences_out
 
 
 router = APIRouter(prefix="/users", tags=["users"])
@@ -170,6 +174,49 @@ def put_my_email_handling(
     else:
         user.email_outlook_web_url = None
     user.updated_at = now
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return build_user_public(user, db)
+
+
+@router.put("/me/appearance", response_model=UserPublic)
+def put_my_appearance(
+    body: UserAppearanceUpdate,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> UserPublic:
+    """Persist UI appearance preferences for this user account."""
+    try:
+        font, accent, mode, page_bg = normalize_appearance_update(
+            font=body.font,
+            accent=body.accent,
+            mode=body.mode,
+            page_bg=body.page_bg,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+    user.appearance_font = font
+    user.appearance_accent = accent
+    user.appearance_mode = mode
+    user.appearance_page_bg = page_bg
+    user.updated_at = datetime.now(timezone.utc)
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return build_user_public(user, db)
+
+
+@router.put("/me/ui-preferences", response_model=UserPublic)
+def put_my_ui_preferences(
+    body: UserUiPreferencesUpdate,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> UserPublic:
+    """Persist UI layout preferences for this user account (calendar view, task layout, sort order)."""
+    patch = UserUiPreferencesPatch.model_validate(body.model_dump(exclude_unset=True))
+    user.ui_preferences = merge_ui_preferences_patch(user.ui_preferences, patch)
+    user.updated_at = datetime.now(timezone.utc)
     db.add(user)
     db.commit()
     db.refresh(user)

@@ -31,13 +31,15 @@ JWT_ALG = "HS256"
 JWT_TTL_SECONDS = int(os.getenv("JWT_TTL_SECONDS", "28800"))  # 8h
 
 
-def create_access_token(*, user_id: str, role: str, mfa_verified: bool = True) -> str:
+def create_access_token(*, user_id: str, role: str, mfa_verified: bool = True, password_ok: bool = True) -> str:
     now = int(time.time())
     payload = {
         "sub": user_id,
         "role": role,
         # Under org mandate, API access requires mfa_verified=True (passkey sign-in or password+authenticator).
         "mfa": bool(mfa_verified),
+        # When False, user must change password before using the rest of the app (rotation policy).
+        "pwd": bool(password_ok),
         "iat": now,
         "exp": now + JWT_TTL_SECONDS,
     }
@@ -50,6 +52,8 @@ class TokenPayload:
     role: str
     """Present on newer JWTs only; ``None`` means legacy token without an ``mfa`` claim."""
     mfa_verified: bool | None = None
+    """Present on newer JWTs only; ``None`` means legacy token without a ``pwd`` claim."""
+    password_ok: bool | None = None
 
 
 EML_OPEN_TTL_SECONDS = int(os.getenv("EML_OPEN_TTL_SECONDS", "120"))
@@ -161,6 +165,38 @@ def decode_eml_open_token(token: str) -> EmlOpenTokenPayload:
     return EmlOpenTokenPayload(user_id=sub, case_id=case_id, file_id=file_id)
 
 
+PORTAL_SESSION_TTL_SECONDS = int(os.getenv("PORTAL_SESSION_TTL_SECONDS", "28800"))  # 8h
+
+
+@dataclass(frozen=True)
+class PortalSessionPayload:
+    contact_id: str
+
+
+def create_portal_session_token(*, contact_id: str) -> str:
+    now = int(time.time())
+    payload = {
+        "sub": contact_id,
+        "purpose": "portal",
+        "iat": now,
+        "exp": now + PORTAL_SESSION_TTL_SECONDS,
+    }
+    return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALG)
+
+
+def decode_portal_session_token(token: str) -> PortalSessionPayload:
+    try:
+        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALG])
+    except JWTError as e:
+        raise ValueError("Invalid or expired session") from e
+    if payload.get("purpose") != "portal":
+        raise ValueError("Invalid session")
+    sub = payload.get("sub")
+    if not isinstance(sub, str) or not sub.strip():
+        raise ValueError("Invalid session")
+    return PortalSessionPayload(contact_id=sub)
+
+
 def decode_access_token(token: str) -> TokenPayload:
     try:
         payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALG])
@@ -179,7 +215,15 @@ def decode_access_token(token: str) -> TokenPayload:
         mfa_verified = False
     else:
         mfa_verified = None
-    return TokenPayload(user_id=sub, role=role, mfa_verified=mfa_verified)
+    pwd_raw = payload.get("pwd")
+    password_ok: bool | None
+    if pwd_raw is True:
+        password_ok = True
+    elif pwd_raw is False:
+        password_ok = False
+    else:
+        password_ok = None
+    return TokenPayload(user_id=sub, role=role, mfa_verified=mfa_verified, password_ok=password_ok)
 
 
 def generate_totp_secret() -> str:

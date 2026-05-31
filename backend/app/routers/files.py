@@ -29,8 +29,10 @@ from app.docx_util import extract_plain_text_from_docx_bytes, write_blank_docx
 from app.graph_mail import create_outlook_draft, graph_mail_configured
 from app.file_storage import FILES_ROOT, StoredFilePaths, case_file_paths, ensure_files_root, sanitize_folder_path
 from app.models import Case as CaseRow
-from app.models import CaseContact, Contact as GlobalContactRow
+from app.models import CaseContact, Contact as GlobalContactRow, ContactPortalGrant
 from app.models import CaseLockMode, CaseStatus, File as DbFile, FileCategory, FileEditSession, MatterHeadType, MatterSubType, Precedent, PrecedentKind, User
+from app.portal_service import grant_is_active
+from app.alert_dispatch import notify_portal_contacts_files_added
 from app.audit import log_event
 from app.canary_public_url import canary_public_url, onlyoffice_browser_public_base
 from app.feature_flags import (
@@ -63,6 +65,7 @@ from app.schemas import (
     CaseFolderDeleteUpdate,
     CaseFolderMoveUpdate,
     CaseFolderRenameUpdate,
+    CasePortalFolderAccessGrantOut,
     CaseEmailDraftM365In,
     CaseEmailDraftM365AttachmentOut,
     CaseEmailDraftM365Out,
@@ -390,6 +393,7 @@ def upload_case_file(
     upload: UploadFile = FastAPIFile(...),
     folder: str = Form(default=""),
     parent_file_id: uuid.UUID | None = Form(default=None),
+    notify_portal_contacts: bool = Form(default=False),
     compose_precedent_id: uuid.UUID | None = Form(default=None),
     compose_case_contact_id: uuid.UUID | None = Form(default=None),
     compose_global_contact_id: uuid.UUID | None = Form(default=None),
@@ -520,6 +524,13 @@ def upload_case_file(
             "compose_global_contact_id": str(compose_global_contact_id) if compose_global_contact_id else None,
         },
     )
+    if notify_portal_contacts:
+        notify_portal_contacts_files_added(
+            db,
+            case_id=case_id,
+            folder_path=paths.folder_path or "",
+            filenames=[row.original_filename],
+        )
 
     if parent_file_id is None and (mime_base == "message/rfc822" or original.lower().endswith(".eml")):
         try:
@@ -955,12 +966,44 @@ def list_case_files(
             "source_outlook_item_id": f.source_outlook_item_id,
             "outlook_graph_message_id": f.outlook_graph_message_id,
             "outlook_web_link": f.outlook_web_link,
-            "owner_display_name": owner_display_name,
-            "owner_email": owner_email,
-            "owner_initials": owner_initials,
+            "uploaded_via_portal": f.uploaded_via_portal,
+            "owner_display_name": "Portal" if f.uploaded_via_portal else owner_display_name,
+            "owner_email": None if f.uploaded_via_portal else owner_email,
+            "owner_initials": "Portal" if f.uploaded_via_portal else owner_initials,
         }
         for (f, owner_display_name, owner_email, owner_initials) in rows
     ]
+
+
+@router.get("/portal-folder-access", response_model=list[CasePortalFolderAccessGrantOut])
+def list_case_portal_folder_access(
+    case_id: uuid.UUID,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> list[CasePortalFolderAccessGrantOut]:
+    """Active client-portal grants for this matter (staff UI: shared folder indicators)."""
+    require_case_access(case_id, user, db)
+    rows = (
+        db.execute(
+            select(ContactPortalGrant, GlobalContactRow)
+            .join(GlobalContactRow, ContactPortalGrant.contact_id == GlobalContactRow.id)
+            .where(ContactPortalGrant.case_id == case_id)
+            .order_by(GlobalContactRow.name.asc())
+        )
+        .all()
+    )
+    out: list[CasePortalFolderAccessGrantOut] = []
+    for grant, contact in rows:
+        if not grant_is_active(grant):
+            continue
+        out.append(
+            CasePortalFolderAccessGrantOut(
+                folder_path=grant.folder_path or "",
+                contact_id=contact.id,
+                contact_name=(contact.name or "").strip() or "Contact",
+            )
+        )
+    return out
 
 
 @router.post("/folders", status_code=status.HTTP_201_CREATED)

@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 # ---------------------------------------------------------------------------
 # Precedent merge codes
@@ -707,7 +708,252 @@ def _normalize_post_merge_whitespace(text: str) -> str:
 # Inner token without brackets, e.g. TITLE, LAST_NAME_3 — for slot detection.
 _NAME_CODE_INNERS: frozenset[str] = frozenset(c[1:-1] for c in _ADDITIONAL_CLIENT_NAME_CODES)
 
-_PLACEHOLDER_TOKEN_RE = re.compile(r"\[([A-Z0-9_]+)\]")
+# ``[CODE]`` or ``[modifiers:CODE]`` where modifiers are one or more of b, i, u.
+_MERGE_TOKEN_RE = re.compile(r"\[((?:[biu]+):)?([A-Z0-9_]+)\]", re.IGNORECASE)
+
+
+@dataclass(frozen=True)
+class _MergeTextSegment:
+    text: str
+    bold: bool | None = None
+    italic: bool | None = None
+    underline: bool | None = None
+
+
+def _parse_modifier_letters(mod: str | None) -> tuple[bool | None, bool | None, bool | None]:
+    if not mod:
+        return None, None, None
+    letters = set(mod.lower())
+    return (
+        True if "b" in letters else None,
+        True if "i" in letters else None,
+        True if "u" in letters else None,
+    )
+
+
+def _merge_token_pattern_for_fields(fields: Mapping[str, str]) -> re.Pattern[str]:
+    inners = sorted({k[1:-1] for k in fields}, key=len, reverse=True)
+    if not inners:
+        return re.compile(r"(?!x)")
+    inner_alt = "|".join(re.escape(c) for c in inners)
+    return re.compile(rf"\[(?:[biu]+:)?(?:{inner_alt})\]", re.IGNORECASE)
+
+
+def _paragraph_has_merge_tokens(text: str, fields: Mapping[str, str]) -> bool:
+    return _merge_token_pattern_for_fields(fields).search(text) is not None
+
+
+def _replace_merge_tokens_to_segments(text: str, fields: Mapping[str, str]) -> list[_MergeTextSegment]:
+    segments: list[_MergeTextSegment] = []
+    pos = 0
+    for m in _MERGE_TOKEN_RE.finditer(text):
+        if m.start() > pos:
+            segments.append(_MergeTextSegment(text[pos : m.start()]))
+        inner = m.group(2).upper()
+        key = f"[{inner}]"
+        if key in fields:
+            bold, italic, underline = _parse_modifier_letters(m.group(1))
+            value = fields[key]
+            if value:
+                segments.append(_MergeTextSegment(value, bold, italic, underline))
+        else:
+            segments.append(_MergeTextSegment(m.group(0)))
+        pos = m.end()
+    if pos < len(text):
+        segments.append(_MergeTextSegment(text[pos:]))
+    return segments
+
+
+def _segments_plain_text(segments: list[_MergeTextSegment]) -> str:
+    return "".join(s.text for s in segments)
+
+
+def _trim_leading_segment_whitespace(segments: list[_MergeTextSegment]) -> list[_MergeTextSegment]:
+    out: list[_MergeTextSegment] = []
+    trimmed = False
+    for seg in segments:
+        if trimmed or not seg.text.strip():
+            out.append(seg)
+            continue
+        text = seg.text.lstrip()
+        out.append(_MergeTextSegment(text, seg.bold, seg.italic, seg.underline))
+        trimmed = True
+    return out
+
+
+def _run_element_formatting(r_el: Any) -> tuple[bool | None, bool | None, bool | None]:
+    """Read direct bold / italic / underline from a ``w:r`` element."""
+    from docx.oxml.ns import qn
+
+    rpr = r_el.find(qn("w:rPr"))
+    if rpr is None:
+        return None, None, None
+
+    def _tri_state(tag: str) -> bool | None:
+        el = rpr.find(qn(tag))
+        if el is None:
+            return None
+        val = el.get(qn("w:val"))
+        if val is None or val in ("1", "true", "on"):
+            return True
+        if val in ("0", "false", "off"):
+            return False
+        return True
+
+    return _tri_state("w:b"), _tri_state("w:i"), _tri_state("w:u")
+
+
+def _paragraph_to_formatted_segments(para: Any) -> list[_MergeTextSegment]:
+    """Extract paragraph text as formatted segments (includes runs inside ``w:hyperlink``)."""
+    from docx.oxml.ns import qn
+
+    segments: list[_MergeTextSegment] = []
+    for r in para._p.iter(qn("w:r")):
+        parts: list[str] = []
+        for child in r:
+            tag = child.tag
+            if tag == qn("w:t"):
+                if child.text:
+                    parts.append(child.text)
+            elif tag == qn("w:tab"):
+                parts.append("\t")
+            elif tag in (qn("w:br"), qn("w:cr")):
+                parts.append("\n")
+            elif tag == qn("w:noBreakHyphen"):
+                parts.append("\u2011")
+            elif tag == qn("w:softHyphen"):
+                parts.append("\u00ad")
+        text = "".join(parts)
+        if not text:
+            continue
+        bold, italic, underline = _run_element_formatting(r)
+        segments.append(_MergeTextSegment(text, bold, italic, underline))
+    return _coalesce_formatted_segments(segments)
+
+
+def _coalesce_formatted_segments(segments: list[_MergeTextSegment]) -> list[_MergeTextSegment]:
+    if not segments:
+        return []
+    out: list[_MergeTextSegment] = []
+    cur = segments[0]
+    for seg in segments[1:]:
+        if seg.bold == cur.bold and seg.italic == cur.italic and seg.underline == cur.underline:
+            cur = _MergeTextSegment(cur.text + seg.text, cur.bold, cur.italic, cur.underline)
+        else:
+            out.append(cur)
+            cur = seg
+    out.append(cur)
+    return out
+
+
+def _slice_formatted_segments(
+    segments: list[_MergeTextSegment],
+    start: int,
+    end: int,
+) -> list[_MergeTextSegment]:
+    if start >= end:
+        return []
+    result: list[_MergeTextSegment] = []
+    pos = 0
+    for seg in segments:
+        seg_start = pos
+        seg_end = pos + len(seg.text)
+        pos = seg_end
+        if seg_end <= start or seg_start >= end:
+            continue
+        slice_start = max(start, seg_start) - seg_start
+        slice_end = min(end, seg_end) - seg_start
+        result.append(
+            _MergeTextSegment(seg.text[slice_start:slice_end], seg.bold, seg.italic, seg.underline)
+        )
+    return _coalesce_formatted_segments(result)
+
+
+def _formatting_for_segment_range(
+    segments: list[_MergeTextSegment],
+    start: int,
+    end: int,
+) -> tuple[bool | None, bool | None, bool | None]:
+    sliced = _slice_formatted_segments(segments, start, end)
+    if not sliced:
+        return None, None, None
+    b0, i0, u0 = sliced[0].bold, sliced[0].italic, sliced[0].underline
+    for seg in sliced[1:]:
+        if seg.bold != b0 or seg.italic != i0 or seg.underline != u0:
+            return None, None, None
+    return b0, i0, u0
+
+
+def _replace_merge_tokens_in_formatted_segments(
+    segments: list[_MergeTextSegment],
+    fields: Mapping[str, str],
+) -> list[_MergeTextSegment]:
+    """Replace merge tokens while preserving formatting on surrounding static text."""
+    text = _segments_plain_text(segments)
+    if not _paragraph_has_merge_tokens(text, fields):
+        return segments
+    result: list[_MergeTextSegment] = []
+    pos = 0
+    for m in _MERGE_TOKEN_RE.finditer(text):
+        if m.start() > pos:
+            result.extend(_slice_formatted_segments(segments, pos, m.start()))
+        inner = m.group(2).upper()
+        key = f"[{inner}]"
+        if key in fields:
+            bold, italic, underline = _parse_modifier_letters(m.group(1))
+            if bold is None and italic is None and underline is None:
+                bold, italic, underline = _formatting_for_segment_range(segments, m.start(), m.end())
+            value = fields[key]
+            if value:
+                result.append(_MergeTextSegment(value, bold, italic, underline))
+        else:
+            result.extend(_slice_formatted_segments(segments, m.start(), m.end()))
+        pos = m.end()
+    if pos < len(text):
+        result.extend(_slice_formatted_segments(segments, pos, len(text)))
+    return _coalesce_formatted_segments(result)
+
+
+def _insert_and_between_adjacent_name_placeholders_in_segments(
+    segments: list[_MergeTextSegment],
+    sep_flags: dict[tuple[int, int], bool],
+) -> list[_MergeTextSegment]:
+    """Like :func:`_insert_and_between_adjacent_name_placeholders` but keeps static formatting."""
+    text = _segments_plain_text(segments)
+    if not sep_flags:
+        return segments
+    matches = list(_MERGE_TOKEN_RE.finditer(text))
+    if len(matches) < 2:
+        return segments
+    result: list[_MergeTextSegment] = []
+    pos = 0
+    i = 0
+    while i < len(matches):
+        m = matches[i]
+        result.extend(_slice_formatted_segments(segments, pos, m.start()))
+        result.extend(_slice_formatted_segments(segments, m.start(), m.end()))
+        pos = m.end()
+        if i + 1 < len(matches):
+            m2 = matches[i + 1]
+            s1 = _name_slot_from_placeholder_inner(m.group(2))
+            s2 = _name_slot_from_placeholder_inner(m2.group(2))
+            if (
+                s1 is not None
+                and s2 is not None
+                and s2 == s1 + 1
+                and sep_flags.get((s1, s2), False)
+            ):
+                result.append(_MergeTextSegment(" and "))
+                pos = m2.start()
+        i += 1
+    result.extend(_slice_formatted_segments(segments, pos, len(text)))
+    return _coalesce_formatted_segments(result)
+
+
+def _segments_have_direct_formatting(segments: list[_MergeTextSegment]) -> bool:
+    return any(
+        s.bold is not None or s.italic is not None or s.underline is not None for s in segments
+    )
 
 
 def _name_slot_from_placeholder_inner(inner: str) -> int | None:
@@ -752,7 +998,7 @@ def _insert_and_between_adjacent_name_placeholders(
     """
     if not sep_flags:
         return text
-    matches = list(_PLACEHOLDER_TOKEN_RE.finditer(text))
+    matches = list(_MERGE_TOKEN_RE.finditer(text))
     if len(matches) < 2:
         return text
     parts: list[str] = []
@@ -765,8 +1011,8 @@ def _insert_and_between_adjacent_name_placeholders(
         pos = m.end()
         if i + 1 < len(matches):
             m2 = matches[i + 1]
-            s1 = _name_slot_from_placeholder_inner(m.group(1))
-            s2 = _name_slot_from_placeholder_inner(m2.group(1))
+            s1 = _name_slot_from_placeholder_inner(m.group(2))
+            s2 = _name_slot_from_placeholder_inner(m2.group(2))
             if (
                 s1 is not None
                 and s2 is not None
@@ -828,10 +1074,49 @@ def _merge_precedent_codes_in_ooxml_zip(src_bytes: bytes, fields: dict[str, str]
                 except UnicodeDecodeError:
                     zout.writestr(info, raw)
                     continue
-                text = _replace_in_text(text, escaped)
+                text = _replace_merge_tokens_in_ooxml_text(text, escaped)
                 raw = text.encode("utf-8")
             zout.writestr(info, raw)
     return out.getvalue()
+
+
+def _replace_merge_tokens_in_ooxml_text(text: str, fields: Mapping[str, str]) -> str:
+    """Replace merge tokens in raw OOXML text (modifiers are dropped — plain escaped value)."""
+
+    def repl(m: re.Match[str]) -> str:
+        key = f"[{m.group(2).upper()}]"
+        if key not in fields:
+            return m.group(0)
+        return fields[key]
+
+    return _MERGE_TOKEN_RE.sub(repl, text)
+
+
+def _rewrite_paragraph_to_runs(para: Any, segments: list[_MergeTextSegment]) -> None:
+    """Replace paragraph content with formatted runs (supports embedded ``\\n`` as line breaks)."""
+    from docx.enum.text import WD_BREAK
+    from docx.oxml.ns import qn
+
+    p_el = para._p
+    for child in list(p_el):
+        if child.tag != qn("w:pPr"):
+            p_el.remove(child)
+    for seg in segments:
+        if not seg.text:
+            continue
+        parts = seg.text.split("\n")
+        for i, part in enumerate(parts):
+            if i > 0:
+                para.add_run().add_break(WD_BREAK.LINE)
+            if not part:
+                continue
+            run = para.add_run(part)
+            if seg.bold is not None:
+                run.bold = seg.bold
+            if seg.italic is not None:
+                run.italic = seg.italic
+            if seg.underline is not None:
+                run.underline = seg.underline
 
 
 def _rewrite_paragraph_to_single_run(para: Any, replaced: str) -> None:
@@ -1008,13 +1293,196 @@ def splice_precedent_into_blank_letter(blank_letter_bytes: bytes, precedent_byte
     return out.getvalue()
 
 
+_OD_REL_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+_W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+_HF_PART_RE = re.compile(r"^word/(header|footer)\d+\.xml$")
+
+
+def _read_docx_zip_parts(raw: bytes) -> dict[str, bytes]:
+    import io
+    import zipfile
+
+    parts: dict[str, bytes] = {}
+    with zipfile.ZipFile(io.BytesIO(raw), "r") as zf:
+        for name in zf.namelist():
+            parts[name] = zf.read(name)
+    return parts
+
+
+def _write_docx_zip_parts(parts: dict[str, bytes]) -> bytes:
+    import io
+    import zipfile
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zout:
+        for name, data in parts.items():
+            zout.writestr(name, data)
+    return buf.getvalue()
+
+
+def _ooxml_rels_part_path(part_path: str) -> str:
+    folder, name = part_path.rsplit("/", 1)
+    return f"{folder}/_rels/{name}.rels"
+
+
+def _parse_ooxml_relationships(rels_bytes: bytes) -> list[tuple[str, str, str]]:
+    import xml.etree.ElementTree as ET
+
+    root = ET.fromstring(rels_bytes)
+    rels: list[tuple[str, str, str]] = []
+    for el in root:
+        if el.tag.rsplit("}", 1)[-1] != "Relationship":
+            continue
+        rels.append((el.get("Id") or "", el.get("Type") or "", el.get("Target") or ""))
+    return rels
+
+
+def _resolve_word_part_path(target: str) -> str:
+    path = target.lstrip("/")
+    if not path.startswith("word/"):
+        path = f"word/{path}"
+    return path
+
+
+def _letterhead_default_hf_rels_paths(lh_parts: dict[str, bytes]) -> tuple[str | None, str | None]:
+    """Return ``(header_rels_path, footer_rels_path)`` for the letterhead default header/footer."""
+    import xml.etree.ElementTree as ET
+
+    doc_rels_path = "word/_rels/document.xml.rels"
+    header_rels_path: str | None = None
+    footer_rels_path: str | None = None
+
+    if doc_rels_path in lh_parts:
+        rid_to_target = {
+            rid: target for rid, _typ, target in _parse_ooxml_relationships(lh_parts[doc_rels_path])
+        }
+        try:
+            root = ET.fromstring(lh_parts["word/document.xml"])
+        except (KeyError, ET.ParseError):
+            root = None
+        if root is not None:
+            header_rid: str | None = None
+            footer_rid: str | None = None
+            for el in root.iter(f"{{{_W_NS}}}headerReference"):
+                htype = el.get(f"{{{_W_NS}}}type")
+                if htype is None or htype == "default":
+                    header_rid = el.get(f"{{{_OD_REL_NS}}}id")
+                    break
+            for el in root.iter(f"{{{_W_NS}}}footerReference"):
+                ftype = el.get(f"{{{_W_NS}}}type")
+                if ftype is None or ftype == "default":
+                    footer_rid = el.get(f"{{{_OD_REL_NS}}}id")
+                    break
+            if header_rid and header_rid in rid_to_target:
+                rels = _ooxml_rels_part_path(_resolve_word_part_path(rid_to_target[header_rid]))
+                if rels in lh_parts:
+                    header_rels_path = rels
+            if footer_rid and footer_rid in rid_to_target:
+                rels = _ooxml_rels_part_path(_resolve_word_part_path(rid_to_target[footer_rid]))
+                if rels in lh_parts:
+                    footer_rels_path = rels
+
+    if header_rels_path is None and "word/_rels/header1.xml.rels" in lh_parts:
+        header_rels_path = "word/_rels/header1.xml.rels"
+    if footer_rels_path is None and "word/_rels/footer1.xml.rels" in lh_parts:
+        footer_rels_path = "word/_rels/footer1.xml.rels"
+    return header_rels_path, footer_rels_path
+
+
+def _media_paths_from_hf_rels(rels_bytes: bytes | None) -> list[str]:
+    if not rels_bytes:
+        return []
+    paths: list[str] = []
+    for _rid, typ, target in _parse_ooxml_relationships(rels_bytes):
+        if not target:
+            continue
+        if typ and "image" in typ.lower():
+            paths.append(_resolve_word_part_path(target))
+    return paths
+
+
+def _merge_content_types_for_media(content_types_bytes: bytes, lh_content_types_bytes: bytes) -> bytes:
+    """Copy missing ``Default`` entries (e.g. png) from the letterhead package."""
+    import xml.etree.ElementTree as ET
+
+    root = ET.fromstring(content_types_bytes)
+    lh_root = ET.fromstring(lh_content_types_bytes)
+    existing_ext = {
+        (el.get("Extension") or "").lower()
+        for el in root
+        if el.tag.rsplit("}", 1)[-1] == "Default"
+    }
+    for el in lh_root:
+        if el.tag.rsplit("}", 1)[-1] != "Default":
+            continue
+        ext = (el.get("Extension") or "").lower()
+        if ext and ext not in existing_ext:
+            root.append(el)
+            existing_ext.add(ext)
+    return ET.tostring(root, encoding="utf-8", xml_declaration=True)
+
+
+def _merge_letterhead_package_assets(precedent_bytes: bytes, letterhead_bytes: bytes) -> bytes:
+    """Copy letterhead ``word/media`` parts and header/footer ``.rels`` into a composed document."""
+    lh_parts = _read_docx_zip_parts(letterhead_bytes)
+    prec_parts = _read_docx_zip_parts(precedent_bytes)
+
+    lh_hdr_rels_path, lh_ftr_rels_path = _letterhead_default_hf_rels_paths(lh_parts)
+    lh_hdr_rels = lh_parts.get(lh_hdr_rels_path) if lh_hdr_rels_path else None
+    lh_ftr_rels = lh_parts.get(lh_ftr_rels_path) if lh_ftr_rels_path else None
+
+    def _copy_media(rels_bytes: bytes | None) -> bytes | None:
+        if not rels_bytes:
+            return rels_bytes
+        updated = rels_bytes
+        for media_path in _media_paths_from_hf_rels(rels_bytes):
+            if media_path not in lh_parts:
+                continue
+            dest_path = media_path
+            if dest_path in prec_parts and prec_parts[dest_path] != lh_parts[media_path]:
+                base = dest_path.rsplit("/", 1)[-1]
+                dest_path = f"word/media/lh_{base}"
+                n = 0
+                while dest_path in prec_parts:
+                    n += 1
+                    dest_path = f"word/media/lh_{n}_{base}"
+                old_target = media_path.removeprefix("word/")
+                new_target = dest_path.removeprefix("word/")
+                updated = updated.replace(
+                    f'Target="{old_target}"'.encode(),
+                    f'Target="{new_target}"'.encode(),
+                )
+            prec_parts[dest_path] = lh_parts[media_path]
+        return updated
+
+    lh_hdr_rels = _copy_media(lh_hdr_rels)
+    lh_ftr_rels = _copy_media(lh_ftr_rels)
+
+    for part_path in list(prec_parts):
+        if not _HF_PART_RE.match(part_path):
+            continue
+        rels_path = _ooxml_rels_part_path(part_path)
+        if part_path.startswith("word/header") and lh_hdr_rels:
+            prec_parts[rels_path] = lh_hdr_rels
+        elif part_path.startswith("word/footer") and lh_ftr_rels:
+            prec_parts[rels_path] = lh_ftr_rels
+
+    if "[Content_Types].xml" in prec_parts and "[Content_Types].xml" in lh_parts:
+        prec_parts["[Content_Types].xml"] = _merge_content_types_for_media(
+            prec_parts["[Content_Types].xml"],
+            lh_parts["[Content_Types].xml"],
+        )
+
+    return _write_docx_zip_parts(prec_parts)
+
+
 def apply_digital_letterhead_headers_footers(precedent_bytes: bytes, letterhead_bytes: bytes) -> bytes:
     """Copy header and footer XML from the letterhead .docx onto every section of the precedent .docx.
 
     Intended for “typical” letterhead: logos and firm lines live in headers/footers; precedent body
     stays in the document story so page 1 shows letterhead + letter content together. Embedded
-    images in the letterhead may require the letterhead and precedent packages to share ``word/media``
-    parts — text-only or simply structured letterheads work most reliably.
+    images in the letterhead are copied from ``word/media`` and header/footer relationship parts
+    are merged into the composed package.
 
     Also copies **section page geometry** (margins, header/footer offsets, page size) from the
     letterhead's first section onto every precedent section so padding matches the uploaded template.
@@ -1043,7 +1511,7 @@ def apply_digital_letterhead_headers_footers(precedent_bytes: bytes, letterhead_
 
     out = io.BytesIO()
     prec.save(out)
-    return out.getvalue()
+    return _merge_letterhead_package_assets(out.getvalue(), letterhead_bytes)
 
 
 def merge_precedent_codes(
@@ -1060,8 +1528,9 @@ def merge_precedent_codes(
        have name/company data; then substitutes fields; handles merged table cells; removes
        code-only blank paragraphs.
 
-    2. **Zip / OOXML pass** — replaces any remaining contiguous ``[CODE]`` substrings in
-       document parts (including split tokens not fixed in step 1).
+    2. **Zip / OOXML pass** — replaces any remaining contiguous ``[CODE]`` or
+       ``[modifiers:CODE]`` substrings in document parts (including split tokens not fixed
+       in step 1; formatting modifiers may be lost when a token was split across XML nodes).
     """
     sep_flags = _inter_client_sep_flags(ordered_clients) if merge_all_clients else {}
     merged = _merge_precedent_codes_via_python_docx(src_bytes, fields, sep_flags)
@@ -1079,8 +1548,6 @@ def _merge_precedent_codes_via_python_docx(
 
     doc = Document(io.BytesIO(src_bytes))
 
-    # Build a regex that matches any known code so we can detect code-only paragraphs
-    code_pattern = re.compile("|".join(re.escape(k) for k in fields))
     seen_wp: set[Any] = set()
 
     def _merge_para(para: Any) -> bool:
@@ -1088,22 +1555,27 @@ def _merge_precedent_codes_via_python_docx(
         wp = para._p
         if wp in seen_wp:
             return False
-        # Use Paragraph.text, not join(para.runs): runs inside w:hyperlink are not top-level runs,
-        # and leaving those w:t nodes caused duplicate visible text after merging the first run.
-        full = para.text
+        # Read run-level formatting before flattening so static bold/italic survives merge.
+        segments = _paragraph_to_formatted_segments(para)
+        full = _segments_plain_text(segments)
         if not full:
             return False  # already empty — don't touch
         if sep_flags:
-            full = _insert_and_between_adjacent_name_placeholders(full, sep_flags)
-        had_code = bool(code_pattern.search(full))
-        if not had_code:
+            segments = _insert_and_between_adjacent_name_placeholders_in_segments(segments, sep_flags)
+            full = _segments_plain_text(segments)
+        if not _paragraph_has_merge_tokens(full, fields):
             return False
         # Claim only once we will rewrite, so empty / no-code paragraphs visited from duplicate
         # merged cells can still be processed on a later distinct visit (should not happen, but safe).
         seen_wp.add(wp)
-        replaced = _replace_in_text(full, fields)
-        replaced = _normalize_post_merge_whitespace(replaced)
-        _rewrite_paragraph_to_single_run(para, replaced)
+        segments = _replace_merge_tokens_in_formatted_segments(segments, fields)
+        if _segments_have_direct_formatting(segments):
+            segments = _trim_leading_segment_whitespace(segments)
+            replaced = _normalize_post_merge_whitespace(_segments_plain_text(segments))
+            _rewrite_paragraph_to_runs(para, segments)
+        else:
+            replaced = _normalize_post_merge_whitespace(_segments_plain_text(segments))
+            _rewrite_paragraph_to_single_run(para, replaced)
         # Remove the paragraph if it's now blank (was code-only, value was empty)
         return not replaced.strip()
 

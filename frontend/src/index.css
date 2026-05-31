@@ -195,6 +195,25 @@ a {
   margin-bottom: 4px;
 }
 
+.loginForgotLink {
+  display: inline;
+  color: var(--muted);
+  font-size: 0.95rem;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.loginForgotLink:hover {
+  color: var(--text);
+}
+
+.loginForgotLink[aria-disabled='true'] {
+  opacity: 0.6;
+  pointer-events: none;
+  cursor: not-allowed;
+}
+
 .appLogo {
   display: block;
   object-fit: contain;
@@ -319,6 +338,14 @@ html.dark .topbar .btn:not(.primary):not(.danger) {
 /* Search width = 25% of full filter bar (not the flex left group), so Main menu and Tasks match. */
 .mainMenuFilterBar {
   container-type: inline-size;
+  position: relative;
+  z-index: 1;
+  overflow: visible;
+}
+
+/* Filter dropdown overlaps the cases table below; raise the bar while open. */
+.mainMenuFilterBar--dropdownOpen {
+  z-index: 300;
 }
 
 .mainMenuShell--mainMenu .casesTableCard {
@@ -333,12 +360,28 @@ html.dark .topbar .btn:not(.primary):not(.danger) {
 
 /* Reports placeholder — full width like other menu tables; copy top-left */
 .mainMenuShell--mainMenu .reportsPageShell {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
   width: 100%;
   box-sizing: border-box;
   padding: 24px 28px;
-  align-items: flex-start;
+  align-items: stretch;
   text-align: left;
-  overflow: auto;
+  overflow: hidden;
+}
+
+.reportsPageHeader {
+  flex-shrink: 0;
+}
+
+.reportsPageBody {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .mainMenuShell--mainMenu .reportsPageTitle {
@@ -488,12 +531,80 @@ html.dark .topbar .btn:not(.primary):not(.danger) {
   margin-top: 16px;
 }
 
+.reportsSection--fill {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  margin-top: 16px;
+}
+
+.reportsSectionStatic {
+  flex-shrink: 0;
+}
+
 .reportsPreviewScroll {
   margin-top: 14px;
   max-height: min(52vh, 560px);
   overflow: auto;
   border: 1px solid var(--border);
   border-radius: 10px;
+}
+
+.reportsPreviewFrame {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  margin-top: 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.reportsPreviewFrame .reportsPreviewScroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
+  margin-top: 0;
+  border: none;
+  border-radius: 0;
+  overflow: auto;
+}
+
+.reportsPreviewTotalsRibbon {
+  flex-shrink: 0;
+  border-top: 1px solid var(--border);
+}
+
+.reportsPreviewTotalsRibbon .reportsTable td {
+  border-bottom: none;
+}
+
+.reportsTable--balances {
+  table-layout: fixed;
+  width: 100%;
+}
+
+.reportsTable--balances .reportsColRef {
+  width: 11%;
+}
+
+.reportsTable--balances .reportsColClient {
+  width: 17%;
+}
+
+.reportsTable--balances .reportsColMatter {
+  width: 33%;
+}
+
+.reportsTable--balances .reportsColFeeEarner {
+  width: 17%;
+}
+
+.reportsTable--balances .reportsColMoney {
+  width: 11%;
 }
 
 .reportsTable {
@@ -516,6 +627,10 @@ html.dark .topbar .btn:not(.primary):not(.danger) {
   position: sticky;
   top: 0;
   z-index: 1;
+}
+
+.reportsPreviewFrame .reportsTable thead th {
+  box-shadow: 0 1px 0 var(--border);
 }
 
 .reportsTableTotalRow td {
@@ -634,6 +749,31 @@ html.dark .topbar .btn:not(.primary):not(.danger) {
   flex-shrink: 0;
 }
 
+/* Main menu cases: action buttons left, search/filter right */
+.mainMenuFilterRow--searchRight > .mainMenuFilterRowLeft {
+  flex: 0 0 auto;
+  gap: 8px;
+}
+
+.mainMenuFilterRow--searchRight > .mainMenuFilterRowRight {
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 12px;
+  min-width: 0;
+}
+
+.mainMenuFilterRow--searchRight > .mainMenuFilterRowRight .caseToolbarDropdownWrap {
+  flex-shrink: 0;
+}
+
+.mainMenuFilterRow--searchRight > .mainMenuFilterRowRight .mainMenuSearchInput {
+  flex: 1 1 286px;
+  width: auto;
+  min-width: 208px;
+  max-width: 468px;
+}
+
 /* Match case toolbar search: modest width, not a fraction of the full viewport. */
 .mainMenuFilterRow .mainMenuSearchInput,
 .mainMenuFilterRowLeft .mainMenuSearchInput {
@@ -662,20 +802,242 @@ html.dark .topbar .btn:not(.primary):not(.danger) {
 
 .mainMenuFilterDropdown {
   z-index: 250;
+  min-width: 280px;
+}
+
+.mainMenuFilterDropdown--hidden {
+  display: none;
+}
+
+.mainMenuCasesHost--hidden {
+  display: none !important;
+}
+
+.mainMenuFilterField {
+  position: relative;
+}
+
+.mainMenuFilterSelectRow {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.mainMenuFilterSelectRow .mainMenuFilterSelectWrap {
+  flex: 1;
+  min-width: 0;
+}
+
+.mainMenuFilterToolbarGroup {
+  gap: 4px;
+}
+
+.mainMenuFilterClearBtn {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.mainMenuFilterClearBtn:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.mainMenuFilterClearBtn--toolbar {
+  align-self: center;
+}
+
+.mainMenuFilterSelectWrap {
+  position: relative;
+}
+
+.mainMenuFilterSelectTrigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+}
+
+.mainMenuFilterSelectTrigger:hover {
+  border-color: rgba(var(--primary-rgb), 0.4);
+}
+
+.mainMenuFilterSelectTriggerLabel {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mainMenuFilterSelectChevron {
+  flex-shrink: 0;
+  opacity: 0.7;
+  font-size: 0.85em;
+}
+
+.mainMenuFilterSelectMenu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 300;
+  max-height: min(220px, 40vh);
+  overflow-y: auto;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.12);
+  padding: 4px;
+}
+
+.singleSelectDropdownField {
+  position: relative;
+}
+
+.singleSelectDropdown {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.singleSelectDropdownTrigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+}
+
+.singleSelectDropdownTrigger:hover:not(:disabled) {
+  border-color: rgba(var(--primary-rgb), 0.4);
+}
+
+.singleSelectDropdownTrigger:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.singleSelectDropdownTriggerMain {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.singleSelectDropdownTriggerLabel {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.singleSelectDropdownTriggerHint {
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.singleSelectDropdownChevron {
+  flex-shrink: 0;
+  opacity: 0.7;
+  font-size: 0.85em;
+}
+
+.singleSelectDropdownMenu {
+  max-height: min(220px, 40vh);
+  overflow-y: auto;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.12);
+  padding: 4px;
+}
+
+.singleSelectDropdownOption {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+}
+
+.singleSelectDropdownOption:hover {
+  background: var(--hover);
+}
+
+.singleSelectDropdownOption.active {
+  background: rgba(var(--primary-rgb), 0.08);
+}
+
+.singleSelectDropdownOptionHint {
+  font-size: 12px;
+}
+
+.singleSelectDropdownEmpty {
+  padding: 8px 10px;
+  font-size: 13px;
+}
+
+.mainMenuFilterCheckRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.mainMenuFilterCheckRow:hover {
+  background: var(--hover);
+}
+
+.mainMenuFilterCheckRow input[type='checkbox'] {
+  flex-shrink: 0;
+  margin: 0;
 }
 
 .mainMenuFilterDropdownBody {
   padding: 8px 12px 12px;
 }
 
-.mainMenuFilterDropdownBody .field {
+.mainMenuFilterDropdownBody .mainMenuFilterField {
   margin-bottom: 0;
-}
-
-.mainMenuFilterDropdownBody .field select {
-  width: 100%;
-  max-width: none;
-  box-sizing: border-box;
 }
 
 .pane {
@@ -974,7 +1336,6 @@ select {
   display: flex;
   flex-direction: row;
   align-items: stretch;
-  gap: calc(8px * 0.85);
   min-width: 0;
 }
 
@@ -988,7 +1349,6 @@ select {
   display: flex;
   flex-direction: column;
   justify-content: center;
-  /* Column flex + base .docsDescCell align-items:center was centring the block horizontally; stretch = left-aligned full width. */
   align-items: stretch;
 }
 
@@ -996,13 +1356,21 @@ select {
   justify-content: flex-start;
 }
 
-.docsMailIconSlot {
-  align-self: center;
-  flex-shrink: 0;
+.docsDescRow {
   display: flex;
   align-items: center;
-  justify-content: center;
-  line-height: 0;
+  gap: var(--canary-table-row-padding);
+  min-width: 0;
+  width: 100%;
+}
+
+.docsDescTextBlock {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: calc(5px * 0.85);
+  overflow: hidden;
 }
 
 .docsMailGlyph {
@@ -1046,30 +1414,7 @@ select {
   min-width: 0;
 }
 
-/* Two-line description (e.g. mail From): align block to top of the row. */
-.docsDescCell--hasSub {
-  align-items: flex-start;
-}
-
-.docsDescStack {
-  display: flex;
-  flex-direction: column;
-  gap: calc(5px * 0.85);
-  min-width: 0;
-  flex: 1;
-}
-
-.docsDescInner {
-  display: flex;
-  align-items: center;
-  gap: calc(6px * 0.85);
-  min-width: 0;
-  flex: 1;
-}
-
-/* Align second line with filename (past type icons; extra offset when pin column is present). */
 .docsDescCell .docsDescSub {
-  padding-left: calc(var(--docs-file-icon-size, calc(18px * 1.2)) + (6px * 0.85));
   font-size: 0.84em;
   line-height: calc(1.35 * 0.85);
   min-height: calc(1.35em * 0.85);
@@ -1078,24 +1423,16 @@ select {
   white-space: nowrap;
 }
 
-.docsDescCell--pinnedHead:not(.docsDescCell--mailRoot) .docsDescSub {
-  padding-left: calc(2 * (var(--docs-file-icon-size, calc(18px * 1.2)) + (6px * 0.85)));
-}
-
-.docsDescCell--mailRoot:not(.docsDescCell--pinnedHead) .docsDescSub {
-  padding-left: 0;
-}
-
-.docsDescCell--mailRoot.docsDescCell--pinnedHead .docsDescSub {
-  padding-left: calc(var(--docs-file-icon-size, calc(18px * 1.2)) + (6px * 0.85));
-}
-
 .docsTypeIcon,
 .docsPinIcon {
   flex-shrink: 0;
   font-size: 14px;
-  line-height: 1;
+  line-height: 0;
   width: var(--docs-file-icon-size, calc(18px * 1.2));
+  height: var(--docs-file-icon-size, calc(18px * 1.2));
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   text-align: center;
 }
 
@@ -1106,12 +1443,29 @@ select {
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
+  width: 100%;
+  height: 100%;
+  line-height: 0;
 }
 
 .docsFolderIconSvg {
-  width: calc(18px * 1.2 * 1.15);
-  height: calc(18px * 1.2 * 1.15);
+  width: var(--docs-file-icon-size, calc(18px * 1.2));
+  height: var(--docs-file-icon-size, calc(18px * 1.2));
   display: block;
+  flex-shrink: 0;
+}
+
+.docsFolderIconWrap--shared {
+  color: inherit;
+  /* Share badge adds visual weight at the bottom-right; lift to match mime/mail icons. */
+  transform: translateY(-2px);
+}
+
+.docsSharedFolderIconSvg {
+  width: var(--docs-file-icon-size, calc(18px * 1.2));
+  height: var(--docs-file-icon-size, calc(18px * 1.2));
+  display: block;
+  flex-shrink: 0;
 }
 
 .docsVimixIcon {
@@ -1169,6 +1523,57 @@ select {
   min-width: 220px;
   box-shadow: 0 12px 30px rgba(15, 23, 42, 0.12);
   z-index: 2;
+}
+
+.docSubMenu .docContextSubWrap {
+  position: relative;
+}
+
+.docSubMenu .docContextSubWrap::after {
+  content: '';
+  position: absolute;
+  left: 100%;
+  top: 0;
+  width: 14px;
+  height: 100%;
+  z-index: 1;
+}
+
+.docSubMenuPortalShare {
+  min-width: 260px;
+  max-width: 320px;
+  z-index: 3;
+}
+
+.docSubMenuHeading {
+  padding: 8px 12px 6px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--muted);
+  border-bottom: 1px solid var(--border);
+}
+
+.docSubMenuHint {
+  padding: 10px 12px;
+  font-size: 0.9rem;
+  line-height: 1.4;
+}
+
+.docSubMenuErr {
+  padding: 8px 12px;
+  font-size: 0.85rem;
+}
+
+.docContextItemCheck {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.docContextItemCheck input {
+  flex-shrink: 0;
 }
 
 .docContextItem {
@@ -3336,6 +3741,32 @@ html.dark .emlPreviewBodyWrap {
   background: #fff;
 }
 
+.portalShell {
+  min-height: 100vh;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 32px 16px 48px;
+  background: var(--page-bg, #f3f4f6);
+}
+
+.portalCard {
+  width: min(480px, 100%);
+  padding: 24px;
+}
+
+.portalCardWide {
+  width: min(920px, 100%);
+}
+
+.portalFilesTable .tr {
+  align-items: center;
+}
+
+html.dark .portalShell {
+  background: var(--page-bg);
+}
+
 /* E-mail compose: attach from Canary / local */
 .emailAttachCanaryOverlay {
   z-index: 20;
@@ -3420,4 +3851,141 @@ html.dark .emlPreviewBodyWrap {
   display: block;
   width: 14px;
   height: 1px;
+}
+
+/* Admin > Deploy > Storage */
+.adminStorageCard {
+  max-width: 720px;
+}
+
+.adminStorageLayout {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 24px;
+  align-items: center;
+  margin: 20px 0;
+}
+
+.adminStoragePieWrap {
+  position: relative;
+  width: 180px;
+  height: 180px;
+  flex-shrink: 0;
+}
+
+.adminStoragePie {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+}
+
+.adminStoragePieCenter {
+  position: absolute;
+  inset: 22%;
+  border-radius: 50%;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 8px;
+  box-sizing: border-box;
+}
+
+.adminStoragePieCenterValue {
+  font-weight: 700;
+  font-size: 0.95rem;
+  line-height: 1.2;
+}
+
+.adminStoragePieCenterLabel {
+  font-size: 0.72rem;
+  color: var(--muted);
+  margin-top: 2px;
+}
+
+.adminStoragePieCenterSub {
+  font-size: 0.68rem;
+  margin-top: 2px;
+}
+
+.adminStorageLegend {
+  flex: 1 1 220px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.adminStorageLegendRow {
+  display: grid;
+  grid-template-columns: 14px 1fr auto;
+  gap: 8px;
+  align-items: center;
+  font-size: 0.92rem;
+}
+
+.adminStorageLegendSwatch {
+  width: 14px;
+  height: 14px;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+
+.adminStorageLegendLabel {
+  min-width: 0;
+}
+
+.adminStorageLegendValue {
+  font-size: 0.88rem;
+}
+
+.adminStorageLegendTotal {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding-top: 8px;
+  margin-top: 4px;
+  border-top: 1px solid var(--border);
+  font-size: 0.92rem;
+}
+
+.adminStorageDiskNote {
+  margin: 8px 0 0;
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.adminStorageLimitForm {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: flex-end;
+  margin-top: 8px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
+.adminStorageFileBreakdown {
+  margin-top: 8px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
+.adminStorageFileBreakdownTitle {
+  font-weight: 650;
+  font-size: 0.92rem;
+  margin-bottom: 6px;
+}
+
+.adminStorageFileBreakdownIntro {
+  margin: 0 0 10px;
+  font-size: 0.84rem;
+  line-height: 1.45;
+}
+
+.adminStorageLegendRow--nested {
+  padding-left: 8px;
 }

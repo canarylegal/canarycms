@@ -17,7 +17,8 @@ from app.models import (
     MatterSubTypeEventTemplate,
     User,
 )
-from app.smtp_send import send_smtp_message
+from app.alert_dispatch import AlertKind, dispatch_alert
+from app.firm_email_service import resolve_alert_transport
 
 log = logging.getLogger(__name__)
 
@@ -185,10 +186,7 @@ def _should_fire(
 
 def process_due_calendar_notifications(db: Session) -> int:
     """Send due reminder e-mails; returns number of messages sent."""
-    from app.smtp_notification_settings import get_smtp_notification_settings
-
-    settings = get_smtp_notification_settings(db)
-    if not settings.enabled:
+    if resolve_alert_transport(db) is None:
         return 0
 
     today = datetime.now(timezone.utc).date()
@@ -223,20 +221,16 @@ def process_due_calendar_notifications(db: Session) -> int:
             )
             if exists:
                 continue
-            subject = f"Calendar reminder: {sub.title_snapshot or 'Event'}"
-            body_lines = [
-                "This is a reminder for your Canary calendar event:",
-                "",
-                sub.title_snapshot or "(no title)",
-                "",
-                f"Event date (UTC): {anchor.isoformat() if anchor else 'unknown'}",
-                "",
-                "You are receiving this because e-mail alerts are enabled for this event in Canary.",
-            ]
-            try:
-                send_smtp_message(db, to_email=user.email, subject=subject, body="\n".join(body_lines))
-            except Exception:
-                log.exception("calendar_email_alert: send failed user=%s key=%s", sub.user_id, sub.event_key)
+            sent = dispatch_alert(
+                db,
+                AlertKind.calendar_event_reminder,
+                to_email=user.email,
+                context={
+                    "title": sub.title_snapshot or "Event",
+                    "anchor_label": anchor.isoformat() if anchor else "unknown",
+                },
+            )
+            if not sent:
                 continue
             db.add(
                 CalendarEventNotificationSent(

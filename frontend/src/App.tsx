@@ -23,8 +23,9 @@ import {
   contactFieldsModelToPayload,
   resolveContactNameWithFallback,
 } from './GlobalContactCreateForm'
+import { ContactPortalPanel } from './ContactPortalPanel'
 import { CASE_FILES_STORAGE_KEY, signalCaseFilesChanged } from './caseFilesCrossTab'
-import { CaseDetail } from './case/CaseDetail'
+import { CaseDetail, type CaseOpenDocPanel } from './case/CaseDetail'
 import { matterContactTypeLabel } from './case/matterLabels'
 import { PropertyDetailsForm } from './case/PropertyDetailsForm'
 import {
@@ -40,9 +41,27 @@ import {
   DEFAULT_PAGE_BG,
   FONT_OPTIONS,
   PAGE_BG_COLOR_PRESETS,
-  getThemePreferences,
-  saveThemePreferences,
 } from './theme'
+import { persistUserAppearance, useAppearanceFormState, useServerAppearance } from './useServerAppearance'
+import { useUserUiPreferences } from './useUserUiPreferences'
+import { useColumnWidths } from './useColumnWidths'
+import { MainMenuFilterCheckboxDropdown } from './MainMenuFilterCheckboxDropdown'
+import {
+  CONTACTS_COLUMN_COUNT,
+  CONTACTS_COLUMN_WIDTHS_DEFAULT,
+  MAIN_MENU_COLUMN_COUNT,
+  MAIN_MENU_COLUMN_WIDTHS_DEFAULT,
+  TASKS_MENU_COLUMN_COUNT,
+  TASKS_MENU_COLUMN_WIDTHS_DEFAULT,
+  type MainMenuCaseStatusFilter,
+} from './userUiPreferences'
+import {
+  effectiveColumnWidths,
+  LEGACY_AUTO_CONTACTS_COLUMN_WIDTHS,
+  LEGACY_AUTO_MAIN_MENU_COLUMN_WIDTHS,
+  LEGACY_AUTO_TASKS_MENU_COLUMN_WIDTHS,
+} from './columnGridDefaults'
+import { normalizeUiPreferences } from './userUiPreferences'
 import { AppLogo } from './AppLogo'
 import { openOnlyOfficePrecedentEditor } from './onlyofficeEditorWindow'
 import {
@@ -77,6 +96,9 @@ import type {
   PrecedentOut,
   TokenResponse,
   Verify2FASessionResponse,
+  ForgotPasswordResponse,
+  ChangePasswordResponse,
+  AdminSendPasswordResetResponse,
   AdminUserPublic,
   UserCalDAVProvisionOut,
   UserCalDAVStatusOut,
@@ -95,8 +117,6 @@ type View =
   | 'reports'
   | 'user-settings'
   | 'admin-console'
-
-const TASK_MENU_LAYOUT_STORAGE_KEY = 'canary.tasks.menuLayout'
 
 function canaryViewTitleSegment(view: View, caseDetail: CaseOut | null): string {
   switch (view) {
@@ -138,6 +158,62 @@ function userNeedsSecondFactorSetup(me: UserPublic): boolean {
 function sessionNeedsVerifiedSecondFactor(me: UserPublic): boolean {
   if (me.admin_console_access) return false
   return me.session_second_factor_verified === false
+}
+
+function sessionNeedsPasswordChange(me: UserPublic): boolean {
+  if (me.admin_console_access) return false
+  return me.session_password_change_required === true
+}
+
+function PasswordChangeSessionGate({
+  token,
+  me,
+  onLogout,
+  refreshMe,
+  applySessionToken,
+}: {
+  token: string
+  me: UserPublic
+  onLogout: () => void
+  refreshMe: () => Promise<void>
+  applySessionToken: (t: string) => void
+}) {
+  const days = me.password_rotation_days
+  return (
+    <div className="appShell">
+      <header className="topbar">
+        <div className="topbarMain">
+          <nav className="topNav" aria-label="Password update required">
+            <span className="muted" style={{ padding: '6px 10px' }}>
+              Password update required
+            </span>
+          </nav>
+        </div>
+        <div className="topbarRight">
+          <div className="muted">{me.email}</div>
+          <button type="button" className="btn" onClick={onLogout}>
+            Sign out
+          </button>
+        </div>
+      </header>
+      <main className="main main--mainMenu">
+        <div className="stack" style={{ padding: 16, maxWidth: 720, margin: '0 auto' }}>
+          <div className="error" role="alert">
+            <p style={{ marginTop: 0 }}>
+              Your organisation requires you to update your password
+              {days ? ` every ${days} days` : ''}. Choose a new password below to continue using Canary.
+            </p>
+          </div>
+          <UserSettingsPage
+            token={token}
+            refreshMe={refreshMe}
+            applySessionToken={applySessionToken}
+            passwordChangeRequiredOnly
+          />
+        </div>
+      </main>
+    </div>
+  )
 }
 
 function SecondFactorSessionGate({
@@ -225,13 +301,9 @@ function SecondFactorSessionGate({
   )
 }
 
-/** Main menu cases: Reference · Client · Description · Fee earner · Status — Client 30fr; Status 5fr (5% moved from Status to Client). */
-const MAIN_MENU_CASES_TABLE_GRID =
-  'minmax(0, 10fr) minmax(0, 30fr) minmax(0, 35fr) minmax(0, 20fr) minmax(0, 5fr)'
+/** Main menu cases table — default column widths live in ``userUiPreferences``; grid uses pixel widths when resized. */
 
-/** Contacts page: Name · Type · Email · Phone — Name 30% (90fr/300fr); others share 70% equally (70fr each). */
-const CONTACTS_TABLE_GRID =
-  'minmax(0, 90fr) minmax(0, 70fr) minmax(0, 70fr) minmax(0, 70fr)'
+/** Contacts page table — default column widths live in ``userUiPreferences``. */
 
 function useAuth() {
   const [token, setToken] = useState<string | null>(() => localStorage.getItem('token'))
@@ -359,6 +431,92 @@ function useAuth() {
   }
 }
 
+function ResetPasswordForm({ token, onDone }: { token: string; onDone: () => void }) {
+  const [password, setPassword] = useState('')
+  const [confirm, setConfirm] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+  const [ok, setOk] = useState(false)
+
+  async function handleSubmit(e: FormEvent) {
+    e.preventDefault()
+    if (busy) return
+    setErr(null)
+    if (password.length < 12) {
+      setErr('Password must be at least 12 characters.')
+      return
+    }
+    if (password !== confirm) {
+      setErr('Password and confirmation do not match.')
+      return
+    }
+    setBusy(true)
+    try {
+      await apiFetch<null>('/auth/reset-password', {
+        method: 'POST',
+        json: { token, new_password: password },
+      })
+      setOk(true)
+    } catch (e: unknown) {
+      setErr((e as ApiError).message ?? 'Could not reset password')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="loginScreen">
+      <div className="loginBrandRow">
+        <AppLogo />
+      </div>
+      <div className="card" style={{ maxWidth: 520, margin: '24px auto 0' }}>
+        {ok ? (
+          <div className="stack" style={{ marginTop: 16, gap: 12 }}>
+            <p className="muted" style={{ marginTop: 0 }}>
+              Your password has been updated. Sign in with your new password.
+            </p>
+            <button type="button" className="btn primary" onClick={onDone}>
+              Back to sign in
+            </button>
+          </div>
+        ) : (
+          <>
+            <p className="muted">Choose a new password for your account.</p>
+            <form className="stack" style={{ marginTop: 16 }} onSubmit={(e) => void handleSubmit(e)}>
+              <label className="field">
+                <span>New password</span>
+                <input
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  autoComplete="new-password"
+                  autoFocus
+                />
+              </label>
+              <label className="field">
+                <span>Confirm new password</span>
+                <input
+                  type="password"
+                  value={confirm}
+                  onChange={(e) => setConfirm(e.target.value)}
+                  autoComplete="new-password"
+                />
+              </label>
+              <div className="muted" style={{ fontSize: 13 }}>
+                At least 12 characters.
+              </div>
+              {err ? <div className="error">{err}</div> : null}
+              <button type="submit" className="btn primary" disabled={busy}>
+                {busy ? 'Saving…' : 'Update password'}
+              </button>
+            </form>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
 function LoginForm({
   onLogin,
   onPasskeyLogin,
@@ -373,8 +531,10 @@ function LoginForm({
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [faCode, setFaCode] = useState('')
-  const [step, setStep] = useState<'password' | '2fa'>('password')
+  const [step, setStep] = useState<'password' | '2fa' | 'forgot'>('password')
   const [busy, setBusy] = useState(false)
+  const [forgotNotice, setForgotNotice] = useState<string | null>(null)
+  const [forgotErr, setForgotErr] = useState<string | null>(null)
 
   async function handlePasswordSubmit(e: FormEvent) {
     e.preventDefault()
@@ -437,7 +597,7 @@ function LoginForm({
                 />
               </label>
               {error ? <div className="error">{error}</div> : null}
-              <button type="submit" className="btn primary" disabled={busy}>
+              <button type="submit" className="btn primary" style={{ marginTop: 8 }} disabled={busy}>
                 {busy ? 'Signing in…' : 'Sign in'}
               </button>
             </form>
@@ -460,7 +620,89 @@ function LoginForm({
             >
               Sign in with passkey
             </button>
+            <div style={{ marginTop: 12, textAlign: 'center' }}>
+              <a
+                href="#forgot-password"
+                className="loginForgotLink"
+                aria-disabled={busy}
+                onClick={(e) => {
+                  e.preventDefault()
+                  if (busy) return
+                  onClearError()
+                  setForgotNotice(null)
+                  setForgotErr(null)
+                  setStep('forgot')
+                }}
+              >
+                Forgot password?
+              </a>
+            </div>
           </>
+        ) : step === 'forgot' ? (
+          <form
+            className="stack"
+            style={{ marginTop: 16 }}
+            onSubmit={(e) => {
+              e.preventDefault()
+              if (busy) return
+              setBusy(true)
+              onClearError()
+              setForgotNotice(null)
+              setForgotErr(null)
+              void (async () => {
+                try {
+                  const res = await apiFetch<ForgotPasswordResponse>('/auth/forgot-password', {
+                    method: 'POST',
+                    json: { email: email.trim() },
+                  })
+                  setForgotNotice(res.message)
+                } catch (err: unknown) {
+                  setForgotNotice(null)
+                  setForgotErr((err as ApiError).message ?? 'Could not request password reset')
+                } finally {
+                  setBusy(false)
+                }
+              })()
+            }}
+          >
+            <p className="muted" style={{ marginTop: 0 }}>
+              Enter your account e-mail and we will send a reset link if automated e-mail alerts are configured.
+            </p>
+            <label className="field">
+              <span>Email</span>
+              <input
+                value={email}
+                onChange={(e) => {
+                  onClearError()
+                  setForgotNotice(null)
+                  setEmail(e.target.value)
+                }}
+                autoComplete="username"
+                autoFocus
+              />
+            </label>
+            {error ? <div className="error">{error}</div> : null}
+            {forgotErr ? <div className="error">{forgotErr}</div> : null}
+            {forgotNotice ? <div className="muted">{forgotNotice}</div> : null}
+            <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
+              <button type="submit" className="btn primary" disabled={busy || !email.trim()}>
+                {busy ? 'Sending…' : 'Send reset link'}
+              </button>
+              <button
+                type="button"
+                className="btn"
+                disabled={busy}
+                onClick={() => {
+                  onClearError()
+                  setForgotNotice(null)
+                  setForgotErr(null)
+                  setStep('password')
+                }}
+              >
+                Back to sign in
+              </button>
+            </div>
+          </form>
         ) : (
           <form className="stack" style={{ marginTop: 16 }} onSubmit={handle2faSubmit}>
             <p className="muted" style={{ marginTop: 0 }}>
@@ -507,6 +749,24 @@ function LoginForm({
 
 function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | null } = {}) {
   const auth = useAuth()
+  const [resetToken, setResetToken] = useState<string | null>(() => {
+    try {
+      return new URLSearchParams(window.location.search).get('reset_token')
+    } catch {
+      return null
+    }
+  })
+  const clearResetToken = useCallback(() => {
+    setResetToken(null)
+    try {
+      const url = new URL(window.location.href)
+      url.searchParams.delete('reset_token')
+      window.history.replaceState({}, '', url.pathname + url.search + url.hash)
+    } catch {
+      // ignore
+    }
+  }, [])
+  useServerAppearance(auth.me, auth.token)
   const { askConfirm } = useDialogs()
   const [view, setView] = useState<View>(() => (initialTasksCaseFilter ? 'tasks' : 'main-menu'))
   const [selectedCaseId, setSelectedCaseId] = useState<string | null>(null)
@@ -516,47 +776,13 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
   const [cases, setCases] = useState<CaseOut[]>([])
   const [, setCasesBusy] = useState(false)
   const [casesErr, setCasesErr] = useState<string | null>(null)
-  const [caseSearch, setCaseSearch] = useState('')
-  const [filterMatterType, setFilterMatterType] = useState('')
-  const [filterFeeEarnerUserId, setFilterFeeEarnerUserId] = useState('')
-  const [filterCaseStatus, setFilterCaseStatus] = useState<
-    '' | 'open' | 'closed' | 'archived' | 'quote' | 'post_completion'
-  >('')
-  const [sortKey, setSortKey] = useState<'reference' | 'client' | 'matter' | 'feeEarner' | 'status' | 'created'>(
-    'created',
-  )
-  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
-  /** Row highlight before double-click to open a case */
   const [caseListFocusId, setCaseListFocusId] = useState<string | null>(null)
-  const [mainMenuFilterOpen, setMainMenuFilterOpen] = useState(false)
-  const mainMenuFilterWrapRef = useRef<HTMLDivElement | null>(null)
-
+  const [caseOpenDocPanel, setCaseOpenDocPanel] = useState<CaseOpenDocPanel | null>(null)
+  const consumeCaseOpenDocPanel = useCallback(() => setCaseOpenDocPanel(null), [])
   const [taskMenuRows, setTaskMenuRows] = useState<TaskMenuRow[]>([])
   const [taskMenuCaseFilter, setTaskMenuCaseFilter] = useState<string | null>(initialTasksCaseFilter ?? null)
-  const [taskMenuSearch, setTaskMenuSearch] = useState('')
-  const [taskMenuFilterMatterType, setTaskMenuFilterMatterType] = useState('')
-  const [taskMenuSortKey, setTaskMenuSortKey] = useState<
-    'reference' | 'client' | 'matter' | 'task' | 'date' | 'assigned' | 'priority'
-  >('priority')
-  const [taskMenuSortDir, setTaskMenuSortDir] = useState<'asc' | 'desc'>('asc')
-  const [taskMenuLayout, setTaskMenuLayout] = useState<'list' | 'kanban'>(() => {
-    try {
-      return localStorage.getItem(TASK_MENU_LAYOUT_STORAGE_KEY) === 'kanban' ? 'kanban' : 'list'
-    } catch {
-      return 'list'
-    }
-  })
-  const setTaskMenuLayoutPersist = useCallback((v: 'list' | 'kanban') => {
-    setTaskMenuLayout(v)
-    try {
-      localStorage.setItem(TASK_MENU_LAYOUT_STORAGE_KEY, v)
-    } catch {
-      /* ignore quota / private mode */
-    }
-  }, [])
   const [globalTaskCreateOpen, setGlobalTaskCreateOpen] = useState(false)
   const [tasksMenuFilterOpen, setTasksMenuFilterOpen] = useState(false)
-  const tasksMenuFilterWrapRef = useRef<HTMLDivElement | null>(null)
 
   // Case detail data
   const [caseDetail, setCaseDetail] = useState<CaseOut | null>(null)
@@ -569,21 +795,65 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
   const canAdminConsole = Boolean(auth.me?.admin_console_access || auth.me?.role === 'admin')
 
   const token = auth.token ?? undefined
+  const [taskMenuSearch, setTaskMenuSearch] = useState('')
+  const [taskMenuFilterMatterType, setTaskMenuFilterMatterType] = useState('')
+  const [mainMenuFilterMatterTypes, setMainMenuFilterMatterTypes] = useState<string[]>([])
+  const [mainMenuFilterFeeEarnerUserIds, setMainMenuFilterFeeEarnerUserIds] = useState<string[]>([])
+  const [mainMenuFilterCaseStatuses, setMainMenuFilterCaseStatuses] = useState<MainMenuCaseStatusFilter[]>([])
 
-  const mainMenuMatterTypeOptions = useMemo(() => {
-    const set = new Set<string>()
-    for (const c of cases) {
-      set.add(matterTypeLabel(c))
-    }
-    return Array.from(set).sort((a, b) => a.localeCompare(b))
-  }, [cases])
+  const { prefs: uiPrefs, setPreference: setUiPreference, setPreferenceDebounced: setUiPreferenceDebounced } =
+    useUserUiPreferences(auth.me, auth.token)
 
-  const mainMenuActiveFilterCount = useMemo(
-    () =>
-      (filterMatterType ? 1 : 0) +
-      (filterFeeEarnerUserId ? 1 : 0) +
-      (filterCaseStatus ? 1 : 0),
-    [filterMatterType, filterFeeEarnerUserId, filterCaseStatus],
+  const onMainMenuFilterMatterTypesChange = useCallback((value: string[]) => {
+    setMainMenuFilterMatterTypes(value)
+  }, [])
+
+  const onMainMenuFilterFeeEarnerIdsChange = useCallback((value: string[]) => {
+    setMainMenuFilterFeeEarnerUserIds(value)
+  }, [])
+
+  const onMainMenuFilterCaseStatusesChange = useCallback((value: MainMenuCaseStatusFilter[]) => {
+    setMainMenuFilterCaseStatuses(value)
+  }, [])
+
+  const persistMainMenuFilters = useCallback(
+    (matterTypes: string[], feeEarnerUserIds: string[], caseStatuses: MainMenuCaseStatusFilter[]) => {
+      setUiPreference('main_menu_filter_matter_types', matterTypes)
+      setUiPreference('main_menu_filter_fee_earner_user_ids', feeEarnerUserIds)
+      setUiPreference('main_menu_filter_case_statuses', caseStatuses)
+    },
+    [setUiPreference],
+  )
+
+  const { gridTemplateColumns: casesGridColumns, startResize: casesStartResize } = useColumnWidths(
+    MAIN_MENU_COLUMN_COUNT,
+    {
+      widths: effectiveColumnWidths(
+        uiPrefs.main_menu_column_widths,
+        MAIN_MENU_COLUMN_COUNT,
+        LEGACY_AUTO_MAIN_MENU_COLUMN_WIDTHS,
+      ),
+      fallbackWidths: [...MAIN_MENU_COLUMN_WIDTHS_DEFAULT],
+      onChange: (widths) => setUiPreferenceDebounced('main_menu_column_widths', widths, 300),
+    },
+  )
+
+  const { gridTemplateColumns: tasksGridColumns, startResize: tasksStartResize } = useColumnWidths(
+    TASKS_MENU_COLUMN_COUNT,
+    {
+      widths: effectiveColumnWidths(
+        uiPrefs.tasks_menu_column_widths,
+        TASKS_MENU_COLUMN_COUNT,
+        LEGACY_AUTO_TASKS_MENU_COLUMN_WIDTHS,
+      ),
+      fallbackWidths: [...TASKS_MENU_COLUMN_WIDTHS_DEFAULT],
+      onChange: (widths) => setUiPreferenceDebounced('tasks_menu_column_widths', widths, 300),
+    },
+  )
+
+  const tasksMenuActiveFilterCount = useMemo(
+    () => (taskMenuFilterMatterType ? 1 : 0),
+    [taskMenuFilterMatterType],
   )
 
   const tasksMenuMatterTypeOptions = useMemo(() => {
@@ -593,8 +863,6 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
     }
     return Array.from(s).sort((a, b) => a.localeCompare(b))
   }, [taskMenuRows])
-
-  const tasksMenuActiveFilterCount = useMemo(() => (taskMenuFilterMatterType ? 1 : 0), [taskMenuFilterMatterType])
 
   useEffect(() => {
     if (!token) return
@@ -714,43 +982,60 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
   }, [token, selectedCaseId, refreshCaseDetail])
 
   useEffect(() => {
-    if (!mainMenuFilterOpen) return
-    function handleMouseDown(e: MouseEvent) {
-      const root = mainMenuFilterWrapRef.current
-      if (root && !root.contains(e.target as Node)) {
-        setMainMenuFilterOpen(false)
-      }
-    }
-    document.addEventListener('mousedown', handleMouseDown)
-    return () => document.removeEventListener('mousedown', handleMouseDown)
-  }, [mainMenuFilterOpen])
-
-  useEffect(() => {
-    if (!tasksMenuFilterOpen) return
-    function handleMouseDown(e: MouseEvent) {
-      const root = tasksMenuFilterWrapRef.current
-      if (root && !root.contains(e.target as Node)) {
-        setTasksMenuFilterOpen(false)
-      }
-    }
-    document.addEventListener('mousedown', handleMouseDown)
-    return () => document.removeEventListener('mousedown', handleMouseDown)
-  }, [tasksMenuFilterOpen])
-
-  useEffect(() => {
-    if (view !== 'main-menu') setMainMenuFilterOpen(false)
     if (view !== 'tasks') setTasksMenuFilterOpen(false)
   }, [view])
 
-  const main = useMemo(() => {
+  const onMainMenuSelectCase = useCallback((id: string, opts?: { docPanel?: CaseOpenDocPanel }) => {
+    setCaseListFocusId(id)
+    setSelectedCaseId(id)
+    setCaseOpenDocPanel(opts?.docPanel ?? null)
+    setView('case-menu')
+  }, [])
+
+  const onMainMenuSort = useCallback(
+    (k: 'reference' | 'client' | 'matter' | 'feeEarner' | 'status' | 'created') => {
+      if (k === uiPrefs.main_menu_sort_key) {
+        setUiPreference('main_menu_sort_dir', uiPrefs.main_menu_sort_dir === 'asc' ? 'desc' : 'asc')
+      } else {
+        setUiPreference('main_menu_sort_key', k)
+        setUiPreference('main_menu_sort_dir', 'asc')
+      }
+    },
+    [setUiPreference, uiPrefs.main_menu_sort_dir, uiPrefs.main_menu_sort_key],
+  )
+
+  const onOpenNewMatter = useCallback(() => setShowNewMatter(true), [])
+  const onCloseNewMatter = useCallback(() => setShowNewMatter(false), [])
+  const onRefreshCases = useCallback(() => void refreshCases(), [token])
+  const onMainMenuCaseCreated = useCallback(async () => {
+    setShowNewMatter(false)
+    await refreshCases()
+  }, [token])
+
+  const mainMenuFiltersLoadedForUser = useRef<string | null>(null)
+  useEffect(() => {
+    if (!auth.me?.id) {
+      mainMenuFiltersLoadedForUser.current = null
+      return
+    }
+    if (mainMenuFiltersLoadedForUser.current === auth.me.id) return
+    mainMenuFiltersLoadedForUser.current = auth.me.id
+    const saved = normalizeUiPreferences(auth.me.ui_preferences)
+    setMainMenuFilterMatterTypes(saved.main_menu_filter_matter_types)
+    setMainMenuFilterFeeEarnerUserIds(saved.main_menu_filter_fee_earner_user_ids)
+    setMainMenuFilterCaseStatuses(saved.main_menu_filter_case_statuses)
+  }, [auth.me?.id])
+
+  function renderMainContent() {
     if (!token) return null
+    if (view === 'main-menu') return null
 
     if (view === 'admin-console') return <AdminConsole token={token} refreshMe={auth.refreshMe} />
     if (view === 'user-settings')
       return <UserSettingsPage token={token} refreshMe={auth.refreshMe} applySessionToken={auth.applySessionToken} />
     if (view === 'calendar')
-      return <CalendarPage token={token} onOpenSettings={() => setView('user-settings')} />
-    if (view === 'contacts') return <Contacts token={token} />
+      return <CalendarPage token={token} me={auth.me} onOpenSettings={() => setView('user-settings')} />
+    if (view === 'contacts') return <Contacts token={token} me={auth.me} />
 
     if (view === 'reports') {
       return <ReportsPage token={token} me={auth.me} />
@@ -768,6 +1053,8 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
           error={detailErr}
           selectedCaseId={selectedCaseId}
           currentUser={auth.me}
+          openDocPanel={caseOpenDocPanel}
+          onOpenDocPanelConsumed={consumeCaseOpenDocPanel}
           onRefresh={refreshCaseDetailWithCrossTabSignal}
           onCaseListInvalidate={() => void refreshCases()}
           onTaskMenuInvalidate={() => void refreshTaskMenu()}
@@ -779,7 +1066,7 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
       return (
         <>
         <div className="mainMenuShell mainMenuShell--mainMenu">
-          <div className="mainMenuFilterBar">
+          <div className={`mainMenuFilterBar${tasksMenuFilterOpen ? ' mainMenuFilterBar--dropdownOpen' : ''}`}>
             <div className="row mainMenuFilterRow mainMenuFilterRow--toolbar">
               <div className="mainMenuFilterRowLeft">
             <SearchInput
@@ -790,7 +1077,7 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
               className="mainMenuSearchInput"
               aria-label="Search tasks"
             />
-                <div className="caseToolbarDropdownWrap" ref={tasksMenuFilterWrapRef}>
+                <div className="caseToolbarDropdownWrap">
                   <button
                     type="button"
                     className="btn mainMenuFilterBtn"
@@ -798,7 +1085,10 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
                     aria-haspopup="true"
                     aria-controls="tasks-menu-filter-menu"
                     id="tasks-menu-filter-button"
-                    onClick={() => setTasksMenuFilterOpen((o) => !o)}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      setTasksMenuFilterOpen((o) => !o)
+                    }}
                   >
                     <span className="mainMenuFilterBtnInner">
                       <svg
@@ -829,6 +1119,7 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
                       className="caseToolbarDropdown mainMenuFilterDropdown"
                       role="group"
                       aria-labelledby="tasks-menu-filter-button"
+                      onMouseDown={(e) => e.stopPropagation()}
                     >
                       <div className="stack mainMenuFilterDropdownBody">
                         <label className="field">
@@ -864,8 +1155,8 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
                   <span className="tasksToolbarLayoutLabel">View</span>
                   <select
                     className="tasksToolbarLayoutSelect"
-                    value={taskMenuLayout}
-                    onChange={(e) => setTaskMenuLayoutPersist(e.target.value as 'list' | 'kanban')}
+                    value={uiPrefs.tasks_menu_layout}
+                    onChange={(e) => setUiPreference('tasks_menu_layout', e.target.value as 'list' | 'kanban')}
                     aria-label="Task layout"
                   >
                     <option value="list">List</option>
@@ -913,20 +1204,23 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
             currentUserId={auth.me?.id ?? ''}
             users={caseListUsers}
             rows={taskMenuRows}
-            layoutMode={taskMenuLayout}
+            layoutMode={uiPrefs.tasks_menu_layout}
             search={taskMenuSearch}
             filterMatterType={taskMenuFilterMatterType}
+            gridTemplateColumns={tasksGridColumns}
+            startColumnResize={tasksStartResize}
             onSelectCase={(caseId) => {
               setSelectedCaseId(caseId)
               setView('case-menu')
             }}
-            sortKey={taskMenuSortKey}
-            sortDir={taskMenuSortDir}
+            sortKey={uiPrefs.tasks_menu_sort_key}
+            sortDir={uiPrefs.tasks_menu_sort_dir}
             onSort={(k) => {
-              if (k === taskMenuSortKey) setTaskMenuSortDir(taskMenuSortDir === 'asc' ? 'desc' : 'asc')
-              else {
-                setTaskMenuSortKey(k)
-                setTaskMenuSortDir(k === 'priority' ? 'desc' : 'asc')
+              if (k === uiPrefs.tasks_menu_sort_key) {
+                setUiPreference('tasks_menu_sort_dir', uiPrefs.tasks_menu_sort_dir === 'asc' ? 'desc' : 'asc')
+              } else {
+                setUiPreference('tasks_menu_sort_key', k)
+                setUiPreference('tasks_menu_sort_dir', k === 'priority' ? 'desc' : 'asc')
               }
             }}
             onInvalidate={() => void refreshTaskMenu()}
@@ -946,210 +1240,38 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
       )
     }
 
-    return (
-      <div className="mainMenuShell mainMenuShell--mainMenu">
-        {casesErr ? <div className="error">{casesErr}</div> : null}
-        <div className="mainMenuFilterBar">
-          <div className="row mainMenuFilterRow mainMenuFilterRow--toolbar">
-            <div className="mainMenuFilterRowLeft">
-            <SearchInput
-              placeholder="Search cases (reference, client, matter, fee earner, status)…"
-              value={caseSearch}
-              onChange={(e) => setCaseSearch(e.target.value)}
-              onClear={() => setCaseSearch('')}
-              className="mainMenuSearchInput"
-              aria-label="Search cases"
-            />
-            <div className="caseToolbarDropdownWrap" ref={mainMenuFilterWrapRef}>
-              <button
-                type="button"
-                className="btn mainMenuFilterBtn"
-                aria-expanded={mainMenuFilterOpen}
-                aria-haspopup="true"
-                aria-controls="main-menu-filter-menu"
-                id="main-menu-filter-button"
-                onClick={() => setMainMenuFilterOpen((o) => !o)}
-              >
-                <span className="mainMenuFilterBtnInner">
-                  <svg
-                    className="mainMenuFilterBtnIcon"
-                    width={16}
-                    height={16}
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    xmlns="http://www.w3.org/2000/svg"
-                    aria-hidden
-                  >
-                    <polygon
-                      points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      fill="none"
-                    />
-                  </svg>
-                  <span>Filter</span>
-                  <span className="mainMenuFilterBtnCount">({mainMenuActiveFilterCount})</span>
-                </span>
-              </button>
-              {mainMenuFilterOpen ? (
-                <div
-                  id="main-menu-filter-menu"
-                  className="caseToolbarDropdown mainMenuFilterDropdown"
-                  role="group"
-                  aria-labelledby="main-menu-filter-button"
-                >
-                  <div className="stack mainMenuFilterDropdownBody">
-                    <label className="field">
-                      <span>Matter type</span>
-                      <select
-                        value={filterMatterType}
-                        onChange={(e) => setFilterMatterType(e.target.value)}
-                        aria-label="Filter by matter type"
-                      >
-                        <option value="">All</option>
-                        {mainMenuMatterTypeOptions.map((opt) => (
-                          <option key={opt} value={opt}>
-                            {opt}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <label className="field">
-                      <span>Fee earner</span>
-                      <select
-                        value={filterFeeEarnerUserId}
-                        onChange={(e) => setFilterFeeEarnerUserId(e.target.value)}
-                        aria-label="Filter by fee earner"
-                      >
-                        <option value="">All</option>
-                        {caseListUsers
-                          .slice()
-                          .sort((a, b) => a.display_name.localeCompare(b.display_name))
-                          .map((u) => (
-                            <option key={u.id} value={u.id}>
-                              {u.display_name}
-                            </option>
-                          ))}
-                      </select>
-                    </label>
-                    <label className="field">
-                      <span>Status</span>
-                      <select
-                        value={filterCaseStatus}
-                        onChange={(e) =>
-                          setFilterCaseStatus(
-                            e.target.value as
-                              | ''
-                              | 'open'
-                              | 'closed'
-                              | 'archived'
-                              | 'quote'
-                              | 'post_completion',
-                          )
-                        }
-                        aria-label="Filter by status"
-                      >
-                        <option value="">All</option>
-                        <option value="open">Active</option>
-                        <option value="quote">Quote</option>
-                        <option value="post_completion">Post-completion</option>
-                        <option value="closed">Closed</option>
-                        <option value="archived">Archived</option>
-                      </select>
-                    </label>
-                  </div>
-                </div>
-              ) : null}
-            </div>
-            </div>
-            <div className="mainMenuFilterRowRight">
-              <button type="button" className="btn" onClick={() => void refreshCases()}>
-                Refresh
-              </button>
-              <button type="button" className="btn" onClick={() => setShowNewMatter(true)}>
-                New matter
-              </button>
-            </div>
-          </div>
-        </div>
-        {showNewMatter ? (
-          <NewMatterModal
-            token={token}
-            currentUserId={auth.me?.id ?? ''}
-            onClose={() => setShowNewMatter(false)}
-            onCreated={async () => {
-              setShowNewMatter(false)
-              await refreshCases()
-            }}
-          />
-        ) : null}
-        <CasesTable
-          cases={cases}
-          users={caseListUsers}
-          search={caseSearch}
-          filterMatterType={filterMatterType}
-          filterFeeEarnerUserId={filterFeeEarnerUserId}
-          filterCaseStatus={filterCaseStatus}
-          caseListFocusId={caseListFocusId}
-          onCaseRowFocus={setCaseListFocusId}
-          onSelect={(id) => {
-            setCaseListFocusId(id)
-            setSelectedCaseId(id)
-            setView('case-menu')
-          }}
-          sortKey={sortKey}
-          sortDir={sortDir}
-          onSort={(k) => {
-            if (k === sortKey) setSortDir(sortDir === 'asc' ? 'desc' : 'asc')
-            else {
-              setSortKey(k)
-              setSortDir('asc')
-            }
-          }}
-        />
-      </div>
-    )
-  }, [
-    token,
-    view,
-    casesErr,
-    cases,
-    selectedCaseId,
-    caseDetail,
-    notes,
-    tasks,
-    files,
-    caseContacts,
-    detailErr,
-    caseSearch,
-    filterMatterType,
-    filterFeeEarnerUserId,
-    filterCaseStatus,
-    mainMenuMatterTypeOptions,
-    mainMenuFilterOpen,
-    mainMenuActiveFilterCount,
-    sortKey,
-    sortDir,
-    showNewMatter,
-    caseListFocusId,
-    caseListUsers,
-    taskMenuRows,
-    taskMenuCaseFilter,
-    taskMenuSearch,
-    taskMenuFilterMatterType,
-    taskMenuSortKey,
-    taskMenuSortDir,
-    taskMenuLayout,
-    setTaskMenuLayoutPersist,
-    tasksMenuFilterOpen,
-    tasksMenuActiveFilterCount,
-    tasksMenuMatterTypeOptions,
-    refreshTaskMenu,
-    auth.me,
-    auth.refreshMe,
-  ])
+    return null
+  }
+
+  const mainMenuCasesPanel = token ? (
+    <MainMenuCasesPanel
+      token={token}
+      currentUserId={auth.me?.id ?? ''}
+      cases={cases}
+      casesErr={casesErr}
+      users={caseListUsers}
+      filterMatterTypes={mainMenuFilterMatterTypes}
+      filterFeeEarnerUserIds={mainMenuFilterFeeEarnerUserIds}
+      filterCaseStatuses={mainMenuFilterCaseStatuses}
+      onFilterMatterTypesChange={onMainMenuFilterMatterTypesChange}
+      onFilterFeeEarnerIdsChange={onMainMenuFilterFeeEarnerIdsChange}
+      onFilterCaseStatusesChange={onMainMenuFilterCaseStatusesChange}
+      onPersistFilters={persistMainMenuFilters}
+      gridTemplateColumns={casesGridColumns}
+      startColumnResize={casesStartResize}
+      caseListFocusId={caseListFocusId}
+      onCaseRowFocus={setCaseListFocusId}
+      onSelectCase={onMainMenuSelectCase}
+      sortKey={uiPrefs.main_menu_sort_key}
+      sortDir={uiPrefs.main_menu_sort_dir}
+      onSort={onMainMenuSort}
+      showNewMatter={showNewMatter}
+      onOpenNewMatter={onOpenNewMatter}
+      onCloseNewMatter={onCloseNewMatter}
+      onRefreshCases={onRefreshCases}
+      onCaseCreated={onMainMenuCaseCreated}
+    />
+  ) : null
 
   useEffect(() => {
     if (auth.loading) {
@@ -1171,12 +1293,27 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
 
   if (auth.loading) return <div className="center muted">Loading…</div>
   if (!auth.token) {
+    if (resetToken) {
+      return <ResetPasswordForm token={resetToken} onDone={clearResetToken} />
+    }
     return (
       <LoginForm
         onLogin={auth.login}
         onPasskeyLogin={auth.loginWithPasskey}
         error={auth.loginError}
         onClearError={auth.clearLoginError}
+      />
+    )
+  }
+
+  if (auth.me && sessionNeedsPasswordChange(auth.me)) {
+    return (
+      <PasswordChangeSessionGate
+        token={auth.token}
+        me={auth.me}
+        onLogout={auth.logout}
+        refreshMe={auth.refreshMe}
+        applySessionToken={auth.applySessionToken}
       />
     )
   }
@@ -1259,7 +1396,12 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
               : 'main'
         }
       >
-        {main}
+        {mainMenuCasesPanel ? (
+          <div className={view === 'main-menu' ? 'mainMenuCasesHost' : 'mainMenuCasesHost mainMenuCasesHost--hidden'}>
+            {mainMenuCasesPanel}
+          </div>
+        ) : null}
+        {renderMainContent()}
       </main>
     </div>
   )
@@ -1800,32 +1942,124 @@ function feeEarnerLabel(c: CaseOut, users: UserSummary[]) {
   return u?.display_name ?? '—'
 }
 
+function caseMatchesMainMenuSearch(c: CaseOut, users: UserSummary[], search: string): boolean {
+  const s = search.trim().toLowerCase()
+  if (!s) return true
+  const fe = feeEarnerLabel(c, users)
+  const parts = [
+    c.case_number,
+    c.client_name ?? '',
+    c.matter_description ?? '',
+    formatCaseStatusLabel(c.status),
+    fe,
+  ]
+  return parts.join(' ').toLowerCase().includes(s)
+}
+
+function filterMainMenuCases(
+  cases: CaseOut[],
+  matterTypes: string[],
+  feeEarnerUserIds: string[],
+  caseStatuses: MainMenuCaseStatusFilter[],
+): CaseOut[] {
+  let result = cases
+  if (matterTypes.length > 0) {
+    result = result.filter((c) => matterTypes.includes(matterTypeLabel(c)))
+  }
+  if (feeEarnerUserIds.length > 0) {
+    result = result.filter((c) => c.fee_earner_user_id && feeEarnerUserIds.includes(c.fee_earner_user_id))
+  }
+  if (caseStatuses.length > 0) {
+    result = result.filter((c) => caseStatuses.includes(c.status as MainMenuCaseStatusFilter))
+  }
+  return result
+}
+
+function buildCaseTableRows(
+  cases: CaseOut[],
+  users: UserSummary[],
+  search: string,
+  filters: {
+    matterTypes: string[]
+    feeEarnerUserIds: string[]
+    caseStatuses: MainMenuCaseStatusFilter[]
+  },
+  sortKey: 'reference' | 'client' | 'matter' | 'feeEarner' | 'status' | 'created',
+  sortDir: 'asc' | 'desc',
+): CaseOut[] {
+  const s = search.trim()
+  const filtered = s
+    ? cases.filter((c) => caseMatchesMainMenuSearch(c, users, search))
+    : filterMainMenuCases(
+        cases,
+        filters.matterTypes,
+        filters.feeEarnerUserIds,
+        filters.caseStatuses,
+      )
+  const dir = sortDir === 'asc' ? 1 : -1
+  return [...filtered].sort((a, b) => {
+    const av =
+      sortKey === 'reference'
+        ? a.case_number
+        : sortKey === 'client'
+          ? a.client_name ?? ''
+          : sortKey === 'matter'
+            ? a.matter_description ?? ''
+            : sortKey === 'feeEarner'
+              ? feeEarnerLabel(a, users)
+              : sortKey === 'status'
+                ? a.status
+                : sortKey === 'created'
+                  ? a.created_at
+                  : ''
+    const bv =
+      sortKey === 'reference'
+        ? b.case_number
+        : sortKey === 'client'
+          ? b.client_name ?? ''
+          : sortKey === 'matter'
+            ? b.matter_description ?? ''
+            : sortKey === 'feeEarner'
+              ? feeEarnerLabel(b, users)
+              : sortKey === 'status'
+                ? b.status
+                : sortKey === 'created'
+                  ? b.created_at
+                  : ''
+    return String(av).localeCompare(String(bv)) * dir
+  })
+}
+
 function CasesTable({
   cases,
   users,
   search,
-  filterMatterType,
-  filterFeeEarnerUserId,
-  filterCaseStatus,
+  filterMatterTypes,
+  filterFeeEarnerUserIds,
+  filterCaseStatuses,
   caseListFocusId,
   onCaseRowFocus,
   onSelect,
   sortKey,
   sortDir,
   onSort,
+  gridTemplateColumns,
+  startColumnResize,
 }: {
   cases: CaseOut[]
   users: UserSummary[]
   search: string
-  filterMatterType: string
-  filterFeeEarnerUserId: string
-  filterCaseStatus: '' | 'open' | 'closed' | 'archived' | 'quote' | 'post_completion'
+  filterMatterTypes: string[]
+  filterFeeEarnerUserIds: string[]
+  filterCaseStatuses: MainMenuCaseStatusFilter[]
   caseListFocusId: string | null
   onCaseRowFocus: (id: string | null) => void
-  onSelect: (id: string) => void
+  onSelect: (id: string, opts?: { docPanel?: CaseOpenDocPanel }) => void
   sortKey: 'reference' | 'client' | 'matter' | 'feeEarner' | 'status' | 'created'
   sortDir: 'asc' | 'desc'
   onSort: (k: 'reference' | 'client' | 'matter' | 'feeEarner' | 'status' | 'created') => void
+  gridTemplateColumns?: string
+  startColumnResize: (colIndex: number, startClientX: number, measureRow?: HTMLElement | null) => void
 }) {
   const [caseCtx, setCaseCtx] = useState<null | { id: string; x: number; y: number }>(null)
   const caseCtxRef = useRef<HTMLDivElement | null>(null)
@@ -1841,75 +2075,24 @@ function CasesTable({
     return () => document.removeEventListener('mousedown', handleMouseDown)
   }, [caseCtx])
 
-  const rows = useMemo(() => {
-    const s = search.trim().toLowerCase()
-    let filtered = cases
-    if (s) {
-      filtered = filtered.filter((c) => {
-        const fe = feeEarnerLabel(c, users)
-        const parts = [c.case_number, c.client_name ?? '', c.matter_description ?? '', c.status, fe]
-        return parts.join(' ').toLowerCase().includes(s)
-      })
-    }
-    if (filterMatterType) {
-      filtered = filtered.filter((c) => matterTypeLabel(c) === filterMatterType)
-    }
-    if (filterFeeEarnerUserId) {
-      filtered = filtered.filter((c) => c.fee_earner_user_id === filterFeeEarnerUserId)
-    }
-    if (filterCaseStatus) {
-      filtered = filtered.filter((c) => c.status === filterCaseStatus)
-    }
-    const dir = sortDir === 'asc' ? 1 : -1
-    const key = sortKey
-    const sorted = [...filtered].sort((a, b) => {
-      const av =
-        key === 'reference'
-          ? a.case_number
-          : key === 'client'
-            ? a.client_name ?? ''
-            : key === 'matter'
-              ? a.matter_description ?? ''
-              : key === 'feeEarner'
-                ? feeEarnerLabel(a, users)
-                : key === 'status'
-                  ? a.status
-                  : key === 'created'
-                    ? a.created_at
-                    : ''
-      const bv =
-        key === 'reference'
-          ? b.case_number
-          : key === 'client'
-            ? b.client_name ?? ''
-            : key === 'matter'
-              ? b.matter_description ?? ''
-              : key === 'feeEarner'
-                ? feeEarnerLabel(b, users)
-                : key === 'status'
-                  ? b.status
-                  : key === 'created'
-                    ? b.created_at
-                    : ''
-      return String(av).localeCompare(String(bv)) * dir
-    })
-    return sorted
-  }, [
+  const rows = buildCaseTableRows(
     cases,
     users,
     search,
-    filterMatterType,
-    filterFeeEarnerUserId,
-    filterCaseStatus,
+    {
+      matterTypes: filterMatterTypes,
+      feeEarnerUserIds: filterFeeEarnerUserIds,
+      caseStatuses: filterCaseStatuses,
+    },
     sortKey,
     sortDir,
-  ])
+  )
 
   return (
     <div className="card casesTableCard" style={{ padding: 0, overflow: 'hidden' }}>
       <div className="casesTableScroll">
         <div className="table">
-        <div className="tr th" style={{ gridTemplateColumns: MAIN_MENU_CASES_TABLE_GRID }}>
+        <div className="tr th" style={gridTemplateColumns ? { gridTemplateColumns } : undefined}>
           {(
             [
               ['reference', 'Reference'],
@@ -1918,11 +2101,23 @@ function CasesTable({
               ['feeEarner', 'Fee earner'],
               ['status', 'Status'],
             ] as const
-          ).map(([k, label]) => (
+          ).map(([k, label], colIndex) => (
             <div key={k} className="thCell">
               <button type="button" className="thbtn" onClick={() => onSort(k)}>
                 {label}
               </button>
+              {colIndex < 4 ? (
+                <div
+                  className="colResizeHandle"
+                  role="separator"
+                  aria-orientation="vertical"
+                  aria-label={`Resize ${label} column`}
+                  onMouseDown={(e) => {
+                    e.preventDefault()
+                    startColumnResize(colIndex, e.clientX, e.currentTarget.closest('.tr.th') as HTMLElement | null)
+                  }}
+                />
+              ) : null}
             </div>
           ))}
         </div>
@@ -1936,7 +2131,7 @@ function CasesTable({
               className={['tr', 'rowbtn', rowActive ? 'active' : '', rowInactive ? 'casesRowInactive' : '']
                 .filter(Boolean)
                 .join(' ')}
-              style={{ gridTemplateColumns: MAIN_MENU_CASES_TABLE_GRID }}
+              style={gridTemplateColumns ? { gridTemplateColumns } : undefined}
               onClick={() => onCaseRowFocus(c.id)}
               onDoubleClick={() => onSelect(c.id)}
               onContextMenu={(e) => {
@@ -1983,8 +2178,263 @@ function CasesTable({
           >
             Open
           </div>
+          <div
+            className="docContextItem"
+            role="menuitem"
+            tabIndex={0}
+            onClick={() => {
+              const id = caseCtx.id
+              setCaseCtx(null)
+              onSelect(id, { docPanel: 'accounts' })
+            }}
+          >
+            Accounts
+          </div>
         </div>
       ) : null}
+    </div>
+  )
+}
+
+const MAIN_MENU_STATUS_FILTER_OPTIONS: { value: MainMenuCaseStatusFilter; label: string }[] = [
+  { value: 'open', label: 'Active' },
+  { value: 'quote', label: 'Quote' },
+  { value: 'post_completion', label: 'Post-completion' },
+  { value: 'closed', label: 'Closed' },
+  { value: 'archived', label: 'Archived' },
+]
+
+function MainMenuCasesPanel({
+  token,
+  currentUserId,
+  cases,
+  casesErr,
+  users,
+  filterMatterTypes,
+  filterFeeEarnerUserIds,
+  filterCaseStatuses,
+  onFilterMatterTypesChange,
+  onFilterFeeEarnerIdsChange,
+  onFilterCaseStatusesChange,
+  onPersistFilters,
+  gridTemplateColumns,
+  startColumnResize,
+  caseListFocusId,
+  onCaseRowFocus,
+  onSelectCase,
+  sortKey,
+  sortDir,
+  onSort,
+  showNewMatter,
+  onOpenNewMatter,
+  onCloseNewMatter,
+  onRefreshCases,
+  onCaseCreated,
+}: {
+  token: string
+  currentUserId: string
+  cases: CaseOut[]
+  casesErr: string | null
+  users: UserSummary[]
+  filterMatterTypes: string[]
+  filterFeeEarnerUserIds: string[]
+  filterCaseStatuses: MainMenuCaseStatusFilter[]
+  onFilterMatterTypesChange: (value: string[]) => void
+  onFilterFeeEarnerIdsChange: (value: string[]) => void
+  onFilterCaseStatusesChange: (value: MainMenuCaseStatusFilter[]) => void
+  onPersistFilters: (
+    matterTypes: string[],
+    feeEarnerUserIds: string[],
+    caseStatuses: MainMenuCaseStatusFilter[],
+  ) => void
+  gridTemplateColumns?: string
+  startColumnResize: (colIndex: number, startClientX: number, measureRow?: HTMLElement | null) => void
+  caseListFocusId: string | null
+  onCaseRowFocus: (id: string | null) => void
+  onSelectCase: (id: string, opts?: { docPanel?: CaseOpenDocPanel }) => void
+  sortKey: 'reference' | 'client' | 'matter' | 'feeEarner' | 'status' | 'created'
+  sortDir: 'asc' | 'desc'
+  onSort: (k: 'reference' | 'client' | 'matter' | 'feeEarner' | 'status' | 'created') => void
+  showNewMatter: boolean
+  onOpenNewMatter: () => void
+  onCloseNewMatter: () => void
+  onRefreshCases: () => void
+  onCaseCreated: () => void | Promise<void>
+}) {
+  const [caseSearch, setCaseSearch] = useState('')
+  const [filterOpen, setFilterOpen] = useState(false)
+  const [openFilterField, setOpenFilterField] = useState<'matterType' | 'feeEarner' | 'status' | null>(null)
+
+  const matterTypeOptions = useMemo(() => {
+    const set = new Set<string>()
+    for (const c of cases) {
+      set.add(matterTypeLabel(c))
+    }
+    return Array.from(set)
+      .sort((a, b) => a.localeCompare(b))
+      .map((label) => ({ value: label, label }))
+  }, [cases])
+
+  const feeEarnerOptions = useMemo(() => {
+    const byId = new Map<string, UserSummary>()
+    for (const u of users) {
+      if (!byId.has(u.id)) byId.set(u.id, u)
+    }
+    return Array.from(byId.values())
+      .sort((a, b) => a.display_name.localeCompare(b.display_name))
+      .map((u) => ({ value: u.id, label: u.display_name }))
+  }, [users])
+
+  const activeFilterCount =
+    filterMatterTypes.length + filterFeeEarnerUserIds.length + filterCaseStatuses.length
+
+  const toggleFilterOpen = () => {
+    setFilterOpen((open) => {
+      const next = !open
+      if (!next) {
+        setOpenFilterField(null)
+        onPersistFilters(filterMatterTypes, filterFeeEarnerUserIds, filterCaseStatuses)
+      }
+      return next
+    })
+  }
+
+  const clearAllFilters = () => {
+    setOpenFilterField(null)
+    onFilterMatterTypesChange([])
+    onFilterFeeEarnerIdsChange([])
+    onFilterCaseStatusesChange([])
+    onPersistFilters([], [], [])
+  }
+
+  return (
+    <div className="mainMenuShell mainMenuShell--mainMenu">
+      {casesErr ? <div className="error">{casesErr}</div> : null}
+      <div className={`mainMenuFilterBar${filterOpen ? ' mainMenuFilterBar--dropdownOpen' : ''}`}>
+        <div className="row mainMenuFilterRow mainMenuFilterRow--toolbar mainMenuFilterRow--searchRight">
+          <div className="mainMenuFilterRowLeft">
+            <button type="button" className="btn" onClick={onOpenNewMatter}>
+              New matter
+            </button>
+            <button type="button" className="btn" onClick={onRefreshCases}>
+              Refresh
+            </button>
+          </div>
+          <div className="mainMenuFilterRowRight">
+            <div className="caseToolbarDropdownWrap mainMenuFilterToolbarGroup">
+              <button
+                type="button"
+                className="btn mainMenuFilterBtn"
+                aria-expanded={filterOpen}
+                aria-haspopup="true"
+                aria-controls="main-menu-filter-menu"
+                id="main-menu-filter-button"
+                onClick={toggleFilterOpen}
+              >
+                <span className="mainMenuFilterBtnInner">
+                  <svg
+                    className="mainMenuFilterBtnIcon"
+                    width={16}
+                    height={16}
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    xmlns="http://www.w3.org/2000/svg"
+                    aria-hidden
+                  >
+                    <polygon
+                      points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      fill="none"
+                    />
+                  </svg>
+                  <span>Filter</span>
+                  <span className="mainMenuFilterBtnCount">({activeFilterCount})</span>
+                </span>
+              </button>
+              {activeFilterCount > 0 ? (
+                <button
+                  type="button"
+                  className="mainMenuFilterClearBtn mainMenuFilterClearBtn--toolbar"
+                  aria-label="Clear all filters"
+                  onClick={clearAllFilters}
+                >
+                  ×
+                </button>
+              ) : null}
+              <div
+                id="main-menu-filter-menu"
+                className={`caseToolbarDropdown mainMenuFilterDropdown${filterOpen ? '' : ' mainMenuFilterDropdown--hidden'}`}
+                role="group"
+                aria-labelledby="main-menu-filter-button"
+                aria-hidden={!filterOpen}
+                onMouseDown={(e) => e.stopPropagation()}
+              >
+                <div className="stack mainMenuFilterDropdownBody">
+                  <MainMenuFilterCheckboxDropdown
+                    label="Matter type"
+                    options={matterTypeOptions}
+                    selected={filterMatterTypes}
+                    onChange={onFilterMatterTypesChange}
+                    open={openFilterField === 'matterType'}
+                    onOpenChange={(open) => setOpenFilterField(open ? 'matterType' : null)}
+                  />
+                  <MainMenuFilterCheckboxDropdown
+                    label="Fee earner"
+                    options={feeEarnerOptions}
+                    selected={filterFeeEarnerUserIds}
+                    onChange={onFilterFeeEarnerIdsChange}
+                    open={openFilterField === 'feeEarner'}
+                    onOpenChange={(open) => setOpenFilterField(open ? 'feeEarner' : null)}
+                  />
+                  <MainMenuFilterCheckboxDropdown
+                    label="Status"
+                    options={MAIN_MENU_STATUS_FILTER_OPTIONS}
+                    selected={filterCaseStatuses}
+                    onChange={(next) => onFilterCaseStatusesChange(next as MainMenuCaseStatusFilter[])}
+                    open={openFilterField === 'status'}
+                    onOpenChange={(open) => setOpenFilterField(open ? 'status' : null)}
+                  />
+                </div>
+              </div>
+            </div>
+            <SearchInput
+              placeholder="Search cases (reference, client, matter, fee earner, status)…"
+              value={caseSearch}
+              onChange={(e) => setCaseSearch(e.target.value)}
+              onClear={() => setCaseSearch('')}
+              className="mainMenuSearchInput"
+              aria-label="Search cases"
+            />
+          </div>
+        </div>
+      </div>
+      {showNewMatter ? (
+        <NewMatterModal
+          token={token}
+          currentUserId={currentUserId}
+          onClose={onCloseNewMatter}
+          onCreated={onCaseCreated}
+        />
+      ) : null}
+      <CasesTable
+        cases={cases}
+        users={users}
+        search={caseSearch}
+        filterMatterTypes={filterMatterTypes}
+        filterFeeEarnerUserIds={filterFeeEarnerUserIds}
+        filterCaseStatuses={filterCaseStatuses}
+        gridTemplateColumns={gridTemplateColumns}
+        startColumnResize={startColumnResize}
+        caseListFocusId={caseListFocusId}
+        onCaseRowFocus={onCaseRowFocus}
+        onSelect={onSelectCase}
+        sortKey={sortKey}
+        sortDir={sortDir}
+        onSort={onSort}
+      />
     </div>
   )
 }
@@ -2823,7 +3273,7 @@ function AdminPrecedents({ token }: { token: string }) {
           <strong>Digital</strong> copies the uploaded .docx <strong>headers and footers</strong> into each{' '}
           <strong>Letter</strong> precedent before merge codes run. Keep logos and firm blocks in the header/footer so the
           letter body can sit on page 1 underneath. <strong>Pre-printed</strong> skips any overlay (headed stationery).
-          Images in digital letterheads may not resolve until we add full media package merging.
+          Embedded logos in the uploaded .docx are copied into each composed letter automatically.
         </div>
         {firmSettings ? (
           <div className="stack" style={{ gap: 10 }}>
@@ -3095,16 +3545,93 @@ function AdminPrecedents({ token }: { token: string }) {
       <div className="card" style={{ padding: 12 }}>
         <div
           className="row"
-          style={{ justifyContent: 'space-between', alignItems: 'center', marginBottom: mergePanelOpen ? 8 : 0 }}
+          style={{
+            justifyContent: 'space-between',
+            alignItems: 'flex-start',
+            marginBottom: mergePanelOpen ? 8 : 0,
+            gap: 12,
+          }}
         >
-          <span className="muted" style={{ fontSize: 13 }}>
-            Merge codes — stored in the database; edit descriptions here or round-trip via Excel. Codes themselves come from
-            Canary releases (sync on startup).
-          </span>
+          <div className="stack" style={{ gap: 10, flex: 1, minWidth: 0 }}>
+            <span className="muted" style={{ fontSize: 13 }}>
+              Merge codes — stored in the database; edit descriptions here or round-trip via Excel. Codes themselves
+              come from Canary releases (sync on startup).
+            </span>
+            <div
+              style={{
+                fontSize: 13,
+                padding: '10px 12px',
+                border: '1px solid var(--border)',
+                borderRadius: 6,
+                background: 'var(--panel)',
+              }}
+            >
+              <div style={{ fontWeight: 600, marginBottom: 6 }}>Formatting modifiers</div>
+              <p className="muted" style={{ margin: '0 0 8px', fontSize: 12 }}>
+                Optional prefix before a code in Word templates. Plain <code>[CODE]</code> merges without extra
+                formatting.
+              </p>
+              <table
+                className="allow-select"
+                style={{ width: '100%', maxWidth: 420, borderCollapse: 'collapse', fontSize: 12 }}
+              >
+                <thead>
+                  <tr>
+                    <th
+                      style={{
+                        textAlign: 'left',
+                        padding: '4px 8px 4px 0',
+                        borderBottom: '1px solid var(--border)',
+                        fontWeight: 600,
+                        width: '28%',
+                      }}
+                    >
+                      Modifier
+                    </th>
+                    <th
+                      style={{
+                        textAlign: 'left',
+                        padding: '4px 0',
+                        borderBottom: '1px solid var(--border)',
+                        fontWeight: 600,
+                      }}
+                    >
+                      Effect on merged value
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td style={{ padding: '4px 8px 4px 0', fontFamily: 'monospace', verticalAlign: 'top' }}>
+                      <code>b:</code>
+                    </td>
+                    <td style={{ padding: '4px 0', verticalAlign: 'top' }}>Bold</td>
+                  </tr>
+                  <tr>
+                    <td style={{ padding: '4px 8px 4px 0', fontFamily: 'monospace', verticalAlign: 'top' }}>
+                      <code>i:</code>
+                    </td>
+                    <td style={{ padding: '4px 0', verticalAlign: 'top' }}>Italic</td>
+                  </tr>
+                  <tr>
+                    <td style={{ padding: '4px 8px 4px 0', fontFamily: 'monospace', verticalAlign: 'top' }}>
+                      <code>u:</code>
+                    </td>
+                    <td style={{ padding: '4px 0', verticalAlign: 'top' }}>Underline</td>
+                  </tr>
+                </tbody>
+              </table>
+              <p className="muted" style={{ margin: '8px 0 0', fontSize: 12 }}>
+                Combine modifiers in any order, e.g. <code>[bi:LAST_NAME]</code> (bold + italic) or{' '}
+                <code>[biu:MATTER_DESCRIPTION]</code> (all three). Example:{' '}
+                <code>Re: [b:MATTER_DESCRIPTION]</code>
+              </p>
+            </div>
+          </div>
           <button
             type="button"
             className="btn"
-            style={{ fontSize: 12 }}
+            style={{ fontSize: 12, flexShrink: 0 }}
             onClick={() => {
               setMergePanelOpen((v) => !v)
               if (mergePanelOpen) setMergeMsg(null)
@@ -3363,18 +3890,29 @@ function UserSettingsPage({
   refreshMe,
   applySessionToken,
   securitySetupOnly,
+  passwordChangeRequiredOnly,
 }: {
   token: string
   refreshMe: () => Promise<void>
   applySessionToken: (accessToken: string) => void
   securitySetupOnly?: boolean
+  passwordChangeRequiredOnly?: boolean
 }) {
   const { askConfirm } = useDialogs()
-  const [appFont, setAppFont] = useState(() => getThemePreferences().font)
-  const [appAccent, setAppAccent] = useState(() => getThemePreferences().accent)
-  const [appPageBg, setAppPageBg] = useState(() => getThemePreferences().pageBg)
-  const [appMode, setAppMode] = useState<'light' | 'dark'>(() => getThemePreferences().mode)
+  const [account, setAccount] = useState<UserPublic | null>(null)
+  const {
+    appFont,
+    setAppFont,
+    appAccent,
+    setAppAccent,
+    appPageBg,
+    setAppPageBg,
+    appMode,
+    setAppMode,
+    prefs: appearancePrefs,
+  } = useAppearanceFormState(account)
   const [themeSavedHint, setThemeSavedHint] = useState(false)
+  const [themeSaveErr, setThemeSaveErr] = useState<string | null>(null)
 
   const [busy, setBusy] = useState(false)
 
@@ -3385,7 +3923,6 @@ function UserSettingsPage({
   const [caldavProvision, setCaldavProvision] = useState<UserCalDAVProvisionOut | null>(null)
   const [caldavCopyHint, setCaldavCopyHint] = useState<string | null>(null)
 
-  const [account, setAccount] = useState<UserPublic | null>(null)
   const [pwdCurrent, setPwdCurrent] = useState('')
   const [pwdNew, setPwdNew] = useState('')
   const [pwdConfirm, setPwdConfirm] = useState('')
@@ -3416,31 +3953,38 @@ function UserSettingsPage({
     setAccountLoadErr(null)
     setCaldavLoadErr(null)
     try {
-      const me = await apiFetch<UserPublic>('/auth/me', { token })
-      setAccount(me)
-    } catch (e: unknown) {
-      setAccount(null)
-      setAccountLoadErr((e as ApiError).message ?? 'Failed to load account')
-    }
-    if (!securitySetupOnly) {
       try {
-        const st = await apiFetch<UserCalDAVStatusOut>('/users/me/calendar', { token })
-        setCaldav(st)
+        const me = await apiFetch<UserPublic>('/auth/me', { token })
+        setAccount(me)
       } catch (e: unknown) {
-        setCaldav(null)
-        setCaldavLoadErr((e as ApiError).message ?? 'Failed to load CalDAV status')
+        setAccount(null)
+        setAccountLoadErr((e as ApiError).message ?? 'Failed to load account')
       }
-    } else {
-      setCaldav(null)
-      setCaldavLoadErr(null)
-    }
-    try {
-      const rows = await apiFetch<WebAuthnCredentialOut[]>('/auth/webauthn/credentials', { token })
-      setPasskeys(rows)
-      setPkErr(null)
-    } catch (e: unknown) {
-      setPasskeys([])
-      setPkErr((e as ApiError).message ?? 'Could not load passkeys')
+      if (!securitySetupOnly && !passwordChangeRequiredOnly) {
+        try {
+          const st = await apiFetch<UserCalDAVStatusOut>('/users/me/calendar', { token })
+          setCaldav(st)
+        } catch (e: unknown) {
+          setCaldav(null)
+          setCaldavLoadErr((e as ApiError).message ?? 'Failed to load CalDAV status')
+        }
+      } else {
+        setCaldav(null)
+        setCaldavLoadErr(null)
+      }
+      if (!passwordChangeRequiredOnly) {
+        try {
+          const rows = await apiFetch<WebAuthnCredentialOut[]>('/auth/webauthn/credentials', { token })
+          setPasskeys(rows)
+          setPkErr(null)
+        } catch (e: unknown) {
+          setPasskeys([])
+          setPkErr((e as ApiError).message ?? 'Could not load passkeys')
+        }
+      } else {
+        setPasskeys([])
+        setPkErr(null)
+      }
     } finally {
       setBusy(false)
     }
@@ -3448,7 +3992,7 @@ function UserSettingsPage({
 
   useEffect(() => {
     void load()
-  }, [token, securitySetupOnly])
+  }, [token, securitySetupOnly, passwordChangeRequiredOnly])
 
   useEffect(() => {
     if (!account) return
@@ -3506,11 +4050,14 @@ function UserSettingsPage({
     }
     setSecBusy(true)
     try {
-      await apiFetch<null>('/auth/change-password', {
+      const res = await apiFetch<ChangePasswordResponse>('/auth/change-password', {
         method: 'POST',
         token,
         json: { current_password: pwdCurrent, new_password: pwdNew },
       })
+      applySessionToken(res.access_token)
+      setAccount(res.user)
+      await refreshMe()
       setPwdOk(true)
       setPwdCurrent('')
       setPwdNew('')
@@ -3648,25 +4195,31 @@ function UserSettingsPage({
     >
       <div className="paneHead">
         <div>
-          <h2 style={{ margin: 0 }}>{securitySetupOnly ? 'Security setup' : 'User settings'}</h2>
+          <h2 style={{ margin: 0 }}>
+            {passwordChangeRequiredOnly ? 'Update password' : securitySetupOnly ? 'Security setup' : 'User settings'}
+          </h2>
           <div className="muted" style={{ marginTop: 4 }}>
-            {securitySetupOnly
-              ? 'Your organisation requires an authenticator app (2FA) or at least one passkey. Complete either option below.'
-              : 'Preferences for your account: appearance, sign-in security, e-mail launcher, and calendar sync.'}
+            {passwordChangeRequiredOnly
+              ? 'Enter your current password and choose a new one to continue.'
+              : securitySetupOnly
+                ? 'Your organisation requires an authenticator app (2FA) or at least one passkey. Complete either option below.'
+                : 'Preferences for your account: appearance, sign-in security, e-mail launcher, calendar sync, and layout choices (calendar view, filters, task layout, column widths, sort order) saved automatically as you use the app.'}
           </div>
         </div>
-        <button type="button" className="btn" onClick={() => void load()} disabled={busy}>
-          Refresh
-        </button>
+        {!passwordChangeRequiredOnly ? (
+          <button type="button" className="btn" onClick={() => void load()} disabled={busy}>
+            Refresh
+          </button>
+        ) : null}
       </div>
       <div style={{ flex: 1, minHeight: 0, marginTop: 12, overflow: 'auto' }} className="stack">
         {accountLoadErr ? <div className="error">{accountLoadErr}</div> : null}
-        {!securitySetupOnly ? (
+        {!securitySetupOnly && !passwordChangeRequiredOnly ? (
         <section className="card" style={{ padding: 16 }}>
           <h3 style={{ marginTop: 0 }}>Appearance</h3>
           <p className="muted" style={{ marginTop: 0 }}>
-            Font, accent colour, page background, and light or dark mode are stored in this browser only. More fonts and preset
-            colours are listed below; stacks fall back if a font is not installed, and you can always enter a hex manually.
+            Font, accent colour, page background, and light or dark mode are saved to your account and follow you on any
+            device or browser when you sign in.
           </p>
           <div className="stack" style={{ maxWidth: 480, gap: 12 }}>
             <label className="field">
@@ -3837,14 +4390,27 @@ function UserSettingsPage({
                 </label>
               </div>
             </fieldset>
+            {themeSaveErr ? <div className="error">{themeSaveErr}</div> : null}
             {themeSavedHint ? <div className="muted">Appearance saved.</div> : null}
             <div className="row" style={{ gap: 8 }}>
               <button
                 type="button"
                 className="btn primary"
+                disabled={busy}
                 onClick={() => {
-                  saveThemePreferences({ font: appFont, accent: appAccent, mode: appMode, pageBg: appPageBg })
-                  setThemeSavedHint(true)
+                  void (async () => {
+                    setThemeSaveErr(null)
+                    setBusy(true)
+                    try {
+                      await persistUserAppearance(token, appearancePrefs)
+                      setThemeSavedHint(true)
+                      await refreshMe()
+                    } catch (e: unknown) {
+                      setThemeSaveErr((e as ApiError).message ?? 'Could not save appearance')
+                    } finally {
+                      setBusy(false)
+                    }
+                  })()
                 }}
               >
                 Save appearance
@@ -3852,13 +4418,26 @@ function UserSettingsPage({
               <button
                 type="button"
                 className="btn"
+                disabled={busy}
                 onClick={() => {
-                  setAppFont('')
-                  setAppAccent(DEFAULT_ACCENT)
-                  setAppPageBg('')
-                  setAppMode('light')
-                  saveThemePreferences({ font: '', accent: DEFAULT_ACCENT, mode: 'light', pageBg: '' })
-                  setThemeSavedHint(true)
+                  void (async () => {
+                    setThemeSaveErr(null)
+                    setBusy(true)
+                    try {
+                      const defaults = { font: '', accent: DEFAULT_ACCENT, mode: 'light' as const, pageBg: '' }
+                      setAppFont('')
+                      setAppAccent(DEFAULT_ACCENT)
+                      setAppPageBg('')
+                      setAppMode('light')
+                      await persistUserAppearance(token, defaults)
+                      setThemeSavedHint(true)
+                      await refreshMe()
+                    } catch (e: unknown) {
+                      setThemeSaveErr((e as ApiError).message ?? 'Could not reset appearance')
+                    } finally {
+                      setBusy(false)
+                    }
+                  })()
                 }}
               >
                 Reset to defaults
@@ -3868,14 +4447,16 @@ function UserSettingsPage({
         </section>
         ) : null}
 
-        <section className="card" style={{ padding: 16, marginTop: securitySetupOnly ? 0 : 16 }}>
+        <section className="card" style={{ padding: 16, marginTop: securitySetupOnly || passwordChangeRequiredOnly ? 0 : 16 }}>
           <h3 style={{ marginTop: 0 }}>
-            {securitySetupOnly ? 'Authenticator & passkeys' : 'Password & two-factor authentication'}
+            {passwordChangeRequiredOnly ? 'New password' : securitySetupOnly ? 'Authenticator & passkeys' : 'Password & two-factor authentication'}
           </h3>
           <p className="muted" style={{ marginTop: 0 }}>
-            {securitySetupOnly
-              ? 'Enable an authenticator app or register a passkey — either option satisfies your organisation’s requirement.'
-              : 'Change your Canary login password. Optional 2FA (authenticator app) or passkeys add a second step at sign-in.'}
+            {passwordChangeRequiredOnly
+              ? 'Your organisation requires periodic password updates. Choose a new password that is at least 12 characters.'
+              : securitySetupOnly
+                ? 'Enable an authenticator app or register a passkey — either option satisfies your organisation’s requirement.'
+                : 'Change your Canary login password. Optional 2FA (authenticator app) or passkeys add a second step at sign-in.'}
           </p>
 
           {!securitySetupOnly ? (
@@ -3931,6 +4512,8 @@ function UserSettingsPage({
             </>
           ) : null}
 
+          {!passwordChangeRequiredOnly ? (
+          <>
           <h4 style={{ margin: securitySetupOnly ? '0 0 8px' : '20px 0 8px', fontSize: '1rem', fontWeight: 600 }}>
             Authenticator (2FA)
           </h4>
@@ -4148,9 +4731,11 @@ function UserSettingsPage({
             ))}
             {passkeys.length === 0 ? <div className="muted">No passkeys registered yet.</div> : null}
           </div>
+          </>
+          ) : null}
         </section>
 
-        {!securitySetupOnly ? (
+        {!securitySetupOnly && !passwordChangeRequiredOnly ? (
         <section className="card" style={{ padding: 16, marginTop: 16 }}>
           <h3 style={{ marginTop: 0 }}>E-mail</h3>
           <p className="muted" style={{ marginTop: 0 }}>
@@ -4218,7 +4803,7 @@ function UserSettingsPage({
         </section>
         ) : null}
 
-        {!securitySetupOnly ? (
+        {!securitySetupOnly && !passwordChangeRequiredOnly ? (
         <section className="card" style={{ padding: 16, marginTop: 16 }}>
           <h3 style={{ marginTop: 0 }}>Calendar (CalDAV)</h3>
           <p className="muted" style={{ marginTop: 0 }}>
@@ -4564,7 +5149,7 @@ function AdminConsole({ token, refreshMe }: { token: string; refreshMe: () => Pr
       : tab === 'email'
       ? 'Org-wide e-mail integration (mailto vs Microsoft 365).'
       : tab === 'deploy'
-        ? 'Request GitHub Actions to rebuild and restart this stack (admin only).'
+        ? 'Deploy, updates, and file storage usage.'
         : tab === 'audit'
         ? 'Activity and audit trail.'
         : tab === 'users'
@@ -4658,7 +5243,7 @@ function AdminConsole({ token, refreshMe }: { token: string; refreshMe: () => Pr
 }
 
 function AdminUsers({ token, embedded }: { token: string; embedded?: boolean }) {
-  const { askConfirm } = useDialogs()
+  const { askConfirm, alert: showAlert } = useDialogs()
   const [users, setUsers] = useState<AdminUserPublic[]>([])
   const [categories, setCategories] = useState<UserPermissionCategoryOut[]>([])
   const [firmSettings, setFirmSettings] = useState<FirmSettingsOut | null>(null)
@@ -4987,6 +5572,73 @@ function AdminUsers({ token, embedded }: { token: string; embedded?: boolean }) 
           />
           <span>Mandate two-factor authentication</span>
         </label>
+        <label className="row" style={{ gap: 10, alignItems: 'center', cursor: firmSettings ? 'pointer' : 'default', marginTop: 12 }}>
+          <input
+            type="checkbox"
+            checked={Boolean(firmSettings?.mandate_password_rotation)}
+            disabled={busy || !firmSettings}
+            onChange={async (e) => {
+              if (!firmSettings) return
+              const next = e.target.checked
+              setBusy(true)
+              setErr(null)
+              try {
+                const updated = await apiFetch<FirmSettingsOut>('/admin/firm-settings', {
+                  token,
+                  method: 'PATCH',
+                  json: next
+                    ? {
+                        mandate_password_rotation: true,
+                        password_rotation_days: firmSettings.password_rotation_days ?? 90,
+                      }
+                    : { mandate_password_rotation: false, password_rotation_days: null },
+                })
+                setFirmSettings(updated)
+              } catch (err: unknown) {
+                setErr((err as ApiError).message ?? 'Could not update security settings')
+              } finally {
+                setBusy(false)
+              }
+            }}
+          />
+          <span>Require periodic password updates</span>
+        </label>
+        {firmSettings?.mandate_password_rotation ? (
+          <label className="field" style={{ marginTop: 12, maxWidth: 280 }}>
+            <span>Update every</span>
+            <select
+              value={String(firmSettings.password_rotation_days ?? 90)}
+              disabled={busy}
+              onChange={async (e) => {
+                const days = Number(e.target.value)
+                setBusy(true)
+                setErr(null)
+                try {
+                  const updated = await apiFetch<FirmSettingsOut>('/admin/firm-settings', {
+                    token,
+                    method: 'PATCH',
+                    json: { mandate_password_rotation: true, password_rotation_days: days },
+                  })
+                  setFirmSettings(updated)
+                } catch (err: unknown) {
+                  setErr((err as ApiError).message ?? 'Could not update password rotation interval')
+                } finally {
+                  setBusy(false)
+                }
+              }}
+            >
+              <option value="30">30 days</option>
+              <option value="60">60 days</option>
+              <option value="90">90 days</option>
+              <option value="180">180 days</option>
+              <option value="365">365 days</option>
+            </select>
+          </label>
+        ) : null}
+        <p className="muted" style={{ marginBottom: 0, fontSize: 13 }}>
+          When enabled, users must choose a new password after the interval since their last change. Admins are exempt. Password
+          reset e-mails require alert notifications under Admin → E-mail.
+        </p>
       </div>
       <div className="card">
         <h3>Create user</h3>
@@ -5229,6 +5881,31 @@ function AdminUsers({ token, embedded }: { token: string; embedded?: boolean }) 
               >
                 Reset authenticator (2FA)
               </button>
+              <button
+                type="button"
+                className="btn"
+                disabled={busy}
+                onClick={() =>
+                  void (async () => {
+                    if (!editingUser) return
+                    setBusy(true)
+                    setErr(null)
+                    try {
+                      const res = await apiFetch<AdminSendPasswordResetResponse>(
+                        `/admin/users/${editingUser.id}/send-password-reset-email`,
+                        { method: 'POST', token },
+                      )
+                      await showAlert(res.message ?? 'Password reset e-mail sent.', 'E-mail sent')
+                    } catch (e: unknown) {
+                      setErr((e as ApiError).message ?? 'Could not send password reset e-mail')
+                    } finally {
+                      setBusy(false)
+                    }
+                  })()
+                }
+              >
+                Send password reset e-mail
+              </button>
 
               <label className="field" style={{ marginBottom: 0, marginTop: 14 }}>
                 <span>New password (optional, min 12 characters)</span>
@@ -5410,12 +6087,26 @@ function contactTypeLabel(t: ContactOut['type']) {
   return t === 'person' ? 'Person' : 'Organisation'
 }
 
-function Contacts({ token }: { token: string }) {
+function Contacts({ token, me }: { token: string; me?: UserPublic | null }) {
   const { askConfirm } = useDialogs()
+  const { prefs: uiPrefs, setPreference: setUiPreference, setPreferenceDebounced: setUiPreferenceDebounced } =
+    useUserUiPreferences(me, token)
+  const [contactsSearch, setContactsSearch] = useState('')
+  const { gridTemplateColumns: contactsGridColumns, startResize: contactsStartResize } = useColumnWidths(
+    CONTACTS_COLUMN_COUNT,
+    {
+      widths: effectiveColumnWidths(
+        uiPrefs.contacts_column_widths,
+        CONTACTS_COLUMN_COUNT,
+        LEGACY_AUTO_CONTACTS_COLUMN_WIDTHS,
+      ),
+      fallbackWidths: [...CONTACTS_COLUMN_WIDTHS_DEFAULT],
+      onChange: (widths) => setUiPreferenceDebounced('contacts_column_widths', widths, 300),
+    },
+  )
   const [contacts, setContacts] = useState<ContactOut[]>([])
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
-  const [q, setQ] = useState('')
   const [contactRowFocusId, setContactRowFocusId] = useState<string | null>(null)
 
   const [createOpen, setCreateOpen] = useState(false)
@@ -5454,7 +6145,7 @@ function Contacts({ token }: { token: string }) {
   }, [contactCtx])
 
   const rows = useMemo(() => {
-    const s = q.trim().toLowerCase()
+    const s = contactsSearch.trim().toLowerCase()
     let list = contacts
     if (s) {
       list = contacts.filter((c) => {
@@ -5462,8 +6153,37 @@ function Contacts({ token }: { token: string }) {
         return parts.join(' ').toLowerCase().includes(s)
       })
     }
-    return [...list].sort((a, b) => a.name.localeCompare(b.name))
-  }, [contacts, q])
+    const dir = uiPrefs.contacts_sort_dir === 'asc' ? 1 : -1
+    const key = uiPrefs.contacts_sort_key
+    return [...list].sort((a, b) => {
+      const av =
+        key === 'name'
+          ? a.name
+          : key === 'type'
+            ? a.type
+            : key === 'email'
+              ? a.email ?? ''
+              : a.phone ?? ''
+      const bv =
+        key === 'name'
+          ? b.name
+          : key === 'type'
+            ? b.type
+            : key === 'email'
+              ? b.email ?? ''
+              : b.phone ?? ''
+      return String(av).localeCompare(String(bv)) * dir
+    })
+  }, [contacts, contactsSearch, uiPrefs.contacts_sort_key, uiPrefs.contacts_sort_dir])
+
+  function toggleContactsSort(key: 'name' | 'type' | 'email' | 'phone') {
+    if (uiPrefs.contacts_sort_key === key) {
+      setUiPreference('contacts_sort_dir', uiPrefs.contacts_sort_dir === 'asc' ? 'desc' : 'asc')
+    } else {
+      setUiPreference('contacts_sort_key', key)
+      setUiPreference('contacts_sort_dir', 'asc')
+    }
+  }
 
   function closeCreateModal() {
     if (busy) return
@@ -5479,9 +6199,9 @@ function Contacts({ token }: { token: string }) {
           <div className="mainMenuFilterRowLeft">
             <SearchInput
               placeholder="Search contacts (name, email, phone)…"
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-              onClear={() => setQ('')}
+              value={contactsSearch}
+              onChange={(e) => setContactsSearch(e.target.value)}
+              onClear={() => setContactsSearch('')}
               className="mainMenuSearchInput"
               aria-label="Search contacts"
             />
@@ -5507,12 +6227,31 @@ function Contacts({ token }: { token: string }) {
       <div className="card casesTableCard" style={{ padding: 0, overflow: 'hidden' }}>
         <div className="casesTableScroll contactsTableScroll">
           <div className="table">
-            <div className="tr th" style={{ gridTemplateColumns: CONTACTS_TABLE_GRID }}>
-              {(['Name', 'Type', 'Email', 'Phone'] as const).map((label) => (
-                <div key={label} className="thCell">
-                  <div className="thbtn" style={{ cursor: 'default', userSelect: 'none' }}>
+            <div className="tr th" style={contactsGridColumns ? { gridTemplateColumns: contactsGridColumns } : undefined}>
+              {(
+                [
+                  ['name', 'Name'],
+                  ['type', 'Type'],
+                  ['email', 'Email'],
+                  ['phone', 'Phone'],
+                ] as const
+              ).map(([k, label], colIndex) => (
+                <div key={k} className="thCell">
+                  <button type="button" className="thbtn" onClick={() => toggleContactsSort(k)}>
                     {label}
-                  </div>
+                  </button>
+                  {colIndex < 3 ? (
+                    <div
+                      className="colResizeHandle"
+                      role="separator"
+                      aria-orientation="vertical"
+                      aria-label={`Resize ${label} column`}
+                      onMouseDown={(e) => {
+                        e.preventDefault()
+                        contactsStartResize(colIndex, e.clientX, e.currentTarget.closest('.tr.th') as HTMLElement | null)
+                      }}
+                    />
+                  ) : null}
                 </div>
               ))}
             </div>
@@ -5521,7 +6260,7 @@ function Contacts({ token }: { token: string }) {
                 key={c.id}
                 type="button"
                 className={`tr rowbtn${contactRowFocusId === c.id ? ' active' : ''}`}
-                style={{ gridTemplateColumns: CONTACTS_TABLE_GRID }}
+                style={contactsGridColumns ? { gridTemplateColumns: contactsGridColumns } : undefined}
                 onClick={() => setContactRowFocusId(c.id)}
                 onDoubleClick={() => setEditing(c)}
                 onContextMenu={(e) => {
@@ -5791,6 +6530,7 @@ function ContactEditor({
           onChange={(patch) => setFields((prev) => ({ ...prev, ...patch }))}
           busy={busy}
         />
+        <ContactPortalPanel token={token} contactId={contact.id} contactName={contact.name} contactEmail={contact.email} />
       </div>
     </>
   )

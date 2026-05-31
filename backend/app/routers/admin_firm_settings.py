@@ -56,6 +56,8 @@ def _to_out(db: Session, row: FirmSettings) -> FirmSettingsOut:
         letterhead_style=row.letterhead_style,
         letterhead_original_filename=name,
         mandate_two_factor=bool(row.mandate_two_factor),
+        mandate_password_rotation=bool(row.mandate_password_rotation),
+        password_rotation_days=row.password_rotation_days,
     )
 
 
@@ -106,6 +108,14 @@ def patch_firm_settings(
 ) -> FirmSettingsOut:
     row = _settings_row(db)
     data = payload.model_dump(exclude_unset=True)
+    if data.get("mandate_password_rotation") and not data.get("password_rotation_days"):
+        if row.password_rotation_days is None and payload.password_rotation_days is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Choose how often users must update their password (rotation interval in days).",
+            )
+    if data.get("mandate_password_rotation") is False:
+        data["password_rotation_days"] = None
     for k, v in data.items():
         setattr(row, k, v)
     row.updated_at = datetime.utcnow()

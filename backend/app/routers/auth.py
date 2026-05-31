@@ -11,12 +11,30 @@ from app.db import get_db
 from app.deps import _jwt_raw_from_request, get_current_user
 from app.email_integration_settings import build_user_public
 from app.models import User, UserRole
-from app.org_security import firm_mandates_second_factor, user_has_any_passkey, user_meets_second_factor_policy
+from app.org_security import (
+    firm_mandates_second_factor,
+    firm_password_rotation_policy,
+    user_has_any_passkey,
+    user_meets_second_factor_policy,
+    user_password_change_required,
+)
+from app.password_reset_service import (
+    consume_password_reset_token,
+    create_password_reset_token,
+    login_access_token,
+    password_reset_email_configured,
+    send_password_reset_email,
+    touch_password_changed,
+)
 from app.schemas import (
     BootstrapAdminRequest,
     Cancel2FASetupRequest,
     ChangePasswordRequest,
+    ChangePasswordResponse,
+    ForgotPasswordRequest,
+    ForgotPasswordResponse,
     LoginRequest,
+    ResetPasswordRequest,
     Setup2FAResponse,
     TokenResponse,
     UserDisable2FARequest,
@@ -72,6 +90,7 @@ def bootstrap_admin(payload: BootstrapAdminRequest, db: Session = Depends(get_db
         initials=ini,
         role=UserRole.admin,
         is_active=True,
+        password_changed_at=datetime.now(timezone.utc),
     )
     db.add(user)
     db.commit()
@@ -115,7 +134,7 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)) -> TokenResponse
         if not db_ok:
             mfa_verified = False
 
-    token = create_access_token(user_id=str(user.id), role=user.role.value, mfa_verified=mfa_verified)
+    token = login_access_token(db, user, mfa_verified=mfa_verified)
     log_event(
         db,
         actor_user_id=user.id,
@@ -136,6 +155,7 @@ def me(
 ) -> UserPublic:
     pub = build_user_public(user, db)
     mandate = firm_mandates_second_factor(db)
+    rotation_enabled, rotation_days = firm_password_rotation_policy(db)
     if user_effective_admin(user, db) or not mandate:
         sf_ok = True
     else:
@@ -148,7 +168,53 @@ def me(
                 sf_ok = tp.mfa_verified is True
             except ValueError:
                 sf_ok = False
-    return pub.model_copy(update={"session_second_factor_verified": sf_ok})
+    pwd_change_required = user_password_change_required(db, user)
+    return pub.model_copy(
+        update={
+            "session_second_factor_verified": sf_ok,
+            "organization_requires_password_rotation": rotation_enabled,
+            "password_rotation_days": rotation_days,
+            "session_password_change_required": pwd_change_required,
+        }
+    )
+
+
+@router.post("/forgot-password", response_model=ForgotPasswordResponse)
+def forgot_password(payload: ForgotPasswordRequest, db: Session = Depends(get_db)) -> ForgotPasswordResponse:
+    if not password_reset_email_configured(db):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="E-mail password reset has not been configured. Please contact your administrator.",
+        )
+    email = str(payload.email).lower().strip()
+    user = db.execute(select(User).where(User.email == email)).scalar_one_or_none()
+    if user and user.is_active and (user.email or "").strip():
+        raw = create_password_reset_token(db, user)
+        send_password_reset_email(db, user, raw)
+    return ForgotPasswordResponse(
+        message="If an account exists for that e-mail address, a password reset link has been sent.",
+    )
+
+
+@router.post("/reset-password", status_code=status.HTTP_204_NO_CONTENT)
+def reset_password(payload: ResetPasswordRequest, db: Session = Depends(get_db)) -> None:
+    user = consume_password_reset_token(db, payload.token.strip())
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired reset link.")
+    user.password_hash = hash_password(payload.new_password)
+    touch_password_changed(user)
+    user.totp_secret = None
+    user.is_2fa_enabled = False
+    db.add(user)
+    db.commit()
+    log_event(
+        db,
+        actor_user_id=user.id,
+        action="auth.password.reset",
+        entity_type="user",
+        entity_id=str(user.id),
+    )
+    return None
 
 
 @router.post("/2fa/setup", response_model=Setup2FAResponse)
@@ -189,7 +255,7 @@ def verify_2fa(
         entity_type="user",
         entity_id=str(user.id),
     )
-    access_token = create_access_token(user_id=str(user.id), role=user.role.value, mfa_verified=True)
+    access_token = login_access_token(db, user, mfa_verified=True)
     return Verify2FASessionResponse(access_token=access_token, user=build_user_public(user, db))
 
 
@@ -271,21 +337,21 @@ def cancel_my_2fa_setup(
     return None
 
 
-@router.post("/change-password", status_code=status.HTTP_204_NO_CONTENT)
+@router.post("/change-password", response_model=ChangePasswordResponse)
 def change_password(
     payload: ChangePasswordRequest,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
-) -> None:
+) -> ChangePasswordResponse:
     if not verify_password(payload.current_password, user.password_hash):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Current password is incorrect")
 
     user.password_hash = hash_password(payload.new_password)
-    user.updated_at = datetime.utcnow()
+    touch_password_changed(user)
 
-    # Force 2FA re-verify if enabled: keep secret but require user to re-enter code next login is already enforced.
     db.add(user)
     db.commit()
+    db.refresh(user)
     log_event(
         db,
         actor_user_id=user.id,
@@ -293,5 +359,6 @@ def change_password(
         entity_type="user",
         entity_id=str(user.id),
     )
-    return None
+    access_token = login_access_token(db, user, mfa_verified=True)
+    return ChangePasswordResponse(access_token=access_token, user=build_user_public(user, db))
 

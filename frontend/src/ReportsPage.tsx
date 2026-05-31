@@ -28,6 +28,19 @@ const CASE_STATUS_OPTIONS: { value: CaseWorkflowStatus; label: string }[] = [
   { value: 'archived', label: 'Archived' },
 ]
 
+function BalancesReportColgroup() {
+  return (
+    <colgroup>
+      <col className="reportsColRef" />
+      <col className="reportsColClient" />
+      <col className="reportsColMatter" />
+      <col className="reportsColFeeEarner" />
+      <col className="reportsColMoney" />
+      <col className="reportsColMoney" />
+    </colgroup>
+  )
+}
+
 function formatMoneyPence(p: number): string {
   const neg = p < 0
   const a = Math.abs(p)
@@ -388,6 +401,7 @@ export function ReportsPage({ token, me }: { token: string; me: UserPublic | nul
   return (
     <div className="mainMenuShell mainMenuShell--mainMenu">
       <div className="card casesTableCard reportsPageShell">
+        <div className="reportsPageHeader">
         <h1 className="reportsPageTitle">Reports</h1>
         <p className="muted reportsPageLead" style={{ marginBottom: 16 }}>
           Run firm reports by fee earner. Exports use the same Excel format as merge-code downloads.
@@ -614,11 +628,14 @@ export function ReportsPage({ token, me }: { token: string; me: UserPublic | nul
             ) : null}
           </div>
         </div>
+        </div>
+
+        <div className="reportsPageBody">
 
         {tab === 'client_office_balances' ? (
-          <section className="reportsSection">
-            <p className="muted">Excludes matters with status Closed or Archived. Balances use approved ledger entries only.</p>
-            <div className="row" style={{ gap: 8, marginTop: 10 }}>
+          <section className={`reportsSection${previewBalances?.rows ? ' reportsSection--fill' : ''}`}>
+            <p className="muted reportsSectionStatic">Excludes matters with status Closed or Archived. Balances use approved ledger entries only.</p>
+            <div className="row reportsSectionStatic" style={{ gap: 8, marginTop: 10 }}>
               <button type="button" className="btn primary" disabled={busy} onClick={() => void runJson('/reports/client-office-balances', balancesBody)}>
                 Run report
               </button>
@@ -632,44 +649,54 @@ export function ReportsPage({ token, me }: { token: string; me: UserPublic | nul
               </button>
             </div>
             {previewBalances?.rows ? (
-              <div className="reportsPreviewScroll">
-                <table className="reportsTable">
-                  <thead>
-                    <tr>
-                      <th>Reference</th>
-                      <th>Client</th>
-                      <th>Matter</th>
-                      <th>Fee earner</th>
-                      <th>Client balance</th>
-                      <th>Office balance</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {previewBalances.rows.map((r) => (
-                      <tr key={r.case_id}>
-                        <td>{r.case_number}</td>
-                        <td>{r.client_name ?? ''}</td>
-                        <td>{r.matter_description}</td>
-                        <td>{r.fee_earner_name}</td>
-                        <td>{formatMoneyPence(r.client_balance_pence)}</td>
-                        <td>{formatMoneyPence(r.office_balance_pence)}</td>
+              <div className="reportsPreviewFrame">
+                <div className="reportsPreviewScroll">
+                  <table className="reportsTable reportsTable--balances">
+                    <BalancesReportColgroup />
+                    <thead>
+                      <tr>
+                        <th>Reference</th>
+                        <th>Client</th>
+                        <th>Matter</th>
+                        <th>Fee earner</th>
+                        <th>Client balance</th>
+                        <th>Office balance</th>
                       </tr>
-                    ))}
-                    {previewBalances.totals ? (
-                      <tr className="reportsTableTotalRow">
-                        <td colSpan={4}>
-                          <strong>Total</strong>
-                        </td>
-                        <td>
-                          <strong>{formatMoneyPence(previewBalances.totals.client_balance_pence)}</strong>
-                        </td>
-                        <td>
-                          <strong>{formatMoneyPence(previewBalances.totals.office_balance_pence)}</strong>
-                        </td>
-                      </tr>
-                    ) : null}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      {previewBalances.rows.map((r) => (
+                        <tr key={r.case_id}>
+                          <td>{r.case_number}</td>
+                          <td>{r.client_name ?? ''}</td>
+                          <td>{r.matter_description}</td>
+                          <td>{r.fee_earner_name}</td>
+                          <td>{formatMoneyPence(r.client_balance_pence)}</td>
+                          <td>{formatMoneyPence(r.office_balance_pence)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                {previewBalances.totals ? (
+                  <div className="reportsPreviewTotalsRibbon" aria-label="Report totals">
+                    <table className="reportsTable reportsTable--balances">
+                      <BalancesReportColgroup />
+                      <tbody>
+                        <tr className="reportsTableTotalRow">
+                          <td colSpan={4}>
+                            <strong>Total</strong>
+                          </td>
+                          <td>
+                            <strong>{formatMoneyPence(previewBalances.totals.client_balance_pence)}</strong>
+                          </td>
+                          <td>
+                            <strong>{formatMoneyPence(previewBalances.totals.office_balance_pence)}</strong>
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                ) : null}
               </div>
             ) : null}
           </section>
@@ -890,6 +917,7 @@ export function ReportsPage({ token, me }: { token: string; me: UserPublic | nul
             ) : null}
           </section>
         ) : null}
+        </div>
       </div>
     </div>
   )

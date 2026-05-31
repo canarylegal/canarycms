@@ -36,6 +36,7 @@ from app.db import get_db
 from app.deps import get_current_user
 from app.models import User, WebAuthnChallenge, WebAuthnCredential
 from app.org_security import firm_mandates_second_factor
+from app.password_reset_service import login_access_token
 from app.security import create_access_token
 from app.schemas import TokenResponse
 
@@ -215,7 +216,7 @@ def webauthn_login_finish(
     db.add(cred_row)
     db.commit()
 
-    token = create_access_token(user_id=str(user.id), role=user.role.value, mfa_verified=True)
+    token = login_access_token(db, user, mfa_verified=True)
     log_event(
         db,
         actor_user_id=user.id,

@@ -17,6 +17,7 @@ import type { ApiError } from './api'
 import { ConfirmModal } from './ConfirmModal'
 import { useDialogs } from './DialogProvider'
 import { SearchInput } from './SearchInput'
+import { useUserUiPreferences, type CalendarView } from './useUserUiPreferences'
 import type {
   CalendarCategoryOut,
   CalendarDirectoryRow,
@@ -25,6 +26,7 @@ import type {
   CaseEventOut,
   CaseOut,
   UserCalendarListItem,
+  UserPublic,
   UserSummary,
 } from './types'
 
@@ -423,13 +425,17 @@ function eventInputToYmd(v: EventInput['start']): string | undefined {
 
 export function CalendarPage({
   token,
+  me,
   onOpenSettings,
 }: {
   token: string
+  me?: UserPublic | null
   onOpenSettings: () => void
 }) {
   const calRef = useRef<FullCalendar>(null)
   const calWrapRef = useRef<HTMLDivElement | null>(null)
+  const calendarSelectionHydratedRef = useRef(false)
+  const { prefs, setPreference } = useUserUiPreferences(me, token)
   const [calendarPixelHeight, setCalendarPixelHeight] = useState(480)
   const [needCaldav, setNeedCaldav] = useState(false)
   const [banner, setBanner] = useState<string | null>(null)
@@ -596,16 +602,22 @@ export function CalendarPage({
 
   useEffect(() => {
     if (calendars.length === 0) return
-    setSelectedCalIds((prev) => {
-      const valid = new Set(calendars.map((c) => c.id))
-      let next = prev.filter((id) => valid.has(id))
-      for (const c of calendars) {
-        if (!next.includes(c.id)) next = [...next, c.id]
-      }
-      if (next.length === 0) next = calendars.map((c) => c.id)
-      return next
-    })
-  }, [calendars])
+    const valid = new Set(calendars.map((c) => c.id))
+    const saved = prefs.calendar_selected_calendar_ids.filter((id) => valid.has(id))
+    if (prefs.calendar_selected_calendar_ids.length > 0 && saved.length > 0) {
+      setSelectedCalIds(saved)
+    } else {
+      setSelectedCalIds(calendars.map((c) => c.id))
+    }
+    calendarSelectionHydratedRef.current = true
+  }, [calendars, prefs.calendar_selected_calendar_ids])
+
+  useEffect(() => {
+    const api = calRef.current?.getApi()
+    if (api && api.view.type !== prefs.calendar_view) {
+      api.changeView(prefs.calendar_view)
+    }
+  }, [prefs.calendar_view])
 
   useLayoutEffect(() => {
     const el = calWrapRef.current
@@ -761,11 +773,17 @@ export function CalendarPage({
 
   function toggleCal(id: string) {
     setSelectedCalIds((prev) => {
+      let next: string[]
       if (prev.includes(id)) {
         if (prev.length <= 1) return prev
-        return prev.filter((x) => x !== id)
+        next = prev.filter((x) => x !== id)
+      } else {
+        next = [...prev, id]
       }
-      return [...prev, id]
+      if (calendarSelectionHydratedRef.current) {
+        setPreference('calendar_selected_calendar_ids', next)
+      }
+      return next
     })
   }
 
@@ -1194,11 +1212,15 @@ export function CalendarPage({
           <FullCalendar
           ref={calRef}
           plugins={[dayGridPlugin, timeGridPlugin, listPlugin, interactionPlugin]}
-          initialView="dayGridMonth"
+          initialView={prefs.calendar_view}
           headerToolbar={{
             left: 'prev,next today',
             center: 'title',
             right: 'dayGridMonth,timeGridWeek,timeGridDay,listWeek',
+          }}
+          datesSet={(arg) => {
+            const viewType = arg.view.type as CalendarView
+            if (viewType !== prefs.calendar_view) setPreference('calendar_view', viewType)
           }}
           height={calendarPixelHeight}
           editable={!needCaldav}

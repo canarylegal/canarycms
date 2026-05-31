@@ -13,6 +13,7 @@ from app.webdav_cors_middleware import WebdavPublicCORSMiddleware
 from app.routers import (
     admin_audit,
     admin_deploy,
+    admin_storage,
     admin_billing,
     admin_email_integration,
     admin_firm_settings,
@@ -31,9 +32,11 @@ from app.routers import (
     case_invoices,
     case_ledger,
     case_notes,
+    case_portal,
     case_property,
     case_tasks,
     cases,
+    contact_portal,
     task_menu,
     contacts,
     files,
@@ -44,6 +47,7 @@ from app.routers import (
     onlyoffice,
     mail_plugin,
     outlook_plugin,
+    portal,
     precedents,
     reports,
     users,
@@ -185,14 +189,17 @@ app.include_router(admin_matter_contact_types.router)
 app.include_router(admin_permission_categories.router)
 app.include_router(admin_audit.router)
 app.include_router(admin_deploy.router)
+app.include_router(admin_storage.router)
 app.include_router(matter_contact_types.router)
 app.include_router(matter_types.router)
 app.include_router(cases.router)
 app.include_router(case_property.router)
 app.include_router(precedents.router)
 app.include_router(contacts.router)
+app.include_router(contact_portal.router)
 app.include_router(case_access.router)
 app.include_router(case_contacts.router)
+app.include_router(case_portal.router)
 app.include_router(case_notes.router)
 app.include_router(case_tasks.router)
 app.include_router(task_menu.router)
@@ -214,6 +221,7 @@ app.include_router(users.router)
 app.include_router(me_calendar_events.router)
 app.include_router(me_calendars.router)
 app.include_router(reports.router)
+app.include_router(portal.router)
 
 @app.get("/health")
 def health():

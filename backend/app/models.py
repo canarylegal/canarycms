@@ -66,6 +66,7 @@ class User(Base):
 
     totp_secret: Mapped[str | None] = mapped_column(Text, nullable=True)
     is_2fa_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    password_changed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     # Fernet-encrypted CalDAV app password (Radicale htpasswd); plaintext shown only on enable/reset.
     caldav_password_enc: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -73,6 +74,13 @@ class User(Base):
     # Matter e-mail compose: desktop mailto vs Outlook on the web (user setting).
     email_launch_preference: Mapped[str] = mapped_column(String(32), nullable=False, default="desktop")
     email_outlook_web_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    appearance_font: Mapped[str | None] = mapped_column(Text, nullable=True)
+    appearance_accent: Mapped[str] = mapped_column(String(7), nullable=False, default="#2563eb")
+    appearance_mode: Mapped[str] = mapped_column(String(8), nullable=False, default="light")
+    appearance_page_bg: Mapped[str | None] = mapped_column(String(7), nullable=True)
+
+    ui_preferences: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
 
     # Next Outlook send (add-in OnMessageSend): matter chosen from Canary web before composing.
     outlook_pending_send_case_id: Mapped[uuid.UUID | None] = mapped_column(
@@ -333,7 +341,24 @@ class FirmSettings(Base):
         UUID(as_uuid=True), ForeignKey("file.id", ondelete="SET NULL"), nullable=True
     )
     mandate_two_factor: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    mandate_password_rotation: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    password_rotation_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    storage_limit_bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+
+
+class PasswordResetToken(Base):
+    """Single-use staff password reset link (hashed token, short TTL)."""
+
+    __tablename__ = "password_reset_token"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("user.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    token_sha256: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
 
 
 class WebAuthnChallenge(Base):
@@ -445,6 +470,47 @@ class Contact(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
 
 
+class ContactPortalAccess(Base):
+    """Portal login for a global contact (unique access code per contact)."""
+
+    __tablename__ = "contact_portal_access"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    contact_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("contact.id", ondelete="CASCADE"), nullable=False, unique=True
+    )
+    code_sha256: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)
+    code_enc: Mapped[str | None] = mapped_column(Text, nullable=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    failed_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_by_user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("user.id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+
+
+class ContactPortalGrant(Base):
+    """Folder-scoped portal access for a contact (many grants per contact)."""
+
+    __tablename__ = "contact_portal_grant"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    contact_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("contact.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    case_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("case.id", ondelete="CASCADE"), nullable=False)
+    folder_path: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    label: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    can_download: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    can_upload: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_by_user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("user.id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+
+
 class CaseContact(Base):
     __tablename__ = "case_contact"
 
@@ -549,6 +615,7 @@ class File(Base):
     oo_compose_pending: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     # Set while /oo-force-save waits for DS callback; cleared when bytes are saved or unchanged save is ack'd.
     oo_force_save_pending: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    uploaded_via_portal: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
@@ -870,6 +937,10 @@ class EmailIntegrationSettings(Base):
     graph_client_id: Mapped[str | None] = mapped_column(Text, nullable=True)
     graph_client_secret_enc: Mapped[str | None] = mapped_column(Text, nullable=True)
     outlook_web_mail_base: Mapped[str | None] = mapped_column(Text, nullable=True)
+    alerts_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    alert_transport: Mapped[str] = mapped_column(String(16), nullable=False, default="auto")
+    graph_send_mailbox: Mapped[str | None] = mapped_column(String(320), nullable=True)
+    graph_send_from_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
 
 

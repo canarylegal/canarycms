@@ -27,6 +27,68 @@ export type UserPublic = {
    * (e.g. password-only session). Omitted on older APIs (treat as unrestricted).
    */
   session_second_factor_verified?: boolean
+  organization_requires_password_rotation?: boolean
+  password_rotation_days?: number | null
+  session_password_change_required?: boolean
+  appearance?: UserAppearanceOut
+  ui_preferences?: UserUiPreferencesOut
+}
+
+export type CalendarView = 'dayGridMonth' | 'timeGridWeek' | 'timeGridDay' | 'listWeek'
+export type TaskLayout = 'list' | 'kanban'
+export type TaskSortKey = 'reference' | 'client' | 'matter' | 'task' | 'date' | 'assigned' | 'priority'
+export type MainMenuSortKey = 'reference' | 'client' | 'matter' | 'feeEarner' | 'status' | 'created'
+export type ContactsSortKey = 'name' | 'type' | 'email' | 'phone'
+export type CaseStatusFilter = '' | 'open' | 'closed' | 'archived' | 'quote' | 'post_completion'
+export type SortDir = 'asc' | 'desc'
+
+export type UserUiPreferencesOut = {
+  calendar_view: CalendarView
+  case_calendar_view: CalendarView
+  tasks_menu_layout: TaskLayout
+  case_tasks_layout: TaskLayout
+  tasks_menu_sort_key: TaskSortKey
+  tasks_menu_sort_dir: SortDir
+  case_tasks_sort_key: TaskSortKey
+  case_tasks_sort_dir: SortDir
+  main_menu_sort_key: MainMenuSortKey
+  main_menu_sort_dir: SortDir
+  main_menu_search: string
+  main_menu_filter_matter_type: string
+  main_menu_filter_fee_earner_user_id: string
+  main_menu_filter_case_status: CaseStatusFilter
+  main_menu_filter_matter_types: string[]
+  main_menu_filter_fee_earner_user_ids: string[]
+  main_menu_filter_case_statuses: Exclude<CaseStatusFilter, ''>[]
+  tasks_menu_search: string
+  tasks_menu_filter_matter_type: string
+  contacts_search: string
+  contacts_sort_key: ContactsSortKey
+  contacts_sort_dir: SortDir
+  calendar_selected_calendar_ids: string[]
+  main_menu_column_widths: number[]
+  tasks_menu_column_widths: number[]
+  contacts_column_widths: number[]
+}
+
+export type ChangePasswordResponse = TokenResponse & {
+  user: UserPublic
+}
+
+export type ForgotPasswordResponse = {
+  message: string
+}
+
+export type AdminSendPasswordResetResponse = {
+  email_sent: boolean
+  message?: string | null
+}
+
+export type UserAppearanceOut = {
+  font: string
+  accent: string
+  mode: 'light' | 'dark'
+  page_bg: string
 }
 
 /** POST /auth/2fa/verify — new JWT after enrolment (org mandate / session upgrade). */
@@ -64,6 +126,8 @@ export type FirmSettingsOut = {
   letterhead_style: LetterheadStyle
   letterhead_original_filename?: string | null
   mandate_two_factor?: boolean
+  mandate_password_rotation?: boolean
+  password_rotation_days?: number | null
 }
 
 /** Registered passkey row from GET /auth/webauthn/credentials */
@@ -471,6 +535,7 @@ export type FileSummary = {
   owner_display_name?: string | null
   owner_email?: string | null
   owner_initials?: string | null
+  uploaded_via_portal?: boolean
 }
 
 /** Response from ``POST /cases/{id}/files/email-drafts/m365`` (Microsoft Graph draft). */
@@ -515,6 +580,13 @@ export type EmailIntegrationSettingsOut = {
   graph_client_id: string | null
   graph_client_secret_configured: boolean
   outlook_web_mail_base: string | null
+  alerts_enabled: boolean
+  alert_transport: 'auto' | 'graph' | 'smtp'
+  graph_send_mailbox: string | null
+  graph_send_from_name: string | null
+  graph_alert_ready: boolean
+  smtp_alert_ready: boolean
+  effective_alert_transport: 'graph' | 'smtp' | null
 }
 
 export type AdminAuditEvent = {
@@ -734,6 +806,47 @@ export type AdminDeployUpdateCheckOut = {
   note?: string | null
 }
 
+export type AdminStorageCategoryOut = {
+  category: string
+  label: string
+  bytes_used: number
+  file_count: number
+}
+
+export type AdminStorageDeploymentComponentOut = {
+  key: string
+  label: string
+  bytes_used: number
+  detected: boolean
+}
+
+export type AdminStorageOut = {
+  tracked_total_bytes: number
+  files_on_disk_bytes: number
+  compose_mount_bytes: number
+  application_checkout_bytes: number
+  database_bytes: number | null
+  database_logical_bytes: number | null
+  calendars_bytes: number | null
+  deployment_total_bytes: number
+  docker_detected: boolean
+  docker_images_bytes: number
+  docker_container_writable_bytes: number
+  docker_dangling_images_bytes: number
+  docker_build_cache_bytes: number | null
+  deployment_active_bytes: number
+  deployment_artifacts_bytes: number
+  measurement_note: string | null
+  deployment_components: AdminStorageDeploymentComponentOut[]
+  categories: AdminStorageCategoryOut[]
+  storage_limit_bytes: number | null
+  files_root: string
+  host_disk_detected: boolean
+  host_disk_total_bytes: number | null
+  host_disk_used_bytes: number | null
+  host_disk_free_bytes: number | null
+}
+
 export type AdminDeployTriggerOut = {
   ok: boolean
   message: string
@@ -787,5 +900,92 @@ export type CaseEventOut = {
 export type CaseEventsOut = {
   case_id: string
   events: CaseEventOut[]
+}
+
+export type PortalGrantSummaryOut = {
+  id: string
+  case_id: string
+  case_title: string
+  folder_path: string
+  folder_label: string
+  label: string
+  can_download: boolean
+  can_upload: boolean
+}
+
+export type PortalAuthOut = {
+  session_token: string
+  contact_name: string
+  grants: PortalGrantSummaryOut[]
+}
+
+export type PortalSessionOut = {
+  contact_name: string
+  grants: PortalGrantSummaryOut[]
+}
+
+export type PortalFileOut = {
+  id: string
+  original_filename: string
+  mime_type: string
+  size_bytes: number
+  folder_path: string
+  created_at: string
+  updated_at: string
+}
+
+export type ContactPortalAccessOut = {
+  enabled: boolean
+  expires_at: string | null
+  last_login_at: string | null
+  locked_until: string | null
+  has_access: boolean
+  access_code?: string | null
+  access_record_exists?: boolean
+}
+
+export type ContactPortalAccessCreateOut = {
+  access_code: string
+  enabled: boolean
+  expires_at: string | null
+  email_sent?: boolean
+}
+
+export type ContactPortalGrantOut = {
+  id: string
+  contact_id: string
+  case_id: string
+  case_title: string
+  folder_path: string
+  label: string | null
+  can_download: boolean
+  can_upload: boolean
+  expires_at: string | null
+  created_at: string
+  email_sent?: boolean
+}
+
+export type ContactPortalGrantCreateIn = {
+  case_id: string
+  folder_path?: string
+  label?: string | null
+  can_download?: boolean
+  can_upload?: boolean
+  expires_at?: string | null
+  send_email?: boolean
+}
+
+export type CasePortalFolderShareContactOut = {
+  case_contact_id: string
+  contact_id: string
+  contact_name: string
+  has_grant: boolean
+  grant_id: string | null
+}
+
+export type CasePortalFolderAccessGrantOut = {
+  folder_path: string
+  contact_id: string
+  contact_name: string
 }
 
