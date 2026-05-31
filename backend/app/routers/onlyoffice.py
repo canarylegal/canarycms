@@ -33,8 +33,9 @@ from sqlalchemy.orm import Session
 from app.db import get_db
 from app.deps import get_current_user
 from app.file_storage import FILES_ROOT, case_file_paths, ensure_files_root
-from app.models import File as DbFile, FileCategory, FileEditSession, Precedent, User
+from app.models import FeeScale, File as DbFile, FileCategory, FileEditSession, Precedent, User
 from app.audit import log_event
+from app.docx_util import finalize_stored_docx_bytes, normalize_onlyoffice_persisted_docx_bytes
 
 router = APIRouter(prefix="/onlyoffice", tags=["onlyoffice"])
 log = logging.getLogger(__name__)
@@ -462,6 +463,17 @@ async def persist_onlyoffice_browser_url_to_file(
     if Path(row.original_filename).suffix.lower() == ".pdf":
         data = fix_pdf_form_need_appearances(data)
 
+    data = normalize_onlyoffice_persisted_docx_bytes(
+        data,
+        filename=row.original_filename,
+        mime_type=row.mime_type,
+    )
+    data = finalize_stored_docx_bytes(
+        data,
+        filename=row.original_filename,
+        mime_type=row.mime_type,
+    )
+
     ensure_files_root()
     abs_path = (FILES_ROOT / row.storage_path).resolve()
     if not str(abs_path).startswith(str(FILES_ROOT.resolve())):
@@ -635,9 +647,15 @@ def _callback_resolve_file_row(
     case_id: uuid.UUID | None,
     file_id: uuid.UUID | None,
     precedent_id: uuid.UUID | None,
+    fee_scale_id: uuid.UUID | None = None,
 ) -> DbFile | None:
     """Resolve the backing ``file`` row for a ONLYOFFICE callback (case file or precedent template)."""
 
+    if fee_scale_id is not None:
+        scale = db.get(FeeScale, fee_scale_id)
+        if not scale:
+            return None
+        return db.get(DbFile, scale.file_id)
     if precedent_id is not None:
         prec = db.get(Precedent, precedent_id)
         if not prec:
@@ -694,9 +712,10 @@ async def onlyoffice_callback(
     case_id: uuid.UUID | None = Query(None),
     file_id: uuid.UUID | None = Query(None),
     precedent_id: uuid.UUID | None = Query(None),
+    fee_scale_id: uuid.UUID | None = Query(None),
     db: Session = Depends(get_db),
 ) -> dict[str, int]:
-    if precedent_id is None and (case_id is None or file_id is None):
+    if precedent_id is None and fee_scale_id is None and (case_id is None or file_id is None):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Missing case_id or file_id")
 
     raw = await request.body()
@@ -726,7 +745,9 @@ async def onlyoffice_callback(
     # POST /oo-force-save wait until timeout and then return HTTP 504. ``/oo-force-save`` completes
     # with a metadata version bump when the CommandService forcesave itself succeeded.
     if st == 7:
-        row7 = _callback_resolve_file_row(db, case_id=case_id, file_id=file_id, precedent_id=precedent_id)
+        row7 = _callback_resolve_file_row(
+            db, case_id=case_id, file_id=file_id, precedent_id=precedent_id, fee_scale_id=fee_scale_id
+        )
         if row7 is not None:
             log.warning(
                 "onlyoffice_callback: force-save status=7 (DS error) file=%s oo_force_save_pending=%s",
@@ -738,7 +759,9 @@ async def onlyoffice_callback(
     # 2 = document closed, must save; 4 = closed with no changes (some builds still send a url);
     # 6 = force-save while editing.
     if st in (2, 4, 6) and download_url:
-        row = _callback_resolve_file_row(db, case_id=case_id, file_id=file_id, precedent_id=precedent_id)
+        row = _callback_resolve_file_row(
+            db, case_id=case_id, file_id=file_id, precedent_id=precedent_id, fee_scale_id=fee_scale_id
+        )
         if row is None:
             return {"error": 1}
         db.refresh(row)
@@ -783,6 +806,12 @@ async def onlyoffice_callback(
             log.exception("ONLYOFFICE save download failed (url=%s): %s", fetch_url, e)
             return {"error": 1}
 
+        data = finalize_stored_docx_bytes(
+            data,
+            filename=row.original_filename,
+            mime_type=row.mime_type,
+        )
+
         abs_path.parent.mkdir(parents=True, exist_ok=True)
         abs_path.write_bytes(data)
 
@@ -817,7 +846,9 @@ async def onlyoffice_callback(
 
     # Force-save with no edits: DS may omit ``url`` (status 4 is “closed, no changes”; some builds also omit url on 2/6).
     if st in (2, 4, 6) and not download_url:
-        row = _callback_resolve_file_row(db, case_id=case_id, file_id=file_id, precedent_id=precedent_id)
+        row = _callback_resolve_file_row(
+            db, case_id=case_id, file_id=file_id, precedent_id=precedent_id, fee_scale_id=fee_scale_id
+        )
         if row is None:
             return {"error": 1}
         db.refresh(row)

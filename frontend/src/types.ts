@@ -34,6 +34,10 @@ export type UserPublic = {
   ui_preferences?: UserUiPreferencesOut
 }
 
+export function userCanAccessAdminConsole(me: UserPublic | null | undefined): boolean {
+  return Boolean(me?.admin_console_access || me?.role === 'admin')
+}
+
 export type CalendarView = 'dayGridMonth' | 'timeGridWeek' | 'timeGridDay' | 'listWeek'
 export type TaskLayout = 'list' | 'kanban'
 export type TaskSortKey = 'reference' | 'client' | 'matter' | 'task' | 'date' | 'assigned' | 'priority'
@@ -125,6 +129,8 @@ export type FirmSettingsOut = {
   postcode?: string | null
   letterhead_style: LetterheadStyle
   letterhead_original_filename?: string | null
+  quote_letterhead_style?: LetterheadStyle
+  quote_letterhead_original_filename?: string | null
   mandate_two_factor?: boolean
   mandate_password_rotation?: boolean
   password_rotation_days?: number | null
@@ -433,6 +439,116 @@ export type PrecedentOut = {
   matter_sub_type_name?: string | null
   scope_summary?: string
   created_at: string
+}
+
+export type FeeScaleLineKind = 'section_header' | 'item' | 'vat' | 'subtotal' | 'total'
+export type FeeScaleAmountKind = 'fixed' | 'editable' | 'band'
+
+export type FeeScaleOut = {
+  id: string
+  name: string
+  reference: string
+  vat_rate_bps: number
+  matter_head_type_id?: string | null
+  matter_sub_type_id?: string | null
+  matter_head_type_name?: string | null
+  matter_sub_type_name?: string | null
+  scope_summary?: string | null
+  created_at: string
+  updated_at: string
+}
+
+export type FeeScaleLineOut = {
+  id: string
+  category_id: string
+  name: string
+  line_kind: FeeScaleLineKind
+  amount_kind?: FeeScaleAmountKind | null
+  default_amount_pence?: number | null
+  band_set_id?: string | null
+  include_in_vat: boolean
+  sort_order: number
+}
+
+export type FeeScaleCategoryOut = {
+  id: string
+  fee_scale_id: string
+  name: string
+  sort_order: number
+  lines: FeeScaleLineOut[]
+}
+
+export type FeeScaleBandRowOut = {
+  id: string
+  band_set_id: string
+  min_value_pence: number
+  max_value_pence?: number | null
+  amount_pence: number
+  sort_order: number
+}
+
+export type FeeScaleBandSetOut = {
+  id: string
+  fee_scale_id: string
+  name: string
+  sort_order: number
+  rows: FeeScaleBandRowOut[]
+}
+
+export type FeeScaleDetailOut = FeeScaleOut & {
+  categories: FeeScaleCategoryOut[]
+  band_sets: FeeScaleBandSetOut[]
+}
+
+export type QuotePreviewLineOut = {
+  key?: string | null
+  line_id?: string | null
+  name: string
+  line_kind: string
+  amount_pence?: number | null
+  amount_display?: string | null
+  editable: boolean
+  is_bold: boolean
+  include_in_vat?: boolean
+  amount_kind?: string | null
+  band_set_id?: string | null
+  sort_order?: number
+}
+
+export type QuotePreviewCategoryOut = {
+  key: string
+  category_id?: string | null
+  name: string
+  sort_order: number
+  lines: QuotePreviewLineOut[]
+}
+
+export type QuotePreviewOut = {
+  fee_scale_id: string
+  property_value_pence?: number | null
+  needs_property_value: boolean
+  lines: QuotePreviewLineOut[]
+  categories?: QuotePreviewCategoryOut[]
+}
+
+export type QuoteDraftLine = {
+  key: string
+  line_id?: string | null
+  name: string
+  line_kind: FeeScaleLineKind
+  amount_kind?: FeeScaleAmountKind | null
+  amount_pence?: number | null
+  include_in_vat: boolean
+  band_set_id?: string | null
+  sort_order: number
+}
+
+export type QuoteDraftCategory = {
+  key: string
+  category_id?: string | null
+  name: string
+  sort_order: number
+  lines: QuoteDraftLine[]
 }
 
 export type UserSummary = {

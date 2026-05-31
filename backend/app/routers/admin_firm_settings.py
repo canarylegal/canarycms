@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 from app.audit import log_event
 from app.db import get_db
 from app.deps import require_admin
-from app.file_storage import FILES_ROOT, ensure_files_root, firm_letterhead_file_paths
+from app.file_storage import FILES_ROOT, ensure_files_root, firm_letterhead_file_paths, firm_quote_letterhead_file_paths
 from app.models import File as DbFile
 from app.models import FileCategory, FirmSettings, LetterheadStyle, User
 from app.schemas import FirmSettingsOut, FirmSettingsUpdate
@@ -40,10 +40,15 @@ def _settings_row(db: Session) -> FirmSettings:
 
 def _to_out(db: Session, row: FirmSettings) -> FirmSettingsOut:
     name: str | None = None
+    quote_name: str | None = None
     if row.letterhead_file_id:
         f = db.get(DbFile, row.letterhead_file_id)
         if f:
             name = f.original_filename
+    if row.quote_letterhead_file_id:
+        qf = db.get(DbFile, row.quote_letterhead_file_id)
+        if qf:
+            quote_name = qf.original_filename
     return FirmSettingsOut(
         id=row.id,
         trading_name=row.trading_name or "",
@@ -55,6 +60,8 @@ def _to_out(db: Session, row: FirmSettings) -> FirmSettingsOut:
         postcode=row.postcode,
         letterhead_style=row.letterhead_style,
         letterhead_original_filename=name,
+        quote_letterhead_style=row.quote_letterhead_style,
+        quote_letterhead_original_filename=quote_name,
         mandate_two_factor=bool(row.mandate_two_factor),
         mandate_password_rotation=bool(row.mandate_password_rotation),
         password_rotation_days=row.password_rotation_days,
@@ -84,6 +91,23 @@ def _delete_letterhead_file(db: Session, settings: FirmSettings) -> None:
         return
     f = db.get(DbFile, fid)
     settings.letterhead_file_id = None
+    if f:
+        abs_path = (FILES_ROOT / f.storage_path).resolve()
+        db.delete(f)
+        db.flush()
+        if str(abs_path).startswith(str(FILES_ROOT)) and abs_path.is_file():
+            try:
+                abs_path.unlink()
+            except OSError:
+                pass
+
+
+def _delete_quote_letterhead_file(db: Session, settings: FirmSettings) -> None:
+    fid = settings.quote_letterhead_file_id
+    if not fid:
+        return
+    f = db.get(DbFile, fid)
+    settings.quote_letterhead_file_id = None
     if f:
         abs_path = (FILES_ROOT / f.storage_path).resolve()
         db.delete(f)
@@ -213,6 +237,93 @@ def delete_letterhead(admin: User = Depends(require_admin), db: Session = Depend
         db,
         actor_user_id=admin.id,
         action="firm_settings.letterhead_delete",
+        entity_type="firm_settings",
+        entity_id="1",
+        meta={},
+    )
+    return _to_out(db, row)
+
+
+@router.post("/quote-letterhead", response_model=FirmSettingsOut)
+async def upload_quote_letterhead(
+    upload: UploadFile = File(...),
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+) -> FirmSettingsOut:
+    original = upload.filename or "quote_letterhead.bin"
+    _validate_docx_upload(original, upload.content_type)
+
+    row = _settings_row(db)
+    ensure_files_root()
+    _delete_quote_letterhead_file(db, row)
+
+    file_id = uuid.uuid4()
+    paths = firm_quote_letterhead_file_paths(file_id=file_id, original_filename=original)
+
+    size = 0
+    with paths.abs_path.open("wb") as fh:
+        while True:
+            chunk = await upload.read(1024 * 1024)
+            if not chunk:
+                break
+            size += len(chunk)
+            fh.write(chunk)
+
+    mime = upload.content_type or (
+        mimetypes.guess_type(original)[0]
+        or "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    )
+    if mime.split(";", 1)[0].strip().lower() not in _ALLOWED_LETTERHEAD_MIME:
+        mime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+
+    now = datetime.utcnow()
+    frow = DbFile(
+        id=file_id,
+        case_id=None,
+        owner_id=admin.id,
+        category=FileCategory.firm_letterhead,
+        storage_path=paths.rel_path,
+        folder_path="",
+        parent_file_id=None,
+        is_pinned=False,
+        original_filename=Path(original).name,
+        mime_type=mime,
+        size_bytes=size,
+        version=1,
+        checksum=None,
+        created_at=now,
+        updated_at=now,
+    )
+    row.quote_letterhead_file_id = file_id
+    row.quote_letterhead_style = LetterheadStyle.digital
+    row.updated_at = now
+    db.add(frow)
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    log_event(
+        db,
+        actor_user_id=admin.id,
+        action="firm_settings.quote_letterhead_upload",
+        entity_type="firm_settings",
+        entity_id="1",
+        meta={"file_id": str(file_id)},
+    )
+    return _to_out(db, row)
+
+
+@router.delete("/quote-letterhead", response_model=FirmSettingsOut)
+def delete_quote_letterhead(admin: User = Depends(require_admin), db: Session = Depends(get_db)) -> FirmSettingsOut:
+    row = _settings_row(db)
+    _delete_quote_letterhead_file(db, row)
+    row.updated_at = datetime.utcnow()
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    log_event(
+        db,
+        actor_user_id=admin.id,
+        action="firm_settings.quote_letterhead_delete",
         entity_type="firm_settings",
         entity_id="1",
         meta={},

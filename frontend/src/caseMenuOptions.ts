@@ -6,5 +6,6 @@ export const CASE_MENU_OPTIONS: string[] = [
   'Calendar',
   'Finance',
   'Property',
+  'Quotes',
   'Tasks',
 ]

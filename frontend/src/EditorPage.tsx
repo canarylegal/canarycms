@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { apiFetch } from './api'
+import { BusyIcon } from './BusyIcon'
 import { signalCaseFilesChanged } from './caseFilesCrossTab'
 import { canaryDocumentTitle } from './tabTitle'
 
@@ -22,9 +23,32 @@ type OoConfig = {
 type EditorTarget =
   | { mode: 'case'; caseId: string; fileId: string }
   | { mode: 'precedent'; precedentId: string }
+  | { mode: 'fee-scale'; feeScaleId: string }
+
+function editorConfigUrl(params: EditorTarget): string {
+  if (params.mode === 'precedent') return `/precedents/${params.precedentId}/onlyoffice-config`
+  if (params.mode === 'fee-scale') return `/fee-scales/${params.feeScaleId}/onlyoffice-config`
+  return `/cases/${params.caseId}/files/${params.fileId}/onlyoffice-config`
+}
+
+function editorPersistPath(params: EditorTarget): string {
+  if (params.mode === 'precedent') return `/precedents/${params.precedentId}/oo-persist-download`
+  if (params.mode === 'fee-scale') return `/fee-scales/${params.feeScaleId}/oo-persist-download`
+  return `/cases/${params.caseId}/files/${params.fileId}/oo-persist-download`
+}
+
+function editorForceSaveBase(params: EditorTarget): string {
+  if (params.mode === 'precedent') return `/precedents/${params.precedentId}/oo-force-save`
+  if (params.mode === 'fee-scale') return `/fee-scales/${params.feeScaleId}/oo-force-save`
+  return `/cases/${params.caseId}/files/${params.fileId}/oo-force-save`
+}
 
 function parseEditorPath(): EditorTarget | null {
   const parts = window.location.pathname.split('/').filter(Boolean)
+  // /editor/fee-scale/{feeScaleId}
+  if (parts[0] === 'editor' && parts[1] === 'fee-scale' && parts[2]) {
+    return { mode: 'fee-scale', feeScaleId: parts[2] }
+  }
   // /editor/precedent/{precedentId}
   if (parts[0] === 'editor' && parts[1] === 'precedent' && parts[2]) {
     return { mode: 'precedent', precedentId: parts[2] }
@@ -76,6 +100,8 @@ const OO_PERSIST_SAVE_TIMEOUT_MS = 90_000
 const OO_SAVE_POLL_MS = 300
 /** Brief poll after programmatic toolbar Save (matches native OO Save callback). */
 const OO_PDF_TOOLBAR_POLL_MS = 12_000
+/** Office formats: allow longer for CommandService forcesave + callback persist. */
+const OO_OFFICE_SAVE_POLL_MS = 45_000
 const OO_SYNC_WAIT_MS = 3_000
 
 type OoForceSaveArmOut = { base_version: number }
@@ -287,14 +313,11 @@ export default function EditorPage() {
   // (React Strict Mode remount, fast tab switches) minting extra WebDAV sessions server-side.
   useEffect(() => {
     if (!params) {
-      setErr('Invalid editor URL — expected /editor/{caseId}/{fileId} or /editor/precedent/{precedentId}')
+      setErr('Invalid editor URL — expected /editor/{caseId}/{fileId}, /editor/precedent/{precedentId}, or /editor/fee-scale/{feeScaleId}')
       return
     }
     const ac = new AbortController()
-    const configUrl = params.mode === 'precedent'
-      ? `/precedents/${params.precedentId}/onlyoffice-config`
-      : `/cases/${params.caseId}/files/${params.fileId}/onlyoffice-config`
-    apiFetch<OoConfig>(configUrl, { token, signal: ac.signal })
+    apiFetch<OoConfig>(editorConfigUrl(params), { token, signal: ac.signal })
       .then((data) => {
         if (ac.signal.aborted) return
         setErr(null)
@@ -462,10 +485,7 @@ export default function EditorPage() {
                   wait.reject(new Error('Sign in again to save.'))
                   return
                 }
-                const persistPath =
-                  params.mode === 'case'
-                    ? `/cases/${params.caseId}/files/${params.fileId}/oo-persist-download`
-                    : `/precedents/${params.precedentId}/oo-persist-download`
+                const persistPath = editorPersistPath(params)
                 void (async () => {
                   try {
                     await apiFetch(persistPath, {
@@ -656,6 +676,50 @@ export default function EditorPage() {
   }
 
   /**
+   * Office save: prefer forcesave callback (native OO save path). ``downloadAs`` exports can
+   * produce .docx files that ONLYOFFICE fails to reopen (``changesError`` on next open).
+   */
+  async function performOfficeSave(format: string): Promise<void> {
+    if (!params || !cfg) return
+    const docKey = String((cfg.document as { key?: string }).key ?? '')
+    if (!docKey) {
+      throw new Error('Editor key missing; cannot save safely. Please reload and try again.')
+    }
+    const saveBase = editorForceSaveBase(params)
+
+    await waitForOoServerSync()
+
+    const arm = await apiFetch<OoForceSaveArmOut>(ooForceSavePath(saveBase, docKey, 'arm'), {
+      method: 'POST',
+      token,
+    })
+    const statusUrl = ooSaveStatusPath(saveBase, arm.base_version)
+
+    let saveTriggered = triggerOnlyofficeToolbarSave()
+    if (!saveTriggered) {
+      try {
+        await apiFetch(ooForceSavePath(saveBase, docKey, 'command'), { method: 'POST', token })
+        saveTriggered = true
+      } catch (e: unknown) {
+        console.warn('[ONLYOFFICE] command forcesave failed:', e)
+      }
+    }
+
+    if (saveTriggered) {
+      try {
+        await pollOnlyofficeSaveConfirmed(statusUrl, arm.base_version, token, OO_OFFICE_SAVE_POLL_MS)
+        return
+      } catch (pollErr: unknown) {
+        console.warn('[ONLYOFFICE] forcesave not confirmed; using downloadAs:', pollErr)
+      }
+    } else {
+      console.info('[ONLYOFFICE] toolbar Save not reachable; using downloadAs persist')
+    }
+
+    await saveDocumentViaDownloadAs(format)
+  }
+
+  /**
    * PDF save: prefer native toolbar forcesave (correct form appearances). CommandService
    * forcesave does not bump version for PDFs in practice — do not poll 45s waiting for it.
    * Fall back quickly to ``downloadAs`` + backend NeedAppearances fix.
@@ -666,10 +730,7 @@ export default function EditorPage() {
     if (!docKey) {
       throw new Error('Editor key missing; cannot save safely. Please reload and try again.')
     }
-    const saveBase =
-      params.mode === 'case'
-        ? `/cases/${params.caseId}/files/${params.fileId}/oo-force-save`
-        : `/precedents/${params.precedentId}/oo-force-save`
+    const saveBase = editorForceSaveBase(params)
 
     await waitForOoServerSync()
 
@@ -704,11 +765,19 @@ export default function EditorPage() {
     if (!params || !cfg) return false
     const fileType = String((cfg.document as { fileType?: string }).fileType ?? '').toLowerCase()
     const dlFormat = fileType === 'pdf' ? 'pdf' : fileType || 'docx'
+    /** Compose drafts (quotes, letters) are already on disk — publishing is enough if the user did not edit. */
+    const composePublishOnly =
+      params.mode === 'case' &&
+      composePublishPending &&
+      !hasUncommittedOoEditsRef.current &&
+      !documentDirty
     try {
-      if (isPdfOoConfig(cfg)) {
-        await performPdfSave()
-      } else {
-        await saveDocumentViaDownloadAs(dlFormat)
+      if (!composePublishOnly) {
+        if (isPdfOoConfig(cfg)) {
+          await performPdfSave()
+        } else {
+          await performOfficeSave(dlFormat)
+        }
       }
 
       if (params.mode === 'case') {
@@ -1103,20 +1172,33 @@ export default function EditorPage() {
         >
           {err}
         </div>
-      ) : !cfg ? (
-        <div
-          style={{
-            flex: 1,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            color: '#64748b',
-          }}
-        >
-          Loading editor…
-        </div>
       ) : (
-        <div id="oo-editor-page" style={{ flex: 1, minHeight: 0 }} />
+        <div style={{ flex: 1, minHeight: 0, position: 'relative', display: 'flex', flexDirection: 'column' }}>
+          {!cfg ? (
+            <div
+              style={{
+                flex: 1,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              <BusyIcon label="Loading editor" />
+            </div>
+          ) : (
+            <div id="oo-editor-page" style={{ flex: 1, minHeight: 0 }} />
+          )}
+          {saving || unsavedSaveBusy ? (
+            <div
+              className="modalBusyOverlay"
+              style={{ position: 'absolute', inset: 0, borderRadius: 0 }}
+              role="status"
+              aria-live="polite"
+            >
+              <BusyIcon label="Saving document" />
+            </div>
+          ) : null}
+        </div>
       )}
     </div>
   )

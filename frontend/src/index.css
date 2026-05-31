@@ -214,6 +214,21 @@ a {
   cursor: not-allowed;
 }
 
+.loginActionsRow {
+  display: flex;
+  gap: 10px;
+  width: 100%;
+  /* Match visual gap between email and password inputs (.stack gap + field label). */
+  margin-top: calc(6px + 1.25em);
+}
+
+.loginActionsRow .btn {
+  flex: 1 1 0;
+  min-width: 0;
+  align-self: stretch;
+  text-align: center;
+}
+
 .appLogo {
   display: block;
   object-fit: contain;
@@ -1057,6 +1072,10 @@ html.dark .topbar .btn:not(.primary):not(.danger) {
   gap: 12px;
 }
 
+.stack > .btn {
+  align-self: flex-start;
+}
+
 .row {
   display: flex;
   gap: 10px;
@@ -1698,6 +1717,35 @@ select {
   color: var(--muted);
 }
 
+.busyIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.busyIconSpinner {
+  width: 28px;
+  height: 28px;
+  border: 2px solid var(--border);
+  border-top-color: var(--primary);
+  border-radius: 50%;
+  animation: busyIconSpin 0.7s linear infinite;
+}
+
+@keyframes busyIconSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.caseViewBusy {
+  display: flex;
+  flex: 1 1 0;
+  align-items: center;
+  justify-content: center;
+  min-height: 120px;
+}
+
 .grid2 {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -2110,6 +2158,21 @@ select {
 .modalOverlay > .card.modal {
   margin-top: max(2vh, 8px);
   margin-bottom: auto;
+}
+
+.modalBodyScroll--relative {
+  position: relative;
+}
+
+.modalBusyOverlay {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(15, 23, 42, 0.55);
+  border-radius: inherit;
 }
 
 /** Pop-out dialogs: drag handle shows grip cursor; surface can be resized (NW–SE) like a desktop window. */
@@ -3018,11 +3081,147 @@ html.dark .ledgerBalanceBand--client {
   border-bottom: 1px solid var(--border);
 }
 
-.finCategoryName {
+.finCategoryNameInput {
   font-weight: 600;
   font-size: 0.95rem;
-  color: var(--text);
   flex: 1;
+  min-width: 0;
+  background: transparent;
+  border: 1px solid transparent;
+}
+
+.finCategoryNameInput:focus {
+  background: var(--card);
+  border-color: var(--border);
+}
+
+.quoteReviewCategory {
+  margin-bottom: 0;
+}
+
+.quoteReviewTable .input,
+.quoteReviewTable .select {
+  font-size: 0.88rem;
+  padding: 4px 8px;
+}
+
+.quoteReviewRowBold .input {
+  font-weight: 600;
+}
+
+.modal.modal--scrollBody .modalBodyScroll {
+  overflow-y: auto;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.modal.modal--quoteReview {
+  width: min(980px, 96vw);
+  max-width: min(980px, 96vw);
+  min-height: min(720px, 88vh);
+  max-height: min(92vh, 900px);
+}
+
+.modal.modal--quoteReview .modalBodyScroll {
+  padding-top: 4px;
+}
+
+.quoteReviewShell {
+  gap: 14px;
+}
+
+.quoteReviewToolbar {
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 4px;
+}
+
+.quoteReviewToolbarMain {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.quoteReviewPropertyBlock {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.quoteReviewPropertyLabel {
+  display: block;
+  margin: 0;
+  font-size: 0.88rem;
+  color: var(--muted);
+}
+
+.quoteReviewPropertyRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.quoteReviewPropertyInput {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 38px;
+  box-sizing: border-box;
+}
+
+.quoteReviewToolbarActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.quoteReviewToolbarActions .finAddCatBtn {
+  min-height: 38px;
+  box-sizing: border-box;
+  white-space: nowrap;
+}
+
+.quoteReviewHint {
+  flex: 1 1 240px;
+  margin: 0;
+  font-size: 13px;
+  padding-bottom: 8px;
+}
+
+.quoteReviewUpdating {
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.quoteReviewCategories {
+  padding-bottom: 8px;
+}
+
+.quoteReviewCategory {
+  margin-bottom: 0;
+}
+
+.quoteReviewTable th,
+.quoteReviewTable td {
+  padding: 10px 12px;
+  vertical-align: middle;
+}
+
+.quoteReviewTable .input,
+.quoteReviewTable .select {
+  font-size: 0.92rem;
+  padding: 6px 10px;
+  min-height: 34px;
+}
+
+.quoteReviewRowBold .input {
+  font-weight: 600;
+}
+
+.quoteReviewLoading {
+  padding: 24px 8px;
 }
 
 .finCategoryTotals {

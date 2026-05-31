@@ -521,6 +521,7 @@ def get_precedent_onlyoffice_config(
             "mode": "edit",
             "lang": "en-GB",
             "region": "en-GB",
+            "location": "en-GB",
             "callbackUrl": cb_url,
             "user": {"id": str(user.id), "name": user.display_name or user.email, "group": "Canary"},
             "customization": onlyoffice_editor_customization(file_type=file_type),

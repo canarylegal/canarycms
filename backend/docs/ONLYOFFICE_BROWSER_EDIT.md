@@ -66,7 +66,7 @@ docker compose exec onlyoffice curl -sS --max-time 5 -o /dev/null -w "%{http_cod
 
 If **`backend:8000` fails**, fix Docker networking (same `canary` network for `backend` + `onlyoffice`), not LAN URLs in `.env`.
 
-**Strong fix when `GET /webdav` never appears:** leave **`ONLYOFFICE_APP_URL_INTERNAL` unset** (JWT uses **`http://backend:8000`**) and ensure **`docker compose exec onlyoffice curl -sS -o /dev/null -w "%{http_code}\n" http://backend:8000/health`** returns **200**. If the editor shows **invalid token** / stays blank with no `/webdav` hit, confirm the signed config uses **`editorConfig.lang`** as a **two-letter** code (**`en`**, not **`en-US`**) and **`region`** for **`en-US`** — Canary encodes that. Recreate Document Server after changing **`ALLOW_PRIVATE_IP_ADDRESS`** so **`local.json`** is rewritten: **`docker compose up -d --force-recreate onlyoffice`**. Avoid **192.168…** in the JWT unless you have proven `curl` from `onlyoffice` succeeds.
+**Strong fix when `GET /webdav` never appears:** leave **`ONLYOFFICE_APP_URL_INTERNAL` unset** (JWT uses **`http://backend:8000`**) and ensure **`docker compose exec onlyoffice curl -sS -o /dev/null -w "%{http_code}\n" http://backend:8000/health`** returns **200**. If the editor shows **invalid token** / stays blank with no `/webdav` hit, confirm the signed config uses **`editorConfig.lang`**, **`region`**, and **`location`** all set to **`en-GB`** (British English only). Recreate Document Server after changing **`ALLOW_PRIVATE_IP_ADDRESS`** so **`local.json`** is rewritten: **`docker compose up -d --force-recreate onlyoffice`**. Avoid **192.168…** in the JWT unless you have proven `curl` from `onlyoffice` succeeds.
 
 **2. Watch backend logs while opening “Edit in browser”**
 

@@ -25,6 +25,7 @@ from starlette.background import BackgroundTask
 from app.db import get_db
 from app.deps import get_current_user, require_case_access
 from app.compose_merge import merge_compose_docx_bytes
+from app.compose_quote import merge_compose_quote_docx_bytes
 from app.docx_util import extract_plain_text_from_docx_bytes, write_blank_docx
 from app.graph_mail import create_outlook_draft, graph_mail_configured
 from app.file_storage import FILES_ROOT, StoredFilePaths, case_file_paths, ensure_files_root, sanitize_folder_path
@@ -73,6 +74,7 @@ from app.schemas import (
     CaseEmailMailtoOut,
     CommentFileUpdate,
     ComposeOfficeDocumentIn,
+    ComposeQuoteIn,
     FileDesktopCheckoutOut,
     FileEditSessionStatusOut,
     FilePinUpdate,
@@ -617,6 +619,74 @@ def compose_office_document(
     }
 
 
+@router.post("/compose-quote", status_code=status.HTTP_201_CREATED)
+def compose_quote_spreadsheet(
+    case_id: uuid.UUID,
+    body: ComposeQuoteIn,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Create a new quote .docx: quote letterhead template + fee table from the fee scale."""
+    require_case_access(case_id, user, db)
+    ensure_files_root()
+    orig = body.original_filename.strip()
+    if not orig.lower().endswith(".docx"):
+        orig = f"{Path(orig).stem or 'Quote'}.docx"
+
+    try:
+        src_bytes, mime = merge_compose_quote_docx_bytes(db, case_id, body)
+    except ValueError as ve:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(ve)) from ve
+
+    file_id = uuid.uuid4()
+    folder = sanitize_folder_path(body.folder or "")
+    paths = case_file_paths(case_id=case_id, file_id=file_id, original_filename=orig, folder_path=folder)
+    paths.abs_path.write_bytes(src_bytes)
+    size = len(src_bytes)
+    now = datetime.utcnow()
+    row = DbFile(
+        id=file_id,
+        case_id=case_id,
+        owner_id=user.id,
+        category=FileCategory.case_document,
+        storage_path=paths.rel_path,
+        folder_path=paths.folder_path,
+        parent_file_id=None,
+        source_imap_mbox=None,
+        source_imap_uid=None,
+        is_pinned=False,
+        original_filename=orig,
+        mime_type=mime,
+        size_bytes=size,
+        version=1,
+        checksum=None,
+        oo_compose_pending=True,
+        created_at=now,
+        updated_at=now,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    log_event(
+        db,
+        actor_user_id=user.id,
+        action="case.file.compose_quote",
+        entity_type="file",
+        entity_id=str(row.id),
+        meta={
+            "case_id": str(case_id),
+            "fee_scale_id": str(body.fee_scale_id) if body.fee_scale_id else None,
+        },
+    )
+    return {
+        "id": str(row.id),
+        "case_id": str(row.case_id),
+        "original_filename": row.original_filename,
+        "mime_type": row.mime_type,
+        "size_bytes": row.size_bytes,
+    }
+
+
 def _resolve_recipient_email_m365(
     db: Session,
     case_id: uuid.UUID,
@@ -657,6 +727,7 @@ def _case_email_compose_bundle(
         case_contact_id=body.case_contact_id,
         global_contact_id=body.global_contact_id,
         precedent_merge_all_clients=body.precedent_merge_all_clients,
+        compose_office_role=body.compose_office_role,
     )
     kind_filter = PrecedentKind.email if body.precedent_id is not None else None
     src_bytes, _mime = merge_compose_docx_bytes(db, case_id, merge_in, require_precedent_kind=kind_filter)
@@ -1984,6 +2055,7 @@ def get_onlyoffice_editor_config(
             "mode": "edit",
             "lang": "en-GB",
             "region": "en-GB",
+            "location": "en-GB",
             "callbackUrl": cb_url,
             "user": {
                 "id": str(user.id),

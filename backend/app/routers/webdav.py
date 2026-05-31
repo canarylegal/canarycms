@@ -23,6 +23,7 @@ from app.models import File as DbFile, FileCategory, FileEditSession, User
 from app.routers.files import convert_case_upload_msg_to_eml_if_applicable, refresh_root_eml_mail_metadata
 from app.audit import log_event
 from app.canary_public_url import get_canary_public_base
+from app.docx_util import ensure_docx_proofing_language_en_gb_bytes, finalize_stored_docx_bytes
 
 router = APIRouter(prefix="/webdav", tags=["webdav"])
 log = logging.getLogger(__name__)
@@ -412,8 +413,6 @@ def webdav_get_file(
         media_type.split(";", 1)[0].strip()
         == "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     ):
-        from app.docx_util import ensure_docx_proofing_language_en_gb_bytes
-
         data = ensure_docx_proofing_language_en_gb_bytes(data)
     total_len = len(data)
     last_mod = frow.updated_at or frow.created_at
@@ -510,9 +509,27 @@ async def webdav_put_file(
             if chunk:
                 out.write(chunk)
 
+    if frow.original_filename.lower().endswith(".docx") or (
+        (frow.mime_type or "").split(";", 1)[0].strip().lower()
+        == "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    ):
+        raw = abs_path.read_bytes()
+        patched = finalize_stored_docx_bytes(
+            raw,
+            filename=frow.original_filename,
+            mime_type=frow.mime_type,
+        )
+        if patched != raw:
+            abs_path.write_bytes(patched)
+            new_size = len(patched)
+        else:
+            new_size = abs_path.stat().st_size
+    else:
+        new_size = abs_path.stat().st_size
+
     paths_wrap = StoredFilePaths(abs_path=abs_path, rel_path=frow.storage_path, folder_path=frow.folder_path or "")
     prev_name = frow.original_filename
-    original_fn, new_paths, new_size = convert_case_upload_msg_to_eml_if_applicable(
+    original_fn, new_paths, final_size = convert_case_upload_msg_to_eml_if_applicable(
         case_id=frow.case_id,
         file_id=frow.id,
         folder_path=frow.folder_path or "",
@@ -521,7 +538,7 @@ async def webdav_put_file(
     )
     frow.storage_path = new_paths.rel_path
     frow.original_filename = original_fn
-    frow.size_bytes = new_size
+    frow.size_bytes = final_size
     if prev_name.lower().endswith(".msg") and original_fn.lower().endswith(".eml"):
         frow.mime_type = "message/rfc822"
         uploader = db.get(User, sess.user_id)
@@ -536,7 +553,7 @@ async def webdav_put_file(
         action="case.file.webdav_put",
         entity_type="file",
         entity_id=str(frow.id),
-        meta={"case_id": str(frow.case_id), "version": frow.version, "size_bytes": new_size},
+        meta={"case_id": str(frow.case_id), "version": frow.version, "size_bytes": frow.size_bytes},
     )
     return Response(status_code=204)
 

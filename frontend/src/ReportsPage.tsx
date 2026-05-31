@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { apiFetch, apiUrl, applyAuthHeaders } from './api'
 import type { ApiError } from './api'
-import type { CalendarEventTemplatePickOut, CaseWorkflowStatus, UserPublic } from './types'
+import { userCanAccessAdminConsole, type CalendarEventTemplatePickOut, type CaseWorkflowStatus, type UserPublic } from './types'
 
 type ReportTab =
   | 'client_office_balances'
@@ -147,7 +147,7 @@ export function ReportsPage({ token, me }: { token: string; me: UserPublic | nul
   const [feeEarners, setFeeEarners] = useState<FeeEarnerPick[]>([])
   const [feeEarnerSelected, setFeeEarnerSelected] = useState<Set<string>>(new Set())
 
-  const isAdmin = Boolean(me?.admin_console_access || me?.role === 'admin')
+  const isAdmin = userCanAccessAdminConsole(me)
   const feeEarnerLocked = !isAdmin
 
   const [billingFrom, setBillingFrom] = useState('')

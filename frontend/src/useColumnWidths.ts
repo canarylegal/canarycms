@@ -63,6 +63,7 @@ export function useColumnWidths(columnCount: number, options?: ColumnWidthsOptio
       function onUp() {
         document.removeEventListener('mousemove', onMove)
         document.removeEventListener('mouseup', onUp)
+        window.removeEventListener('blur', onUp)
         document.body.style.cursor = ''
         document.body.style.userSelect = ''
       }
@@ -70,6 +71,7 @@ export function useColumnWidths(columnCount: number, options?: ColumnWidthsOptio
       document.body.style.userSelect = 'none'
       document.addEventListener('mousemove', onMove)
       document.addEventListener('mouseup', onUp)
+      window.addEventListener('blur', onUp)
     },
     [columnCount, customized, externalWidths, fallbacks, min, options, pixelWidths],
   )

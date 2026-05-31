@@ -6,13 +6,23 @@ type Props = {
   hint?: string
   initial: string
   confirmLabel: string
+  fieldLabel?: string
   busy?: boolean
   onConfirm: (value: string) => void
   onCancel: () => void
 }
 
 /** In-app text entry instead of window.prompt (no browser URL chrome). */
-export function TextPromptModal({ title, hint, initial, confirmLabel, busy, onConfirm, onCancel }: Props) {
+export function TextPromptModal({
+  title,
+  hint,
+  initial,
+  confirmLabel,
+  fieldLabel = 'Name',
+  busy,
+  onConfirm,
+  onCancel,
+}: Props) {
   const [val, setVal] = useState(initial)
   const drag = useModalDrag(true)
   const { style: dragTitleStyle, ...dragTitleRest } = drag.handleProps
@@ -49,7 +59,7 @@ export function TextPromptModal({ title, hint, initial, confirmLabel, busy, onCo
           </p>
         ) : null}
         <label className="field" style={{ marginTop: 12 }}>
-          <span>Name</span>
+          <span>{fieldLabel}</span>
           <input
             className="allow-select"
             value={val}

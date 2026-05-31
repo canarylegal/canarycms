@@ -48,7 +48,6 @@ if (!el) {
 
   const searchParams = new URLSearchParams(window.location.search)
   const ledgerCaseId = searchParams.get('ledger')
-  const tasksCaseId = searchParams.get('tasks')
 
   if (window.location.pathname === '/portal') {
     document.documentElement.style.zoom = '1'
@@ -89,25 +88,6 @@ if (!el) {
           <AppErrorBoundary>
             <DialogProvider>
               <LedgerStandalone caseId={ledgerCaseId!} token={storedToken} />
-            </DialogProvider>
-          </AppErrorBoundary>
-        </StrictMode>,
-      )
-    }
-  } else if (tasksCaseId) {
-    const storedToken = localStorage.getItem('token') ?? ''
-    if (!storedToken) {
-      root.render(
-        <div style={{ padding: 32, fontFamily: 'system-ui, sans-serif', color: '#64748b' }}>
-          Please log in to Canary first, then reopen this tab.
-        </div>,
-      )
-    } else {
-      root.render(
-        <StrictMode>
-          <AppErrorBoundary>
-            <DialogProvider>
-              <App initialTasksCaseFilter={tasksCaseId} />
             </DialogProvider>
           </AppErrorBoundary>
         </StrictMode>,

@@ -60,12 +60,50 @@ def _effective_compose_office_role(body: ComposeOfficeDocumentIn) -> str | None:
     return None
 
 
+def _is_letter_compose_role(role: str | None) -> bool:
+    return role in ("letter", "quote_letter")
+
+
+def _apply_configured_digital_letterhead(
+    db: Session,
+    *,
+    body: ComposeOfficeDocumentIn,
+    src_bytes: bytes,
+    firm_row: FirmSettings | None,
+    prec_kind: PrecedentKind | None = None,
+) -> bytes:
+    """Overlay firm letterhead headers/footers when digital mode is enabled."""
+    if firm_row is None:
+        return src_bytes
+    if prec_kind is not None and prec_kind != PrecedentKind.letter:
+        return src_bytes
+    role = _effective_compose_office_role(body)
+    if not _is_letter_compose_role(role):
+        return src_bytes
+    use_quote_lh = role == "quote_letter"
+    lh_style = firm_row.quote_letterhead_style if use_quote_lh else firm_row.letterhead_style
+    lh_file_id = firm_row.quote_letterhead_file_id if use_quote_lh else firm_row.letterhead_file_id
+    if lh_style != LetterheadStyle.digital or lh_file_id is None:
+        return src_bytes
+    lh_file = db.get(DbFile, lh_file_id)
+    if lh_file is None:
+        return src_bytes
+    lh_abs = (FILES_ROOT / lh_file.storage_path).resolve()
+    if not str(lh_abs).startswith(str(FILES_ROOT)) or not lh_abs.is_file():
+        return src_bytes
+    try:
+        return apply_digital_letterhead_headers_footers(src_bytes, lh_abs.read_bytes())
+    except Exception as lh_exc:
+        log.warning("digital letterhead merge failed: %s", lh_exc)
+        return src_bytes
+
+
 def _resolve_blank_letter_precedent_body(db: Session, body: ComposeOfficeDocumentIn) -> ComposeOfficeDocumentIn:
     """If letter compose with no precedent id, use reserved ``BLANK_LETTER`` precedent when present."""
 
     if body.precedent_id is not None:
         return body
-    if _effective_compose_office_role(body) != "letter":
+    if not _is_letter_compose_role(_effective_compose_office_role(body)):
         return body
     blank = _load_blank_letter_precedent(db)
     if blank is None:
@@ -291,21 +329,13 @@ def merge_compose_docx_bytes(
                     ),
                 )
 
-        if (
-            prec.kind == PrecedentKind.letter
-            and firm_row
-            and firm_row.letterhead_style == LetterheadStyle.digital
-            and firm_row.letterhead_file_id is not None
-        ):
-            lh_file = db.get(DbFile, firm_row.letterhead_file_id)
-            if lh_file:
-                lh_abs = (FILES_ROOT / lh_file.storage_path).resolve()
-                if str(lh_abs).startswith(str(FILES_ROOT)) and lh_abs.is_file():
-                    try:
-                        lh_bytes = lh_abs.read_bytes()
-                        src_bytes = apply_digital_letterhead_headers_footers(src_bytes, lh_bytes)
-                    except Exception as lh_exc:
-                        log.warning("digital letterhead merge failed: %s", lh_exc)
+        src_bytes = _apply_configured_digital_letterhead(
+            db,
+            body=body,
+            src_bytes=src_bytes,
+            firm_row=firm_row,
+            prec_kind=prec.kind,
+        )
 
         src_bytes = ensure_docx_proofing_language_en_gb_bytes(src_bytes)
         return src_bytes, mime
@@ -318,5 +348,14 @@ def merge_compose_docx_bytes(
         src_bytes = tmp.read_bytes()
     finally:
         tmp.unlink(missing_ok=True)
+    firm_row = db.execute(select(FirmSettings).where(FirmSettings.id == 1)).scalar_one_or_none()
+    src_bytes = _apply_configured_digital_letterhead(
+        db,
+        body=body,
+        src_bytes=src_bytes,
+        firm_row=firm_row,
+        prec_kind=PrecedentKind.letter if _is_letter_compose_role(_effective_compose_office_role(body)) else None,
+    )
+    src_bytes = ensure_docx_proofing_language_en_gb_bytes(src_bytes)
     mime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     return src_bytes, mime

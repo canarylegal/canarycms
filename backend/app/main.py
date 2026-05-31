@@ -37,6 +37,7 @@ from app.routers import (
     case_tasks,
     cases,
     contact_portal,
+    fee_scales,
     task_menu,
     contacts,
     files,
@@ -195,6 +196,7 @@ app.include_router(matter_types.router)
 app.include_router(cases.router)
 app.include_router(case_property.router)
 app.include_router(precedents.router)
+app.include_router(fee_scales.router)
 app.include_router(contacts.router)
 app.include_router(contact_portal.router)
 app.include_router(case_access.router)

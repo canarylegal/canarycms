@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { lockBodyWaitCursor, unlockBodyWaitCursor } from '../bodyCursorLock'
 import { CaseEventCreateModal } from '../CaseEventCreateModal'
 import { EventsPage } from '../EventsPage'
 import { FinancePage } from '../FinancePage'
@@ -25,6 +26,7 @@ import { useDialogs } from '../DialogProvider'
 import { SearchInput } from '../SearchInput'
 import { SingleSelectDropdown } from '../SingleSelectDropdown'
 import { TaskCreateModal } from '../TaskCreateModal'
+import { QuoteWizard } from '../QuoteWizard'
 import { CANARY_FOLLOW_UP_STANDARD_TASK_ID } from '../standardTasks'
 import { TextPromptModal } from '../TextPromptModal'
 import { LedgerPage } from '../LedgerPage'
@@ -283,6 +285,9 @@ export function CaseDetail({
   currentUser,
   openDocPanel,
   onOpenDocPanelConsumed,
+  pendingComposeKind,
+  useQuoteLetterhead,
+  onPendingComposeConsumed,
 }: {
   token: string
   caseDetail: CaseOut | null
@@ -300,6 +305,10 @@ export function CaseDetail({
   /** When set from the main menu, open this documents sub-panel once the matter has loaded. */
   openDocPanel?: CaseOpenDocPanel | null
   onOpenDocPanelConsumed?: () => void
+  /** After quote send flow: open letter or e-mail precedent picker once the matter has loaded. */
+  pendingComposeKind?: 'letter' | 'email' | null
+  useQuoteLetterhead?: boolean
+  onPendingComposeConsumed?: () => void
 }) {
   void _notes
   void _tasks
@@ -328,11 +337,8 @@ export function CaseDetail({
   }, [refreshPortalFolderGrants, files])
   useEffect(() => {
     if (!busy) return
-    const prev = document.body.style.cursor
-    document.body.style.cursor = 'wait'
-    return () => {
-      document.body.style.cursor = prev
-    }
+    lockBodyWaitCursor()
+    return () => unlockBodyWaitCursor()
   }, [busy])
 
   // File drag: prevent the browser from navigating / opening the file when dropping outside a valid target.
@@ -427,6 +433,15 @@ export function CaseDetail({
   const importInputRef = useRef<HTMLInputElement | null>(null)
   const newMenuRef = useRef<HTMLDivElement | null>(null)
   const [newMenuOpen, setNewMenuOpen] = useState(false)
+  const [quoteWizardOpen, setQuoteWizardOpen] = useState(false)
+  const quoteWasCreatedRef = useRef(false)
+  const closeQuoteWizard = useCallback(() => {
+    setQuoteWizardOpen(false)
+    if (quoteWasCreatedRef.current) {
+      quoteWasCreatedRef.current = false
+      onRefresh()
+    }
+  }, [onRefresh])
   const [taskCreateOpen, setTaskCreateOpen] = useState(false)
   const [taskCreatePreset, setTaskCreatePreset] = useState<{ standardTaskId?: string; title?: string } | null>(null)
   const [commentOpen, setCommentOpen] = useState(false)
@@ -650,6 +665,15 @@ export function CaseDetail({
     syncedMatterIdRef.current = caseId
     setCaseDocPanel('documents')
   }, [caseId, selectedCaseId, openDocPanel, onOpenDocPanelConsumed])
+
+  const useQuoteLetterheadRef = useRef(false)
+  useEffect(() => {
+    if (!pendingComposeKind || !matterScopeId) return
+    useQuoteLetterheadRef.current = Boolean(useQuoteLetterhead)
+    setCaseDocPanel('documents')
+    setPrecedentPicker({ kind: pendingComposeKind })
+    onPendingComposeConsumed?.()
+  }, [pendingComposeKind, matterScopeId, useQuoteLetterhead, onPendingComposeConsumed])
 
   useEffect(() => {
     if (!contactRowMenu) return
@@ -1267,7 +1291,7 @@ export function CaseDetail({
     caseContactId?: string | null,
     globalContactId?: string | null,
     precedentMergeAllClients?: boolean,
-    composeOfficeRole?: 'letter' | 'document' | null,
+    composeOfficeRole?: 'letter' | 'document' | 'quote_letter' | null,
   ) {
     if (!caseId) return
     setBusy(true)
@@ -1298,6 +1322,7 @@ export function CaseDetail({
     caseContactId: string | null,
     globalContactId: string | null,
     precedentMergeAllClients: boolean,
+    composeOfficeRole?: 'letter' | 'document' | 'quote_letter' | null,
   ) {
     if (!caseId) return
     setBusy(true)
@@ -1312,6 +1337,7 @@ export function CaseDetail({
           case_contact_id: caseContactId,
           global_contact_id: globalContactId,
           precedent_merge_all_clients: precedentMergeAllClients,
+          compose_office_role: composeOfficeRole ?? null,
           attachment_file_ids: [],
         },
       })
@@ -1762,6 +1788,7 @@ export function CaseDetail({
           caseContactIdForMerge,
           globalContactIdForMerge,
           mergeAllClients,
+          useQuoteLetterheadRef.current ? 'quote_letter' : 'letter',
         )
         setContactPickModal(null)
         resetContactPickForm()
@@ -1775,7 +1802,7 @@ export function CaseDetail({
         caseContactIdForMerge,
         globalContactIdForMerge,
         mergeAllClients,
-        'letter',
+        useQuoteLetterheadRef.current ? 'quote_letter' : 'letter',
       )
       setContactPickModal(null)
       resetContactPickForm()
@@ -1786,8 +1813,7 @@ export function CaseDetail({
     }
   }
 
-  if (!caseId || !matterScopeId)
-    return error ? <div className="error">{error}</div> : <div className="empty">Loading…</div>
+  if (!caseId || !matterScopeId) return error ? <div className="error">{error}</div> : null
 
   return (
     <div className="caseShell">
@@ -2364,6 +2390,17 @@ export function CaseDetail({
                           }}
                         >
                           Event
+                        </button>
+                        <button
+                          type="button"
+                          className="caseToolbarDropdownItem"
+                          role="menuitem"
+                          onClick={() => {
+                            setNewMenuOpen(false)
+                            setQuoteWizardOpen(true)
+                          }}
+                        >
+                          Quote
                         </button>
                         <button
                           type="button"
@@ -3258,6 +3295,34 @@ export function CaseDetail({
                 .then(setEventsPreview)
                 .catch(() => {})
               onRefresh()
+            }}
+          />
+        ) : null}
+
+        {quoteWizardOpen && caseDetail ? (
+          <QuoteWizard
+            token={token}
+            cases={[caseDetail]}
+            users={users}
+            open={quoteWizardOpen}
+            presetCase={caseDetail}
+            onClose={closeQuoteWizard}
+            onOpenNewMatter={() => {}}
+            onCaseCreatedRefresh={() => {}}
+            pendingNewCaseId={null}
+            onClearPendingNewCase={() => {}}
+            onQuoteCreated={() => {
+              quoteWasCreatedRef.current = true
+            }}
+            onSendLetter={(_caseId) => {
+              useQuoteLetterheadRef.current = true
+              setCaseDocPanel('documents')
+              setPrecedentPicker({ kind: 'letter' })
+            }}
+            onSendEmail={(_caseId) => {
+              useQuoteLetterheadRef.current = true
+              setCaseDocPanel('documents')
+              setPrecedentPicker({ kind: 'email' })
             }}
           />
         ) : null}

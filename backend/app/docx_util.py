@@ -1173,6 +1173,158 @@ def _copy_section_page_geometry(src_section: Any, tgt_section: Any) -> None:
 
 
 PRECEDENT_BODY_MARKER = "[PRECEDENT_BODY]"
+QUOTE_FEE_TABLE_MARKER = "[QUOTE_FEE_TABLE]"
+QUOTE_TABLE_MARKERS = (QUOTE_FEE_TABLE_MARKER, PRECEDENT_BODY_MARKER)
+QUOTE_MERGE_SLOT_COUNT = 25
+_QUOTE_SLOT_TOKEN_RE = re.compile(r"^\[QUOTE_\d{2}_(?:LABEL|AMOUNT)\]$", re.IGNORECASE)
+
+
+def insert_xlsx_grid_table_at_marker(doc_bytes: bytes, grid: "XlsxGrid") -> bytes:
+    """Replace ``[QUOTE_FEE_TABLE]`` / ``[PRECEDENT_BODY]`` with a Word table built from an xlsx grid."""
+    import io
+    from copy import deepcopy
+
+    from docx import Document
+    from docx.oxml.ns import qn
+
+    from app.xlsx_util import XlsxGrid
+
+    if not isinstance(grid, XlsxGrid):
+        raise TypeError("grid must be XlsxGrid")
+
+    doc = Document(io.BytesIO(doc_bytes))
+    body = doc.element.body
+    p_tag = qn("w:p")
+    t_tag = qn("w:t")
+    tbl_tag = qn("w:tbl")
+    sect_pr_tag = qn("w:sectPr")
+
+    marker_para = None
+    for el in list(body):
+        if el.tag != p_tag:
+            continue
+        text = "".join((t.text or "") for t in el.iter(t_tag))
+        if any(m in text for m in QUOTE_TABLE_MARKERS):
+            marker_para = el
+            break
+
+    tmp = Document()
+    nrows = len(grid.rows) or 1
+    ncols = max((len(r) for r in grid.rows), default=1) or 1
+    table = tmp.add_table(rows=nrows, cols=ncols)
+    try:
+        table.style = "Table Grid"
+    except Exception:
+        pass
+    for r_i, row in enumerate(grid.rows):
+        for c_i in range(ncols):
+            val = row[c_i] if c_i < len(row) else ""
+            cell = table.rows[r_i].cells[c_i]
+            cell.text = val
+            if (r_i, c_i) in grid.bold:
+                for para in cell.paragraphs:
+                    for run in para.runs:
+                        run.bold = True
+    for r0, c0, r1, c1 in grid.merges:
+        try:
+            table.rows[r0].cells[c0].merge(table.rows[r1].cells[c1])
+        except (IndexError, ValueError):
+            pass
+
+    tbl_el = deepcopy(table._tbl)
+
+    if marker_para is not None:
+        parent = marker_para.getparent()
+        idx = list(parent).index(marker_para)
+        parent.insert(idx, tbl_el)
+        parent.remove(marker_para)
+    else:
+        sect_pr = next((el for el in body if el.tag == sect_pr_tag), None)
+        if sect_pr is not None:
+            idx = list(body).index(sect_pr)
+            body.insert(idx, tbl_el)
+        else:
+            body.append(tbl_el)
+
+    out = io.BytesIO()
+    doc.save(out)
+    return out.getvalue()
+
+
+def format_gbp_pence(pence: int | None) -> str:
+    if pence is None:
+        return ""
+    negative = pence < 0
+    pence = abs(pence)
+    pounds = pence / 100
+    text = f"£{pounds:,.2f}"
+    return f"-{text}" if negative else text
+
+
+def insert_quote_fee_table_at_marker(
+    doc_bytes: bytes,
+    rows: list[tuple[str, str | None, bool, bool]],
+) -> bytes:
+    """Insert a two-column fee table. Each row: (label, amount_display, is_bold, amount_right)."""
+    import io
+    from copy import deepcopy
+
+    from docx import Document
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.oxml.ns import qn
+
+    doc = Document(io.BytesIO(doc_bytes))
+    body = doc.element.body
+    p_tag = qn("w:p")
+    t_tag = qn("w:t")
+    sect_pr_tag = qn("w:sectPr")
+
+    marker_para = None
+    for el in list(body):
+        if el.tag != p_tag:
+            continue
+        text = "".join((t.text or "") for t in el.iter(t_tag))
+        if any(m in text for m in QUOTE_TABLE_MARKERS):
+            marker_para = el
+            break
+
+    tmp = Document()
+    nrows = max(len(rows), 1)
+    table = tmp.add_table(rows=nrows, cols=2)
+    try:
+        table.style = "Table Grid"
+    except Exception:
+        pass
+    data = rows if rows else [(" ", "")]
+    for r_i, (label, amount, is_bold, amount_right) in enumerate(data):
+        left = table.rows[r_i].cells[0]
+        right = table.rows[r_i].cells[1]
+        left.text = label
+        right.text = amount or ""
+        for cell, right_align in ((left, False), (right, amount_right)):
+            for para in cell.paragraphs:
+                para.alignment = WD_ALIGN_PARAGRAPH.RIGHT if right_align else WD_ALIGN_PARAGRAPH.LEFT
+                for run in para.runs:
+                    if is_bold:
+                        run.bold = True
+
+    tbl_el = deepcopy(table._tbl)
+    if marker_para is not None:
+        parent = marker_para.getparent()
+        idx = list(parent).index(marker_para)
+        parent.insert(idx, tbl_el)
+        parent.remove(marker_para)
+    else:
+        sect_pr = next((el for el in body if el.tag == sect_pr_tag), None)
+        if sect_pr is not None:
+            idx = list(body).index(sect_pr)
+            body.insert(idx, tbl_el)
+        else:
+            body.append(tbl_el)
+
+    out = io.BytesIO()
+    doc.save(out)
+    return out.getvalue()
 
 
 def strip_precedent_body_marker(doc_bytes: bytes) -> bytes:
@@ -1626,69 +1778,210 @@ def _merge_precedent_codes_via_python_docx(
     return buf.getvalue()
 
 
+def strip_empty_quote_table_rows(doc_bytes: bytes) -> bytes:
+    """Remove fee-table rows with no merged content (empty cells or leftover slot placeholders)."""
+    import io
+
+    from docx import Document
+
+    doc = Document(io.BytesIO(doc_bytes))
+    changed = False
+
+    def _row_blank(cells: list) -> bool:
+        if len(cells) < 2:
+            return all(not (c.text or "").strip() for c in cells)
+        label = (cells[0].text or "").strip()
+        amount = (cells[1].text or "").strip()
+        if _QUOTE_SLOT_TOKEN_RE.match(label) or _QUOTE_SLOT_TOKEN_RE.match(amount):
+            return True
+        return not label and not amount
+
+    def _process_table(table: Any) -> None:
+        nonlocal changed
+        remove_indices: list[int] = []
+        for ri, row in enumerate(table.rows):
+            if ri == 0:
+                continue
+            if _row_blank(row.cells):
+                remove_indices.append(ri)
+        for ri in reversed(remove_indices):
+            table._tbl.remove(table.rows[ri]._tr)
+            changed = True
+
+    for table in doc.tables:
+        _process_table(table)
+    for section in doc.sections:
+        for hf in (
+            section.header,
+            section.footer,
+            section.even_page_header,
+            section.even_page_footer,
+            section.first_page_header,
+            section.first_page_footer,
+        ):
+            if hf.is_linked_to_previous:
+                continue
+            for table in hf.tables:
+                _process_table(table)
+
+    if not changed:
+        return doc_bytes
+    out = io.BytesIO()
+    doc.save(out)
+    return out.getvalue()
+
+
 _W_MAIN_NS = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
 
+# Match self-closing or opening ``w:lang`` / ``w:themeFontLang`` elements only.
+_LANG_ELEM_RE = re.compile(
+    r"<(?:(?:w):)?(?:lang|themeFontLang)\b[^>]*/?>|<(?:(?:w):)?(?:lang|themeFontLang)\b[^>]*>",
+    re.IGNORECASE,
+)
+_LANG_ATTR_RE = re.compile(
+    r'(\s(?:(?:w):)?(?:val|eastAsia|bidi)=["\'])([^"\']*)(["\'])',
+    re.IGNORECASE,
+)
+_STYLES_OPEN_RE = re.compile(r"(<(?:(?:w):)?styles\b[^>]*>)", re.IGNORECASE)
+_SETTINGS_OPEN_RE = re.compile(r"(<(?:(?:w):)?settings\b[^>]*>)", re.IGNORECASE)
+_DOC_DEFAULTS_BLOCK = (
+    "<w:docDefaults><w:rPrDefault><w:rPr>"
+    '<w:lang w:val="en-GB" w:eastAsia="en-GB" w:bidi="en-GB"/>'
+    "</w:rPr></w:rPrDefault></w:docDefaults>"
+)
+_THEME_FONT_LANG_BLOCK = '<w:themeFontLang w:val="en-GB" w:eastAsia="en-GB" w:bidi="en-GB"/>'
 
-def _styles_et_ensure_doc_defaults_lang_en_gb(root: Any) -> None:
-    """Ensure ``w:docDefaults/w:rPrDefault/w:rPr/w:lang`` is en-GB (creates nodes if absent)."""
 
-    import xml.etree.ElementTree as ET
+def _coerce_lang_attr_to_en_gb(val: str | None) -> str:
+    v = (val or "").strip()
+    if not v:
+        return "en-GB"
+    low = v.replace("_", "-").lower()
+    if low in ("en-us", "en", "en-us-x"):
+        return "en-GB"
+    if low == "en-gb":
+        return "en-GB"
+    return v
 
-    W = _W_MAIN_NS
-    dd = root.find(f"{W}docDefaults")
-    if dd is None:
-        dd = ET.Element(f"{W}docDefaults")
-        root.insert(0, dd)
-    rpd = dd.find(f"{W}rPrDefault")
-    if rpd is None:
-        rpd = ET.Element(f"{W}rPrDefault")
-        dd.insert(0, rpd)
-    rpr = rpd.find(f"{W}rPr")
-    if rpr is None:
-        rpr = ET.Element(f"{W}rPr")
-        rpd.append(rpr)
-    lang = rpr.find(f"{W}lang")
-    if lang is None:
-        lang = ET.Element(f"{W}lang")
-        rpr.append(lang)
-    lang.set(f"{W}val", "en-GB")
-    lang.set(f"{W}eastAsia", "en-GB")
-    lang.set(f"{W}bidi", "en-GB")
+
+def _patch_lang_element_xml(elem_xml: str) -> str:
+    def attr_repl(match: re.Match[str]) -> str:
+        return match.group(1) + _coerce_lang_attr_to_en_gb(match.group(2)) + match.group(3)
+
+    return _LANG_ATTR_RE.sub(attr_repl, elem_xml)
+
+
+def _patch_ooxml_lang_text(text: str, *, part_filename: str = "") -> str:
+    """Patch language tags in-place without rewriting the whole OOXML tree.
+
+    ElementTree ``tostring`` on large ``styles.xml`` parts rewrites namespaces and can
+    bloat or corrupt complex firm letterheads — ONLYOFFICE then fails to open the file.
+    """
+    text = _LANG_ELEM_RE.sub(lambda m: _patch_lang_element_xml(m.group(0)), text)
+    base = part_filename.rsplit("/", 1)[-1]
+    if base == "styles.xml" and not re.search(r"<(?:(?:w):)?docDefaults\b", text, re.IGNORECASE):
+        m = _STYLES_OPEN_RE.search(text)
+        if m:
+            text = text[: m.end()] + _DOC_DEFAULTS_BLOCK + text[m.end() :]
+    if base == "settings.xml" and not re.search(r"<(?:(?:w):)?themeFontLang\b", text, re.IGNORECASE):
+        m = _SETTINGS_OPEN_RE.search(text)
+        if m:
+            text = text[: m.end()] + _THEME_FONT_LANG_BLOCK + text[m.end() :]
+    return text
+
+
+def _patch_ooxml_lang_bytes(raw: bytes, *, part_filename: str = "") -> bytes:
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        return raw
+    patched = _patch_ooxml_lang_text(text, part_filename=part_filename)
+    if patched == text:
+        return raw
+    return patched.encode("utf-8")
 
 
 def ensure_docx_proofing_language_en_gb_bytes(src_bytes: bytes) -> bytes:
-    """Patch ``word/styles.xml`` so default document language is en-GB (Word / ONLYOFFICE status bar)."""
+    """Force British English as the document language across Word OOXML parts.
 
+    ONLYOFFICE and Word read ``w:docDefaults``, ``w:themeFontLang``, and per-run ``w:lang``.
+    Without a full pass, DS often shows “English (United States)” and rewrites saves as en-US.
+    """
     import io
     import zipfile
-    import xml.etree.ElementTree as ET
 
+    if not src_bytes.startswith(b"PK"):
+        return src_bytes
     try:
         zin = zipfile.ZipFile(io.BytesIO(src_bytes), "r")
     except zipfile.BadZipFile:
         return src_bytes
-    try:
-        raw = zin.read("word/styles.xml")
-    except KeyError:
+
+    patches: dict[str, bytes] = {}
+    for info in zin.infolist():
+        if not info.filename.startswith("word/") or not info.filename.endswith(".xml"):
+            continue
+        raw = zin.read(info.filename)
+        patched = _patch_ooxml_lang_bytes(raw, part_filename=info.filename)
+        if patched != raw:
+            patches[info.filename] = patched
+
+    if not patches:
         zin.close()
         return src_bytes
-    try:
-        root = ET.fromstring(raw)
-    except ET.ParseError:
-        zin.close()
-        return src_bytes
-    _styles_et_ensure_doc_defaults_lang_en_gb(root)
-    new_styles = ET.tostring(root, encoding="utf-8", xml_declaration=True)
 
     out_buf = io.BytesIO()
     with zipfile.ZipFile(out_buf, "w", zipfile.ZIP_DEFLATED) as zout:
         for info in zin.infolist():
-            data = zin.read(info.filename)
-            if info.filename == "word/styles.xml":
-                data = new_styles
+            data = patches.get(info.filename, zin.read(info.filename))
             zout.writestr(info, data)
     zin.close()
     return out_buf.getvalue()
+
+
+def normalize_onlyoffice_persisted_docx_bytes(
+    data: bytes,
+    *,
+    filename: str | None = None,
+    mime_type: str | None = None,
+) -> bytes:
+    """Re-save a .docx exported via ONLYOFFICE ``downloadAs`` so it can be reopened reliably.
+
+    ``downloadAs`` can leave orphan relationship parts and OOXML that triggers ONLYOFFICE
+    ``changesError`` on the next open. Round-tripping through python-docx strips those artefacts
+    while preserving body content, tables, headers, and embedded media.
+    """
+    import io
+
+    name = (filename or "").lower()
+    mt = (mime_type or "").split(";", 1)[0].strip().lower()
+    if not (name.endswith(".docx") or mt == "application/vnd.openxmlformats-officedocument.wordprocessingml.document"):
+        return data
+    if not data.startswith(b"PK"):
+        return data
+    try:
+        from docx import Document
+
+        doc = Document(io.BytesIO(data))
+        out = io.BytesIO()
+        doc.save(out)
+        return out.getvalue()
+    except Exception:
+        return data
+
+
+def finalize_stored_docx_bytes(
+    data: bytes,
+    *,
+    filename: str | None = None,
+    mime_type: str | None = None,
+) -> bytes:
+    """Apply en-GB language normalisation before persisting a .docx from ONLYOFFICE / WebDAV."""
+    name = (filename or "").lower()
+    mt = (mime_type or "").split(";", 1)[0].strip().lower()
+    if name.endswith(".docx") or mt == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+        return ensure_docx_proofing_language_en_gb_bytes(data)
+    return data
 
 
 def _set_default_proofing_language_en_gb(doc: Any) -> None:

@@ -168,9 +168,9 @@ export function applyAuthHeaders(headers: Headers, authTrimmed: string): void {
 
 export async function apiFetch<T>(
   path: string,
-  opts: RequestInit & { token?: string; json?: unknown } = {},
+  opts: RequestInit & { token?: string; json?: unknown; timeoutMs?: number } = {},
 ): Promise<T> {
-  const { token, json, ...rest } = opts
+  const { token, json, timeoutMs = 120_000, signal: callerSignal, ...rest } = opts
   const headers = new Headers(rest.headers ?? {})
   /** Starlette HTTPBearer treats ``Bearer `` with no token as *missing* auth — avoid sending that. */
   const auth = token != null ? String(token).trim() : ''
@@ -185,12 +185,47 @@ export async function apiFetch<T>(
         ? JSON.stringify(json)
         : rest.body
 
-  const res = await fetch(apiUrl(path), {
-    ...rest,
-    method,
-    headers,
-    body,
-  })
+  const controller = new AbortController()
+  const timeoutId =
+    typeof window !== 'undefined' && timeoutMs > 0
+      ? window.setTimeout(() => controller.abort(), timeoutMs)
+      : undefined
+  if (callerSignal) {
+    if (callerSignal.aborted) controller.abort()
+    else callerSignal.addEventListener('abort', () => controller.abort(), { once: true })
+  }
+
+  let res: Response
+  try {
+    res = await fetch(apiUrl(path), {
+      ...rest,
+      method,
+      headers,
+      body,
+      signal: controller.signal,
+    })
+  } catch (e: unknown) {
+    const resolvedUrl =
+      typeof window !== 'undefined'
+        ? new URL(apiUrl(path), window.location.origin).href
+        : apiUrl(path)
+    if (e instanceof DOMException && e.name === 'AbortError') {
+      const err: ApiError = {
+        status: 0,
+        message: callerSignal?.aborted
+          ? 'Request cancelled.'
+          : `Request timed out after ${Math.round(timeoutMs / 1000)}s (${resolvedUrl}).`,
+      }
+      throw err
+    }
+    const err: ApiError = {
+      status: 0,
+      message: `Network error — could not reach the server (${resolvedUrl}). Check your connection and try again.`,
+    }
+    throw err
+  } finally {
+    if (timeoutId !== undefined && typeof window !== 'undefined') window.clearTimeout(timeoutId)
+  }
 
   if (!res.ok) {
     if (res.status === 401) {

@@ -26,3 +26,15 @@ export function openOnlyOfficePrecedentEditor(precedentId: string): Window | nul
     ONLYOFFICE_EDITOR_WINDOW_FEATURES,
   )
 }
+
+export function onlyofficeFeeScaleEditorWindowTarget(feeScaleId: string): string {
+  return `canary-oo-fee-scale-${feeScaleId}`
+}
+
+export function openOnlyOfficeFeeScaleEditor(feeScaleId: string): Window | null {
+  return window.open(
+    `/editor/fee-scale/${feeScaleId}`,
+    onlyofficeFeeScaleEditorWindowTarget(feeScaleId),
+    ONLYOFFICE_EDITOR_WINDOW_FEATURES,
+  )
+}

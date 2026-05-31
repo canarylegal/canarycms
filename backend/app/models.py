@@ -340,6 +340,14 @@ class FirmSettings(Base):
     letterhead_file_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("file.id", ondelete="SET NULL"), nullable=True
     )
+    quote_letterhead_style: Mapped[LetterheadStyle] = mapped_column(
+        Enum(LetterheadStyle, name="letterhead_style"),
+        nullable=False,
+        default=LetterheadStyle.preprinted,
+    )
+    quote_letterhead_file_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("file.id", ondelete="SET NULL"), nullable=True
+    )
     mandate_two_factor: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     mandate_password_rotation: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     password_rotation_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -421,6 +429,108 @@ class Precedent(Base):
     category_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("precedent_category.id", ondelete="RESTRICT"), nullable=True
     )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+
+
+class FeeScale(Base):
+    """Firm-wide fee scale templates used when composing quotes."""
+
+    __tablename__ = "fee_scale"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name: Mapped[str] = mapped_column(String(300), nullable=False)
+    reference: Mapped[str] = mapped_column(String(200), nullable=False)
+    vat_rate_bps: Mapped[int] = mapped_column(Integer, nullable=False, default=2000)
+    # Scope: (NULL,NULL) = all cases; (H,NULL) = all sub-types under head H; (H,S) = one sub-type.
+    matter_head_type_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("matter_head_type.id", ondelete="RESTRICT"), nullable=True, index=True
+    )
+    matter_sub_type_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("matter_sub_type.id", ondelete="RESTRICT"), nullable=True, index=True
+    )
+    owner_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("user.id", ondelete="RESTRICT"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (UniqueConstraint("reference", name="uq_fee_scale_reference"),)
+
+
+class FeeScaleLineKind(str, enum.Enum):
+    section_header = "section_header"
+    item = "item"
+    vat = "vat"
+    subtotal = "subtotal"
+    total = "total"
+
+
+class FeeScaleAmountKind(str, enum.Enum):
+    fixed = "fixed"
+    editable = "editable"
+    band = "band"
+
+
+class FeeScaleCategory(Base):
+    __tablename__ = "fee_scale_category"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    fee_scale_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("fee_scale.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+
+
+class FeeScaleBandSet(Base):
+    __tablename__ = "fee_scale_band_set"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    fee_scale_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("fee_scale.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+
+
+class FeeScaleBandRow(Base):
+    __tablename__ = "fee_scale_band_row"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    band_set_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("fee_scale_band_set.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    min_value_pence: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    max_value_pence: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    amount_pence: Mapped[int] = mapped_column(Integer, nullable=False)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+
+
+class FeeScaleLine(Base):
+    __tablename__ = "fee_scale_line"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    category_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("fee_scale_category.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    name: Mapped[str] = mapped_column(String(300), nullable=False)
+    line_kind: Mapped[FeeScaleLineKind] = mapped_column(
+        Enum(FeeScaleLineKind, name="fee_scale_line_kind"), nullable=False
+    )
+    amount_kind: Mapped[FeeScaleAmountKind | None] = mapped_column(
+        Enum(FeeScaleAmountKind, name="fee_scale_amount_kind"), nullable=True
+    )
+    default_amount_pence: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    band_set_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("fee_scale_band_set.id", ondelete="SET NULL"), nullable=True
+    )
+    include_in_vat: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
 
@@ -556,6 +666,7 @@ class CaseContact(Base):
 class FileCategory(str, enum.Enum):
     case_document = "case_document"
     precedent = "precedent"
+    fee_scale = "fee_scale"
     system = "system"
     firm_letterhead = "firm_letterhead"
 
