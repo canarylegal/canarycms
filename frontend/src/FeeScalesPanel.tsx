@@ -1,7 +1,11 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { apiFetch } from './api'
 import { useDialogs } from './DialogProvider'
 import { FeeScaleEditor } from './FeeScaleEditor'
+import { FeeScaleListCard } from './FeeScaleListCard'
+import { FeeScaleScaleRows, FeeScaleThreadGroup } from './FeeScaleThreadTree'
+import { buildFeeScaleTree } from './feeScaleGrouping'
+import { scopeSummaryForCreate, buildClonedDraftDetail, type FeeScaleDraftCreate } from './feeScaleDraft'
 import { SingleSelectDropdown } from './SingleSelectDropdown'
 import { GLOBAL_PRECEDENT_SCOPE, type FeeScaleDetailOut, type FeeScaleOut, type MatterHeadTypeOut } from './types'
 
@@ -119,6 +123,16 @@ function MatterScopeFields({
   )
 }
 
+function scopeIdsFromScale(scale: FeeScaleOut): { headId: string; subId: string } {
+  if (!scale.matter_head_type_id) {
+    return { headId: GLOBAL_PRECEDENT_SCOPE, subId: GLOBAL_PRECEDENT_SCOPE }
+  }
+  if (!scale.matter_sub_type_id) {
+    return { headId: scale.matter_head_type_id, subId: GLOBAL_PRECEDENT_SCOPE }
+  }
+  return { headId: scale.matter_head_type_id, subId: scale.matter_sub_type_id }
+}
+
 export function FeeScalesPanel({ token, onBack }: { token: string; onBack: () => void }) {
   const { askConfirm } = useDialogs()
   const [items, setItems] = useState<FeeScaleOut[]>([])
@@ -127,11 +141,16 @@ export function FeeScalesPanel({ token, onBack }: { token: string; onBack: () =>
   const [err, setErr] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [editId, setEditId] = useState<string | null>(null)
-  const [editSetupMode, setEditSetupMode] = useState(false)
+  const [draftCreate, setDraftCreate] = useState<FeeScaleDraftCreate | null>(null)
+  const [draftInitialDetail, setDraftInitialDetail] = useState<FeeScaleDetailOut | null>(null)
+  const [cloneSourceDetail, setCloneSourceDetail] = useState<FeeScaleDetailOut | null>(null)
+  const [cloneSourceName, setCloneSourceName] = useState<string | null>(null)
+  const createFormRef = useRef<HTMLDivElement>(null)
   const [createName, setCreateName] = useState('')
   const [createRef, setCreateRef] = useState(() => randomHexRef())
   const [createHeadId, setCreateHeadId] = useState('')
   const [createSubId, setCreateSubId] = useState('')
+  const [createErr, setCreateErr] = useState<string | null>(null)
 
   const matterTypeOptions = useMemo(
     () => matterHeads.map((h) => ({ id: h.id, label: h.name })),
@@ -142,11 +161,92 @@ export function FeeScalesPanel({ token, onBack }: { token: string; onBack: () =>
     [matterHeads, createHeadId],
   )
   const createHeadIsGlobal = createHeadId === GLOBAL_PRECEDENT_SCOPE
-  const createScopeComplete = useMemo(() => {
-    if (!createHeadId) return false
-    if (createHeadIsGlobal) return true
-    return Boolean(createSubId)
-  }, [createHeadId, createHeadIsGlobal, createSubId])
+
+  function validateCreateForm(): string | null {
+    if (!createName.trim()) return 'Enter a name for the fee scale.'
+    if (!createHeadId) return 'Select a matter type or Global (all cases).'
+    if (!createHeadIsGlobal && !createSubId) {
+      return 'Select a sub-type or “All sub-types under this matter type”.'
+    }
+    return null
+  }
+
+  const feeScaleTree = useMemo(() => buildFeeScaleTree(items, matterHeads), [items, matterHeads])
+
+  async function toggleFavorite(scale: FeeScaleOut) {
+    const favorited = !scale.is_favorited
+    setBusy(true)
+    try {
+      await apiFetch<FeeScaleOut>(`/fee-scales/${scale.id}/favorite`, {
+        token,
+        method: 'PUT',
+        json: { favorited },
+      })
+      setItems((prev) => prev.map((row) => (row.id === scale.id ? { ...row, is_favorited: favorited } : row)))
+    } catch (e: unknown) {
+      setErr((e as { message?: string }).message ?? 'Could not update favourite')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function startCloneSetup(scale: FeeScaleOut) {
+    setBusy(true)
+    setErr(null)
+    try {
+      const detail = await apiFetch<FeeScaleDetailOut>(`/fee-scales/${scale.id}`, { token })
+      const { headId, subId } = scopeIdsFromScale(scale)
+      setCloneSourceDetail(detail)
+      setCloneSourceName(scale.name)
+      setCreateName(`${scale.name} (copy)`)
+      setCreateRef(randomHexRef())
+      setCreateHeadId(headId)
+      setCreateSubId(subId)
+      setCreateErr(null)
+      createFormRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    } catch (e: unknown) {
+      setErr((e as { message?: string }).message ?? 'Could not load fee scale to clone')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  function clearCloneSetup() {
+    setCloneSourceDetail(null)
+    setCloneSourceName(null)
+  }
+
+  function renderScaleActions(p: FeeScaleOut) {
+    return (
+      <FeeScaleListCard
+        scale={p}
+        busy={busy}
+        onToggleFavorite={() => void toggleFavorite(p)}
+        onClone={() => void startCloneSetup(p)}
+        onEdit={() => {
+          setDraftCreate(null)
+          setDraftInitialDetail(null)
+          clearCloneSetup()
+          setEditId(p.id)
+        }}
+        onRemove={() => {
+          void askConfirm({
+            title: 'Delete fee scale',
+            message: `Delete “${p.name}”?`,
+            confirmLabel: 'Delete',
+            danger: true,
+          }).then((ok) => {
+            if (!ok) return
+            setBusy(true)
+            apiFetch(`/fee-scales/${p.id}`, { token, method: 'DELETE' })
+              .then(() => load())
+              .catch((e: unknown) => setErr((e as { message?: string }).message ?? 'Delete failed'))
+              .finally(() => setBusy(false))
+          })
+        }}
+      />
+    )
+  }
 
   const load = useCallback(async () => {
     try {
@@ -177,48 +277,50 @@ export function FeeScalesPanel({ token, onBack }: { token: string; onBack: () =>
     if (createHeadId === GLOBAL_PRECEDENT_SCOPE) setCreateSubId(GLOBAL_PRECEDENT_SCOPE)
   }, [createHeadId])
 
-  async function createScale() {
-    if (!createName.trim() || !createScopeComplete) {
-      setErr('Enter a name and choose scope before creating.')
+  function startCreateSetup() {
+    const validationErr = validateCreateForm()
+    if (validationErr) {
+      setCreateErr(validationErr)
       return
     }
-    setBusy(true)
-    setErr(null)
-    try {
-      const created = await apiFetch<FeeScaleDetailOut>('/fee-scales', {
-        token,
-        method: 'POST',
-        json: {
-          name: createName.trim(),
-          reference: createRef.trim() || randomHexRef(),
-          ...scopeToApiPayload(createHeadId, createSubId),
-        },
-      })
-      setCreateName('')
-      setCreateRef(randomHexRef())
-      setCreateHeadId('')
-      setCreateSubId('')
-      setEditId(created.id)
-      setEditSetupMode(true)
-    } catch (e: unknown) {
-      setErr((e as { message?: string }).message ?? 'Could not create fee scale')
-    } finally {
-      setBusy(false)
+    const scope = scopeToApiPayload(createHeadId, createSubId)
+    const draft: FeeScaleDraftCreate = {
+      name: createName.trim(),
+      reference: createRef.trim() || randomHexRef(),
+      matter_head_type_id: scope.matter_head_type_id,
+      matter_sub_type_id: scope.matter_sub_type_id,
+      scope_summary: scopeSummaryForCreate(createHeadId, createSubId, matterHeads),
     }
+    setCreateErr(null)
+    setDraftCreate(draft)
+    setDraftInitialDetail(cloneSourceDetail ? buildClonedDraftDetail(cloneSourceDetail, draft) : null)
+    clearCloneSetup()
+    setEditId(null)
   }
 
-  if (editId) {
+  function exitEditor() {
+    setEditId(null)
+    setDraftCreate(null)
+    setDraftInitialDetail(null)
+    clearCloneSetup()
+    setCreateName('')
+    setCreateRef(randomHexRef())
+    setCreateHeadId('')
+    setCreateSubId('')
+    setCreateErr(null)
+    void load()
+  }
+
+  if (editId || draftCreate) {
     return (
       <div className="mainMenuShell mainMenuShell--mainMenu">
         <FeeScaleEditor
           token={token}
-          scaleId={editId}
-          setupMode={editSetupMode}
-          onBack={() => {
-            setEditId(null)
-            setEditSetupMode(false)
-            void load()
-          }}
+          scaleId={editId ?? undefined}
+          draftCreate={draftCreate ?? undefined}
+          draftInitialDetail={draftInitialDetail}
+          setupMode={Boolean(draftCreate)}
+          onBack={() => exitEditor()}
         />
       </div>
     )
@@ -232,21 +334,51 @@ export function FeeScalesPanel({ token, onBack }: { token: string; onBack: () =>
         </button>
         <h2 style={{ margin: '8px 0 0', fontSize: 18 }}>Fee scales</h2>
         <p className="muted" style={{ margin: '4px 0 0' }}>
-          Configure quote fee tables in Canary — categories, line items, value bands, VAT and totals. Quotes are
-          generated as Word documents on your quote letterhead.
+          Configure quote fee tables in Canary — categories, line items, value bands, VAT and totals. Star a scale to
+          show it first when creating quotes. Quotes are generated as Word documents on your quote letterhead.
         </p>
       </div>
       {err ? <div className="error">{err}</div> : null}
 
-      <div className="card stack" style={{ marginBottom: 16, padding: 12 }}>
+      <div ref={createFormRef} className="card stack" style={{ marginBottom: 16, padding: 12 }}>
         <h4 style={{ margin: 0 }}>New fee scale</h4>
+        {cloneSourceName ? (
+          <p className="muted" style={{ margin: 0, fontSize: 13 }}>
+            Cloning from “{cloneSourceName}”. Set the name, reference and matter type below, then click Create to edit
+            the copy.
+            {' '}
+            <button
+              type="button"
+              className="btn"
+              style={{ padding: 0, border: 'none', background: 'none', color: 'var(--link, #2563eb)', font: 'inherit' }}
+              disabled={busy}
+              onClick={() => clearCloneSetup()}
+            >
+              Cancel clone
+            </button>
+          </p>
+        ) : null}
         <label className="field">
           <span>Name</span>
-          <input className="input" value={createName} onChange={(e) => setCreateName(e.target.value)} />
+          <input
+            className="input"
+            value={createName}
+            onChange={(e) => {
+              setCreateName(e.target.value)
+              setCreateErr(null)
+            }}
+          />
         </label>
         <label className="field">
           <span>Reference</span>
-          <input className="input" value={createRef} onChange={(e) => setCreateRef(e.target.value)} />
+          <input
+            className="input"
+            value={createRef}
+            onChange={(e) => {
+              setCreateRef(e.target.value)
+              setCreateErr(null)
+            }}
+          />
         </label>
         <MatterScopeFields
           headTypeId={createHeadId}
@@ -259,66 +391,79 @@ export function FeeScalesPanel({ token, onBack }: { token: string; onBack: () =>
           onHeadChange={(v) => {
             setCreateHeadId(v)
             setCreateSubId('')
+            setCreateErr(null)
           }}
-          onSubChange={setCreateSubId}
+          onSubChange={(v) => {
+            setCreateSubId(v)
+            setCreateErr(null)
+          }}
         />
-        <button type="button" className="btn primary" disabled={busy || !createScopeComplete} onClick={() => void createScale()}>
-          Create &amp; set up…
+        {createErr ? <div className="error">{createErr}</div> : null}
+        <button type="button" className="btn primary" disabled={busy} onClick={() => startCreateSetup()}>
+          Create
         </button>
-        {createHeadId && !createHeadIsGlobal && !createSubId ? (
-          <p className="muted" style={{ margin: 0, fontSize: 12 }}>
-            Select a sub-type (or “All sub-types under this matter type”) to enable Create.
-          </p>
-        ) : null}
       </div>
 
-      <div className="list">
-        {items.map((p) => (
-          <div key={p.id} className="listCard row" style={{ justifyContent: 'space-between', gap: 12 }}>
-            <div>
-              <div className="listTitle">{p.name}</div>
-              <div className="muted" style={{ fontSize: 12 }}>
-                {p.reference}
-                {p.scope_summary ? ` · ${p.scope_summary}` : ''}
-              </div>
-            </div>
-            <div className="row" style={{ gap: 6 }}>
-              <button
-                type="button"
-                className="btn primary"
-                disabled={busy}
-                onClick={() => {
-                  setEditSetupMode(false)
-                  setEditId(p.id)
-                }}
-              >
-                Edit
-              </button>
-              <button
-                type="button"
-                className="btn danger"
-                disabled={busy}
-                onClick={() => {
-                  void askConfirm({
-                    title: 'Delete fee scale',
-                    message: `Delete “${p.name}”?`,
-                    confirmLabel: 'Delete',
-                    danger: true,
-                  }).then((ok) => {
-                    if (!ok) return
-                    setBusy(true)
-                    apiFetch(`/fee-scales/${p.id}`, { token, method: 'DELETE' })
-                      .then(() => load())
-                      .catch((e: unknown) => setErr((e as { message?: string }).message ?? 'Delete failed'))
-                      .finally(() => setBusy(false))
-                  })
-                }}
-              >
-                Remove
-              </button>
-            </div>
-          </div>
-        ))}
+      <div className="feeScaleTree stack" style={{ gap: 24 }}>
+        {feeScaleTree.map((block) => {
+          if (block.kind === 'global') {
+            return (
+              <section key="global" className="feeScaleTreeBlock">
+                <h4 className="feeScaleTreeBlockTitle">Global — all cases</h4>
+                <FeeScaleScaleRows
+                  depth={0}
+                  scales={block.scales.map((p) => ({
+                    id: p.id,
+                    render: () => renderScaleActions(p),
+                  }))}
+                />
+              </section>
+            )
+          }
+
+          if (block.kind === 'orphan') {
+            return (
+              <section key="orphan" className="feeScaleTreeBlock">
+                <h4 className="feeScaleTreeBlockTitle">Other</h4>
+                <FeeScaleScaleRows
+                  depth={1}
+                  scales={block.scales.map((p) => ({
+                    id: p.id,
+                    render: () => renderScaleActions(p),
+                  }))}
+                />
+              </section>
+            )
+          }
+
+          return (
+            <section key={block.headId} className="feeScaleTreeBlock feeScaleTreeBlock--matter">
+              <h4 className="feeScaleTreeBlockTitle">{block.headName}</h4>
+              {block.headScales.length ? (
+                <FeeScaleThreadGroup depth={1} label="All sub-types">
+                  <FeeScaleScaleRows
+                    depth={1}
+                    scales={block.headScales.map((p) => ({
+                      id: p.id,
+                      render: () => renderScaleActions(p),
+                    }))}
+                  />
+                </FeeScaleThreadGroup>
+              ) : null}
+              {block.subGroups.map((sg) => (
+                <FeeScaleThreadGroup key={sg.subId} depth={2} label={sg.subName}>
+                  <FeeScaleScaleRows
+                    depth={2}
+                    scales={sg.scales.map((p) => ({
+                      id: p.id,
+                      render: () => renderScaleActions(p),
+                    }))}
+                  />
+                </FeeScaleThreadGroup>
+              ))}
+            </section>
+          )
+        })}
         {items.length === 0 ? <div className="muted">No fee scales yet — create one above.</div> : null}
       </div>
     </div>

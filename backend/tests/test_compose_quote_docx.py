@@ -65,7 +65,7 @@ def test_compose_quote_produces_docx_with_table(db) -> None:
         line_kind=FeeScaleLineKind.item,
         amount_kind=FeeScaleAmountKind.fixed,
         default_amount_pence=92500,
-        include_in_vat=True,
+        vat_treatment="plus_vat",
         sort_order=0,
         created_at=now,
         updated_at=now,
@@ -89,6 +89,7 @@ def test_compose_quote_produces_docx_with_table(db) -> None:
     xml = zipfile.ZipFile(io.BytesIO(out)).read("word/document.xml").decode()
     assert "Legal fee" in xml
     assert re.search(r"925\.00|£925\.00", xml)
+    assert re.search(r"185\.00|£185\.00", xml)  # 20% VAT on plus_vat line
     assert "QUOTE_01_LABEL" not in xml  # merge codes should be replaced
 
     db.delete(line)

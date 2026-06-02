@@ -15,6 +15,7 @@ from app.deps import get_current_user, require_case_access
 from app.docx_util import write_completion_statement_docx
 from app.file_storage import FILES_ROOT, case_file_paths, ensure_files_root
 from app.finance_service import (
+    apply_quote_to_finance,
     create_finance_category,
     create_finance_item,
     delete_finance_category,
@@ -46,6 +47,18 @@ def read_finance(
     require_case_access(case_id, user, db)
     result = get_finance(case_id, db)
     db.commit()  # commit any auto-initialisation
+    return result
+
+
+@router.post("/{case_id}/finance/apply-quote", response_model=FinanceOut)
+def apply_quote_finance(
+    case_id: uuid.UUID,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> FinanceOut:
+    require_case_access(case_id, user, db)
+    result = apply_quote_to_finance(case_id, db)
+    db.commit()
     return result
 
 

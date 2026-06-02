@@ -2,8 +2,15 @@
 
 import uuid
 
-from app.fee_scale_calc import compute_quote_lines
-from app.models import FeeScale, FeeScaleAmountKind, FeeScaleCategory, FeeScaleLine, FeeScaleLineKind
+from app.fee_scale_calc import compute_quote_from_draft, compute_quote_lines, quote_column_totals
+from app.models import (
+    FeeScale,
+    FeeScaleAmountKind,
+    FeeScaleCategory,
+    FeeScaleLine,
+    FeeScaleLineKind,
+    FeeScaleVatTreatment,
+)
 
 
 def _scale() -> FeeScale:
@@ -18,7 +25,7 @@ def _scale() -> FeeScale:
     )
 
 
-def test_vat_and_subtotal() -> None:
+def test_plus_vat_item_shows_vat_column() -> None:
     cat_id = uuid.uuid4()
     cat = FeeScaleCategory(id=cat_id, fee_scale_id=uuid.uuid4(), name="Fees", sort_order=0)
     lines = [
@@ -29,7 +36,7 @@ def test_vat_and_subtotal() -> None:
             line_kind=FeeScaleLineKind.item,
             amount_kind=FeeScaleAmountKind.fixed,
             default_amount_pence=100000,
-            include_in_vat=True,
+            vat_treatment=FeeScaleVatTreatment.plus_vat,
             sort_order=0,
         ),
         FeeScaleLine(
@@ -39,30 +46,56 @@ def test_vat_and_subtotal() -> None:
             line_kind=FeeScaleLineKind.item,
             amount_kind=FeeScaleAmountKind.fixed,
             default_amount_pence=3500,
-            include_in_vat=False,
+            vat_treatment=FeeScaleVatTreatment.included,
             sort_order=1,
+        ),
+    ]
+    out = compute_quote_lines(_scale(), [cat], {cat_id: lines}, {}, property_value_pence=None)
+    by_name = {ln.name: ln for ln in out}
+    assert by_name["Legal fee"].amount_pence == 100000
+    assert by_name["Legal fee"].vat_pence == 20000
+    assert by_name["TT fee"].vat_pence is None
+    main, vat = quote_column_totals(out)
+    assert main == 103500
+    assert vat == 20000
+
+
+def test_legacy_vat_line_kind() -> None:
+    cat_id = uuid.uuid4()
+    cat = FeeScaleCategory(id=cat_id, fee_scale_id=uuid.uuid4(), name="Fees", sort_order=0)
+    lines = [
+        FeeScaleLine(
+            id=uuid.uuid4(),
+            category_id=cat_id,
+            name="Legal fee",
+            line_kind=FeeScaleLineKind.item,
+            amount_kind=FeeScaleAmountKind.fixed,
+            default_amount_pence=100000,
+            vat_treatment=FeeScaleVatTreatment.plus_vat,
+            sort_order=0,
         ),
         FeeScaleLine(
             id=uuid.uuid4(),
             category_id=cat_id,
             name="VAT",
             line_kind=FeeScaleLineKind.vat,
-            sort_order=2,
+            vat_treatment=FeeScaleVatTreatment.included,
+            sort_order=1,
         ),
         FeeScaleLine(
             id=uuid.uuid4(),
             category_id=cat_id,
             name="Total fees",
             line_kind=FeeScaleLineKind.subtotal,
-            sort_order=3,
+            vat_treatment=FeeScaleVatTreatment.included,
+            sort_order=2,
         ),
     ]
     out = compute_quote_lines(_scale(), [cat], {cat_id: lines}, {}, property_value_pence=None)
-    amounts = {ln.name: ln.amount_pence for ln in out}
-    assert amounts["Legal fee"] == 100000
-    assert amounts["VAT"] == 20000  # 20% of 100000 only
-from app.fee_scale_calc import compute_quote_from_draft
-from app.models import FeeScale, FeeScaleAmountKind, FeeScaleLineKind
+    amounts = {ln.name: (ln.amount_pence, ln.vat_pence) for ln in out}
+    assert amounts["Legal fee"] == (100000, 20000)
+    assert amounts["VAT"] == (None, 20000)
+    assert amounts["Total fees"] == (100000, 20000)  # main + rolled-up VAT column
 
 
 class _DraftLine:
@@ -74,7 +107,7 @@ class _DraftLine:
         line_kind: str,
         amount_kind: str | None = None,
         amount_pence: int | None = None,
-        include_in_vat: bool = False,
+        vat_treatment: str = "included",
         band_set_id=None,
         sort_order: int = 0,
         line_id=None,
@@ -85,7 +118,7 @@ class _DraftLine:
         self.line_kind = line_kind
         self.amount_kind = amount_kind
         self.amount_pence = amount_pence
-        self.include_in_vat = include_in_vat
+        self.vat_treatment = vat_treatment
         self.band_set_id = band_set_id
         self.sort_order = sort_order
 
@@ -110,7 +143,7 @@ def test_compute_quote_from_draft_respects_overrides() -> None:
                 line_kind=FeeScaleLineKind.item.value,
                 amount_kind=FeeScaleAmountKind.fixed.value,
                 amount_pence=100000,
-                include_in_vat=True,
+                vat_treatment="plus_vat",
                 sort_order=0,
             ),
             _DraftLine(key="l2", name="VAT", line_kind=FeeScaleLineKind.vat.value, sort_order=1),
@@ -119,6 +152,7 @@ def test_compute_quote_from_draft_respects_overrides() -> None:
     )
     out = compute_quote_from_draft(_scale(), [cat], {}, property_value_pence=None, amount_overrides={"l1": 110000})
     amounts = {ln.name: ln.amount_pence for ln in out}
+    vats = {ln.name: ln.vat_pence for ln in out}
     assert amounts["Legal fee"] == 110000
-    assert amounts["VAT"] == 22000
-    assert amounts["Total"] == 132000
+    assert vats["Legal fee"] == 22000
+    assert amounts["Total"] == 110000

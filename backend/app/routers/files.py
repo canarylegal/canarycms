@@ -25,13 +25,13 @@ from starlette.background import BackgroundTask
 from app.db import get_db
 from app.deps import get_current_user, require_case_access
 from app.compose_merge import merge_compose_docx_bytes
-from app.compose_quote import merge_compose_quote_docx_bytes
+from app.compose_quote import merge_compose_quote_docx_bytes, quote_lines_snapshot_payload, resolve_compose_quote_lines
 from app.docx_util import extract_plain_text_from_docx_bytes, write_blank_docx
 from app.graph_mail import create_outlook_draft, graph_mail_configured
 from app.file_storage import FILES_ROOT, StoredFilePaths, case_file_paths, ensure_files_root, sanitize_folder_path
 from app.models import Case as CaseRow
 from app.models import CaseContact, Contact as GlobalContactRow, ContactPortalGrant
-from app.models import CaseLockMode, CaseStatus, File as DbFile, FileCategory, FileEditSession, MatterHeadType, MatterSubType, Precedent, PrecedentKind, User
+from app.models import CaseLockMode, CaseQuoteSnapshot, CaseStatus, File as DbFile, FileCategory, FileEditSession, MatterHeadType, MatterSubType, Precedent, PrecedentKind, User
 from app.portal_service import grant_is_active
 from app.alert_dispatch import notify_portal_contacts_files_added
 from app.audit import log_event
@@ -665,6 +665,21 @@ def compose_quote_spreadsheet(
         updated_at=now,
     )
     db.add(row)
+    db.flush()
+    try:
+        computed = resolve_compose_quote_lines(db, case_id, body)
+        if computed:
+            db.add(
+                CaseQuoteSnapshot(
+                    id=uuid.uuid4(),
+                    case_id=case_id,
+                    file_id=file_id,
+                    quote_lines=quote_lines_snapshot_payload(computed),
+                    created_at=now,
+                )
+            )
+    except ValueError:
+        pass
     db.commit()
     db.refresh(row)
     log_event(

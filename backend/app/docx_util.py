@@ -223,6 +223,16 @@ for _base_key in _ADDITIONAL_CLIENT_NAME_CODES:
         f"always the contact picked in the dialogue (including when “merge all clients” fills [{_inner}] from another client)."
     )
 
+PRECEDENT_CODES["[QUOTE_PROPERTY_VALUE]"] = "Property value used for banded fee scales (formatted GBP)."
+for _qi in range(1, 26):
+    _qtag = f"{_qi:02d}"
+    PRECEDENT_CODES[f"[QUOTE_{_qtag}_LABEL]"] = f"Quote table row {_qi}: description."
+    PRECEDENT_CODES[f"[QUOTE_{_qtag}_AMOUNT]"] = f"Quote table row {_qi}: main (net/inclusive) amount."
+    PRECEDENT_CODES[f"[QUOTE_{_qtag}_VAT]"] = f"Quote table row {_qi}: VAT amount (Plus VAT lines)."
+PRECEDENT_CODES["[QUOTE_MAIN_TOTAL]"] = "Sum of main-column amounts on item lines."
+PRECEDENT_CODES["[QUOTE_VAT_TOTAL]"] = "Sum of VAT-column amounts on item lines."
+PRECEDENT_CODES["[QUOTE_GRAND_TOTAL]"] = "Main column total plus VAT column total."
+
 
 def _zip_archive_basename(path: str) -> str:
     return path.replace("\\", "/").rsplit("/", 1)[-1]
@@ -1176,7 +1186,7 @@ PRECEDENT_BODY_MARKER = "[PRECEDENT_BODY]"
 QUOTE_FEE_TABLE_MARKER = "[QUOTE_FEE_TABLE]"
 QUOTE_TABLE_MARKERS = (QUOTE_FEE_TABLE_MARKER, PRECEDENT_BODY_MARKER)
 QUOTE_MERGE_SLOT_COUNT = 25
-_QUOTE_SLOT_TOKEN_RE = re.compile(r"^\[QUOTE_\d{2}_(?:LABEL|AMOUNT)\]$", re.IGNORECASE)
+_QUOTE_SLOT_TOKEN_RE = re.compile(r"^\[QUOTE_\d{2}_(?:LABEL|AMOUNT|VAT)\]$", re.IGNORECASE)
 
 
 def insert_xlsx_grid_table_at_marker(doc_bytes: bytes, grid: "XlsxGrid") -> bytes:
@@ -1792,9 +1802,14 @@ def strip_empty_quote_table_rows(doc_bytes: bytes) -> bytes:
             return all(not (c.text or "").strip() for c in cells)
         label = (cells[0].text or "").strip()
         amount = (cells[1].text or "").strip()
-        if _QUOTE_SLOT_TOKEN_RE.match(label) or _QUOTE_SLOT_TOKEN_RE.match(amount):
+        vat = (cells[2].text or "").strip() if len(cells) > 2 else ""
+        if (
+            _QUOTE_SLOT_TOKEN_RE.match(label)
+            or _QUOTE_SLOT_TOKEN_RE.match(amount)
+            or _QUOTE_SLOT_TOKEN_RE.match(vat)
+        ):
             return True
-        return not label and not amount
+        return not label and not amount and not vat
 
     def _process_table(table: Any) -> None:
         nonlocal changed

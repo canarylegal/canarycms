@@ -504,6 +504,8 @@ class CaseCreate(BaseModel):
     practice_area: str | None = Field(default=None, max_length=200)
     matter_sub_type_id: uuid.UUID
     fee_earner_user_id: uuid.UUID
+    source_id: uuid.UUID | None = None
+    source_name: str | None = Field(default=None, max_length=200)
 
     @field_validator("status")
     @classmethod
@@ -522,6 +524,7 @@ class CaseUpdate(BaseModel):
     matter_head_type_id: uuid.UUID | None = None
     is_locked: bool | None = None
     lock_mode: CaseLockMode | None = None
+    source_id: uuid.UUID | None = None
 
 
 class MatterMenuItemOut(BaseModel):
@@ -542,6 +545,8 @@ class CaseOut(BaseModel):
     matter_sub_type_name: str | None
     matter_head_type_name: str | None
     matter_menus: list[MatterMenuItemOut] = Field(default_factory=list)
+    source_id: uuid.UUID | None = None
+    source_name: str | None = None
     created_by: uuid.UUID
     is_locked: bool
     lock_mode: CaseLockMode
@@ -557,6 +562,24 @@ class MatterContactTypeOut(BaseModel):
     is_system: bool
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class CaseSourceOut(BaseModel):
+    id: uuid.UUID
+    name: str
+    sort_order: int
+    is_system: bool
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class CaseSourceCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+
+
+class CaseSourceAdminUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=200)
+    sort_order: int | None = None
 
 
 class MatterContactTypeAdminCreate(BaseModel):
@@ -655,8 +678,13 @@ class FeeScaleOut(BaseModel):
     matter_head_type_name: str | None = None
     matter_sub_type_name: str | None = None
     scope_summary: str | None = None
+    is_favorited: bool = False
     created_at: datetime
     updated_at: datetime
+
+
+class FeeScaleFavoriteUpdate(BaseModel):
+    favorited: bool
 
 
 class FeeScaleCreate(BaseModel):
@@ -683,7 +711,7 @@ class FeeScaleLineOut(BaseModel):
     amount_kind: Literal["fixed", "editable", "band"] | None = None
     default_amount_pence: int | None = None
     band_set_id: uuid.UUID | None = None
-    include_in_vat: bool = False
+    vat_treatment: Literal["included", "plus_vat"] = "included"
     sort_order: int
 
 
@@ -735,7 +763,7 @@ class FeeScaleLineCreate(BaseModel):
     amount_kind: Literal["fixed", "editable", "band"] | None = None
     default_amount_pence: int | None = None
     band_set_id: uuid.UUID | None = None
-    include_in_vat: bool = False
+    vat_treatment: Literal["included", "plus_vat"] = "included"
     sort_order: int = 0
 
 
@@ -745,7 +773,7 @@ class FeeScaleLineUpdate(BaseModel):
     amount_kind: Literal["fixed", "editable", "band"] | None = None
     default_amount_pence: int | None = None
     band_set_id: uuid.UUID | None = None
-    include_in_vat: bool | None = None
+    vat_treatment: Literal["included", "plus_vat"] | None = None
     sort_order: int | None = None
 
 
@@ -784,7 +812,8 @@ class QuotePreviewLineOut(BaseModel):
     amount_display: str | None = None
     editable: bool = False
     is_bold: bool = False
-    include_in_vat: bool = False
+    vat_pence: int | None = None
+    vat_treatment: Literal["included", "plus_vat"] | None = None
     amount_kind: str | None = None
     band_set_id: uuid.UUID | None = None
     sort_order: int = 0
@@ -813,7 +842,7 @@ class QuoteDraftLineIn(BaseModel):
     line_kind: str
     amount_kind: str | None = None
     amount_pence: int | None = Field(default=None, ge=0)
-    include_in_vat: bool = False
+    vat_treatment: Literal["included", "plus_vat"] = "included"
     band_set_id: uuid.UUID | None = None
     sort_order: int = 0
 
@@ -837,6 +866,7 @@ class ComposeQuoteLineIn(BaseModel):
     name: str = Field(min_length=1, max_length=512)
     line_kind: str
     amount_pence: int | None = Field(default=None, ge=0)
+    vat_pence: int | None = Field(default=None, ge=0)
     is_bold: bool = False
 
 
@@ -1779,6 +1809,7 @@ class FinanceCategoryTemplateOut(BaseModel):
     matter_sub_type_id: uuid.UUID
     name: str
     sort_order: int
+    credit_only: bool = False
     items: list[FinanceItemTemplateOut] = []
 
 
@@ -1804,6 +1835,7 @@ class FinanceItemUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=200)
     direction: Literal["debit", "credit"] | None = None
     amount_pence: int | None = Field(default=None, ge=0)
+    vat_pence: int | None = Field(default=None, ge=0)
     sort_order: int | None = Field(default=None, ge=0)
 
     model_config = {"extra": "forbid"}
@@ -1816,6 +1848,7 @@ class FinanceItemOut(BaseModel):
     name: str
     direction: Literal["debit", "credit"]
     amount_pence: int | None
+    vat_pence: int | None = None
     sort_order: int
 
 
@@ -1839,12 +1872,15 @@ class FinanceCategoryOut(BaseModel):
     template_category_id: uuid.UUID | None
     name: str
     sort_order: int
+    credit_only: bool = False
     items: list[FinanceItemOut] = []
 
 
 class FinanceOut(BaseModel):
     case_id: uuid.UUID
     categories: list[FinanceCategoryOut]
+    has_finance_preset: bool = False
+    has_quote_snapshot: bool = False
 
 
 # Sub-menu Events (admin templates + case rows)

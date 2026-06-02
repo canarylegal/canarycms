@@ -382,6 +382,7 @@ export function ReportsPage({ token, me }: { token: string; me: UserPublic | nul
       matter_description: string
       status_label: string
       fee_earner_name: string
+      source_name?: string | null
       created_at: string
     }[]
   } | null
@@ -856,6 +857,7 @@ export function ReportsPage({ token, me }: { token: string; me: UserPublic | nul
                       <th>Matter</th>
                       <th>Status</th>
                       <th>Fee earner</th>
+                      <th>Source</th>
                       <th>Opened</th>
                     </tr>
                   </thead>
@@ -867,6 +869,7 @@ export function ReportsPage({ token, me }: { token: string; me: UserPublic | nul
                         <td>{r.matter_description}</td>
                         <td>{r.status_label}</td>
                         <td>{r.fee_earner_name}</td>
+                        <td>{r.source_name ?? ''}</td>
                         <td>{r.created_at?.slice(0, 16)?.replace('T', ' ') ?? ''}</td>
                       </tr>
                     ))}

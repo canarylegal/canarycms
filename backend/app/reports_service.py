@@ -18,6 +18,7 @@ from app.models import (
     CaseEvent,
     CaseInvoice,
     CaseInvoiceLine,
+    CaseSource,
     CaseStatus,
     LedgerAccount,
     LedgerAccountType,
@@ -278,7 +279,16 @@ class CaseReportRow:
     status: str
     status_label: str
     fee_earner_name: str
+    source_name: str | None
     created_at: datetime
+
+
+def _source_names_for_cases(cases: list[Case], db: Session) -> dict[uuid.UUID, str]:
+    ids = {c.source_id for c in cases if c.source_id}
+    if not ids:
+        return {}
+    rows = db.execute(select(CaseSource).where(CaseSource.id.in_(ids))).scalars().all()
+    return {s.id: s.name for s in rows}
 
 
 def report_cases(
@@ -294,6 +304,7 @@ def report_cases(
     if statuses:
         q = q.where(Case.status.in_(statuses))
     rows = db.execute(q.order_by(Case.case_number.asc())).scalars().all()
+    source_map = _source_names_for_cases(rows, db)
     return [
         CaseReportRow(
             case_id=c.id,
@@ -303,6 +314,7 @@ def report_cases(
             status=c.status.value,
             status_label=_case_status_label(c.status),
             fee_earner_name=_fee_earner_label(db, c.fee_earner_user_id),
+            source_name=source_map.get(c.source_id) if c.source_id else None,
             created_at=c.created_at,
         )
         for c in rows
@@ -340,6 +352,7 @@ def report_cases_opened(
         .order_by(Case.created_at.desc())
     )
     rows = db.execute(q).scalars().all()
+    source_map = _source_names_for_cases(rows, db)
     return [
         CaseReportRow(
             case_id=c.id,
@@ -349,6 +362,7 @@ def report_cases_opened(
             status=c.status.value,
             status_label=_case_status_label(c.status),
             fee_earner_name=_fee_earner_label(db, c.fee_earner_user_id),
+            source_name=source_map.get(c.source_id) if c.source_id else None,
             created_at=c.created_at,
         )
         for c in rows

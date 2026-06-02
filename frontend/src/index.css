@@ -673,15 +673,15 @@ html.dark .topbar .btn:not(.primary):not(.danger) {
 
 /*
  * Main menu cases: Reference · Client · Description · Fee earner · Status
- * Matches MAIN_MENU_CASES_TABLE_GRID in App.tsx — Client 30fr; Status 5fr (5% moved from Status to Client).
+ * Col 3 +25% (from col 4); col 5 +50% (from col 2).
  */
 .mainMenuShell--mainMenu .casesTableScroll .tr {
   grid-template-columns:
     minmax(0, 10fr)
-    minmax(0, 30fr)
-    minmax(0, 35fr)
-    minmax(0, 20fr)
-    minmax(0, 5fr);
+    minmax(0, 26.25fr)
+    minmax(0, 34.375fr)
+    minmax(0, 18.125fr)
+    minmax(0, 11.25fr);
 }
 
 /* Closed / archived matters — muted row (main menu cases list only). */
@@ -1235,8 +1235,144 @@ select {
   border-radius: 12px;
 }
 
+.feeScaleFavoriteBtn {
+  flex: 0 0 auto;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-size: 1.15rem;
+  line-height: 1;
+  padding: 2px 4px;
+  cursor: pointer;
+}
+
+.feeScaleFavoriteBtn:hover:not(:disabled) {
+  color: var(--text);
+}
+
+.feeScaleFavoriteBtn--on {
+  color: #eab308;
+}
+
+.feeScaleFavoriteBtn--on:hover:not(:disabled) {
+  color: #facc15;
+}
+
 .listTitle {
   font-weight: 650;
+}
+
+.feeScaleGroupTitle {
+  margin: 0 0 8px;
+  font-size: 0.92rem;
+  font-weight: 650;
+  color: var(--muted);
+  letter-spacing: 0.01em;
+}
+
+.feeScaleGroup .list {
+  gap: 8px;
+}
+
+/* Fee scales tree — Reddit-style thread indentation by scope */
+.feeScaleTreeBlockTitle {
+  margin: 0 0 10px;
+  font-size: 0.95rem;
+  font-weight: 650;
+  color: var(--text);
+}
+
+.feeScaleTreeBlock--matter {
+  margin-left: 2px;
+  padding-left: 14px;
+  border-left: 2px solid color-mix(in srgb, var(--border) 88%, var(--muted));
+}
+
+.feeScaleThreadRow--root {
+  margin-bottom: 8px;
+}
+
+.feeScaleThreadRow--root:last-child {
+  margin-bottom: 0;
+}
+
+.feeScaleThreadRow--depth1,
+.feeScaleThreadRow--depth2 {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr);
+  gap: 10px;
+  align-items: stretch;
+}
+
+.feeScaleThreadGutter {
+  position: relative;
+  width: 22px;
+  min-height: 100%;
+}
+
+.feeScaleThreadVline {
+  position: absolute;
+  left: 10px;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  border-radius: 1px;
+  background: color-mix(in srgb, var(--border) 92%, var(--muted));
+}
+
+.feeScaleThreadRow--last .feeScaleThreadVline {
+  bottom: 50%;
+}
+
+.feeScaleThreadElbow {
+  position: absolute;
+  left: 10px;
+  top: 50%;
+  width: 12px;
+  height: 2px;
+  margin-top: -1px;
+  border-radius: 1px;
+  background: color-mix(in srgb, var(--border) 92%, var(--muted));
+}
+
+.feeScaleThreadContent {
+  min-width: 0;
+  padding-bottom: 8px;
+}
+
+.feeScaleThreadRow--last .feeScaleThreadContent {
+  padding-bottom: 0;
+}
+
+.feeScaleThreadGroup {
+  position: relative;
+  margin-top: 4px;
+}
+
+.feeScaleThreadGroup--depth1 {
+  margin-left: 0;
+  padding-left: 4px;
+}
+
+.feeScaleThreadGroup--depth2 {
+  margin-left: 22px;
+  padding-left: 4px;
+}
+
+.feeScaleThreadGroupLabel {
+  margin: 0 0 6px 32px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--muted);
+  letter-spacing: 0.01em;
+}
+
+.feeScaleThreadGroup--depth2 .feeScaleThreadGroupLabel {
+  margin-left: 32px;
+}
+
+.feeScaleListCard {
+  width: 100%;
 }
 
 /* Admin → Precedents list: align name row with category select + action buttons */
@@ -3283,6 +3419,76 @@ html.dark .ledgerBalanceBand--client {
   padding: 2px 8px !important;
   font-size: 0.8rem !important;
   margin-left: 4px;
+}
+
+/* Fee scale editor: single-row line layout */
+.feeScaleQuoteTable {
+  table-layout: fixed;
+  width: 100%;
+}
+
+.feeScaleQuoteTable .feeScaleColType {
+  width: 14%;
+  min-width: 11rem;
+}
+
+/* Fixed at 2× prior 26rem cap — does not grow with panel width */
+.feeScaleQuoteTable .feeScaleColDesc {
+  width: 52rem;
+  max-width: 52rem;
+}
+
+.feeScaleQuoteTable .feeScaleColAmount {
+  width: 12%;
+  min-width: 8rem;
+}
+
+.feeScaleQuoteTable .feeScaleColVatTreatment {
+  width: 11.75rem;
+  max-width: 11.75rem;
+}
+
+.feeScaleQuoteTable .feeScaleColVat {
+  width: 8%;
+  min-width: 6rem;
+}
+
+.feeScaleQuoteTable .feeScaleColAct {
+  width: 8%;
+  min-width: 6rem;
+}
+
+.feeScaleLineCells {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  width: 100%;
+}
+
+.feeScaleLineCells .feeScaleLineName {
+  flex: 1 1 auto;
+  min-width: 7rem;
+  max-width: 38rem;
+  width: auto;
+  field-sizing: content;
+}
+
+.feeScaleLineCells .feeScaleLineAmountKind,
+.feeScaleLineCells .feeScaleLineBandSet {
+  flex: 0 0 auto;
+  width: auto;
+  min-width: max-content;
+}
+
+.feeScaleQuoteTable .feeScaleTypeCell .select {
+  width: 100%;
+  max-width: none;
+}
+
+.feeScaleQuoteTable .feeScaleVatTreatmentCol .select {
+  width: 100%;
+  max-width: 11.75rem;
 }
 
 .finAddItemRow {

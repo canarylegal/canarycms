@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { MENU_COLUMN_RESET_EVENT } from './userUiPreferences'
 
 type ColumnWidthsOptions = {
   /** Persisted pixel widths; omit length or pass undefined to use CSS fr defaults. */
@@ -32,6 +33,14 @@ export function useColumnWidths(columnCount: number, options?: ColumnWidthsOptio
     }
     setPixelWidths(null)
   }, [customized, externalWidths, fallbacks, min])
+
+  useEffect(() => {
+    function onMenuColumnReset() {
+      setPixelWidths(null)
+    }
+    window.addEventListener(MENU_COLUMN_RESET_EVENT, onMenuColumnReset)
+    return () => window.removeEventListener(MENU_COLUMN_RESET_EVENT, onMenuColumnReset)
+  }, [])
 
   const gridTemplateColumns = pixelWidths
     ? pixelWidths.map((w) => `${Math.round(w)}px`).join(' ')

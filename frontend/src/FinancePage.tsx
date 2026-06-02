@@ -3,7 +3,6 @@ import { apiFetch } from './api'
 import { canaryDocumentTitle } from './tabTitle'
 import type { ApiError } from './api'
 import { useDialogs } from './DialogProvider'
-import { SearchInput } from './SearchInput'
 import type { CaseOut, FinanceCategoryOut, FinanceItemOut, FinanceOut } from './types'
 import { openOnlyOfficeCaseEditor } from './onlyofficeEditorWindow'
 
@@ -16,33 +15,20 @@ interface Props {
   embedded?: boolean
 }
 
-type ItemDraft = { name: string; direction: 'debit' | 'credit'; amountStr: string }
+type ItemDraft = { name: string; direction: 'debit' | 'credit'; amountStr: string; vatStr: string }
 
 function pence(p: number): string {
   return `£${(p / 100).toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 }
 
-function totals(items: FinanceItemOut[], drafts: Record<string, ItemDraft>) {
-  let dr = 0, cr = 0
-  for (const it of items) {
-    const d = drafts[it.id]
-    const dir = d?.direction ?? it.direction
-    const amt = d ? (d.amountStr.trim() ? Math.round(parseFloat(d.amountStr) * 100) : null) : it.amount_pence
-    if (amt == null || isNaN(amt)) continue
-    if (dir === 'debit') dr += amt
-    else cr += amt
-  }
-  return { dr, cr }
-}
-
 export function FinancePage({ caseId, token, onClose, embedded = false }: Props) {
-  const { askConfirm } = useDialogs()
+  const { askConfirm, alert } = useDialogs()
   const [finance, setFinance] = useState<FinanceOut | null>(null)
   const [drafts, setDrafts] = useState<Record<string, ItemDraft>>({})
+  const [catDrafts, setCatDrafts] = useState<Record<string, string>>({})
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [genBusy, setGenBusy] = useState(false)
-  const [financeSearch, setFinanceSearch] = useState('')
 
   // Add item form state per category
   const [addItemCatId, setAddItemCatId] = useState<string | null>(null)
@@ -56,17 +42,30 @@ export function FinancePage({ caseId, token, onClose, embedded = false }: Props)
 
   function initDrafts(data: FinanceOut) {
     const d: Record<string, ItemDraft> = {}
+    const c: Record<string, string> = {}
     for (const cat of data.categories) {
+      c[cat.id] = cat.name
       for (const item of cat.items) {
         d[item.id] = {
           name: item.name,
-          direction: item.direction,
+          direction: cat.credit_only ? 'credit' : item.direction,
           amountStr: item.amount_pence != null ? (item.amount_pence / 100).toFixed(2) : '',
+          vatStr: item.vat_pence != null ? (item.vat_pence / 100).toFixed(2) : '',
         }
       }
     }
     setDrafts(d)
+    setCatDrafts(c)
   }
+
+  const financeUsesPreset = useMemo(
+    () =>
+      Boolean(
+        finance?.has_finance_preset || finance?.categories.some((c) => c.template_category_id),
+      ),
+    [finance],
+  )
+  const showApplyQuote = Boolean(finance?.has_quote_snapshot && financeUsesPreset)
 
   async function load() {
     setBusy(true); setError(null)
@@ -77,6 +76,29 @@ export function FinancePage({ caseId, token, onClose, embedded = false }: Props)
     } catch (e) {
       setError((e as ApiError).message ?? 'Failed to load finance')
     } finally { setBusy(false) }
+  }
+
+  async function applyQuote() {
+    if (!finance?.has_quote_snapshot) return
+    const ok = await askConfirm({
+      title: 'Apply quote',
+      message:
+        'Apply amounts from the most recent quote to this finance sheet? Existing line amounts with matching names will be overwritten.',
+      confirmLabel: 'Apply quote',
+    })
+    if (!ok) return
+    setBusy(true)
+    setError(null)
+    try {
+      const data = await apiFetch<FinanceOut>(`/cases/${caseId}/finance/apply-quote`, { token, method: 'POST' })
+      setFinance(data)
+      initDrafts(data)
+      await alert('Quote amounts applied to the finance sheet.', 'Apply quote')
+    } catch (e) {
+      setError((e as ApiError).message ?? 'Failed to apply quote')
+    } finally {
+      setBusy(false)
+    }
   }
 
   useEffect(() => { void load() }, [caseId])
@@ -91,28 +113,81 @@ export function FinancePage({ caseId, token, onClose, embedded = false }: Props)
     setDrafts((prev) => ({ ...prev, [itemId]: { ...prev[itemId], ...patch } }))
   }
 
+  function setCatDraft(catId: string, name: string) {
+    setCatDrafts((prev) => ({ ...prev, [catId]: name }))
+  }
+
+  async function saveCategoryName(catId: string) {
+    if (!finance) return
+    const cat = finance.categories.find((c) => c.id === catId)
+    const trimmed = (catDrafts[catId] ?? cat?.name ?? '').trim()
+    if (!cat || !trimmed || cat.name === trimmed) {
+      if (cat && trimmed !== catDrafts[catId]) setCatDraft(catId, cat.name)
+      return
+    }
+    try {
+      await apiFetch(`/cases/${caseId}/finance/categories/${catId}`, {
+        token,
+        method: 'PATCH',
+        json: { name: trimmed },
+      })
+      setFinance((prev) =>
+        prev
+          ? {
+              ...prev,
+              categories: prev.categories.map((c) => (c.id === catId ? { ...c, name: trimmed } : c)),
+            }
+          : prev,
+      )
+      setCatDraft(catId, trimmed)
+    } catch (e) {
+      setError((e as ApiError).message ?? 'Failed to save category name')
+      setCatDraft(catId, cat.name)
+    }
+  }
+
+  async function savePendingChanges() {
+    if (!finance) return
+    for (const cat of finance.categories) {
+      const catName = (catDrafts[cat.id] ?? cat.name).trim()
+      if (catName && catName !== cat.name) {
+        await apiFetch(`/cases/${caseId}/finance/categories/${cat.id}`, {
+          token,
+          method: 'PATCH',
+          json: { name: catName },
+        })
+      }
+      for (const item of cat.items) {
+        const d = drafts[item.id]
+        if (!d) continue
+        const amtPence = d.amountStr.trim() ? Math.round(parseFloat(d.amountStr) * 100) : null
+        const vatPence = d.vatStr.trim() ? Math.round(parseFloat(d.vatStr) * 100) : null
+        const nameChanged = d.name !== item.name
+        const dirChanged = !cat.credit_only && d.direction !== item.direction
+        const amtChanged = amtPence !== item.amount_pence
+        const vatChanged = vatPence !== (item.vat_pence ?? null)
+        if (nameChanged || dirChanged || amtChanged || vatChanged) {
+          await apiFetch(`/cases/${caseId}/finance/items/${item.id}`, {
+            token, method: 'PATCH',
+            json: {
+              name: d.name || item.name,
+              direction: cat.credit_only ? 'credit' : d.direction,
+              amount_pence: amtPence,
+              vat_pence: vatPence,
+            },
+          })
+        }
+      }
+    }
+  }
+
   // ── Save all ──────────────────────────────────────────────────────────────
 
   async function saveAll() {
     if (!finance) { onClose?.(); return }
     setBusy(true); setError(null)
     try {
-      for (const cat of finance.categories) {
-        for (const item of cat.items) {
-          const d = drafts[item.id]
-          if (!d) continue
-          const amtPence = d.amountStr.trim() ? Math.round(parseFloat(d.amountStr) * 100) : null
-          const nameChanged = d.name !== item.name
-          const dirChanged = d.direction !== item.direction
-          const amtChanged = amtPence !== item.amount_pence
-          if (nameChanged || dirChanged || amtChanged) {
-            await apiFetch(`/cases/${caseId}/finance/items/${item.id}`, {
-              token, method: 'PATCH',
-              json: { name: d.name || item.name, direction: d.direction, amount_pence: amtPence },
-            })
-          }
-        }
-      }
+      await savePendingChanges()
       onClose?.()
     } catch (e) {
       setError((e as ApiError).message ?? 'Failed to save')
@@ -129,24 +204,7 @@ export function FinancePage({ caseId, token, onClose, embedded = false }: Props)
     if (!finance) return
     setGenBusy(true); setError(null)
     try {
-      // Save any pending drafts first
-      for (const cat of finance.categories) {
-        for (const item of cat.items) {
-          const d = drafts[item.id]
-          if (!d) continue
-          const amtPence = d.amountStr.trim() ? Math.round(parseFloat(d.amountStr) * 100) : null
-          const nameChanged = d.name !== item.name
-          const dirChanged = d.direction !== item.direction
-          const amtChanged = amtPence !== item.amount_pence
-          if (nameChanged || dirChanged || amtChanged) {
-            await apiFetch(`/cases/${caseId}/finance/items/${item.id}`, {
-              token, method: 'PATCH',
-              json: { name: d.name || item.name, direction: d.direction, amount_pence: amtPence },
-            })
-          }
-        }
-      }
-      // Generate the document
+      await savePendingChanges()
       const res = await apiFetch<{ id: string }>(`/cases/${caseId}/finance/completion-statement`, {
         token, method: 'POST',
       })
@@ -177,12 +235,18 @@ export function FinancePage({ caseId, token, onClose, embedded = false }: Props)
 
   async function addItem(catId: string) {
     if (!addItemName.trim()) return
+    const cat = finance?.categories.find((c) => c.id === catId)
     setBusy(true)
     try {
-      const order = finance?.categories.find((c) => c.id === catId)?.items.length ?? 0
+      const order = cat?.items.length ?? 0
       await apiFetch(`/cases/${caseId}/finance/items`, {
         token, method: 'POST',
-        json: { category_id: catId, name: addItemName.trim(), direction: addItemDir, sort_order: order },
+        json: {
+          category_id: catId,
+          name: addItemName.trim(),
+          direction: cat?.credit_only ? 'credit' : addItemDir,
+          sort_order: order,
+        },
       })
       setAddItemCatId(null); setAddItemName(''); setAddItemDir('debit')
       await load()
@@ -221,31 +285,32 @@ export function FinancePage({ caseId, token, onClose, embedded = false }: Props)
   // ── Derived totals ────────────────────────────────────────────────────────
 
   const allItems = finance?.categories.flatMap((c) => c.items) ?? []
+  function itemLineTotal(i: FinanceItemOut): number {
+    const d = drafts[i.id]
+    const amt = d
+      ? d.amountStr.trim()
+        ? Math.round(parseFloat(d.amountStr) * 100)
+        : null
+      : i.amount_pence
+    const vat = d
+      ? d.vatStr.trim()
+        ? Math.round(parseFloat(d.vatStr) * 100)
+        : null
+      : i.vat_pence ?? null
+    if (amt == null || isNaN(amt)) return 0
+    const v = vat != null && !isNaN(vat) ? vat : 0
+    return amt + v
+  }
+
   const grandDr = allItems.reduce((s, i) => {
-    const d = drafts[i.id]; const dir = d?.direction ?? i.direction
-    const amt = d ? (d.amountStr.trim() ? Math.round(parseFloat(d.amountStr) * 100) : null) : i.amount_pence
-    return dir === 'debit' && amt != null && !isNaN(amt) ? s + amt : s
+    const dir = drafts[i.id]?.direction ?? i.direction
+    return dir === 'debit' ? s + itemLineTotal(i) : s
   }, 0)
   const grandCr = allItems.reduce((s, i) => {
-    const d = drafts[i.id]; const dir = d?.direction ?? i.direction
-    const amt = d ? (d.amountStr.trim() ? Math.round(parseFloat(d.amountStr) * 100) : null) : i.amount_pence
-    return dir === 'credit' && amt != null && !isNaN(amt) ? s + amt : s
+    const dir = drafts[i.id]?.direction ?? i.direction
+    return dir === 'credit' ? s + itemLineTotal(i) : s
   }, 0)
   const balance = grandCr - grandDr
-
-  const filteredCategories = useMemo(() => {
-    if (!finance) return []
-    const q = financeSearch.trim().toLowerCase()
-    if (!q) return finance.categories
-    return finance.categories.filter((cat) => {
-      if (cat.name.toLowerCase().includes(q)) return true
-      return cat.items.some((it) => {
-        const d = drafts[it.id]
-        const name = (d?.name ?? it.name).toLowerCase()
-        return name.includes(q)
-      })
-    })
-  }, [finance, financeSearch, drafts])
 
   const showModalTitleBar = Boolean(onClose && !embedded)
   const showTotals = !onClose || embedded
@@ -313,17 +378,18 @@ export function FinancePage({ caseId, token, onClose, embedded = false }: Props)
           className={`finActions${showModalTitleBar ? ' finActions--modalToolbar' : ''}`}
           style={{ flexWrap: 'wrap', gap: 8 }}
         >
-          <div style={{ flex: '1 1 220px', minWidth: 200, maxWidth: 360 }}>
-            <SearchInput
-              placeholder="Search categories and line items…"
-              value={financeSearch}
-              onChange={(e) => setFinanceSearch(e.target.value)}
-              onClear={() => setFinanceSearch('')}
-              className="mainMenuSearchInput"
-              aria-label="Search finance"
-            />
-          </div>
           <button type="button" className="btn" disabled={busy || genBusy} onClick={() => void load()}>Refresh</button>
+          {showApplyQuote ? (
+            <button
+              type="button"
+              className="btn"
+              disabled={busy || genBusy}
+              onClick={() => void applyQuote()}
+              title="Fill finance line amounts from the most recent quote on this case"
+            >
+              Apply quote
+            </button>
+          ) : null}
           <button type="button" className="btn finAddCatBtn" disabled={busy || genBusy} onClick={() => setAddCatOpen(true)}>
             + Category
           </button>
@@ -342,28 +408,29 @@ export function FinancePage({ caseId, token, onClose, embedded = false }: Props)
 
       {error && <div className="error">{error}</div>}
 
+      {finance && financeUsesPreset && !finance.has_quote_snapshot ? (
+        <div className="muted" style={{ marginBottom: 8 }}>
+          Create a quote on this case to enable Apply quote.
+        </div>
+      ) : null}
+
       {!finance && busy && <div className="empty">Loading…</div>}
 
       {finance && finance.categories.length === 0 && (
         <div className="empty">No finance items yet. Add a category to get started.</div>
       )}
 
-      {finance && filteredCategories.length === 0 && finance.categories.length > 0 && financeSearch.trim() ? (
-        <div className="muted" style={{ padding: 12 }}>
-          No categories or items match your search.
-        </div>
-      ) : null}
-
-      {finance && filteredCategories.map((cat: FinanceCategoryOut) => {
-        const { dr, cr } = totals(cat.items, drafts)
-        return (
+      {finance && finance.categories.map((cat: FinanceCategoryOut) => (
           <div key={cat.id} className="finCategoryBlock">
             <div className="finCategoryHead">
-              <span className="finCategoryName">{cat.name}</span>
-              <span className="finCategoryTotals muted">
-                {dr > 0 && <span className="finTotalDr">DR {pence(dr)}</span>}
-                {cr > 0 && <span className="finTotalCr">CR {pence(cr)}</span>}
-              </span>
+              <input
+                className="input finCategoryNameInput"
+                value={catDrafts[cat.id] ?? cat.name}
+                onChange={(e) => setCatDraft(cat.id, e.target.value)}
+                onBlur={() => void saveCategoryName(cat.id)}
+                disabled={busy}
+                aria-label="Category name"
+              />
               <button
                 type="button"
                 className="btn finCatDeleteBtn"
@@ -381,25 +448,35 @@ export function FinancePage({ caseId, token, onClose, embedded = false }: Props)
                   <th style={{ width: 100 }}>Type</th>
                   <th>Description</th>
                   <th className="finAmtCell">Amount</th>
+                  <th className="finAmtCell">VAT</th>
                   <th className="finActCell" />
                 </tr>
               </thead>
               <tbody>
                 {cat.items.map((item: FinanceItemOut) => {
-                  const d = drafts[item.id] ?? { name: item.name, direction: item.direction, amountStr: '' }
+                  const d = drafts[item.id] ?? {
+                    name: item.name,
+                    direction: item.direction,
+                    amountStr: '',
+                    vatStr: '',
+                  }
                   return (
                     <tr key={item.id} className="finRow">
                       <td>
-                        <select
-                          className="select"
-                          style={{ width: 92 }}
-                          value={d.direction}
-                          onChange={(e) => setDraft(item.id, { direction: e.target.value as 'debit' | 'credit' })}
-                          disabled={busy}
-                        >
-                          <option value="debit">Debit</option>
-                          <option value="credit">Credit</option>
-                        </select>
+                        {cat.credit_only ? (
+                          <span className="finDirBadge finDirBadge--credit">Credit</span>
+                        ) : (
+                          <select
+                            className="select"
+                            style={{ width: 92 }}
+                            value={d.direction}
+                            onChange={(e) => setDraft(item.id, { direction: e.target.value as 'debit' | 'credit' })}
+                            disabled={busy}
+                          >
+                            <option value="debit">Debit</option>
+                            <option value="credit">Credit</option>
+                          </select>
+                        )}
                       </td>
                       <td>
                         <input
@@ -423,6 +500,19 @@ export function FinancePage({ caseId, token, onClose, embedded = false }: Props)
                           disabled={busy}
                         />
                       </td>
+                      <td className="finAmtCell">
+                        <input
+                          className="input"
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          placeholder="—"
+                          style={{ width: 110, textAlign: 'right' }}
+                          value={d.vatStr}
+                          onChange={(e) => setDraft(item.id, { vatStr: e.target.value })}
+                          disabled={busy || cat.credit_only}
+                        />
+                      </td>
                       <td className="finActCell">
                         <button
                           type="button"
@@ -438,7 +528,7 @@ export function FinancePage({ caseId, token, onClose, embedded = false }: Props)
                   )
                 })}
                 {cat.items.length === 0 && (
-                  <tr><td colSpan={4} className="muted" style={{ padding: '8px 10px', fontStyle: 'italic' }}>No items.</td></tr>
+                  <tr><td colSpan={5} className="muted" style={{ padding: '8px 10px', fontStyle: 'italic' }}>No items.</td></tr>
                 )}
               </tbody>
             </table>
@@ -446,16 +536,20 @@ export function FinancePage({ caseId, token, onClose, embedded = false }: Props)
             {/* Add item row */}
             {addItemCatId === cat.id ? (
               <div className="finAddItemRow">
-                <select
-                  className="select"
-                  style={{ width: 92 }}
-                  value={addItemDir}
-                  onChange={(e) => setAddItemDir(e.target.value as 'debit' | 'credit')}
-                  disabled={busy}
-                >
-                  <option value="debit">Debit</option>
-                  <option value="credit">Credit</option>
-                </select>
+                {cat.credit_only ? (
+                  <span className="finDirBadge finDirBadge--credit">Credit</span>
+                ) : (
+                  <select
+                    className="select"
+                    style={{ width: 92 }}
+                    value={addItemDir}
+                    onChange={(e) => setAddItemDir(e.target.value as 'debit' | 'credit')}
+                    disabled={busy}
+                  >
+                    <option value="debit">Debit</option>
+                    <option value="credit">Credit</option>
+                  </select>
+                )}
                 <input
                   className="input"
                   style={{ flex: 1 }}
@@ -486,14 +580,17 @@ export function FinancePage({ caseId, token, onClose, embedded = false }: Props)
                 type="button"
                 className="btn finAddItemBtn"
                 disabled={busy}
-                onClick={() => { setAddItemCatId(cat.id); setAddItemName(''); setAddItemDir('debit') }}
+                onClick={() => {
+                  setAddItemCatId(cat.id)
+                  setAddItemName('')
+                  setAddItemDir(cat.credit_only ? 'credit' : 'debit')
+                }}
               >
                 + Add item
               </button>
             )}
           </div>
-        )
-      })}
+      ))}
 
       {/* Add category form */}
       {addCatOpen && (

@@ -3,6 +3,21 @@ import { apiFetch } from './api'
 import { useDialogs } from './DialogProvider'
 import { FeeScaleBandRowModal } from './FeeScaleBandRowModal'
 import { TextPromptModal } from './TextPromptModal'
+import {
+  addBandRowLocal,
+  addBandSetLocal,
+  addCategoryLocal,
+  addLineLocal,
+  buildEmptyDraftDetail,
+  deleteBandRowLocal,
+  deleteLineLocal,
+  persistDraftFeeScale,
+  setVatRateLocal,
+  updateBandRowLocal,
+  updateLineLocal,
+  type FeeScaleDraftCreate,
+} from './feeScaleDraft'
+import { VAT_TREATMENT_OPTIONS, formatVatCell, type FeeScaleVatTreatment } from './feeScaleVat'
 import type {
   FeeScaleAmountKind,
   FeeScaleBandRowOut,
@@ -44,7 +59,12 @@ export function penceToPounds(pence: number | null | undefined): string {
 
 type Props = {
   token: string
-  scaleId: string
+  /** Existing saved fee scale */
+  scaleId?: string
+  /** New fee scale — held locally until Save & finish setup */
+  draftCreate?: FeeScaleDraftCreate
+  /** Pre-built draft content (e.g. clone); defaults to empty scale */
+  draftInitialDetail?: FeeScaleDetailOut | null
   setupMode?: boolean
   onBack: () => void
 }
@@ -56,8 +76,9 @@ type EditorModal =
   | { kind: 'bandRow'; bandSet: FeeScaleBandSetOut }
   | null
 
-export function FeeScaleEditor({ token, scaleId, setupMode, onBack }: Props) {
+export function FeeScaleEditor({ token, scaleId, draftCreate, draftInitialDetail, setupMode, onBack }: Props) {
   const { askConfirm } = useDialogs()
+  const isDraft = Boolean(draftCreate) && !scaleId
   const [detail, setDetail] = useState<FeeScaleDetailOut | null>(null)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
@@ -65,6 +86,7 @@ export function FeeScaleEditor({ token, scaleId, setupMode, onBack }: Props) {
   const [modal, setModal] = useState<EditorModal>(null)
 
   const load = useCallback(async () => {
+    if (!scaleId) return
     setBusy(true)
     setErr(null)
     try {
@@ -79,27 +101,37 @@ export function FeeScaleEditor({ token, scaleId, setupMode, onBack }: Props) {
   }, [scaleId, token])
 
   useEffect(() => {
+    if (isDraft && draftCreate) {
+      const initial = draftInitialDetail ?? buildEmptyDraftDetail(draftCreate)
+      setDetail(initial)
+      setVatPct(String((initial.vat_rate_bps ?? 2000) / 100))
+      setErr(null)
+      return
+    }
     void load()
-  }, [load])
+  }, [isDraft, draftCreate, draftInitialDetail, load])
 
   const bandSetOptions = useMemo(
     () => (detail?.band_sets ?? []).map((b) => ({ id: b.id, label: b.name })),
     [detail?.band_sets],
   )
 
-  async function saveVatIfDirty() {
+  function applyVatRateLocally() {
     if (!detail) return
     const bps = Math.round(Number(vatPct) * 100)
     if (!Number.isFinite(bps) || bps < 0) return
     if (bps === (detail.vat_rate_bps ?? 2000)) return
-    await apiFetch(`/fee-scales/${detail.id}`, { token, method: 'PATCH', json: { vat_rate_bps: bps } })
-    await load()
+    setDetail(setVatRateLocal(detail, bps))
   }
 
   async function saveVat() {
     if (!detail) return
     const bps = Math.round(Number(vatPct) * 100)
     if (!Number.isFinite(bps) || bps < 0) return
+    if (isDraft) {
+      applyVatRateLocally()
+      return
+    }
     setBusy(true)
     try {
       await apiFetch(`/fee-scales/${detail.id}`, { token, method: 'PATCH', json: { vat_rate_bps: bps } })
@@ -117,7 +149,7 @@ export function FeeScaleEditor({ token, scaleId, setupMode, onBack }: Props) {
 
   async function saveAndClose() {
     if (!detail) return
-    if (setupMode && !hasQuoteLines(detail)) {
+    if ((setupMode || isDraft) && !hasQuoteLines(detail)) {
       const ok = await askConfirm({
         title: 'Finish setup?',
         message:
@@ -129,7 +161,16 @@ export function FeeScaleEditor({ token, scaleId, setupMode, onBack }: Props) {
     setBusy(true)
     setErr(null)
     try {
-      await saveVatIfDirty()
+      const bps = Math.round(Number(vatPct) * 100)
+      const detailToSave =
+        Number.isFinite(bps) && bps >= 0 ? setVatRateLocal(detail, bps) : detail
+      if (isDraft && draftCreate) {
+        await persistDraftFeeScale(token, detailToSave, draftCreate)
+      } else {
+        if (bps !== (detail.vat_rate_bps ?? 2000) && Number.isFinite(bps) && bps >= 0) {
+          await apiFetch(`/fee-scales/${detail.id}`, { token, method: 'PATCH', json: { vat_rate_bps: bps } })
+        }
+      }
       onBack()
     } catch (e: unknown) {
       setErr((e as { message?: string }).message ?? 'Save failed')
@@ -139,6 +180,17 @@ export function FeeScaleEditor({ token, scaleId, setupMode, onBack }: Props) {
   }
 
   async function handleBack() {
+    if (isDraft) {
+      const ok = await askConfirm({
+        title: 'Cancel fee scale?',
+        message: 'Nothing will be saved. Cancel creating this fee scale?',
+        confirmLabel: 'Cancel creation',
+        danger: true,
+      })
+      if (!ok) return
+      onBack()
+      return
+    }
     if (setupMode && detail && !hasQuoteLines(detail)) {
       const ok = await askConfirm({
         title: 'Leave setup?',
@@ -152,6 +204,11 @@ export function FeeScaleEditor({ token, scaleId, setupMode, onBack }: Props) {
 
   async function submitCategory(name: string) {
     if (!detail) return
+    if (isDraft) {
+      setDetail(addCategoryLocal(detail, name))
+      setModal(null)
+      return
+    }
     setBusy(true)
     try {
       await apiFetch('/fee-scales/categories', {
@@ -169,6 +226,11 @@ export function FeeScaleEditor({ token, scaleId, setupMode, onBack }: Props) {
   }
 
   async function submitLine(category: FeeScaleCategoryOut, name: string) {
+    if (isDraft && detail) {
+      setDetail(addLineLocal(detail, category.id, name))
+      setModal(null)
+      return
+    }
     setBusy(true)
     try {
       await apiFetch('/fee-scales/lines', {
@@ -194,6 +256,11 @@ export function FeeScaleEditor({ token, scaleId, setupMode, onBack }: Props) {
 
   async function submitBandSet(name: string) {
     if (!detail) return
+    if (isDraft) {
+      setDetail(addBandSetLocal(detail, name))
+      setModal(null)
+      return
+    }
     setBusy(true)
     try {
       await apiFetch('/fee-scales/band-sets', {
@@ -214,6 +281,11 @@ export function FeeScaleEditor({ token, scaleId, setupMode, onBack }: Props) {
     set: FeeScaleBandSetOut,
     values: { min_value_pence: number; max_value_pence: number | null; amount_pence: number },
   ) {
+    if (isDraft && detail) {
+      setDetail(addBandRowLocal(detail, set.id, values))
+      setModal(null)
+      return
+    }
     setBusy(true)
     try {
       await apiFetch('/fee-scales/band-rows', {
@@ -237,6 +309,10 @@ export function FeeScaleEditor({ token, scaleId, setupMode, onBack }: Props) {
   }
 
   async function updateLine(line: FeeScaleLineOut, patch: Record<string, unknown>) {
+    if (isDraft && detail) {
+      setDetail(updateLineLocal(detail, line.id, patch as Partial<FeeScaleLineOut>))
+      return
+    }
     setBusy(true)
     try {
       await apiFetch(`/fee-scales/lines/${line.id}`, { token, method: 'PATCH', json: patch })
@@ -251,6 +327,10 @@ export function FeeScaleEditor({ token, scaleId, setupMode, onBack }: Props) {
   async function deleteLine(lineId: string) {
     const ok = await askConfirm({ title: 'Delete line', message: 'Remove this line?', danger: true, confirmLabel: 'Delete' })
     if (!ok) return
+    if (isDraft && detail) {
+      setDetail(deleteLineLocal(detail, lineId))
+      return
+    }
     setBusy(true)
     try {
       await apiFetch(`/fee-scales/lines/${lineId}`, { token, method: 'DELETE' })
@@ -263,6 +343,10 @@ export function FeeScaleEditor({ token, scaleId, setupMode, onBack }: Props) {
   }
 
   async function updateBandRow(row: FeeScaleBandRowOut, patch: Record<string, unknown>) {
+    if (isDraft && detail) {
+      setDetail(updateBandRowLocal(detail, row.id, patch as Partial<FeeScaleBandRowOut>))
+      return
+    }
     setBusy(true)
     try {
       await apiFetch(`/fee-scales/band-rows/${row.id}`, { token, method: 'PATCH', json: patch })
@@ -277,6 +361,10 @@ export function FeeScaleEditor({ token, scaleId, setupMode, onBack }: Props) {
   async function deleteBandRow(rowId: string) {
     const ok = await askConfirm({ title: 'Delete band', message: 'Remove this band row?', danger: true, confirmLabel: 'Delete' })
     if (!ok) return
+    if (isDraft && detail) {
+      setDetail(deleteBandRowLocal(detail, rowId))
+      return
+    }
     setBusy(true)
     try {
       await apiFetch(`/fee-scales/band-rows/${rowId}`, { token, method: 'DELETE' })
@@ -297,37 +385,35 @@ export function FeeScaleEditor({ token, scaleId, setupMode, onBack }: Props) {
     setModal({ kind: 'bandRow', bandSet: set })
   }
 
-  if (!detail && busy) return <div className="muted">Loading…</div>
+  if (!detail && busy && !isDraft) return <div className="muted">Loading…</div>
   if (!detail) return <div className="error">{err ?? 'Not found'}</div>
 
   return (
     <div className="stack" style={{ gap: 16 }}>
       <div className="row" style={{ justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
         <div>
-          <button type="button" className="btn" disabled={busy} onClick={() => void handleBack()}>
-            ← Fee scales
-          </button>
-          <h3 style={{ margin: '8px 0 0' }}>{detail.name}</h3>
-          <div className="muted" style={{ fontSize: 12 }}>
+          <h3 style={{ margin: 0 }}>{detail.name}</h3>
+          <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
             {detail.reference} · {detail.scope_summary}
+            {isDraft ? ' · not saved yet' : null}
           </div>
         </div>
         <div className="row" style={{ gap: 8, flexShrink: 0 }}>
-          <button type="button" className="btn" disabled={busy} onClick={() => void load()}>
-            Refresh
+          <button type="button" className="btn" disabled={busy} onClick={() => void handleBack()}>
+            Back
           </button>
           <button type="button" className="btn primary" disabled={busy} onClick={() => void saveAndClose()}>
-            {setupMode ? 'Save & finish setup' : 'Save & close'}
+            {setupMode || isDraft ? 'Save & finish setup' : 'Save & close'}
           </button>
         </div>
       </div>
 
-      {setupMode ? (
+      {setupMode || isDraft ? (
         <div className="card" style={{ padding: 12, borderLeft: '3px solid var(--accent)' }}>
           <strong>Set up your fee scale</strong>
           <p className="muted" style={{ margin: '6px 0 0', fontSize: 13 }}>
-            Add at least one category with quote lines. Optionally configure value bands for tiered fees, then click{' '}
-            <strong>Save &amp; finish setup</strong> when done. Return here later from Fee scales → Edit to make changes.
+            Add categories and quote lines as needed. Click <strong>Save &amp; finish setup</strong> to create the fee
+            scale, or <strong>Back</strong> to cancel without saving.
           </p>
         </div>
       ) : null}
@@ -470,19 +556,42 @@ export function FeeScaleEditor({ token, scaleId, setupMode, onBack }: Props) {
           </div>
           {cat.lines.length === 0 ? (
             <div className="muted" style={{ fontSize: 12 }}>
-              No lines — add section headers, items, VAT, subtotals, and totals in order.
+              No lines — add section headers, items, subtotals, and totals in order.
             </div>
           ) : (
-            cat.lines.map((line) => (
-              <LineEditor
-                key={line.id}
-                line={line}
-                bandSetOptions={bandSetOptions}
-                busy={busy}
-                onUpdate={(patch) => void updateLine(line, patch)}
-                onDelete={() => void deleteLine(line.id)}
-              />
-            ))
+            <table className="finTable feeScaleQuoteTable" style={{ fontSize: 13 }}>
+              <colgroup>
+                <col className="feeScaleColType" />
+                <col className="feeScaleColDesc" />
+                <col className="feeScaleColAmount" />
+                <col className="feeScaleColVatTreatment" />
+                <col className="feeScaleColVat" />
+                <col className="feeScaleColAct" />
+              </colgroup>
+              <thead>
+                <tr>
+                  <th>Type</th>
+                  <th className="feeScaleDescCol">Description</th>
+                  <th className="finAmtCell">Amount</th>
+                  <th className="feeScaleVatTreatmentCol">VAT treatment</th>
+                  <th className="finAmtCell">VAT</th>
+                  <th className="finActCell" />
+                </tr>
+              </thead>
+              <tbody>
+                {cat.lines.map((line) => (
+                  <LineEditor
+                    key={line.id}
+                    line={line}
+                    vatRateBps={detail.vat_rate_bps ?? 2000}
+                    bandSetOptions={bandSetOptions}
+                    busy={busy}
+                    onUpdate={(patch) => void updateLine(line, patch)}
+                    onDelete={() => void deleteLine(line.id)}
+                  />
+                ))}
+              </tbody>
+            </table>
           )}
         </div>
       ))}
@@ -568,12 +677,14 @@ function BandRowEditor({
 
 function LineEditor({
   line,
+  vatRateBps,
   bandSetOptions,
   busy,
   onUpdate,
   onDelete,
 }: {
   line: FeeScaleLineOut
+  vatRateBps: number
   bandSetOptions: { id: string; label: string }[]
   busy: boolean
   onUpdate: (patch: Record<string, unknown>) => void
@@ -581,6 +692,11 @@ function LineEditor({
 }) {
   const [amountStr, setAmountStr] = useState(penceToPounds(line.default_amount_pence))
   const [nameStr, setNameStr] = useState(line.name)
+  const treatment = (line.vat_treatment ?? 'included') as FeeScaleVatTreatment
+  const isItem = line.line_kind === 'item'
+  const vatDisplay = isItem
+    ? formatVatCell(line.default_amount_pence, treatment, vatRateBps)
+    : '—'
 
   useEffect(() => {
     setAmountStr(penceToPounds(line.default_amount_pence))
@@ -588,20 +704,11 @@ function LineEditor({
   }, [line.default_amount_pence, line.name])
 
   return (
-    <div className="stack" style={{ gap: 6, padding: 8, background: 'var(--panel2)', borderRadius: 6 }}>
-      <div className="row" style={{ gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-        <input
-          className="input"
-          style={{ flex: 1, minWidth: 160 }}
-          value={nameStr}
-          disabled={busy}
-          onChange={(e) => setNameStr(e.target.value)}
-          onBlur={() => {
-            if (nameStr.trim() && nameStr !== line.name) onUpdate({ name: nameStr.trim() })
-          }}
-        />
+    <tr className="finRow">
+      <td className="feeScaleTypeCell">
         <select
-          className="input"
+          className="select"
+          style={{ width: '100%' }}
           value={line.line_kind}
           disabled={busy}
           onChange={(e) => onUpdate({ line_kind: e.target.value })}
@@ -612,67 +719,99 @@ function LineEditor({
             </option>
           ))}
         </select>
-        <button type="button" className="btn danger" style={SMALL} disabled={busy} onClick={onDelete}>
-          Remove
-        </button>
-      </div>
-      {line.line_kind === 'item' ? (
-        <div className="row" style={{ gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-          <select
-            className="input"
-            value={line.amount_kind ?? 'fixed'}
+      </td>
+      <td className="feeScaleDescCol">
+        <div
+          className="feeScaleLineCells"
+          style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'nowrap', minWidth: 0 }}
+        >
+          <input
+            className="input feeScaleLineName"
+            value={nameStr}
             disabled={busy}
-            onChange={(e) => onUpdate({ amount_kind: e.target.value })}
+            onChange={(e) => setNameStr(e.target.value)}
+            onBlur={() => {
+              if (nameStr.trim() && nameStr !== line.name) onUpdate({ name: nameStr.trim() })
+            }}
+          />
+          {isItem ? (
+            <>
+              <select
+                className="select feeScaleLineAmountKind"
+                style={{ flex: '0 0 auto', width: 'auto' }}
+                value={line.amount_kind ?? 'fixed'}
+                disabled={busy}
+                onChange={(e) => onUpdate({ amount_kind: e.target.value })}
+              >
+                {AMOUNT_KINDS.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+              {line.amount_kind === 'band' ? (
+                <select
+                  className="select feeScaleLineBandSet"
+                  value={line.band_set_id ?? ''}
+                  disabled={busy}
+                  onChange={(e) => onUpdate({ band_set_id: e.target.value || null })}
+                >
+                  <option value="">Band set…</option>
+                  {bandSetOptions.map((b) => (
+                    <option key={b.id} value={b.id}>
+                      {b.label}
+                    </option>
+                  ))}
+                </select>
+              ) : null}
+            </>
+          ) : null}
+        </div>
+      </td>
+      <td className="finAmtCell">
+        {isItem && line.amount_kind !== 'band' ? (
+          <input
+            className="input"
+            style={{ width: '100%', textAlign: 'right' }}
+            value={amountStr}
+            disabled={busy}
+            onChange={(e) => setAmountStr(e.target.value)}
+            onBlur={() => {
+              const p = poundsToPence(amountStr)
+              if (p != null) onUpdate({ default_amount_pence: p })
+            }}
+          />
+        ) : (
+          <span className="muted">—</span>
+        )}
+      </td>
+      <td className="feeScaleVatTreatmentCol">
+        {isItem ? (
+          <select
+            className="select"
+            style={{ width: '100%' }}
+            value={treatment}
+            disabled={busy}
+            onChange={(e) => onUpdate({ vat_treatment: e.target.value })}
           >
-            {AMOUNT_KINDS.map((o) => (
+            {VAT_TREATMENT_OPTIONS.map((o) => (
               <option key={o.value} value={o.value}>
                 {o.label}
               </option>
             ))}
           </select>
-          {line.amount_kind !== 'band' ? (
-            <>
-              <span className="muted" style={{ fontSize: 12 }}>
-                £
-              </span>
-              <input
-                className="input"
-                style={{ width: 100 }}
-                value={amountStr}
-                disabled={busy}
-                onChange={(e) => setAmountStr(e.target.value)}
-                onBlur={() => {
-                  const p = poundsToPence(amountStr)
-                  if (p != null) onUpdate({ default_amount_pence: p })
-                }}
-              />
-            </>
-          ) : (
-            <select
-              className="input"
-              value={line.band_set_id ?? ''}
-              disabled={busy}
-              onChange={(e) => onUpdate({ band_set_id: e.target.value || null })}
-            >
-              <option value="">Select band set…</option>
-              {bandSetOptions.map((b) => (
-                <option key={b.id} value={b.id}>
-                  {b.label}
-                </option>
-              ))}
-            </select>
-          )}
-          <label className="row" style={{ gap: 4, fontSize: 12 }}>
-            <input
-              type="checkbox"
-              checked={line.include_in_vat}
-              disabled={busy}
-              onChange={(e) => onUpdate({ include_in_vat: e.target.checked })}
-            />
-            Include in VAT
-          </label>
-        </div>
-      ) : null}
-    </div>
+        ) : (
+          <span className="muted">—</span>
+        )}
+      </td>
+      <td className="finAmtCell" style={{ textAlign: 'right' }}>
+        <span className="muted">{vatDisplay}</span>
+      </td>
+      <td className="finActCell">
+        <button type="button" className="btn danger" style={SMALL} disabled={busy} onClick={onDelete}>
+          Remove
+        </button>
+      </td>
+    </tr>
   )
 }

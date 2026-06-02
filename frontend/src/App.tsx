@@ -11,6 +11,7 @@ import { parseAppNavigation, readBootNavigation, sanitizeAppNavigation, syncAppN
 import { CaseViewRoute } from './CaseViewRoute'
 import { CalendarPage } from './CalendarPage'
 import { FeeScalesPanel } from './FeeScalesPanel'
+import { QuoteSourcesPanel } from './QuoteSourcesPanel'
 import { QuoteWizard } from './QuoteWizard'
 import { ReportsPage } from './ReportsPage'
 import { TaskCreateModal } from './TaskCreateModal'
@@ -59,7 +60,7 @@ import {
   LEGACY_AUTO_MAIN_MENU_COLUMN_WIDTHS,
   LEGACY_AUTO_TASKS_MENU_COLUMN_WIDTHS,
 } from './columnGridDefaults'
-import { normalizeUiPreferences } from './userUiPreferences'
+import { normalizeUiPreferences, resetMenuColumnWidths } from './userUiPreferences'
 import { AppLogo } from './AppLogo'
 import {
   DEFAULT_OUTLOOK_WEB_MAIL_URL,
@@ -68,6 +69,7 @@ import {
 } from './emailLauncher'
 import { useDialogs } from './DialogProvider'
 import { SearchInput } from './SearchInput'
+import { CaseSourceField, resolveCaseSourcePayload, useCaseSources } from './CaseSourceField'
 import { copyTextToClipboard } from './copyToClipboard'
 import { canaryDocumentTitle } from './tabTitle'
 import { caseHasRevokedUserAccess, formatCaseStatusLabel, userCanAccessAdminConsole } from './types'
@@ -566,6 +568,7 @@ function LoginForm({
                     setEmail(e.target.value)
                   }}
                   autoComplete="username"
+                  autoFocus
                 />
               </label>
               <label className="field">
@@ -797,7 +800,7 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
   const [quotesFilterMatterTypes, setQuotesFilterMatterTypes] = useState<string[]>([])
   const [quotesFilterFeeEarnerUserIds, setQuotesFilterFeeEarnerUserIds] = useState<string[]>([])
   const [quotesFilterCaseStatuses, setQuotesFilterCaseStatuses] = useState<MainMenuCaseStatusFilter[]>(['quote'])
-  const [quotesSubPanel, setQuotesSubPanel] = useState<'list' | 'fee-scales'>(bootNav.quotesSubPanel)
+  const [quotesSubPanel, setQuotesSubPanel] = useState<'list' | 'fee-scales' | 'sources'>(bootNav.quotesSubPanel)
   const [quoteWizardOpen, setQuoteWizardOpen] = useState(false)
   const [newMatterFromQuotes, setNewMatterFromQuotes] = useState(false)
   const [quoteWizardPendingCaseId, setQuoteWizardPendingCaseId] = useState<string | null>(null)
@@ -1036,7 +1039,7 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
   )
 
   const onMainMenuSort = useCallback(
-    (k: 'reference' | 'client' | 'matter' | 'feeEarner' | 'status' | 'created') => {
+    (k: 'reference' | 'client' | 'matter' | 'feeEarner' | 'status' | 'source' | 'created') => {
       if (k === uiPrefs.main_menu_sort_key) {
         setUiPreference('main_menu_sort_dir', uiPrefs.main_menu_sort_dir === 'asc' ? 'desc' : 'asc')
       } else {
@@ -1089,6 +1092,9 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
     if (view === 'quotes') {
       if (quotesSubPanel === 'fee-scales') {
         return <FeeScalesPanel token={token} onBack={() => setQuotesSubPanel('list')} />
+      }
+      if (quotesSubPanel === 'sources') {
+        return <QuoteSourcesPanel token={token} me={auth.me} onBack={() => setQuotesSubPanel('list')} />
       }
       return null
     }
@@ -1332,9 +1338,14 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
 
   const quotesFeeScalesButton = useMemo(
     () => (
-      <button type="button" className="btn" onClick={() => setQuotesSubPanel('fee-scales')}>
-        Fee scales
-      </button>
+      <>
+        <button type="button" className="btn" onClick={() => setQuotesSubPanel('sources')}>
+          Sources
+        </button>
+        <button type="button" className="btn" onClick={() => setQuotesSubPanel('fee-scales')}>
+          Fee scales
+        </button>
+      </>
     ),
     [],
   )
@@ -1353,6 +1364,7 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
       onPersistFilters={persistQuotesFilters}
       gridTemplateColumns={casesGridColumns}
       startColumnResize={casesStartResize}
+      showSourceColumn
       caseListFocusId={caseListFocusId}
       onCaseRowFocus={setCaseListFocusId}
       onSelectCase={onMainMenuSelectCase}
@@ -1579,8 +1591,11 @@ function NewMatterModal({
   defaultStatus?: 'open' | 'quote'
 }) {
   const { askConfirm } = useDialogs()
+  const caseSources = useCaseSources(token)
   const [matterDescription, setMatterDescription] = useState('')
   const [practiceArea, setPracticeArea] = useState('')
+  const [sourceId, setSourceId] = useState('')
+  const [sourceCustomName, setSourceCustomName] = useState('')
   const [feeEarner, setFeeEarner] = useState<string>(currentUserId)
   /** Active = open; Quote = quote (only these may be set on create). */
   const [newMatterStatus, setNewMatterStatus] = useState<'open' | 'quote'>(defaultStatus)
@@ -1703,6 +1718,14 @@ function NewMatterModal({
               ))}
             </select>
           </label>
+          <CaseSourceField
+            sources={caseSources}
+            sourceId={sourceId}
+            customName={sourceCustomName}
+            onSourceIdChange={setSourceId}
+            onCustomNameChange={setSourceCustomName}
+            disabled={busy}
+          />
           <label className="field">
             <span>Fee earner</span>
             <select
@@ -1753,10 +1776,14 @@ function NewMatterModal({
             </button>
             <button
               className="btn primary"
-              disabled={busy || !practiceArea}
+              disabled={busy}
               onClick={() => {
                 setErr(null)
                 setContactErr(null)
+                if (!practiceArea) {
+                  setErr('Select a matter type.')
+                  return
+                }
                 const sub = matterHeadTypes.flatMap((h) => h.sub_types).find((s) => s.id === practiceArea)
                 if (subTypeHasPropertyMenu(sub)) {
                   setPropertyDraft((d) => d ?? blankPropertyPayload())
@@ -1912,22 +1939,32 @@ function NewMatterModal({
 
               <label className="field">
                 <span>Search existing global contacts</span>
-                <input value={contactSearch} onChange={(e) => setContactSearch(e.target.value)} />
+                <input
+                  value={contactSearch}
+                  onChange={(e) => {
+                    const next = e.target.value
+                    setContactSearch(next)
+                    if (!next.trim()) setSelectedGlobalContactId(null)
+                  }}
+                />
               </label>
 
               <div className="list" style={{ maxHeight: 160, overflow: 'auto' }}>
-                {contacts
-                  .filter((c) => {
-                    const s = contactSearch.trim().toLowerCase()
-                    if (!s) return true
-                    return (
-                      c.name.toLowerCase().includes(s) ||
-                      (c.email ?? '').toLowerCase().includes(s) ||
-                      (c.phone ?? '').toLowerCase().includes(s)
-                    )
-                  })
-                  .slice(0, 25)
-                  .map((c) => (
+                {(() => {
+                  const query = contactSearch.trim().toLowerCase()
+                  if (!query) {
+                    return <div className="muted">Type in the search box to find contacts.</div>
+                  }
+                  const matching = contacts.filter(
+                    (c) =>
+                      c.name.toLowerCase().includes(query) ||
+                      (c.email ?? '').toLowerCase().includes(query) ||
+                      (c.phone ?? '').toLowerCase().includes(query),
+                  )
+                  if (matching.length === 0) {
+                    return <div className="muted">No contacts match your search.</div>
+                  }
+                  return matching.slice(0, 25).map((c) => (
                     <div key={c.id} className="listCard row" style={{ justifyContent: 'space-between' }}>
                       <div>
                         <div className="listTitle">
@@ -1947,8 +1984,8 @@ function NewMatterModal({
                             : 'Select'}
                       </button>
                     </div>
-                  ))}
-                {contacts.length === 0 ? <div className="muted">No contacts yet.</div> : null}
+                  ))
+                })()}
               </div>
 
               <div className="row" style={{ justifyContent: 'flex-end' }}>
@@ -2048,6 +2085,7 @@ function NewMatterModal({
                           status: newMatterStatus,
                           matter_sub_type_id: practiceArea || null,
                           fee_earner_user_id: feeEarner,
+                          ...resolveCaseSourcePayload(caseSources, sourceId, sourceCustomName),
                         },
                       })
                       for (const p of pendingClientLinks) {
@@ -2109,6 +2147,7 @@ function caseMatchesMainMenuSearch(c: CaseOut, users: UserSummary[], search: str
     c.matter_description ?? '',
     formatCaseStatusLabel(c.status),
     fe,
+    c.source_name ?? '',
   ]
   return parts.join(' ').toLowerCase().includes(s)
 }
@@ -2141,7 +2180,7 @@ function buildCaseTableRows(
     feeEarnerUserIds: string[]
     caseStatuses: MainMenuCaseStatusFilter[]
   },
-  sortKey: 'reference' | 'client' | 'matter' | 'feeEarner' | 'status' | 'created',
+  sortKey: 'reference' | 'client' | 'matter' | 'feeEarner' | 'status' | 'source' | 'created',
   sortDir: 'asc' | 'desc',
 ): CaseOut[] {
   const s = search.trim()
@@ -2166,6 +2205,8 @@ function buildCaseTableRows(
               ? feeEarnerLabel(a, users)
               : sortKey === 'status'
                 ? a.status
+                : sortKey === 'source'
+                  ? a.source_name ?? ''
                 : sortKey === 'created'
                   ? a.created_at
                   : ''
@@ -2180,6 +2221,8 @@ function buildCaseTableRows(
               ? feeEarnerLabel(b, users)
               : sortKey === 'status'
                 ? b.status
+                : sortKey === 'source'
+                  ? b.source_name ?? ''
                 : sortKey === 'created'
                   ? b.created_at
                   : ''
@@ -2202,6 +2245,7 @@ function CasesTable({
   onSort,
   gridTemplateColumns,
   startColumnResize,
+  showSourceColumn = false,
 }: {
   cases: CaseOut[]
   users: UserSummary[]
@@ -2212,11 +2256,12 @@ function CasesTable({
   caseListFocusId: string | null
   onCaseRowFocus: (id: string | null) => void
   onSelect: (id: string, opts?: { docPanel?: CaseOpenDocPanel }) => void
-  sortKey: 'reference' | 'client' | 'matter' | 'feeEarner' | 'status' | 'created'
+  sortKey: 'reference' | 'client' | 'matter' | 'feeEarner' | 'status' | 'source' | 'created'
   sortDir: 'asc' | 'desc'
-  onSort: (k: 'reference' | 'client' | 'matter' | 'feeEarner' | 'status' | 'created') => void
+  onSort: (k: 'reference' | 'client' | 'matter' | 'feeEarner' | 'status' | 'source' | 'created') => void
   gridTemplateColumns?: string
   startColumnResize: (colIndex: number, startClientX: number, measureRow?: HTMLElement | null) => void
+  showSourceColumn?: boolean
 }) {
   const [caseCtx, setCaseCtx] = useState<null | { id: string; x: number; y: number }>(null)
   const caseCtxRef = useRef<HTMLDivElement | null>(null)
@@ -2249,25 +2294,32 @@ function CasesTable({
     [cases, users, search, filterMatterTypes, filterFeeEarnerUserIds, filterCaseStatuses, sortKey, sortDir],
   )
 
+  const columns = useMemo(() => {
+    const base = [
+      ['reference', 'Reference'],
+      ['client', 'Client name'],
+      ['matter', 'Description'],
+      ['feeEarner', 'Fee earner'],
+    ] as const
+    if (showSourceColumn) {
+      return [...base, ['source', 'Source']] as const
+    }
+    return [...base, ['status', 'Status']] as const
+  }, [showSourceColumn])
+
+  const lastColIndex = columns.length - 1
+
   return (
     <div className="card casesTableCard" style={{ padding: 0, overflow: 'hidden' }}>
       <div className="casesTableScroll">
         <div className="table">
         <div className="tr th" style={gridTemplateColumns ? { gridTemplateColumns } : undefined}>
-          {(
-            [
-              ['reference', 'Reference'],
-              ['client', 'Client name'],
-              ['matter', 'Description'],
-              ['feeEarner', 'Fee earner'],
-              ['status', 'Status'],
-            ] as const
-          ).map(([k, label], colIndex) => (
+          {columns.map(([k, label], colIndex) => (
             <div key={k} className="thCell">
               <button type="button" className="thbtn" onClick={() => onSort(k)}>
                 {label}
               </button>
-              {colIndex < 4 ? (
+              {colIndex < lastColIndex ? (
                 <div
                   className="colResizeHandle"
                   role="separator"
@@ -2311,7 +2363,11 @@ function CasesTable({
               <div className="td">{c.client_name ?? '—'}</div>
               <div className="td">{c.matter_description}</div>
               <div className="td">{feeEarnerLabel(c, users)}</div>
-              <div className="td">{formatCaseStatusLabel(c.status)}</div>
+              {showSourceColumn ? (
+                <div className="td">{c.source_name ?? '—'}</div>
+              ) : (
+                <div className="td">{formatCaseStatusLabel(c.status)}</div>
+              )}
             </button>
           )
         })}
@@ -2387,6 +2443,7 @@ const MainMenuCasesPanel = memo(function MainMenuCasesPanel({
   createButtonLabel = 'New matter',
   onCreateClick,
   toolbarMiddle,
+  showSourceColumn = false,
 }: {
   cases: CaseOut[]
   casesErr: string | null
@@ -2407,14 +2464,15 @@ const MainMenuCasesPanel = memo(function MainMenuCasesPanel({
   caseListFocusId: string | null
   onCaseRowFocus: (id: string | null) => void
   onSelectCase: (id: string, opts?: { docPanel?: CaseOpenDocPanel }) => void
-  sortKey: 'reference' | 'client' | 'matter' | 'feeEarner' | 'status' | 'created'
+  sortKey: 'reference' | 'client' | 'matter' | 'feeEarner' | 'status' | 'source' | 'created'
   sortDir: 'asc' | 'desc'
-  onSort: (k: 'reference' | 'client' | 'matter' | 'feeEarner' | 'status' | 'created') => void
+  onSort: (k: 'reference' | 'client' | 'matter' | 'feeEarner' | 'status' | 'source' | 'created') => void
   onOpenNewMatter: () => void
   onRefreshCases: () => void
   createButtonLabel?: string
   onCreateClick?: () => void
   toolbarMiddle?: ReactNode
+  showSourceColumn?: boolean
 }) {
   const [caseSearch, setCaseSearch] = useState('')
   const [filterOpen, setFilterOpen] = useState(false)
@@ -2577,6 +2635,7 @@ const MainMenuCasesPanel = memo(function MainMenuCasesPanel({
         filterCaseStatuses={filterCaseStatuses}
         gridTemplateColumns={gridTemplateColumns}
         startColumnResize={startColumnResize}
+        showSourceColumn={showSourceColumn}
         caseListFocusId={caseListFocusId}
         onCaseRowFocus={onCaseRowFocus}
         onSelect={onSelectCase}
@@ -2616,6 +2675,7 @@ function UserSettingsPage({
     prefs: appearancePrefs,
   } = useAppearanceFormState(account)
   const [themeSavedHint, setThemeSavedHint] = useState(false)
+  const [columnsResetHint, setColumnsResetHint] = useState(false)
   const [themeSaveErr, setThemeSaveErr] = useState<string | null>(null)
 
   const [busy, setBusy] = useState(false)
@@ -3146,6 +3206,37 @@ function UserSettingsPage({
               >
                 Reset to defaults
               </button>
+            </div>
+            <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid var(--border)' }}>
+              <div className="muted" style={{ fontSize: 13, marginBottom: 8 }}>
+                Menu tables (main menu, quotes, tasks, contacts) remember column widths when you drag column edges.
+              </div>
+              <div className="row" style={{ gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                <button
+                  type="button"
+                  className="btn"
+                  disabled={busy}
+                  onClick={() => {
+                    void (async () => {
+                      setThemeSaveErr(null)
+                      setColumnsResetHint(false)
+                      setBusy(true)
+                      try {
+                        await resetMenuColumnWidths(token)
+                        setColumnsResetHint(true)
+                        await refreshMe()
+                      } catch (e: unknown) {
+                        setThemeSaveErr((e as ApiError).message ?? 'Could not reset menu columns')
+                      } finally {
+                        setBusy(false)
+                      }
+                    })()
+                  }}
+                >
+                  Reset menu columns
+                </button>
+                {columnsResetHint ? <span className="muted">Menu columns reset.</span> : null}
+              </div>
             </div>
           </div>
         </section>

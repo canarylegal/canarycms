@@ -48,6 +48,13 @@ function caseMatchesQuoteSearch(c: CaseOut, users: UserSummary[], search: string
   return parts.join(' ').toLowerCase().includes(s)
 }
 
+function feeScaleMatchesSearch(f: FeeScaleOut, search: string): boolean {
+  const s = search.trim().toLowerCase()
+  if (!s) return false
+  const parts = [f.name, f.reference, f.scope_summary ?? '']
+  return parts.join(' ').toLowerCase().includes(s)
+}
+
 function feeScalesUrlForCase(c: CaseOut | null | undefined): string {
   if (!c) return '/fee-scales'
   if (c.matter_sub_type_id) {
@@ -79,7 +86,7 @@ export function QuoteWizard({
   const [caseMatterSearch, setCaseMatterSearch] = useState('')
   const [feeScales, setFeeScales] = useState<FeeScaleOut[]>([])
   const [feeScaleId, setFeeScaleId] = useState<string | 'none'>('none')
-  const [feeScaleOpen, setFeeScaleOpen] = useState(false)
+  const [feeScaleSearch, setFeeScaleSearch] = useState('')
   const [caseContacts, setCaseContacts] = useState<CaseContactOut[]>([])
   const [pickMatterCcId, setPickMatterCcId] = useState('none')
   const [matterOpen, setMatterOpen] = useState(false)
@@ -108,6 +115,7 @@ export function QuoteWizard({
     wasOpenRef.current = true
     setCaseMatterSearch('')
     setFeeScaleId('none')
+    setFeeScaleSearch('')
     setPickMatterCcId('none')
     setPropertyValueStr('')
     setQuotePreview(null)
@@ -139,10 +147,7 @@ export function QuoteWizard({
       .then((d) => {
         const list = Array.isArray(d) ? d : []
         setFeeScales(list)
-        setFeeScaleId((prev) => {
-          if (prev === 'none') return 'none'
-          return list.some((f) => f.id === prev) ? prev : list[0]?.id ?? 'none'
-        })
+        setFeeScaleId((prev) => (prev !== 'none' && list.some((f) => f.id === prev) ? prev : 'none'))
       })
       .catch(() => {
         setFeeScales([])
@@ -172,13 +177,11 @@ export function QuoteWizard({
     return cases.filter((c) => caseMatchesQuoteSearch(c, users, q)).slice(0, 25)
   }, [cases, users, caseMatterSearch])
 
-  const feeScaleOptions = useMemo(
-    () => [
-      { value: 'none', label: 'No fee scale (letterhead only)' },
-      ...feeScales.map((f) => ({ value: f.id, label: f.name, hint: f.reference })),
-    ],
-    [feeScales],
-  )
+  const displayedFeeScales = useMemo(() => {
+    const q = feeScaleSearch.trim()
+    if (q) return feeScales.filter((f) => feeScaleMatchesSearch(f, q))
+    return feeScales.filter((f) => f.is_favorited)
+  }, [feeScales, feeScaleSearch])
 
   const matterOptions = useMemo(
     () => [
@@ -199,6 +202,10 @@ export function QuoteWizard({
     if (!caseId) return
     if (feeScaleId !== 'none' && !quotePreview) {
       setErr('Fee preview is still loading — wait a moment and try again.')
+      return
+    }
+    if (quotePreview?.needs_property_value && poundsToPence(propertyValueStr) == null) {
+      setErr('Enter the property value (£) before creating the quote — it is required for banded fees and VAT.')
       return
     }
     setBusy(true)
@@ -230,14 +237,8 @@ export function QuoteWizard({
           precedent_merge_all_clients: mergeAll,
           property_value_pence: poundsToPence(propertyValueStr),
           amount_overrides,
-          draft: feeScaleId === 'none' ? null : composeDraft,
-          quote_lines:
-            quotePreview?.lines.map((ln) => ({
-              name: ln.name,
-              line_kind: ln.line_kind,
-              amount_pence: ln.amount_pence ?? null,
-              is_bold: ln.is_bold,
-            })) ?? null,
+          draft: feeScaleId === 'none' || composeDraft.length === 0 ? null : composeDraft,
+          quote_lines: null,
         },
       })
       onQuoteCreated?.()
@@ -342,20 +343,55 @@ export function QuoteWizard({
                   .
                 </p>
               ) : null}
-              <SingleSelectDropdown
-                label="Fee scale"
-                options={feeScaleOptions}
-                value={feeScaleId}
-                onChange={(v) => setFeeScaleId(v as string | 'none')}
-                open={feeScaleOpen}
-                onOpenChange={setFeeScaleOpen}
-                emptyMessage={
-                  feeScales.length === 0 ? 'No fee scales for this matter — add one under Quotes → Fee scales.' : undefined
-                }
-              />
+              <label className="field">
+                <span>Fee scale</span>
+                <SearchInput
+                  className="input"
+                  placeholder="Search fee scales…"
+                  value={feeScaleSearch}
+                  onChange={(e) => setFeeScaleSearch(e.target.value)}
+                  onClear={() => setFeeScaleSearch('')}
+                />
+              </label>
+              <div className="list" style={{ maxHeight: 220, overflow: 'auto', marginTop: 8 }}>
+                <button
+                  type="button"
+                  className={`listItem${feeScaleId === 'none' ? ' active' : ''}`}
+                  onClick={() => setFeeScaleId('none')}
+                >
+                  <div className="listTitle">No fee scale (letterhead only)</div>
+                </button>
+                {displayedFeeScales.map((f) => (
+                  <button
+                    key={f.id}
+                    type="button"
+                    className={`listItem${feeScaleId === f.id ? ' active' : ''}`}
+                    onClick={() => setFeeScaleId(f.id)}
+                  >
+                    <div className="listTitle">
+                      {f.is_favorited ? '★ ' : ''}
+                      {f.name}
+                    </div>
+                    <div className="muted" style={{ fontSize: 12 }}>
+                      {[f.reference, f.scope_summary].filter(Boolean).join(' · ')}
+                    </div>
+                  </button>
+                ))}
+                {!feeScaleSearch.trim() && displayedFeeScales.length === 0 ? (
+                  <div className="muted" style={{ padding: '8px 4px', fontSize: 13 }}>
+                    No favourite fee scales for this matter. Search above to find one, or star scales under Quotes → Fee
+                    scales.
+                  </div>
+                ) : null}
+                {feeScaleSearch.trim() && displayedFeeScales.length === 0 ? (
+                  <div className="muted" style={{ padding: '8px 4px', fontSize: 13 }}>
+                    No fee scales match your search.
+                  </div>
+                ) : null}
+              </div>
               <p className="muted" style={{ fontSize: 12 }}>
-                Fee scales are configured in Canary (lines, bands, VAT). The quote is generated as a Word document on
-                your quote letterhead template.
+                Favourite scales appear here first. Search to find any scale for this matter. Fee scales are configured
+                under Quotes → Fee scales.
               </p>
               <div className="row" style={{ justifyContent: 'flex-end', marginTop: 12 }}>
                 <button

@@ -66,3 +66,12 @@ def test_column_widths_clamped() -> None:
 def test_legacy_auto_column_widths_treated_as_unset() -> None:
     out = user_ui_preferences_out({"main_menu_column_widths": MAIN_MENU_COLUMN_WIDTHS_DEFAULT})
     assert out.main_menu_column_widths == []
+
+
+def test_empty_column_width_patch_clears_customization() -> None:
+    merged = merge_ui_preferences_patch(
+        {"main_menu_column_widths": [100, 200, 300, 200, 100]},
+        UserUiPreferencesPatch(main_menu_column_widths=[]),
+    )
+    out = user_ui_preferences_out(merged)
+    assert out.main_menu_column_widths == []

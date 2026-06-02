@@ -23,10 +23,16 @@ _CONTACTS_SORT_KEYS = frozenset({"name", "type", "email", "phone"})
 _CASE_STATUS_FILTERS = frozenset({"", "open", "closed", "archived", "quote", "post_completion"})
 _SORT_DIRS = frozenset({"asc", "desc"})
 
-MAIN_MENU_COLUMN_WIDTHS_DEFAULT = [110, 240, 300, 180, 100]
+MAIN_MENU_COLUMN_WIDTHS_DEFAULT = [110, 165, 300, 130, 225]
 TASKS_MENU_COLUMN_WIDTHS_DEFAULT = [90, 66, 90, 210, 300, 183, 73]
 CONTACTS_COLUMN_WIDTHS_DEFAULT = [270, 210, 210, 210]
 
+_LEGACY_MAIN_MENU_COLUMN_WIDTH_PRESETS = [
+    [110, 165, 300, 130, 225],
+    [110, 240, 240, 190, 150],
+    [110, 240, 240, 240, 100],
+    [110, 240, 300, 180, 100],
+]
 _LEGACY_AUTO_MAIN_MENU_COLUMN_WIDTHS = MAIN_MENU_COLUMN_WIDTHS_DEFAULT
 _LEGACY_AUTO_TASKS_MENU_COLUMN_WIDTHS = TASKS_MENU_COLUMN_WIDTHS_DEFAULT
 _LEGACY_AUTO_CONTACTS_COLUMN_WIDTHS = CONTACTS_COLUMN_WIDTHS_DEFAULT
@@ -152,7 +158,8 @@ def _stored_column_widths(raw: Any, expected: int, legacy_auto: list[int]) -> li
     clamped = _clamp_widths(raw, expected)
     if clamped is None:
         return []
-    if clamped == legacy_auto:
+    presets = [legacy_auto, *_LEGACY_MAIN_MENU_COLUMN_WIDTH_PRESETS]
+    if any(clamped == preset for preset in presets if len(preset) == expected):
         return []
     return clamped
 
@@ -289,23 +296,35 @@ def merge_ui_preferences_patch(
     if "calendar_selected_calendar_ids" in updates and updates["calendar_selected_calendar_ids"] is not None:
         updates["calendar_selected_calendar_ids"] = _normalize_id_list(updates["calendar_selected_calendar_ids"])
     if "main_menu_column_widths" in updates and updates["main_menu_column_widths"] is not None:
-        clamped = _clamp_widths(updates["main_menu_column_widths"], len(MAIN_MENU_COLUMN_WIDTHS_DEFAULT))
-        if clamped is not None:
-            updates["main_menu_column_widths"] = clamped
+        raw = updates["main_menu_column_widths"]
+        if raw == []:
+            updates["main_menu_column_widths"] = []
         else:
-            updates.pop("main_menu_column_widths", None)
+            clamped = _clamp_widths(raw, len(MAIN_MENU_COLUMN_WIDTHS_DEFAULT))
+            if clamped is not None:
+                updates["main_menu_column_widths"] = clamped
+            else:
+                updates.pop("main_menu_column_widths", None)
     if "tasks_menu_column_widths" in updates and updates["tasks_menu_column_widths"] is not None:
-        clamped = _clamp_widths(updates["tasks_menu_column_widths"], len(TASKS_MENU_COLUMN_WIDTHS_DEFAULT))
-        if clamped is not None:
-            updates["tasks_menu_column_widths"] = clamped
+        raw = updates["tasks_menu_column_widths"]
+        if raw == []:
+            updates["tasks_menu_column_widths"] = []
         else:
-            updates.pop("tasks_menu_column_widths", None)
+            clamped = _clamp_widths(raw, len(TASKS_MENU_COLUMN_WIDTHS_DEFAULT))
+            if clamped is not None:
+                updates["tasks_menu_column_widths"] = clamped
+            else:
+                updates.pop("tasks_menu_column_widths", None)
     if "contacts_column_widths" in updates and updates["contacts_column_widths"] is not None:
-        clamped = _clamp_widths(updates["contacts_column_widths"], len(CONTACTS_COLUMN_WIDTHS_DEFAULT))
-        if clamped is not None:
-            updates["contacts_column_widths"] = clamped
+        raw = updates["contacts_column_widths"]
+        if raw == []:
+            updates["contacts_column_widths"] = []
         else:
-            updates.pop("contacts_column_widths", None)
+            clamped = _clamp_widths(raw, len(CONTACTS_COLUMN_WIDTHS_DEFAULT))
+            if clamped is not None:
+                updates["contacts_column_widths"] = clamped
+            else:
+                updates.pop("contacts_column_widths", None)
     merged.update(updates)
     return user_ui_preferences_out(merged).model_dump()
 

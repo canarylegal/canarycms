@@ -29,6 +29,7 @@ from app.routers import (
     case_contacts,
     case_events,
     case_finance,
+    case_sources,
     case_invoices,
     case_ledger,
     case_notes,
@@ -208,6 +209,7 @@ app.include_router(task_menu.router)
 app.include_router(case_ledger.router)
 app.include_router(case_invoices.router)
 app.include_router(case_finance.router)
+app.include_router(case_sources.router)
 app.include_router(case_events.router)
 app.include_router(admin_finance.router)
 app.include_router(admin_billing.router)

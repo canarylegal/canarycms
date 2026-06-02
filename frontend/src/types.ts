@@ -362,6 +362,8 @@ export type CaseOut = {
   matter_sub_type_name?: string | null
   matter_head_type_name?: string | null
   matter_menus?: MatterMenuItemOut[]
+  source_id?: string | null
+  source_name?: string | null
   created_by: string
   is_locked: boolean
   lock_mode: 'none' | 'whitelist' | 'blacklist'
@@ -454,6 +456,7 @@ export type FeeScaleOut = {
   matter_head_type_name?: string | null
   matter_sub_type_name?: string | null
   scope_summary?: string | null
+  is_favorited?: boolean
   created_at: string
   updated_at: string
 }
@@ -466,7 +469,7 @@ export type FeeScaleLineOut = {
   amount_kind?: FeeScaleAmountKind | null
   default_amount_pence?: number | null
   band_set_id?: string | null
-  include_in_vat: boolean
+  vat_treatment: 'included' | 'plus_vat'
   sort_order: number
 }
 
@@ -509,7 +512,8 @@ export type QuotePreviewLineOut = {
   amount_display?: string | null
   editable: boolean
   is_bold: boolean
-  include_in_vat?: boolean
+  vat_pence?: number | null
+  vat_treatment?: 'included' | 'plus_vat' | null
   amount_kind?: string | null
   band_set_id?: string | null
   sort_order?: number
@@ -538,7 +542,7 @@ export type QuoteDraftLine = {
   line_kind: FeeScaleLineKind
   amount_kind?: FeeScaleAmountKind | null
   amount_pence?: number | null
-  include_in_vat: boolean
+  vat_treatment: 'included' | 'plus_vat'
   band_set_id?: string | null
   sort_order: number
 }
@@ -839,6 +843,7 @@ export type FinanceCategoryTemplateOut = {
   matter_sub_type_id: string
   name: string
   sort_order: number
+  credit_only: boolean
   items: FinanceItemTemplateOut[]
 }
 
@@ -858,6 +863,7 @@ export type FinanceItemOut = {
   name: string
   direction: 'debit' | 'credit'
   amount_pence?: number | null
+  vat_pence?: number | null
   sort_order: number
 }
 
@@ -867,12 +873,22 @@ export type FinanceCategoryOut = {
   template_category_id?: string | null
   name: string
   sort_order: number
+  credit_only: boolean
   items: FinanceItemOut[]
 }
 
 export type FinanceOut = {
   case_id: string
   categories: FinanceCategoryOut[]
+  has_finance_preset?: boolean
+  has_quote_snapshot?: boolean
+}
+
+export type CaseSourceOut = {
+  id: string
+  name: string
+  sort_order: number
+  is_system: boolean
 }
 
 // Sub-menu Events (admin template + case rows)

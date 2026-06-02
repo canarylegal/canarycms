@@ -20,7 +20,7 @@ from app.docx_util import (
     validate_docx_package_bytes,
     write_blank_docx,
 )
-from app.fee_scale_calc import ComputedQuoteLine
+from app.fee_scale_calc import ComputedQuoteLine, quote_column_totals
 from app.fee_scale_service import fee_scale_matches_case, preview_quote_draft, preview_quote_lines
 from app.file_storage import FILES_ROOT
 from app.matter_contact_constants import CLIENT_SLUG, LAWYERS_SLUG, normalize_matter_contact_type_slug
@@ -60,18 +60,28 @@ def _load_quote_template_bytes(db: Session, firm_row: FirmSettings | None) -> by
     return _write_blank_docx_bytes()
 
 
+def _line_vat_pence(ln: ComputedQuoteLine | ComposeQuoteLineIn) -> int | None:
+    return ln.vat_pence
+
+
 def _quote_line_merge_fields(
     lines: list[ComputedQuoteLine] | list[ComposeQuoteLineIn],
     *,
     property_value_pence: int | None,
     max_slots: int = QUOTE_MERGE_SLOT_COUNT,
 ) -> dict[str, str]:
-    """Indexed merge codes for quote fee lines: ``[QUOTE_01_LABEL]``, ``[QUOTE_01_AMOUNT]``, …"""
+    """Indexed merge codes: label, main amount, VAT amount per row; column and grand totals."""
     fields: dict[str, str] = {}
     if property_value_pence is not None:
         fields["[QUOTE_PROPERTY_VALUE]"] = format_gbp_pence(property_value_pence)
     else:
         fields["[QUOTE_PROPERTY_VALUE]"] = ""
+
+    computed_only = [ln for ln in lines if isinstance(ln, ComputedQuoteLine)]
+    if computed_only:
+        main_total, vat_total = quote_column_totals(computed_only)
+    else:
+        main_total, vat_total = 0, 0
 
     used = 0
     for i, ln in enumerate(lines, start=1):
@@ -81,23 +91,37 @@ def _quote_line_merge_fields(
         is_bold = ln.is_bold
         name = ln.name
         amount_pence = ln.amount_pence
+        vat_pence = _line_vat_pence(ln)
         fields[f"[QUOTE_{tag}_LABEL]"] = name
         if kind == "section_header":
             fields[f"[QUOTE_{tag}_AMOUNT]"] = ""
-        elif amount_pence is not None:
-            fields[f"[QUOTE_{tag}_AMOUNT]"] = format_gbp_pence(amount_pence)
+            fields[f"[QUOTE_{tag}_VAT]"] = ""
         else:
-            fields[f"[QUOTE_{tag}_AMOUNT]"] = ""
+            if amount_pence is not None:
+                fields[f"[QUOTE_{tag}_AMOUNT]"] = format_gbp_pence(amount_pence)
+            else:
+                fields[f"[QUOTE_{tag}_AMOUNT]"] = ""
+            if vat_pence is not None:
+                fields[f"[QUOTE_{tag}_VAT]"] = format_gbp_pence(vat_pence)
+            else:
+                fields[f"[QUOTE_{tag}_VAT]"] = ""
         if is_bold:
             fields[f"[b:QUOTE_{tag}_LABEL]"] = name
             if fields[f"[QUOTE_{tag}_AMOUNT]"]:
                 fields[f"[b:QUOTE_{tag}_AMOUNT]"] = fields[f"[QUOTE_{tag}_AMOUNT]"]
+            if fields[f"[QUOTE_{tag}_VAT]"]:
+                fields[f"[b:QUOTE_{tag}_VAT]"] = fields[f"[QUOTE_{tag}_VAT]"]
 
-    # Clear unused template slots so placeholders never render literally.
     for i in range(used + 1, max_slots + 1):
         tag = f"{i:02d}"
         fields[f"[QUOTE_{tag}_LABEL]"] = ""
         fields[f"[QUOTE_{tag}_AMOUNT]"] = ""
+        fields[f"[QUOTE_{tag}_VAT]"] = ""
+
+    fields["[QUOTE_MAIN_TOTAL]"] = format_gbp_pence(main_total) if main_total else ""
+    fields["[QUOTE_VAT_TOTAL]"] = format_gbp_pence(vat_total) if vat_total else ""
+    grand = main_total + vat_total
+    fields["[QUOTE_GRAND_TOTAL]"] = format_gbp_pence(grand) if grand else ""
     return fields
 
 
@@ -116,12 +140,83 @@ def _computed_from_compose_lines(body_lines: list[ComposeQuoteLineIn]) -> list[C
                 name=ln.name,
                 line_kind=kind,
                 amount_pence=ln.amount_pence,
+                vat_pence=ln.vat_pence,
                 editable=False,
                 is_bold=ln.is_bold,
                 align_right=kind.value != "section_header",
             )
         )
     return out
+
+
+def resolve_compose_quote_lines(
+    db: Session,
+    case_id: uuid.UUID,
+    body: ComposeQuoteIn,
+) -> list[ComputedQuoteLine]:
+    """Compute quote display lines for compose (shared by docx merge and finance snapshot)."""
+    amount_overrides = {str(k): int(v) for k, v in body.amount_overrides.items()}
+
+    if body.draft and body.fee_scale_id is not None:
+        _scale, computed, needs_pv = preview_quote_draft(
+            db,
+            body.fee_scale_id,
+            body.draft,
+            property_value_pence=body.property_value_pence,
+            amount_overrides=amount_overrides,
+        )
+        if needs_pv and body.property_value_pence is None:
+            raise ValueError(
+                "Property value is required for this fee scale (banded legal fees and VAT)."
+            )
+        return computed
+    if body.fee_scale_id is not None:
+        case_row = db.get(CaseModel, case_id)
+        if case_row is None:
+            raise ValueError("Case not found")
+        scale = db.get(FeeScale, body.fee_scale_id)
+        if scale is None:
+            raise ValueError("Fee scale not found")
+        if not fee_scale_matches_case(
+            scale,
+            matter_head_type_id=case_row.matter_head_type_id,
+            matter_sub_type_id=case_row.matter_sub_type_id,
+        ):
+            raise ValueError("Fee scale is not available for this matter type")
+        overrides = _parse_overrides(body.line_overrides)
+        for k, v in amount_overrides.items():
+            try:
+                overrides[uuid.UUID(str(k))] = int(v)
+            except (ValueError, TypeError):
+                continue
+        _scale, computed, needs_pv = preview_quote_lines(
+            db,
+            body.fee_scale_id,
+            property_value_pence=body.property_value_pence,
+            overrides=overrides,
+        )
+        if needs_pv and body.property_value_pence is None:
+            raise ValueError(
+                "Property value is required for this fee scale (banded legal fees and VAT)."
+            )
+        return computed
+    if body.quote_lines:
+        return _computed_from_compose_lines(body.quote_lines)
+    return []
+
+
+def quote_lines_snapshot_payload(computed: list[ComputedQuoteLine]) -> list[dict]:
+    return [
+        {
+            "name": ln.name,
+            "line_kind": ln.line_kind.value,
+            "amount_pence": ln.amount_pence,
+            "vat_pence": ln.vat_pence,
+            "vat_treatment": ln.vat_treatment.value if ln.vat_treatment else None,
+            "is_bold": ln.is_bold,
+        }
+        for ln in computed
+    ]
 
 
 def _parse_overrides(raw: dict[str, int]) -> dict[uuid.UUID, int]:
@@ -224,43 +319,7 @@ def merge_compose_quote_docx_bytes(
     mime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     case_row, fields, firm_row = _build_merge_fields_for_quote(db, case_id, body)
 
-    computed: list[ComputedQuoteLine] = []
-    amount_overrides = {str(k): int(v) for k, v in body.amount_overrides.items()}
-
-    if body.quote_lines:
-        computed = _computed_from_compose_lines(body.quote_lines)
-    elif body.draft and body.fee_scale_id is not None:
-        _scale, computed, _needs_pv = preview_quote_draft(
-            db,
-            body.fee_scale_id,
-            body.draft,
-            property_value_pence=body.property_value_pence,
-            amount_overrides=amount_overrides,
-        )
-    elif body.quote_lines:
-        computed = _computed_from_compose_lines(body.quote_lines)
-    elif body.fee_scale_id is not None:
-        scale = db.get(FeeScale, body.fee_scale_id)
-        if scale is None:
-            raise ValueError("Fee scale not found")
-        if not fee_scale_matches_case(
-            scale,
-            matter_head_type_id=case_row.matter_head_type_id,
-            matter_sub_type_id=case_row.matter_sub_type_id,
-        ):
-            raise ValueError("Fee scale is not available for this matter type")
-        overrides = _parse_overrides(body.line_overrides)
-        for k, v in amount_overrides.items():
-            try:
-                overrides[uuid.UUID(str(k))] = int(v)
-            except (ValueError, TypeError):
-                continue
-        _scale, computed, _needs_pv = preview_quote_lines(
-            db,
-            body.fee_scale_id,
-            property_value_pence=body.property_value_pence,
-            overrides=overrides,
-        )
+    computed = resolve_compose_quote_lines(db, case_id, body)
 
     docx_bytes = _load_quote_template_bytes(db, firm_row)
     quote_fields = _quote_line_merge_fields(computed, property_value_pence=body.property_value_pence)

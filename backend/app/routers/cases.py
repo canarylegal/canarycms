@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
@@ -16,6 +16,7 @@ from app.models import (
     CaseAccessRule,
     CaseLockMode,
     CaseReferenceCounter,
+    CaseSource,
     CaseStatus,
     MatterHeadType,
     MatterSubType,
@@ -29,6 +30,39 @@ from app.ledger_service import get_ledger
 
 
 router = APIRouter(prefix="/cases", tags=["cases"])
+
+
+def _resolve_case_source_id(
+    db: Session,
+    *,
+    source_id: uuid.UUID | None,
+    source_name: str | None,
+) -> uuid.UUID | None:
+    if source_id is not None:
+        if db.get(CaseSource, source_id) is None:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Source not found.")
+        return source_id
+    if not source_name:
+        return None
+    name = source_name.strip()
+    if not name:
+        return None
+    existing = db.execute(select(CaseSource).where(func.lower(CaseSource.name) == name.lower())).scalar_one_or_none()
+    if existing:
+        return existing.id
+    max_order = db.scalar(select(func.coalesce(func.max(CaseSource.sort_order), -1))) or -1
+    now = datetime.now(timezone.utc)
+    row = CaseSource(
+        id=uuid.uuid4(),
+        name=name,
+        sort_order=int(max_order) + 1,
+        is_system=False,
+        created_at=now,
+        updated_at=now,
+    )
+    db.add(row)
+    db.flush()
+    return row.id
 
 
 def _require_active_fee_earner(db: Session, fee_earner_user_id: uuid.UUID) -> User:
@@ -89,6 +123,7 @@ def _case_dict(
     sub_name: str | None,
     head_name: str | None,
     matter_menus: list[dict] | None = None,
+    source_name: str | None = None,
 ) -> dict:
     return {
         "id": case.id,
@@ -103,6 +138,8 @@ def _case_dict(
         "matter_sub_type_name": sub_name,
         "matter_head_type_name": head_name,
         "matter_menus": matter_menus or [],
+        "source_id": case.source_id,
+        "source_name": source_name,
         "created_by": case.created_by,
         "is_locked": case.is_locked,
         "lock_mode": case.lock_mode,
@@ -127,6 +164,20 @@ def _menus_for_sub_types(sub_ids: set[uuid.UUID], db: Session) -> dict[uuid.UUID
     for m in rows:
         out.setdefault(m.sub_type_id, []).append({"id": m.id, "name": m.name})
     return out
+
+
+def _case_out(case: Case, db: Session) -> CaseOut:
+    sub_name, head_name = _matter_names(case.matter_sub_type_id, case.matter_head_type_id, db)
+    menus = (
+        _menus_for_sub_types({case.matter_sub_type_id}, db).get(case.matter_sub_type_id, [])
+        if case.matter_sub_type_id
+        else []
+    )
+    source_name = None
+    if case.source_id:
+        src = db.get(CaseSource, case.source_id)
+        source_name = src.name if src else None
+    return CaseOut.model_validate(_case_dict(case, sub_name, head_name, menus, source_name))
 
 
 @router.post("", response_model=CaseOut, status_code=status.HTTP_201_CREATED)
@@ -156,6 +207,11 @@ def create_case(
     resolved_sub = sub.id
     resolved_head = sub.head_type_id
     _require_active_fee_earner(db, payload.fee_earner_user_id)
+    resolved_source_id = _resolve_case_source_id(
+        db,
+        source_id=payload.source_id,
+        source_name=payload.source_name,
+    )
 
     case = Case(
         case_number=case_number,
@@ -166,6 +222,7 @@ def create_case(
         matter_sub_type_id=resolved_sub,
         matter_head_type_id=resolved_head,
         fee_earner_user_id=payload.fee_earner_user_id,
+        source_id=resolved_source_id,
         created_by=user.id,
         is_locked=False,
         lock_mode=CaseLockMode.whitelist,
@@ -186,13 +243,7 @@ def create_case(
         entity_id=str(case.id),
         meta={"case_number": case.case_number, "client_name": case.client_name, "matter_description": case.title},
     )
-    sub_name, head_name = _matter_names(case.matter_sub_type_id, case.matter_head_type_id, db)
-    menus = (
-        _menus_for_sub_types({case.matter_sub_type_id}, db).get(case.matter_sub_type_id, [])
-        if case.matter_sub_type_id
-        else []
-    )
-    return CaseOut.model_validate(_case_dict(case, sub_name, head_name, menus))
+    return _case_out(case, db)
 
 
 @router.get("", response_model=list[CaseOut])
@@ -213,6 +264,11 @@ def list_cases(user: User = Depends(get_current_user), db: Session = Depends(get
         head_map = {h.id: h for h in heads}
 
     menu_map = _menus_for_sub_types(sub_ids, db)
+    source_ids = {c.source_id for c in cases if c.source_id}
+    source_map: dict[uuid.UUID, str] = {}
+    if source_ids:
+        src_rows = db.execute(select(CaseSource).where(CaseSource.id.in_(source_ids))).scalars().all()
+        source_map = {s.id: s.name for s in src_rows}
     result = []
     for c in cases:
         sub_name = None
@@ -225,7 +281,8 @@ def list_cases(user: User = Depends(get_current_user), db: Session = Depends(get
         elif c.matter_head_type_id and c.matter_head_type_id in head_map:
             head_name = head_map[c.matter_head_type_id].name
         menus = menu_map.get(c.matter_sub_type_id, []) if c.matter_sub_type_id else []
-        result.append(CaseOut.model_validate(_case_dict(c, sub_name, head_name, menus)))
+        src_name = source_map.get(c.source_id) if c.source_id else None
+        result.append(CaseOut.model_validate(_case_dict(c, sub_name, head_name, menus, src_name)))
     return result
 
 
@@ -269,13 +326,7 @@ def list_standard_tasks_for_case(
 @router.get("/{case_id}", response_model=CaseOut)
 def get_case(case_id: uuid.UUID, user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> CaseOut:
     case = require_case_access(case_id, user, db)
-    sub_name, head_name = _matter_names(case.matter_sub_type_id, case.matter_head_type_id, db)
-    menus = (
-        _menus_for_sub_types({case.matter_sub_type_id}, db).get(case.matter_sub_type_id, [])
-        if case.matter_sub_type_id
-        else []
-    )
-    return CaseOut.model_validate(_case_dict(case, sub_name, head_name, menus))
+    return _case_out(case, db)
 
 
 @router.patch("/{case_id}", response_model=CaseOut)
@@ -400,6 +451,15 @@ def update_case(
                 ),
             )
 
+    if "source_id" in data:
+        sid = data.pop("source_id")
+        if sid is not None:
+            if db.get(CaseSource, sid) is None:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Source not found.")
+            case.source_id = sid
+        else:
+            case.source_id = None
+
     for key, value in data.items():
         setattr(case, key, value)
     case.updated_at = datetime.utcnow()
@@ -415,10 +475,4 @@ def update_case(
         entity_id=str(case.id),
         meta=payload.model_dump(exclude_unset=True),
     )
-    sub_name, head_name = _matter_names(case.matter_sub_type_id, case.matter_head_type_id, db)
-    menus = (
-        _menus_for_sub_types({case.matter_sub_type_id}, db).get(case.matter_sub_type_id, [])
-        if case.matter_sub_type_id
-        else []
-    )
-    return CaseOut.model_validate(_case_dict(case, sub_name, head_name, menus))
+    return _case_out(case, db)

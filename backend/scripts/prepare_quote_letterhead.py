@@ -43,11 +43,12 @@ def prepare_quote_letterhead(src: Path, dest: Path, *, slots: int = 25) -> None:
     )
     doc.add_paragraph("")
 
-    table = doc.add_table(rows=1 + slots, cols=2)
+    table = doc.add_table(rows=1 + slots, cols=3)
     table.style = "Table Grid"
     hdr = table.rows[0].cells
     hdr[0].text = "Description"
     hdr[1].text = "Amount"
+    hdr[2].text = "VAT"
     for cell in hdr:
         for p in cell.paragraphs:
             for run in p.runs:
@@ -60,6 +61,9 @@ def prepare_quote_letterhead(src: Path, dest: Path, *, slots: int = 25) -> None:
         amt = row[1].paragraphs[0]
         amt.alignment = WD_ALIGN_PARAGRAPH.RIGHT
         amt.text = f"[QUOTE_{tag}_AMOUNT]"
+        vat_cell = row[2].paragraphs[0]
+        vat_cell.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+        vat_cell.text = f"[QUOTE_{tag}_VAT]"
 
     doc.add_paragraph("")
     closing = doc.add_paragraph("Yours faithfully")

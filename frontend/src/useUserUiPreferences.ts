@@ -3,6 +3,7 @@ import type { UserPublic } from './types'
 import {
   DEFAULT_UI_PREFERENCES,
   legacyUiPreferenceOverrides,
+  MENU_COLUMN_RESET_EVENT,
   normalizeUiPreferences,
   persistUserUiPreferences,
   readCachedUiPreferences,
@@ -14,6 +15,22 @@ import {
 function prefValuesEqual<K extends keyof UserUiPreferences>(a: UserUiPreferences[K], b: UserUiPreferences[K]): boolean {
   if (Array.isArray(a) && Array.isArray(b)) return JSON.stringify(a) === JSON.stringify(b)
   return a === b
+}
+
+function columnWidthsCleared(prefs: UserUiPreferences): boolean {
+  return (
+    prefs.main_menu_column_widths.length === 0 &&
+    prefs.tasks_menu_column_widths.length === 0 &&
+    prefs.contacts_column_widths.length === 0
+  )
+}
+
+function hadCustomColumnWidths(prefs: UserUiPreferences): boolean {
+  return (
+    prefs.main_menu_column_widths.length > 0 ||
+    prefs.tasks_menu_column_widths.length > 0 ||
+    prefs.contacts_column_widths.length > 0
+  )
 }
 
 function writePrefsSnapshot(next: UserUiPreferences, serverSnapshotRef: { current: string }) {
@@ -50,7 +67,10 @@ export function useUserUiPreferences(me: UserPublic | null | undefined, token: s
 
       // Incoming /auth/me prefs are stale relative to optimistic local edits — keep local state.
       if (localSnapshot && !uiPreferencesEqual(localSnapshot, server)) {
-        return prev
+        const serverResetColumns = columnWidthsCleared(server) && hadCustomColumnWidths(localSnapshot)
+        if (!serverResetColumns) {
+          return prev
+        }
       }
 
       if (uiPreferencesEqual(prev, server)) return prev
@@ -83,6 +103,23 @@ export function useUserUiPreferences(me: UserPublic | null | undefined, token: s
         if (t) clearTimeout(t)
       }
     }
+  }, [])
+
+  useEffect(() => {
+    function onMenuColumnReset() {
+      setPrefs((prev) => {
+        const next: UserUiPreferences = {
+          ...prev,
+          main_menu_column_widths: [],
+          tasks_menu_column_widths: [],
+          contacts_column_widths: [],
+        }
+        writePrefsSnapshot(next, serverSnapshotRef)
+        return next
+      })
+    }
+    window.addEventListener(MENU_COLUMN_RESET_EVENT, onMenuColumnReset)
+    return () => window.removeEventListener(MENU_COLUMN_RESET_EVENT, onMenuColumnReset)
   }, [])
 
   const persistPatch = useCallback(

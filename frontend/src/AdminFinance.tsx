@@ -100,8 +100,9 @@ export function AdminFinance({ token, subTypeId, subTypeName }: Props) {
   // ── Item CRUD ────────────────────────────────────────────────────────────
 
   async function addItem(catId: string) {
+    const cat = template?.categories.find((c) => c.id === catId)
     const name = (newItemName[catId] ?? '').trim()
-    const dir = newItemDir[catId] ?? 'debit'
+    const dir = cat?.credit_only ? 'credit' : (newItemDir[catId] ?? 'debit')
     if (!name) return
     setBusy(true); setErr(null)
     try {
@@ -117,11 +118,16 @@ export function AdminFinance({ token, subTypeId, subTypeName }: Props) {
 
   async function saveItem() {
     if (!editItem) return
+    const cat = template?.categories.find((c) => c.items.some((it) => it.id === editItem.id))
     setBusy(true); setErr(null)
     try {
       await apiFetch(`/admin/finance/templates/items/${editItem.id}`, {
         token, method: 'PATCH',
-        json: { name: editItem.name.trim(), direction: editItem.direction, sort_order: parseInt(editItem.sort_order) || 0 },
+        json: {
+          name: editItem.name.trim(),
+          direction: cat?.credit_only ? 'credit' : editItem.direction,
+          sort_order: parseInt(editItem.sort_order) || 0,
+        },
       })
       setEditItem(null)
       await loadTemplate()
@@ -216,16 +222,20 @@ export function AdminFinance({ token, subTypeId, subTypeName }: Props) {
                         autoFocus
                         disabled={busy}
                       />
-                      <select
-                        className="select"
-                        style={{ width: 90 }}
-                        value={editItem.direction}
-                        onChange={(e) => setEditItem({ ...editItem, direction: e.target.value as 'debit' | 'credit' })}
-                        disabled={busy}
-                      >
-                        <option value="debit">Debit</option>
-                        <option value="credit">Credit</option>
-                      </select>
+                      {cat.credit_only ? (
+                        <span className="finDirBadge finDirBadge--credit">Credit</span>
+                      ) : (
+                        <select
+                          className="select"
+                          style={{ width: 90 }}
+                          value={editItem.direction}
+                          onChange={(e) => setEditItem({ ...editItem, direction: e.target.value as 'debit' | 'credit' })}
+                          disabled={busy}
+                        >
+                          <option value="debit">Debit</option>
+                          <option value="credit">Credit</option>
+                        </select>
+                      )}
                       <span className="muted" style={{ fontSize: '0.82em' }}>Order:</span>
                       <input
                         className="input"
@@ -253,16 +263,20 @@ export function AdminFinance({ token, subTypeId, subTypeName }: Props) {
 
               {/* Add item row */}
               <div className="adminFinanceAddItem">
-                <select
-                  className="select"
-                  style={{ width: 90 }}
-                  value={newItemDir[cat.id] ?? 'debit'}
-                  onChange={(e) => setNewItemDir((p) => ({ ...p, [cat.id]: e.target.value as 'debit' | 'credit' }))}
-                  disabled={busy}
-                >
-                  <option value="debit">Debit</option>
-                  <option value="credit">Credit</option>
-                </select>
+                {cat.credit_only ? (
+                  <span className="finDirBadge finDirBadge--credit">Credit</span>
+                ) : (
+                  <select
+                    className="select"
+                    style={{ width: 90 }}
+                    value={newItemDir[cat.id] ?? 'debit'}
+                    onChange={(e) => setNewItemDir((p) => ({ ...p, [cat.id]: e.target.value as 'debit' | 'credit' }))}
+                    disabled={busy}
+                  >
+                    <option value="debit">Debit</option>
+                    <option value="credit">Credit</option>
+                  </select>
+                )}
                 <input
                   className="input"
                   style={INLINE}

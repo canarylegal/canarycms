@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, case, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.audit import log_event
@@ -29,9 +29,11 @@ from app.models import (
     FeeScaleCategory,
     FeeScaleLine,
     FeeScaleLineKind,
+    FeeScaleVatTreatment,
     MatterHeadType,
     MatterSubType,
     User,
+    UserFeeScaleFavorite,
 )
 from app.schemas import (
     FeeScaleBandRowCreate,
@@ -44,6 +46,7 @@ from app.schemas import (
     FeeScaleCategoryOut,
     FeeScaleCategoryUpdate,
     FeeScaleCreate,
+    FeeScaleFavoriteUpdate,
     FeeScaleDetailOut,
     FeeScaleLineCreate,
     FeeScaleLineOut,
@@ -71,7 +74,8 @@ def _line_out_from_computed(key: str, draft_line, computed) -> QuotePreviewLineO
         amount_display=format_gbp_pence(computed.amount_pence) if computed.amount_pence is not None else None,
         editable=computed.editable,
         is_bold=computed.is_bold,
-        include_in_vat=draft_line.include_in_vat,
+        vat_treatment=draft_line.vat_treatment,
+        vat_pence=computed.vat_pence,
         amount_kind=draft_line.amount_kind,
         band_set_id=draft_line.band_set_id,
         sort_order=draft_line.sort_order,
@@ -84,6 +88,8 @@ def _preview_line_out(ln) -> QuotePreviewLineOut:
         name=ln.name,
         line_kind=ln.line_kind.value,
         amount_pence=ln.amount_pence,
+        vat_pence=ln.vat_pence,
+        vat_treatment=ln.vat_treatment.value if ln.vat_treatment else None,
         amount_display=format_gbp_pence(ln.amount_pence) if ln.amount_pence is not None else None,
         editable=ln.editable,
         is_bold=ln.is_bold,
@@ -98,7 +104,32 @@ def _scope_summary(*, head_name: str | None, sub_name: str | None, mh: uuid.UUID
     return f"{sub_name or '—'}"
 
 
-def _fee_scale_out(db: Session, scale: FeeScale) -> FeeScaleOut:
+def _fee_scale_list_order():
+    """Global first, then head-wide scales, then sub-type scales; alphabetical within each band."""
+    scope_rank = case(
+        (
+            and_(FeeScale.matter_head_type_id.is_(None), FeeScale.matter_sub_type_id.is_(None)),
+            0,
+        ),
+        (FeeScale.matter_sub_type_id.is_(None), 1),
+        else_=2,
+    )
+    return (
+        scope_rank,
+        func.lower(func.coalesce(MatterHeadType.name, "")),
+        func.lower(func.coalesce(MatterSubType.name, "")),
+        func.lower(FeeScale.name),
+    )
+
+
+def _favorite_ids_for_user(db: Session, user_id: uuid.UUID) -> set[uuid.UUID]:
+    rows = db.execute(
+        select(UserFeeScaleFavorite.fee_scale_id).where(UserFeeScaleFavorite.user_id == user_id)
+    ).scalars().all()
+    return set(rows)
+
+
+def _fee_scale_out(db: Session, scale: FeeScale, *, is_favorited: bool = False) -> FeeScaleOut:
     head_name: str | None = None
     sub_name: str | None = None
     if scale.matter_head_type_id:
@@ -122,6 +153,7 @@ def _fee_scale_out(db: Session, scale: FeeScale) -> FeeScaleOut:
             mh=scale.matter_head_type_id,
             ms=scale.matter_sub_type_id,
         ),
+        is_favorited=is_favorited,
         created_at=scale.created_at,
         updated_at=scale.updated_at,
     )
@@ -136,7 +168,7 @@ def _line_out(ln: FeeScaleLine) -> FeeScaleLineOut:
         amount_kind=ln.amount_kind.value if ln.amount_kind else None,
         default_amount_pence=ln.default_amount_pence,
         band_set_id=ln.band_set_id,
-        include_in_vat=ln.include_in_vat,
+        vat_treatment=ln.vat_treatment.value,
         sort_order=ln.sort_order,
     )
 
@@ -208,8 +240,14 @@ def list_fee_scales(
         q = select(FeeScale).where(or_(scope_global, scope_head))
     else:
         q = select(FeeScale)
-    rows = db.execute(q.order_by(FeeScale.name.asc())).scalars().all()
-    return [_fee_scale_out(db, scale) for scale in rows]
+    q = (
+        q.outerjoin(MatterHeadType, FeeScale.matter_head_type_id == MatterHeadType.id)
+        .outerjoin(MatterSubType, FeeScale.matter_sub_type_id == MatterSubType.id)
+        .order_by(*_fee_scale_list_order())
+    )
+    rows = db.execute(q).scalars().all()
+    fav_ids = _favorite_ids_for_user(db, user.id)
+    return [_fee_scale_out(db, scale, is_favorited=scale.id in fav_ids) for scale in rows]
 
 
 @router.post("", response_model=FeeScaleDetailOut, status_code=status.HTTP_201_CREATED)
@@ -238,6 +276,39 @@ def create_fee_scale(
     log_event(db, actor_user_id=user.id, action="fee_scale.create", entity_type="fee_scale", entity_id=str(row.id))
     scale, cats, lines_by_cat, band_sets, rows_by_set = load_scale_graph(db, row.id)
     return _detail_out(db, scale, cats, lines_by_cat, band_sets, rows_by_set)
+
+
+@router.put("/{fee_scale_id}/favorite", response_model=FeeScaleOut)
+def set_fee_scale_favorite(
+    fee_scale_id: uuid.UUID,
+    payload: FeeScaleFavoriteUpdate,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> FeeScaleOut:
+    row = db.get(FeeScale, fee_scale_id)
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Fee scale not found")
+    existing = db.execute(
+        select(UserFeeScaleFavorite).where(
+            UserFeeScaleFavorite.user_id == user.id,
+            UserFeeScaleFavorite.fee_scale_id == fee_scale_id,
+        )
+    ).scalar_one_or_none()
+    if payload.favorited:
+        if existing is None:
+            db.add(
+                UserFeeScaleFavorite(
+                    id=uuid.uuid4(),
+                    user_id=user.id,
+                    fee_scale_id=fee_scale_id,
+                    created_at=datetime.utcnow(),
+                )
+            )
+            db.commit()
+    elif existing is not None:
+        db.delete(existing)
+        db.commit()
+    return _fee_scale_out(db, row, is_favorited=payload.favorited)
 
 
 @router.get("/{fee_scale_id}", response_model=FeeScaleDetailOut)
@@ -284,7 +355,8 @@ def update_fee_scale(
     db.add(row)
     db.commit()
     db.refresh(row)
-    return _fee_scale_out(db, row)
+    fav_ids = _favorite_ids_for_user(db, user.id)
+    return _fee_scale_out(db, row, is_favorited=row.id in fav_ids)
 
 
 @router.delete("/{fee_scale_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -448,7 +520,7 @@ def create_line(payload: FeeScaleLineCreate, user: User = Depends(get_current_us
         amount_kind=FeeScaleAmountKind(payload.amount_kind) if payload.amount_kind else None,
         default_amount_pence=payload.default_amount_pence,
         band_set_id=payload.band_set_id,
-        include_in_vat=payload.include_in_vat,
+        vat_treatment=FeeScaleVatTreatment(payload.vat_treatment),
         sort_order=payload.sort_order,
         created_at=now,
         updated_at=now,
@@ -480,8 +552,10 @@ def update_line(
         row.default_amount_pence = data["default_amount_pence"]
     if "band_set_id" in data:
         row.band_set_id = data["band_set_id"]
-    if "include_in_vat" in data and data["include_in_vat"] is not None:
-        row.include_in_vat = data["include_in_vat"]
+    if "vat_treatment" in data and data["vat_treatment"] is not None:
+        from app.models import FeeScaleVatTreatment
+
+        row.vat_treatment = FeeScaleVatTreatment(data["vat_treatment"])
     if "sort_order" in data and data["sort_order"] is not None:
         row.sort_order = data["sort_order"]
     row.updated_at = datetime.utcnow()

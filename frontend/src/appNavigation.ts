@@ -12,7 +12,7 @@ export type AppView =
 export type AppNavState = {
   view: AppView
   caseId: string | null
-  quotesSubPanel: 'list' | 'fee-scales'
+  quotesSubPanel: 'list' | 'fee-scales' | 'sources'
   tasksCaseFilter: string | null
 }
 

@@ -3,13 +3,13 @@
 export type CalendarView = 'dayGridMonth' | 'timeGridWeek' | 'timeGridDay' | 'listWeek'
 export type TaskLayout = 'list' | 'kanban'
 export type TaskSortKey = 'reference' | 'client' | 'matter' | 'task' | 'date' | 'assigned' | 'priority'
-export type MainMenuSortKey = 'reference' | 'client' | 'matter' | 'feeEarner' | 'status' | 'created'
+export type MainMenuSortKey = 'reference' | 'client' | 'matter' | 'feeEarner' | 'status' | 'source' | 'created'
 export type ContactsSortKey = 'name' | 'type' | 'email' | 'phone'
 export type CaseStatusFilter = '' | 'open' | 'closed' | 'archived' | 'quote' | 'post_completion'
 export type MainMenuCaseStatusFilter = Exclude<CaseStatusFilter, ''>
 export type SortDir = 'asc' | 'desc'
 
-export const MAIN_MENU_COLUMN_WIDTHS_DEFAULT = [110, 240, 300, 180, 100] as const
+export const MAIN_MENU_COLUMN_WIDTHS_DEFAULT = [110, 165, 300, 130, 225] as const
 export const TASKS_MENU_COLUMN_WIDTHS_DEFAULT = [90, 66, 90, 210, 300, 183, 73] as const
 export const CONTACTS_COLUMN_WIDTHS_DEFAULT = [270, 210, 210, 210] as const
 
@@ -75,7 +75,14 @@ export const DEFAULT_UI_PREFERENCES: UserUiPreferences = {
   contacts_column_widths: [],
 }
 
-const CACHE_KEY = 'canary.uiPreferences'
+const CACHE_KEY = 'canary.uiPreferences.v2'
+
+/** Dispatched after menu column widths are reset so all tables revert immediately. */
+export const MENU_COLUMN_RESET_EVENT = 'canary-menu-columns-reset'
+
+export function notifyMenuColumnReset(): void {
+  window.dispatchEvent(new Event(MENU_COLUMN_RESET_EVENT))
+}
 export const LEGACY_TASKS_MENU_LAYOUT_KEY = 'canary.tasks.menuLayout'
 const SEARCH_MAX = 500
 
@@ -96,6 +103,7 @@ const MAIN_MENU_SORT_KEYS = new Set<MainMenuSortKey>([
   'matter',
   'feeEarner',
   'status',
+  'source',
   'created',
 ])
 const CONTACTS_SORT_KEYS = new Set<ContactsSortKey>(['name', 'type', 'email', 'phone'])
@@ -291,5 +299,16 @@ export async function persistUserUiPreferences(
   })
   const prefs = normalizeUiPreferences(user.ui_preferences)
   writeCachedUiPreferences(prefs)
+  return prefs
+}
+
+/** Clear saved column widths for all resizable menu tables (main menu, quotes, tasks, contacts). */
+export async function resetMenuColumnWidths(token: string): Promise<UserUiPreferences> {
+  const prefs = await persistUserUiPreferences(token, {
+    main_menu_column_widths: [],
+    tasks_menu_column_widths: [],
+    contacts_column_widths: [],
+  })
+  notifyMenuColumnReset()
   return prefs
 }

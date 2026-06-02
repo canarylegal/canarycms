@@ -268,9 +268,41 @@ class Case(Base):
         nullable=False,
         default=CaseLockMode.whitelist,
     )
+    source_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("case_source.id", ondelete="SET NULL"), nullable=True, index=True
+    )
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+
+
+class CaseSource(Base):
+    """Referral / work source labels (Quotes page Sources database)."""
+
+    __tablename__ = "case_source"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name: Mapped[str] = mapped_column(String(200), unique=True, nullable=False)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    is_system: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+
+
+class CaseQuoteSnapshot(Base):
+    """Stored quote line amounts at compose time (for Finance auto-fill)."""
+
+    __tablename__ = "case_quote_snapshot"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    case_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("case.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    file_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("file.id", ondelete="SET NULL"), nullable=True
+    )
+    quote_lines: Mapped[list] = mapped_column(JSONB, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
 
 
 class CaseReferenceCounter(Base):
@@ -456,6 +488,23 @@ class FeeScale(Base):
     __table_args__ = (UniqueConstraint("reference", name="uq_fee_scale_reference"),)
 
 
+class UserFeeScaleFavorite(Base):
+    """Per-user starred fee scales for quick quote selection."""
+
+    __tablename__ = "user_fee_scale_favorite"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("user.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    fee_scale_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("fee_scale.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (UniqueConstraint("user_id", "fee_scale_id", name="uq_user_fee_scale_favorite"),)
+
+
 class FeeScaleLineKind(str, enum.Enum):
     section_header = "section_header"
     item = "item"
@@ -468,6 +517,13 @@ class FeeScaleAmountKind(str, enum.Enum):
     fixed = "fixed"
     editable = "editable"
     band = "band"
+
+
+class FeeScaleVatTreatment(str, enum.Enum):
+    """How VAT applies to a line item amount."""
+
+    included = "included"  # Including / No VAT — amount is final; no separate VAT column
+    plus_vat = "plus_vat"  # Plus VAT — amount is net; VAT shown in VAT column
 
 
 class FeeScaleCategory(Base):
@@ -529,7 +585,11 @@ class FeeScaleLine(Base):
     band_set_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("fee_scale_band_set.id", ondelete="SET NULL"), nullable=True
     )
-    include_in_vat: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    vat_treatment: Mapped[FeeScaleVatTreatment] = mapped_column(
+        Enum(FeeScaleVatTreatment, name="fee_scale_vat_treatment"),
+        nullable=False,
+        default=FeeScaleVatTreatment.included,
+    )
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
@@ -915,6 +975,7 @@ class FinanceCategoryTemplate(Base):
     )
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    credit_only: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
 
@@ -949,6 +1010,7 @@ class FinanceCategory(Base):
     )
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    credit_only: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
 
@@ -968,6 +1030,7 @@ class FinanceItem(Base):
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     direction: Mapped[str] = mapped_column(String(10), nullable=False)  # "debit" | "credit"
     amount_pence: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    vat_pence: Mapped[int | None] = mapped_column(Integer, nullable=True)
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)

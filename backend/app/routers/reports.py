@@ -287,6 +287,7 @@ def post_cases_opened_report(
                     "status": r.status,
                     "status_label": r.status_label,
                     "fee_earner_name": r.fee_earner_name,
+                    "source_name": r.source_name or "",
                     "created_at": r.created_at.isoformat(),
                 }
                 for r in rows
@@ -295,7 +296,7 @@ def post_cases_opened_report(
     wb = Workbook()
     ws = wb.active
     ws.title = "Cases opened"
-    ws.append(["Reference", "Client", "Matter description", "Status", "Fee earner", "Opened (UTC)"])
+    ws.append(["Reference", "Client", "Matter description", "Status", "Fee earner", "Source", "Opened (UTC)"])
     for r in rows:
         ws.append(
             [
@@ -304,6 +305,7 @@ def post_cases_opened_report(
                 r.matter_description,
                 r.status_label,
                 r.fee_earner_name,
+                r.source_name or "",
                 r.created_at.strftime("%Y-%m-%d %H:%M"),
             ]
         )

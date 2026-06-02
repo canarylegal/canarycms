@@ -37,7 +37,9 @@ def read_template(
     _admin: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ) -> FinanceTemplateOut:
-    return get_template(sub_type_id, db)
+    result = get_template(sub_type_id, db)
+    db.commit()
+    return result
 
 
 @router.post("/templates/categories", response_model=FinanceCategoryTemplateOut, status_code=status.HTTP_201_CREATED)

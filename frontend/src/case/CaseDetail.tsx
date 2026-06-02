@@ -40,6 +40,7 @@ import type {
   CaseOut,
   CasePropertyDetailsOut,
   CasePropertyPayload,
+  CaseSourceOut,
   CaseTaskOut,
   ContactOut,
   FileSummary,
@@ -556,6 +557,8 @@ export function CaseDetail({
   const [editPracticeArea, setEditPracticeArea] = useState('')
   const [editFeeEarner, setEditFeeEarner] = useState<string>('')
   const [editCaseStatus, setEditCaseStatus] = useState<CaseWorkflowStatus>('open')
+  const [editSourceId, setEditSourceId] = useState('')
+  const [caseSources, setCaseSources] = useState<CaseSourceOut[]>([])
   /** Edit-case save/API errors only (shown inside the edit card, never in the case shell). */
   const [editCaseErr, setEditCaseErr] = useState<string | null>(null)
   const [matterHeadTypes, setMatterHeadTypes] = useState<MatterHeadTypeOut[]>([])
@@ -884,7 +887,15 @@ export function CaseDetail({
     setEditPracticeArea(caseDetail?.matter_sub_type_id ?? '')
     setEditFeeEarner(caseDetail?.fee_earner_user_id ? String(caseDetail.fee_earner_user_id) : '')
     setEditCaseStatus(caseDetail?.status ?? 'open')
+    setEditSourceId(caseDetail?.source_id ?? '')
   }, [caseDocPanel, caseDetail])
+
+  useEffect(() => {
+    if (caseDocPanel !== 'edit-details' || !token) return
+    void apiFetch<CaseSourceOut[]>('/case-sources', { token })
+      .then(setCaseSources)
+      .catch(() => setCaseSources([]))
+  }, [caseDocPanel, token])
 
   useLayoutEffect(() => {
     if (!docMenu) {
@@ -1878,6 +1889,12 @@ export function CaseDetail({
                 <dt>Fee earner</dt>
                 <dd>{users.find((u) => u.id === caseDetail.fee_earner_user_id)?.display_name ?? '—'}</dd>
               </div>
+              {caseDetail.source_name ? (
+                <div className="caseDetailRow">
+                  <dt>Source</dt>
+                  <dd>{caseDetail.source_name}</dd>
+                </div>
+              ) : null}
               <div className="caseDetailRow">
                 <dt>Lock</dt>
                 <dd>{caseHasRevokedUserAccess(caseDetail) ? 'Locked' : 'Unlocked'}</dd>
@@ -2765,6 +2782,21 @@ export function CaseDetail({
                           <option value="archived">Archived</option>
                         </select>
                       </label>
+                      <label className="field">
+                        <span>Source</span>
+                        <select
+                          value={editSourceId}
+                          onChange={(e) => setEditSourceId(e.target.value)}
+                          disabled={busy}
+                        >
+                          <option value="">— none —</option>
+                          {caseSources.map((s) => (
+                            <option key={s.id} value={s.id}>
+                              {s.name}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
                       <div className="row" style={{ justifyContent: 'flex-start', marginTop: 8 }}>
                         <button
                           type="button"
@@ -2798,6 +2830,7 @@ export function CaseDetail({
                                   matter_description: editMatterDescription.trim(),
                                   fee_earner_user_id: editFeeEarner,
                                   status: editCaseStatus,
+                                  source_id: editSourceId.trim() ? editSourceId.trim() : null,
                                   ...(editPracticeArea.trim()
                                     ? { matter_sub_type_id: editPracticeArea.trim() }
                                     : { matter_sub_type_id: null, matter_head_type_id: null }),

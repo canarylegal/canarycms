@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { apiFetch } from './api'
 import { poundsToPence, penceToPounds } from './FeeScaleEditor'
+import { VAT_TREATMENT_OPTIONS, type FeeScaleVatTreatment } from './feeScaleVat'
 import { useDialogs } from './DialogProvider'
 import type {
   FeeScaleDetailOut,
@@ -35,7 +36,7 @@ export function buildDraftFromDetail(detail: FeeScaleDetailOut): QuoteDraftCateg
       line_kind: ln.line_kind,
       amount_kind: ln.amount_kind,
       amount_pence: ln.default_amount_pence,
-      include_in_vat: ln.include_in_vat,
+      vat_treatment: ln.vat_treatment ?? 'included',
       band_set_id: ln.band_set_id,
       sort_order: li,
     })),
@@ -260,7 +261,7 @@ export function QuoteReviewEditor({
                   line_kind: 'item' as FeeScaleLineKind,
                   amount_kind: 'editable',
                   amount_pence: null,
-                  include_in_vat: false,
+                  vat_treatment: 'included',
                   band_set_id: null,
                   sort_order: c.lines.length,
                 },
@@ -348,8 +349,12 @@ export function QuoteReviewEditor({
                 <tr>
                   <th style={{ width: 130 }}>Type</th>
                   <th>Description</th>
-                  <th className="finAmtCell" style={{ width: 120 }}>
+                  <th className="finAmtCell" style={{ width: 100 }}>
                     Amount
+                  </th>
+                  <th className="feeScaleVatTreatmentCol">VAT treatment</th>
+                  <th className="finAmtCell" style={{ width: 88 }}>
+                    VAT
                   </th>
                   <th className="finActCell" style={{ width: 88 }} />
                 </tr>
@@ -359,11 +364,15 @@ export function QuoteReviewEditor({
                   .sort((a, b) => a.sort_order - b.sort_order)
                   .map((ln) => {
                     const computed = previewLine(ln.key)
-                    const isCalculated = ln.line_kind === 'vat' || ln.line_kind === 'subtotal' || ln.line_kind === 'total'
+                    const isCalculated =
+                      ln.line_kind === 'vat' || ln.line_kind === 'subtotal' || ln.line_kind === 'total'
                     const showAmount = ln.line_kind !== 'section_header'
                     const amountStr =
                       amountOverrides[ln.key] ??
                       (computed?.amount_pence != null ? penceToPounds(computed.amount_pence) : '')
+                    const vatStr =
+                      computed?.vat_pence != null ? penceToPounds(computed.vat_pence) : ''
+                    const isItem = ln.line_kind === 'item'
                     return (
                       <tr key={ln.key} className={`finRow${computed?.is_bold ? ' quoteReviewRowBold' : ''}`}>
                         <td>
@@ -406,6 +415,34 @@ export function QuoteReviewEditor({
                             <span className="muted">—</span>
                           )}
                         </td>
+                        <td className="feeScaleVatTreatmentCol">
+                          {isItem ? (
+                            <select
+                              className="select"
+                              value={(ln.vat_treatment ?? 'included') as FeeScaleVatTreatment}
+                              onChange={(e) =>
+                                setLineField(cat.key, ln.key, {
+                                  vat_treatment: e.target.value as FeeScaleVatTreatment,
+                                })
+                              }
+                            >
+                              {VAT_TREATMENT_OPTIONS.map((o) => (
+                                <option key={o.value} value={o.value}>
+                                  {o.label}
+                                </option>
+                              ))}
+                            </select>
+                          ) : (
+                            <span className="muted">—</span>
+                          )}
+                        </td>
+                        <td className="finAmtCell" style={{ textAlign: 'right' }}>
+                          {showAmount && vatStr ? (
+                            <span>{vatStr}</span>
+                          ) : (
+                            <span className="muted">—</span>
+                          )}
+                        </td>
                         <td className="finActCell">
                           <div className="row" style={{ gap: 2, justifyContent: 'flex-end' }}>
                             <button
@@ -439,7 +476,7 @@ export function QuoteReviewEditor({
                   })}
                 {cat.lines.length === 0 ? (
                   <tr>
-                    <td colSpan={4} className="muted" style={{ padding: '8px 10px', fontStyle: 'italic' }}>
+                    <td colSpan={6} className="muted" style={{ padding: '8px 10px', fontStyle: 'italic' }}>
                       No lines in this category.
                     </td>
                   </tr>
