@@ -10,6 +10,7 @@ from app.audit import log_event
 from app.db import get_db
 from app.deps import get_current_user, require_admin
 from app.event_service import list_calendar_event_template_picks
+from app.matter_type_bootstrap import ensure_sub_type_menus, load_default_sub_menu_names
 from app.models import MatterHeadType, MatterSubType, MatterSubTypeMenu, Precedent, PrecedentCategory, User
 from app.schemas import (
     CalendarEventTemplatePickOut,
@@ -134,6 +135,8 @@ def create_sub_type(
         updated_at=datetime.utcnow(),
     )
     db.add(sub)
+    db.flush()
+    ensure_sub_type_menus(db, sub, load_default_sub_menu_names(), now=datetime.utcnow())
     db.commit()
     db.refresh(sub)
     return _sub_out(sub, db)

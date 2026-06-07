@@ -1,5 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { apiFetch } from './api'
+import { useDialogs } from './DialogProvider'
+import { isPortalSharedFolder, portalSharedFolderUploadNotifyMessage, portalContactsForFolder } from './case/portalFolderAccess'
+import type { CasePortalFolderAccessGrantOut } from './types'
 import { BusyIcon } from './BusyIcon'
 import { signalCaseFilesChanged } from './caseFilesCrossTab'
 import { canaryDocumentTitle } from './tabTitle'
@@ -18,6 +21,8 @@ type OoConfig = {
   editor_config: Record<string, unknown>
   /** Case compose-office: file is hidden until Save publishes it — closing should still confirm save. */
   oo_compose_pending?: boolean
+  folder_path?: string
+  original_filename?: string
 }
 
 type EditorTarget =
@@ -275,6 +280,7 @@ function formatOoError(event: unknown): string {
 
 export default function EditorPage() {
   const params = parseEditorPath()
+  const { askConfirm } = useDialogs()
   const [cfg, setCfg] = useState<OoConfig | null>(null)
   const [filename, setFilename] = useState('')
   const [err, setErr] = useState<string | null>(null)
@@ -781,9 +787,31 @@ export default function EditorPage() {
       }
 
       if (params.mode === 'case') {
+        let notifyPortalContacts = false
+        if (composePublishPending && cfg.folder_path !== undefined && token) {
+          try {
+            const grants = await apiFetch<CasePortalFolderAccessGrantOut[]>(
+              `/cases/${params.caseId}/files/portal-folder-access`,
+              { token },
+            )
+            const folderPath = cfg.folder_path ?? ''
+            if (isPortalSharedFolder(folderPath, grants)) {
+              const contacts = portalContactsForFolder(folderPath, grants)
+              notifyPortalContacts = await askConfirm({
+                title: 'Notify portal contacts?',
+                message: portalSharedFolderUploadNotifyMessage(contacts, 1),
+                confirmLabel: 'Send e-mail',
+                cancelLabel: 'Skip',
+              })
+            }
+          } catch {
+            /* optional — publish without notify prompt */
+          }
+        }
         await apiFetch(`/cases/${params.caseId}/files/${params.fileId}/publish-compose`, {
           method: 'POST',
           token,
+          json: { notify_portal_contacts: notifyPortalContacts },
         })
         notifyCaseFilesChangedIfCase()
       }

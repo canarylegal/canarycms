@@ -1,12 +1,20 @@
 import os
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.admin_access import user_effective_admin
+from app.auth_rate_limit import (
+    check_forgot_password_rate_limits,
+    check_staff_login_rate_limits,
+    clear_staff_login_rate_limits,
+    record_forgot_password_attempt,
+    record_staff_login_failure,
+)
+from app.client_ip import client_ip_from_request
 from app.db import get_db
 from app.deps import _jwt_raw_from_request, get_current_user
 from app.email_integration_settings import build_user_public
@@ -35,6 +43,7 @@ from app.schemas import (
     ForgotPasswordResponse,
     LoginRequest,
     ResetPasswordRequest,
+    Setup2FARequest,
     Setup2FAResponse,
     TokenResponse,
     UserDisable2FARequest,
@@ -99,11 +108,17 @@ def bootstrap_admin(payload: BootstrapAdminRequest, db: Session = Depends(get_db
 
 
 @router.post("/login", response_model=TokenResponse)
-def login(payload: LoginRequest, db: Session = Depends(get_db)) -> TokenResponse:
-    user = db.execute(select(User).where(User.email == str(payload.email).lower())).scalar_one_or_none()
+def login(payload: LoginRequest, request: Request, db: Session = Depends(get_db)) -> TokenResponse:
+    email = str(payload.email).lower()
+    ip = client_ip_from_request(request)
+    check_staff_login_rate_limits(db, email=email, ip=ip)
+
+    user = db.execute(select(User).where(User.email == email)).scalar_one_or_none()
     if not user or not user.is_active:
+        record_staff_login_failure(db, email=email, ip=ip)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
     if not verify_password(payload.password, user.password_hash):
+        record_staff_login_failure(db, email=email, ip=ip)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
 
     mandate = firm_mandates_second_factor(db)
@@ -111,8 +126,10 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)) -> TokenResponse
 
     if user.is_2fa_enabled:
         if not payload.totp_code or not user.totp_secret:
+            record_staff_login_failure(db, email=email, ip=ip)
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="2FA required")
         if not verify_totp(secret=user.totp_secret, code=payload.totp_code):
+            record_staff_login_failure(db, email=email, ip=ip)
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid 2FA code")
 
     # Under mandate: password sign-in always proves MFA via TOTP when enabled. Users with no TOTP and no passkeys
@@ -134,6 +151,7 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)) -> TokenResponse
         if not db_ok:
             mfa_verified = False
 
+    clear_staff_login_rate_limits(db, email=email)
     token = login_access_token(db, user, mfa_verified=mfa_verified)
     log_event(
         db,
@@ -180,13 +198,20 @@ def me(
 
 
 @router.post("/forgot-password", response_model=ForgotPasswordResponse)
-def forgot_password(payload: ForgotPasswordRequest, db: Session = Depends(get_db)) -> ForgotPasswordResponse:
+def forgot_password(
+    payload: ForgotPasswordRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> ForgotPasswordResponse:
     if not password_reset_email_configured(db):
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="E-mail password reset has not been configured. Please contact your administrator.",
         )
     email = str(payload.email).lower().strip()
+    ip = client_ip_from_request(request)
+    check_forgot_password_rate_limits(db, email=email, ip=ip)
+    record_forgot_password_attempt(db, email=email, ip=ip)
     user = db.execute(select(User).where(User.email == email)).scalar_one_or_none()
     if user and user.is_active and (user.email or "").strip():
         raw = create_password_reset_token(db, user)
@@ -203,8 +228,9 @@ def reset_password(payload: ResetPasswordRequest, db: Session = Depends(get_db))
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired reset link.")
     user.password_hash = hash_password(payload.new_password)
     touch_password_changed(user)
-    user.totp_secret = None
-    user.is_2fa_enabled = False
+    cleared_pending_setup = bool(not user.is_2fa_enabled and user.totp_secret)
+    if cleared_pending_setup:
+        user.totp_secret = None
     db.add(user)
     db.commit()
     log_event(
@@ -213,14 +239,33 @@ def reset_password(payload: ResetPasswordRequest, db: Session = Depends(get_db))
         action="auth.password.reset",
         entity_type="user",
         entity_id=str(user.id),
+        meta={
+            "preserved_2fa": user.is_2fa_enabled,
+            "cleared_pending_authenticator_setup": cleared_pending_setup,
+        },
     )
     return None
 
 
 @router.post("/2fa/setup", response_model=Setup2FAResponse)
-def setup_2fa(user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> Setup2FAResponse:
+def setup_2fa(
+    payload: Setup2FARequest = Body(default_factory=Setup2FARequest),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> Setup2FAResponse:
     if user.is_2fa_enabled:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="2FA already enabled")
+
+    if user.totp_secret:
+        pwd = (payload.password or "").strip()
+        if not pwd or not verify_password(pwd, user.password_hash):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    "Password required to continue pending authenticator setup. "
+                    "Enter your Canary password, or cancel setup and start again."
+                ),
+            )
 
     if not user.totp_secret:
         user.totp_secret = generate_totp_secret()
@@ -239,6 +284,8 @@ def verify_2fa(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> Verify2FASessionResponse:
+    if user.is_2fa_enabled:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="2FA is already enabled")
     if not user.totp_secret:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="2FA not set up")
     if not verify_totp(secret=user.totp_secret, code=payload.code):

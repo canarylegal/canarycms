@@ -33,7 +33,8 @@ from app.models import Case as CaseRow
 from app.models import CaseContact, Contact as GlobalContactRow, ContactPortalGrant
 from app.models import CaseLockMode, CaseQuoteSnapshot, CaseStatus, File as DbFile, FileCategory, FileEditSession, MatterHeadType, MatterSubType, Precedent, PrecedentKind, User
 from app.portal_service import grant_is_active
-from app.alert_dispatch import notify_portal_contacts_files_added
+from app.portal_case import require_case_portal_enabled
+from app.portal_notifications import notify_portal_contacts_files_added_batch
 from app.audit import log_event
 from app.canary_public_url import canary_public_url, onlyoffice_browser_public_base
 from app.feature_flags import (
@@ -83,6 +84,7 @@ from app.schemas import (
     OoExportPdfOut,
     OoPersistDownloadIn,
     OutlookOpenHintsOut,
+    PublishComposeIn,
 )
 from app.routers.onlyoffice import (
     create_case_file_from_onlyoffice_pdf_export,
@@ -527,11 +529,12 @@ def upload_case_file(
         },
     )
     if notify_portal_contacts:
-        notify_portal_contacts_files_added(
+        notify_portal_contacts_files_added_batch(
             db,
             case_id=case_id,
             folder_path=paths.folder_path or "",
             filenames=[row.original_filename],
+            actor_user_id=user.id,
         )
 
     if parent_file_id is None and (mime_base == "message/rfc822" or original.lower().endswith(".eml")):
@@ -1069,6 +1072,7 @@ def list_case_portal_folder_access(
 ) -> list[CasePortalFolderAccessGrantOut]:
     """Active client-portal grants for this matter (staff UI: shared folder indicators)."""
     require_case_access(case_id, user, db)
+    require_case_portal_enabled(db, case_id)
     rows = (
         db.execute(
             select(ContactPortalGrant, GlobalContactRow)
@@ -1393,9 +1397,9 @@ def _matter_type_display_line(*, sub_name: str | None, head_name: str | None) ->
 
 
 def _case_lock_display(*, lock_mode: CaseLockMode, is_locked: bool) -> str:
-    if lock_mode == CaseLockMode.blacklist:
+    if lock_mode == CaseLockMode.allow_list:
         return "Locked"
-    if lock_mode == CaseLockMode.whitelist:
+    if lock_mode == CaseLockMode.open_by_default:
         return "Locked" if is_locked else "Unlocked"
     return "Unlocked"
 
@@ -1655,9 +1659,8 @@ def rename_case_file(
             detail="Renaming cannot change the file extension.",
         )
 
+    old_filename = row.original_filename
     ensure_files_root()
-    from app.file_storage import FILES_ROOT
-
     folder = row.folder_path or ""
     new_paths = case_file_paths(
         case_id=case_id,
@@ -1684,7 +1687,11 @@ def rename_case_file(
         action="case.file.rename",
         entity_type="file",
         entity_id=str(row.id),
-        meta={"case_id": str(case_id), "filename": row.original_filename},
+        meta={
+            "case_id": str(case_id),
+            "old_filename": old_filename,
+            "new_filename": row.original_filename,
+        },
     )
     return {"id": str(row.id), "original_filename": row.original_filename}
 
@@ -1709,6 +1716,7 @@ def update_comment_file(
     first_line = (payload.text.strip().split("\n")[0].strip() or "Comment")[:80]
     if len(first_line) == 80:
         first_line = first_line[:77] + "…"
+    old_filename = row.original_filename
     new_name = first_line + ".txt"
 
     folder = row.folder_path or ""
@@ -1747,7 +1755,11 @@ def update_comment_file(
         action="case.file.comment.update",
         entity_type="file",
         entity_id=str(row.id),
-        meta={"case_id": str(case_id)},
+        meta={
+            "case_id": str(case_id),
+            "old_filename": old_filename,
+            "new_filename": row.original_filename,
+        },
     )
     return {"id": str(row.id), "original_filename": row.original_filename}
 
@@ -1767,6 +1779,7 @@ def move_case_file(
     if row.category == FileCategory.system:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot move folder markers here")
 
+    old_folder = row.folder_path or ""
     try:
         new_folder = sanitize_folder_path(payload.folder_path)
     except ValueError as e:
@@ -1808,7 +1821,12 @@ def move_case_file(
         action="case.file.move",
         entity_type="file",
         entity_id=str(row.id),
-        meta={"case_id": str(case_id), "folder_path": row.folder_path},
+        meta={
+            "case_id": str(case_id),
+            "filename": row.original_filename,
+            "old_folder_path": old_folder,
+            "new_folder_path": row.folder_path,
+        },
     )
     return {"id": str(row.id), "folder_path": row.folder_path}
 
@@ -1860,7 +1878,11 @@ def delete_case_file(
         action="case.file.delete",
         entity_type="file",
         entity_id=str(file_id),
-        meta={"case_id": str(case_id)},
+        meta={
+            "case_id": str(case_id),
+            "filename": deleted.original_filename,
+            "folder_path": deleted.folder_path or "",
+        },
     )
     return None
 
@@ -2118,6 +2140,8 @@ def get_onlyoffice_editor_config(
         document=browser_document,
         editor_config=jwt_payload["editorConfig"],
         oo_compose_pending=bool(row.oo_compose_pending),
+        folder_path=row.folder_path or "",
+        original_filename=row.original_filename,
     )
 
 
@@ -2241,6 +2265,7 @@ def oo_save_status(
 def publish_compose_office_file(
     case_id: uuid.UUID,
     file_id: uuid.UUID,
+    payload: PublishComposeIn | None = None,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> None:
@@ -2266,6 +2291,14 @@ def publish_compose_office_file(
         entity_id=str(row.id),
         meta={"case_id": str(case_id)},
     )
+    if payload and payload.notify_portal_contacts:
+        notify_portal_contacts_files_added_batch(
+            db,
+            case_id=case_id,
+            folder_path=row.folder_path or "",
+            filenames=[row.original_filename],
+            actor_user_id=user.id,
+        )
 
 
 @router.post("/{file_id}/discard-edit", status_code=status.HTTP_204_NO_CONTENT)
@@ -2294,6 +2327,7 @@ def discard_onlyoffice_edit(
 
     if row.oo_compose_pending:
         fid = row.id
+        discard_name = row.original_filename
         _erase_case_file_tree(db, case_id, file_id)
         log_event(
             db,
@@ -2301,7 +2335,7 @@ def discard_onlyoffice_edit(
             action="case.file.compose_discard",
             entity_type="file",
             entity_id=str(fid),
-            meta={"case_id": str(case_id)},
+            meta={"case_id": str(case_id), "filename": discard_name},
         )
         return
 

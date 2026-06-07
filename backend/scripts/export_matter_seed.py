@@ -32,5 +32,12 @@ for h in heads:
 
 db.close()
 
-result = json.dumps({"version": 1, "matter_types": out}, indent=2)
+result = json.dumps(
+    {
+        "version": 1,
+        "default_sub_menus": ["Events", "Finance", "Property", "Tasks"],
+        "matter_types": out,
+    },
+    indent=2,
+)
 print(result)

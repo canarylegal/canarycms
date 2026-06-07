@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { apiFetch } from './api'
 import type { CaseAccessRuleOut, UserSummary } from './types'
 
-type CaseLockMode = 'none' | 'whitelist' | 'blacklist'
+type CaseLockMode = 'none' | 'open_by_default' | 'allow_list'
 
 type Props = {
   token: string
@@ -29,11 +29,10 @@ export function ManageCaseAccessModal({
   onClose,
   onSaved,
 }: Props) {
-  /** Stored lock_mode: ``whitelist`` = UI “Blacklist” (everyone in, revoke with denies); ``blacklist`` = UI “Whitelist” (allow list). */
-  const listsActive = lockMode === 'blacklist' || lockMode === 'whitelist'
-  const openLists = lockMode === 'whitelist'
-  const selectValue: 'whitelist' | 'blacklist' =
-    lockMode === 'blacklist' ? 'blacklist' : 'whitelist'
+  const listsActive = lockMode === 'allow_list' || lockMode === 'open_by_default'
+  const openByDefault = lockMode === 'open_by_default'
+  const selectValue: 'open_by_default' | 'allow_list' =
+    lockMode === 'allow_list' ? 'allow_list' : 'open_by_default'
 
   const [rules, setRules] = useState<CaseAccessRuleOut[]>([])
   const [loading, setLoading] = useState(true)
@@ -66,7 +65,7 @@ export function ManageCaseAccessModal({
   }, [rules])
 
   const { granted, revoked } = useMemo(() => {
-    if (openLists) {
+    if (openByDefault) {
       const g: UserSummary[] = []
       const r: UserSummary[] = []
       for (const u of allUsersSorted) {
@@ -93,7 +92,7 @@ export function ManageCaseAccessModal({
       }
     }
     return { granted: g, revoked: r }
-  }, [allUsersSorted, denyUserIds, allowUserIds, feeEarnerUserId, openLists])
+  }, [allUsersSorted, denyUserIds, allowUserIds, feeEarnerUserId, openByDefault])
 
   const canRevokeSelected = useMemo(() => {
     return [...leftSel].some((id) => {
@@ -122,7 +121,7 @@ export function ManageCaseAccessModal({
     void load()
   }, [load])
 
-  async function patchLockMode(next: 'blacklist' | 'whitelist') {
+  async function patchLockMode(next: 'allow_list' | 'open_by_default') {
     if (next === lockMode) return
     setBusy(true)
     setErr(null)
@@ -216,7 +215,7 @@ export function ManageCaseAccessModal({
     setBusy(true)
     setErr(null)
     try {
-      if (lockMode === 'whitelist') {
+      if (openByDefault) {
         for (const userId of ids) {
           await apiFetch<CaseAccessRuleOut>(`/cases/${caseId}/access`, {
             token,
@@ -246,7 +245,7 @@ export function ManageCaseAccessModal({
     setBusy(true)
     setErr(null)
     try {
-      if (lockMode === 'whitelist') {
+      if (openByDefault) {
         await Promise.all(
           ids.map((userId) => apiFetch(`/cases/${caseId}/access/${userId}`, { token, method: 'DELETE' })),
         )
@@ -270,9 +269,9 @@ export function ManageCaseAccessModal({
   }
 
   const hint =
-    lockMode === 'whitelist'
+    lockMode === 'open_by_default'
       ? 'Blacklist: everyone can access unless moved to “No access”.'
-      : lockMode === 'blacklist'
+      : lockMode === 'allow_list'
         ? 'Whitelist: only admins, the fee earner, and people under “Can access”; grant others with ← .'
         : 'Choose Blacklist or Whitelist above.'
 
@@ -298,11 +297,11 @@ export function ManageCaseAccessModal({
                 className="input"
                 value={selectValue}
                 disabled={busy || loading || !canSetLockMode}
-                onChange={(e) => void patchLockMode(e.target.value as 'blacklist' | 'whitelist')}
+                onChange={(e) => void patchLockMode(e.target.value as 'allow_list' | 'open_by_default')}
                 aria-label="Case access mode"
               >
-                <option value="whitelist">Blacklist</option>
-                <option value="blacklist">Whitelist</option>
+                <option value="open_by_default">Blacklist</option>
+                <option value="allow_list">Whitelist</option>
               </select>
             </label>
             {!canSetLockMode ? (
@@ -376,7 +375,7 @@ export function ManageCaseAccessModal({
                   <button
                     type="button"
                     className="btn"
-                    title={lockMode === 'whitelist' ? 'Remove access for selected users' : 'Remove from allowed list'}
+                    title={openByDefault ? 'Remove access for selected users' : 'Remove from allowed list'}
                     disabled={busy || !listsActive || !canRevokeSelected}
                     onClick={() => void moveRevoke()}
                   >
@@ -385,7 +384,7 @@ export function ManageCaseAccessModal({
                   <button
                     type="button"
                     className="btn"
-                    title={lockMode === 'whitelist' ? 'Restore access for selected users' : 'Grant access to selected users'}
+                    title={openByDefault ? 'Restore access for selected users' : 'Grant access to selected users'}
                     disabled={busy || !listsActive || rightSel.size === 0}
                     onClick={() => void moveGrant()}
                   >

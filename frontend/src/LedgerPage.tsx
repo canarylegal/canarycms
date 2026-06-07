@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { apiFetch } from './api'
+import { ContactSearchPicker } from './ContactSearchPicker'
 import { canaryDocumentTitle } from './tabTitle'
 import type { ApiError } from './api'
 import { ConfirmModal } from './ConfirmModal'
@@ -122,10 +123,11 @@ export function LedgerPage({ caseId, token }: Props) {
 
   // Contact picker state
   const [caseContacts, setCaseContacts] = useState<CaseContactOut[]>([])
-  const [globalContacts, setGlobalContacts] = useState<ContactOut[]>([])
   const [contactMode, setContactMode] = useState<ContactMode>('')
   const [contactPickId, setContactPickId] = useState<string>('') // id within chosen group
   const [contactOther, setContactOther] = useState('')
+  const [globalPickerOpen, setGlobalPickerOpen] = useState(false)
+  const [selectedGlobalContact, setSelectedGlobalContact] = useState<ContactOut | null>(null)
 
   const descRef = useRef<HTMLInputElement>(null)
 
@@ -166,9 +168,6 @@ export function LedgerPage({ caseId, token }: Props) {
     apiFetch<CaseContactOut[]>(`/cases/${caseId}/contacts`, { token })
       .then(setCaseContacts)
       .catch(() => {})
-    apiFetch<ContactOut[]>('/contacts', { token })
-      .then(setGlobalContacts)
-      .catch(() => {})
   }, [caseId, token])
 
   useEffect(() => {
@@ -206,7 +205,31 @@ export function LedgerPage({ caseId, token }: Props) {
     setContactMode('')
     setContactPickId('')
     setContactOther('')
+    setGlobalPickerOpen(false)
+    setSelectedGlobalContact(null)
     setPostOpen(true)
+  }
+
+  function clearGlobalContact() {
+    if (contactMode === 'global') {
+      setContactMode('')
+      setContactPickId('')
+    }
+    setSelectedGlobalContact(null)
+  }
+
+  function openGlobalContactPicker() {
+    setGlobalPickerOpen(true)
+    setContactMode('')
+    setContactPickId('')
+    setContactOther('')
+  }
+
+  function selectGlobalContact(contact: ContactOut) {
+    setContactMode('global')
+    setContactPickId(contact.id)
+    setSelectedGlobalContact(contact)
+    setGlobalPickerOpen(false)
   }
 
   function resolveContactLabel(): string | null {
@@ -216,8 +239,7 @@ export function LedgerPage({ caseId, token }: Props) {
       return c?.name ?? null
     }
     if (contactMode === 'global') {
-      const c = globalContacts.find((x) => x.id === contactPickId)
-      return c?.name ?? null
+      return selectedGlobalContact?.name ?? null
     }
     if (contactMode === 'other') return contactOther.trim() || null
     return undefined as never
@@ -264,6 +286,8 @@ export function LedgerPage({ caseId, token }: Props) {
       reference: form.reference?.trim() || null,
       description: form.description.trim(),
       contact_label: resolveContactLabel(),
+      case_contact_id: contactMode === 'matter' ? contactPickId : null,
+      contact_id: contactMode === 'global' ? contactPickId : null,
     }
     setPostBusy(true)
     try {
@@ -440,9 +464,15 @@ export function LedgerPage({ caseId, token }: Props) {
     }
   }
 
-  // Global contacts not already linked to the matter (to avoid duplication in the picker)
-  const matterContactIds = new Set(caseContacts.map((c) => c.contact_id).filter(Boolean))
-  const globalOnly = globalContacts.filter((g) => !matterContactIds.has(g.id))
+  // Exclude matter contacts already linked when picking from global list
+  const matterContactIds = useMemo(
+    () => new Set(caseContacts.map((c) => c.contact_id).filter(Boolean)),
+    [caseContacts],
+  )
+  const excludeMatterContact = useMemo(
+    () => (c: ContactOut) => !matterContactIds.has(c.id),
+    [matterContactIds],
+  )
 
   return (
     <div className="ledgerShell">
@@ -744,31 +774,32 @@ export function LedgerPage({ caseId, token }: Props) {
                   contactMode === 'matter'
                     ? `matter:${contactPickId}`
                     : contactMode === 'global'
-                      ? `global:${contactPickId}`
+                      ? ''
                       : contactMode
                 }
                 onChange={(e) => {
                   const val = e.target.value
                   setContactPickId('')
                   setContactOther('')
+                  setGlobalPickerOpen(false)
                   if (val === 'na') {
                     setContactMode('na')
                   } else if (val === 'other') {
                     setContactMode('other')
+                    clearGlobalContact()
                   } else if (val.startsWith('matter:')) {
                     setContactMode('matter')
                     setContactPickId(val.slice(7))
-                  } else if (val.startsWith('global:')) {
-                    setContactMode('global')
-                    setContactPickId(val.slice(7))
+                    clearGlobalContact()
                   } else {
                     setContactMode('')
+                    clearGlobalContact()
                   }
                 }}
               >
                 <option value="">— select party —</option>
                 <option value="na">N/A</option>
-                {caseContacts.length > 0 && (
+                {caseContacts.length > 0 ? (
                   <optgroup label="Matter contacts">
                     {caseContacts.map((c) => (
                       <option key={c.id} value={`matter:${c.id}`}>
@@ -777,19 +808,52 @@ export function LedgerPage({ caseId, token }: Props) {
                       </option>
                     ))}
                   </optgroup>
-                )}
-                {globalOnly.length > 0 && (
-                  <optgroup label="Global contacts">
-                    {globalOnly.map((c) => (
-                      <option key={c.id} value={`global:${c.id}`}>
-                        {c.name}
-                      </option>
-                    ))}
-                  </optgroup>
-                )}
+                ) : null}
                 <option value="other">Other (enter below)</option>
               </select>
             </label>
+
+            {caseContacts.length === 0 ? (
+              <p className="muted" style={{ margin: '4px 0 0', fontSize: '0.92em' }}>
+                No matter contacts on this file yet — add contacts on the matter or choose Other / global contact.
+              </p>
+            ) : null}
+
+            {selectedGlobalContact ? (
+              <div className="ledgerGlobalContactPick row" style={{ justifyContent: 'space-between', gap: 8 }}>
+                <span>
+                  Global contact: <strong>{selectedGlobalContact.name}</strong>
+                </span>
+                <button type="button" className="btn" onClick={clearGlobalContact}>
+                  Clear
+                </button>
+              </div>
+            ) : (
+              <div className="ledgerGlobalContactPick">
+                <button type="button" className="btn" onClick={openGlobalContactPicker}>
+                  Select global contact…
+                </button>
+              </div>
+            )}
+
+            {globalPickerOpen ? (
+              <div className="ledgerGlobalContactPanel stack">
+                <ContactSearchPicker
+                  token={token}
+                  value={null}
+                  onChange={(_id, contact) => {
+                    if (contact) selectGlobalContact(contact)
+                  }}
+                  filterContact={excludeMatterContact}
+                  listMaxHeight={180}
+                />
+                <div className="row" style={{ justifyContent: 'flex-end' }}>
+                  <button type="button" className="btn" onClick={() => setGlobalPickerOpen(false)}>
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            ) : null}
 
             {contactMode === 'other' && (
               <label className="ledgerPostLabel">

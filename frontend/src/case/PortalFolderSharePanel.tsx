@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import { apiFetch } from '../api'
 import { useDialogs } from '../DialogProvider'
-import type { CasePortalFolderShareContactOut, ContactPortalGrantCreateIn } from '../types'
+import type { CasePortalFolderShareContactOut, ContactPortalGrantCreateIn, ContactPortalGrantOut } from '../types'
+import { PORTAL_ALERTS_NOT_CONFIGURED_MSG } from '../types'
 import { decodeFolderPathForDisplay } from './folderPathCodec'
 
 type Props = {
@@ -16,6 +17,7 @@ export function PortalFolderSharePanel({ token, caseId, folderPath, onChanged }:
   const [rows, setRows] = useState<CasePortalFolderShareContactOut[]>([])
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
 
   const folderLabel = decodeFolderPathForDisplay(folderPath) || 'Home'
 
@@ -60,6 +62,7 @@ export function PortalFolderSharePanel({ token, caseId, folderPath, onChanged }:
       }
       setBusy(true)
       setErr(null)
+      setNotice(null)
       try {
         const payload: ContactPortalGrantCreateIn = {
           case_id: caseId,
@@ -69,7 +72,18 @@ export function PortalFolderSharePanel({ token, caseId, folderPath, onChanged }:
           can_upload: true,
           send_email: sendEmail,
         }
-        await apiFetch(`/contacts/${row.contact_id}/portal/grants`, { token, method: 'POST', json: payload })
+        const out = await apiFetch<ContactPortalGrantOut>(`/contacts/${row.contact_id}/portal/grants`, {
+          token,
+          method: 'POST',
+          json: payload,
+        })
+        if (sendEmail) {
+          setNotice(
+            out.email_sent
+              ? `Notification e-mail sent to ${row.contact_name}.`
+              : out.email_skip_reason ?? PORTAL_ALERTS_NOT_CONFIGURED_MSG,
+          )
+        }
         await reloadRows()
         onChanged()
       } catch (e: unknown) {
@@ -111,6 +125,7 @@ export function PortalFolderSharePanel({ token, caseId, folderPath, onChanged }:
         </p>
       </div>
       {err ? <div className="error">{err}</div> : null}
+      {notice ? <div className="notice">{notice}</div> : null}
       {busy && rows.length === 0 ? <div className="muted">Loading contacts…</div> : null}
       {!busy && rows.length === 0 ? (
         <div className="muted">No matter contacts with portal access. Grant portal access from the contact card first.</div>

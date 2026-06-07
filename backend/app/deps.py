@@ -13,6 +13,7 @@ from app.org_security import firm_mandates_second_factor, user_meets_second_fact
 from app.org_security import user_password_change_required
 from app.security import decode_access_token
 from app.admin_access import user_effective_admin
+from app.permission_checks import user_may_be_fee_earner
 
 
 _bearer = HTTPBearer(auto_error=False)
@@ -134,7 +135,7 @@ def require_case_access(case_id, user: User, db: Session) -> Case:
     if user_effective_admin(user, db):
         return case
 
-    if case.fee_earner_user_id and user.id == case.fee_earner_user_id:
+    if case.fee_earner_user_id and user.id == case.fee_earner_user_id and user_may_be_fee_earner(user, db):
         return case
 
     if case.lock_mode == CaseLockMode.none:
@@ -147,8 +148,8 @@ def require_case_access(case_id, user: User, db: Session) -> Case:
     )
     mode = case.lock_mode
 
-    # Allow-list mode (stored as ``blacklist``): only fee earner, admins, and explicitly allowed users.
-    if mode == CaseLockMode.blacklist:
+    # Allow-list mode: only fee earner, admins, and explicitly allowed users.
+    if mode == CaseLockMode.allow_list:
         if any(r.mode == CaseAccessMode.allow for r in rules):
             return case
         raise HTTPException(
@@ -156,8 +157,8 @@ def require_case_access(case_id, user: User, db: Session) -> Case:
             detail="This matter uses restricted access; you are not on the allowed list.",
         )
 
-    # Open-by-default mode (stored as ``whitelist``): everyone may access unless explicitly denied.
-    if mode == CaseLockMode.whitelist:
+    # Open-by-default mode: everyone may access unless explicitly denied.
+    if mode == CaseLockMode.open_by_default:
         if any(r.mode == CaseAccessMode.deny for r in rules):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access to this matter has been revoked for your user.")
         return case
@@ -174,7 +175,7 @@ def get_case_if_accessible(case_id: uuid.UUID, user: User, db: Session) -> Case 
     if user_effective_admin(user, db):
         return case
 
-    if case.fee_earner_user_id and user.id == case.fee_earner_user_id:
+    if case.fee_earner_user_id and user.id == case.fee_earner_user_id and user_may_be_fee_earner(user, db):
         return case
 
     if case.lock_mode == CaseLockMode.none:
@@ -187,12 +188,12 @@ def get_case_if_accessible(case_id: uuid.UUID, user: User, db: Session) -> Case 
     )
     mode = case.lock_mode
 
-    if mode == CaseLockMode.blacklist:
+    if mode == CaseLockMode.allow_list:
         if any(r.mode == CaseAccessMode.allow for r in rules):
             return case
         return None
 
-    if mode == CaseLockMode.whitelist:
+    if mode == CaseLockMode.open_by_default:
         if any(r.mode == CaseAccessMode.deny for r in rules):
             return None
         return case

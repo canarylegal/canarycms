@@ -1,0 +1,30 @@
+{
+  "name": "canary-thunderbird-addin",
+  "private": true,
+  "description": "Build and sign scripts for the Canary Thunderbird MailExtension",
+  "scripts": {
+    "lint": "web-ext lint --source-dir .",
+    "package": "node scripts/package.mjs",
+    "sign": "node scripts/sign.mjs",
+    "release": "npm run lint && npm run package && npm run sign"
+  },
+  "devDependencies": {
+    "web-ext": "^8.10.0"
+  },
+  "webExt": {
+    "sourceDir": ".",
+    "artifactsDir": "dist",
+    "ignoreFiles": [
+      "README.md",
+      "scripts/**",
+      "package.json",
+      "package-lock.json",
+      "dist/**",
+      "web-ext-artifacts/**",
+      "node_modules/**",
+      "*.xpi",
+      "*.zip",
+      ".amo-upload-uuid"
+    ]
+  }
+}

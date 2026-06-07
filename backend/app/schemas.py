@@ -48,6 +48,10 @@ class UserPublic(BaseModel):
     role: UserRole
     is_active: bool
     is_2fa_enabled: bool
+    pending_authenticator_setup: bool = Field(
+        default=False,
+        description="True when TOTP setup was started but not yet confirmed (requires password to resume).",
+    )
     organization_requires_second_factor: bool = False
     has_passkeys: bool = False
     email_launch_preference: Literal["desktop", "outlook_web"] = "desktop"
@@ -278,6 +282,12 @@ class LoginRequest(BaseModel):
     totp_code: str | None = None
 
 
+class Setup2FARequest(BaseModel):
+    """Optional password when resuming a pending authenticator setup."""
+
+    password: str | None = None
+
+
 class Setup2FAResponse(BaseModel):
     secret: str
     otpauth_uri: str
@@ -506,6 +516,7 @@ class CaseCreate(BaseModel):
     fee_earner_user_id: uuid.UUID
     source_id: uuid.UUID | None = None
     source_name: str | None = Field(default=None, max_length=200)
+    portal_enabled: bool = False
 
     @field_validator("status")
     @classmethod
@@ -525,6 +536,8 @@ class CaseUpdate(BaseModel):
     is_locked: bool | None = None
     lock_mode: CaseLockMode | None = None
     source_id: uuid.UUID | None = None
+    source_name: str | None = Field(default=None, max_length=200)
+    portal_enabled: bool | None = None
 
 
 class MatterMenuItemOut(BaseModel):
@@ -550,6 +563,7 @@ class CaseOut(BaseModel):
     created_by: uuid.UUID
     is_locked: bool
     lock_mode: CaseLockMode
+    portal_enabled: bool = False
     created_at: datetime
     updated_at: datetime
 
@@ -1605,6 +1619,8 @@ class OnlyofficeEditorConfigOut(BaseModel):
     editor_config: dict
     # Case compose-office: file stays hidden until Save; editor should treat as needing explicit save/close flow.
     oo_compose_pending: bool = False
+    folder_path: str = ""
+    original_filename: str = ""
 
 
 # ---------------------------------------------------------------------------
@@ -1625,6 +1641,8 @@ class LedgerPostCreate(BaseModel):
     description: str = Field(min_length=1, max_length=500)
     reference: str | None = Field(default=None, max_length=200)
     contact_label: str | None = Field(default=None, max_length=300)
+    case_contact_id: uuid.UUID | None = None
+    contact_id: uuid.UUID | None = None
     amount_pence: int = Field(gt=0, description="Amount in pence (integer)")
     # Which account(s) to affect and in which direction.
     # At least one leg is required; both may be supplied.
@@ -1643,6 +1661,8 @@ class LedgerEntryOut(BaseModel):
     description: str
     reference: str | None
     contact_label: str | None = None
+    case_contact_id: uuid.UUID | None = None
+    contact_id: uuid.UUID | None = None
     posted_by_user_id: uuid.UUID | None
     posted_at: datetime
     is_approved: bool
@@ -2081,8 +2101,98 @@ class PortalFileOut(BaseModel):
     mime_type: str
     size_bytes: int
     folder_path: str
+    folder_display: str = ""
     created_at: datetime
     updated_at: datetime
+
+
+class PortalBrowseOut(BaseModel):
+    subfolder: str
+    breadcrumb: list[str]
+    subfolders: list[str]
+    files: list[PortalFileOut]
+
+
+class PortalOtpRequestIn(BaseModel):
+    email: str = Field(min_length=3, max_length=320)
+
+
+class PortalOtpVerifyIn(BaseModel):
+    email: str = Field(min_length=3, max_length=320)
+    code: str = Field(min_length=4, max_length=12)
+
+
+class CasePortalNotifyFilesIn(BaseModel):
+    folder_path: str = ""
+    filenames: list[str] = Field(min_length=1)
+
+
+class CasePortalNotifyFilesOut(BaseModel):
+    contacts_notified: int
+    alerts_skipped_reason: str | None = None
+
+
+class CasePortalActivityOut(BaseModel):
+    id: uuid.UUID
+    action: str
+    summary: str
+    contact_name: str | None
+    created_at: datetime
+
+
+class CasePortalShareStatusOut(BaseModel):
+    portal_enabled: bool
+    active_grant_count: int
+    contact_count: int
+
+
+class CasePortalStaffUserOut(BaseModel):
+    id: uuid.UUID
+    display_name: str
+    email: str
+
+
+class CasePortalNotificationSettingsOut(BaseModel):
+    staff_user_ids: list[uuid.UUID]
+    staff_users: list[CasePortalStaffUserOut] = Field(default_factory=list)
+
+
+class CasePortalNotificationSettingsIn(BaseModel):
+    staff_user_ids: list[uuid.UUID] = Field(default_factory=list)
+
+
+class CasePortalPreviewContactOut(BaseModel):
+    contact_id: uuid.UUID
+    contact_name: str
+    shared_folder_count: int
+
+
+class CasePortalPreviewIn(BaseModel):
+    contact_id: uuid.UUID
+
+
+class CasePortalPreviewOut(BaseModel):
+    exchange_token: str
+    contact_name: str
+    preview_url: str
+
+
+class PortalPreviewExchangeIn(BaseModel):
+    exchange_token: str = Field(min_length=10, max_length=4096)
+
+
+class PublishComposeIn(BaseModel):
+    notify_portal_contacts: bool = False
+
+
+class ContactPortalNotificationPrefsOut(BaseModel):
+    notify_files_added: bool
+    notify_folder_shared: bool
+
+
+class ContactPortalNotificationPrefsIn(BaseModel):
+    notify_files_added: bool | None = None
+    notify_folder_shared: bool | None = None
 
 
 class ContactPortalAccessOut(BaseModel):
@@ -2093,6 +2203,8 @@ class ContactPortalAccessOut(BaseModel):
     has_access: bool
     access_code: str | None = None
     access_record_exists: bool = False
+    notify_files_added: bool = True
+    notify_folder_shared: bool = True
 
 
 class ContactPortalAccessCreateOut(BaseModel):
@@ -2100,6 +2212,7 @@ class ContactPortalAccessCreateOut(BaseModel):
     enabled: bool
     expires_at: datetime | None
     email_sent: bool = False
+    email_skip_reason: str | None = None
 
 
 class ContactPortalAccessActionIn(BaseModel):
@@ -2127,6 +2240,7 @@ class ContactPortalGrantOut(BaseModel):
     expires_at: datetime | None
     created_at: datetime
     email_sent: bool = False
+    email_skip_reason: str | None = None
 
 
 class ContactPortalGrantCreateIn(BaseModel):

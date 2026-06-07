@@ -11,8 +11,9 @@ from sqlalchemy.orm import Session
 from app.audit import log_event
 from app.db import get_db
 from app.deps import get_current_user, require_case_access
-from app.alert_dispatch import AlertKind, dispatch_alert
-from app.canary_public_url import canary_public_url
+from app.alert_dispatch import AlertKind, dispatch_alert, firm_alerts_configured, portal_public_url
+from app.portal_notifications import ALERTS_NOT_CONFIGURED_MSG, contact_wants_notification
+from app.portal_case import require_case_portal_enabled
 from app.file_storage import sanitize_folder_path
 from app.models import Case, Contact, ContactPortalAccess, ContactPortalGrant, User
 from app.portal_service import (
@@ -34,6 +35,8 @@ from app.schemas import (
     ContactPortalGrantCreateIn,
     ContactPortalGrantOut,
     ContactPortalGrantUpdateIn,
+    ContactPortalNotificationPrefsIn,
+    ContactPortalNotificationPrefsOut,
 )
 
 router = APIRouter(prefix="/contacts/{contact_id}/portal", tags=["contact-portal"])
@@ -63,51 +66,10 @@ def _grant_out(db: Session, grant: ContactPortalGrant) -> ContactPortalGrantOut:
 
 
 def _portal_public_url() -> str:
-    return f"{canary_public_url().rstrip('/')}/portal"
+    return portal_public_url()
 
 
-def _notify_portal_access_email(db: Session, contact: Contact, access_code: str, *, actor_user_id: uuid.UUID) -> bool:
-    email = (contact.email or "").strip()
-    if not email:
-        return False
-    return dispatch_alert(
-        db,
-        AlertKind.portal_contact_access,
-        to_email=email,
-        context={
-            "contact_name": contact_display_name(contact),
-            "access_code": access_code,
-            "portal_url": _portal_public_url(),
-        },
-        actor_user_id=actor_user_id,
-    )
-
-
-def _notify_portal_folder_granted(db: Session, contact: Contact, grant: ContactPortalGrant, *, actor_user_id: uuid.UUID) -> bool:
-    email = (contact.email or "").strip()
-    if not email:
-        return False
-    return dispatch_alert(
-        db,
-        AlertKind.portal_contact_folder,
-        to_email=email,
-        context={
-            "contact_name": contact_display_name(contact),
-            "area_label": default_grant_label(db, grant),
-            "portal_url": _portal_public_url(),
-        },
-        actor_user_id=actor_user_id,
-    )
-
-
-@router.get("/access", response_model=ContactPortalAccessOut)
-def get_contact_portal_access(
-    contact_id: uuid.UUID,
-    user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-) -> ContactPortalAccessOut:
-    _get_contact_or_404(db, contact_id)
-    row = db.execute(select(ContactPortalAccess).where(ContactPortalAccess.contact_id == contact_id)).scalar_one_or_none()
+def _access_out(row: ContactPortalAccess | None) -> ContactPortalAccessOut:
     if row is None:
         return ContactPortalAccessOut(
             enabled=False,
@@ -126,6 +88,87 @@ def get_contact_portal_access(
         has_access=portal_access_is_active(row),
         access_code=staff_portal_access_code(row) if portal_access_is_active(row) else None,
         access_record_exists=True,
+        notify_files_added=bool(row.notify_files_added),
+        notify_folder_shared=bool(row.notify_folder_shared),
+    )
+
+
+def _notify_portal_access_email(db: Session, contact: Contact, access_code: str, *, actor_user_id: uuid.UUID) -> tuple[bool, str | None]:
+    if not firm_alerts_configured(db):
+        return False, ALERTS_NOT_CONFIGURED_MSG
+    email = (contact.email or "").strip()
+    if not email:
+        return False, "Contact has no e-mail address."
+    sent = dispatch_alert(
+        db,
+        AlertKind.portal_contact_access,
+        to_email=email,
+        context={
+            "contact_name": contact_display_name(contact),
+            "access_code": access_code,
+            "portal_url": _portal_public_url(),
+        },
+        actor_user_id=actor_user_id,
+    )
+    return sent, None if sent else ALERTS_NOT_CONFIGURED_MSG
+
+
+def _notify_portal_folder_granted(db: Session, contact: Contact, grant: ContactPortalGrant, *, actor_user_id: uuid.UUID) -> tuple[bool, str | None]:
+    if not contact_wants_notification(db, contact.id, AlertKind.portal_contact_folder):
+        return False, None
+    if not firm_alerts_configured(db):
+        return False, ALERTS_NOT_CONFIGURED_MSG
+    email = (contact.email or "").strip()
+    if not email:
+        return False, "Contact has no e-mail address."
+    sent = dispatch_alert(
+        db,
+        AlertKind.portal_contact_folder,
+        to_email=email,
+        context={
+            "contact_name": contact_display_name(contact),
+            "area_label": default_grant_label(db, grant),
+            "portal_url": _portal_public_url(),
+        },
+        actor_user_id=actor_user_id,
+    )
+    return sent, None if sent else ALERTS_NOT_CONFIGURED_MSG
+
+
+@router.get("/access", response_model=ContactPortalAccessOut)
+def get_contact_portal_access(
+    contact_id: uuid.UUID,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> ContactPortalAccessOut:
+    _get_contact_or_404(db, contact_id)
+    row = db.execute(select(ContactPortalAccess).where(ContactPortalAccess.contact_id == contact_id)).scalar_one_or_none()
+    out = _access_out(row)
+    if row is None:
+        return out.model_copy(update={"access_record_exists": False})
+    return out
+
+
+@router.patch("/access/notifications", response_model=ContactPortalNotificationPrefsOut)
+def update_contact_portal_notification_prefs(
+    contact_id: uuid.UUID,
+    payload: ContactPortalNotificationPrefsIn,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> ContactPortalNotificationPrefsOut:
+    _get_contact_or_404(db, contact_id)
+    row = db.execute(select(ContactPortalAccess).where(ContactPortalAccess.contact_id == contact_id)).scalar_one_or_none()
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Portal access is not set up for this contact")
+    data = payload.model_dump(exclude_unset=True)
+    for key, value in data.items():
+        setattr(row, key, value)
+    row.updated_at = utcnow()
+    db.add(row)
+    db.commit()
+    return ContactPortalNotificationPrefsOut(
+        notify_files_added=bool(row.notify_files_added),
+        notify_folder_shared=bool(row.notify_folder_shared),
     )
 
 
@@ -168,9 +211,12 @@ def create_contact_portal_access(
         entity_id=str(contact_id),
     )
     email_sent = False
+    email_skip_reason: str | None = None
     if payload.send_email:
-        email_sent = _notify_portal_access_email(db, contact, code, actor_user_id=user.id)
-    return ContactPortalAccessCreateOut(access_code=code, enabled=True, expires_at=None, email_sent=email_sent)
+        email_sent, email_skip_reason = _notify_portal_access_email(db, contact, code, actor_user_id=user.id)
+    return ContactPortalAccessCreateOut(
+        access_code=code, enabled=True, expires_at=None, email_sent=email_sent, email_skip_reason=email_skip_reason
+    )
 
 
 @router.post("/access/email", status_code=status.HTTP_204_NO_CONTENT)
@@ -187,10 +233,10 @@ def send_contact_portal_access_email(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Portal access is not active for this contact")
     if row.code_sha256 != hash_access_code(payload.access_code.strip()):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Access code does not match")
-    if not _notify_portal_access_email(db, contact, payload.access_code.strip(), actor_user_id=user.id):
+    if not _notify_portal_access_email(db, contact, payload.access_code.strip(), actor_user_id=user.id)[0]:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Could not send e-mail (check contact e-mail address and Admin → E-mail alert settings).",
+            detail=ALERTS_NOT_CONFIGURED_MSG,
         )
 
 
@@ -228,9 +274,12 @@ def rotate_contact_portal_access(
         entity_id=str(contact_id),
     )
     email_sent = False
+    email_skip_reason: str | None = None
     if payload.send_email:
-        email_sent = _notify_portal_access_email(db, contact, code, actor_user_id=user.id)
-    return ContactPortalAccessCreateOut(access_code=code, enabled=True, expires_at=row.expires_at, email_sent=email_sent)
+        email_sent, email_skip_reason = _notify_portal_access_email(db, contact, code, actor_user_id=user.id)
+    return ContactPortalAccessCreateOut(
+        access_code=code, enabled=True, expires_at=row.expires_at, email_sent=email_sent, email_skip_reason=email_skip_reason
+    )
 
 
 @router.patch("/access", response_model=ContactPortalAccessOut)
@@ -259,15 +308,7 @@ def update_contact_portal_access(
         entity_id=str(contact_id),
         meta=data,
     )
-    return ContactPortalAccessOut(
-        enabled=row.enabled,
-        expires_at=row.expires_at,
-        last_login_at=row.last_login_at,
-        locked_until=row.locked_until,
-        has_access=portal_access_is_active(row),
-        access_code=staff_portal_access_code(row) if portal_access_is_active(row) else None,
-        access_record_exists=True,
-    )
+    return _access_out(row)
 
 
 @router.delete("/access", status_code=status.HTTP_204_NO_CONTENT)
@@ -319,6 +360,7 @@ def create_contact_portal_grant(
     contact = db.get(Contact, contact_id)
     assert contact is not None
     require_case_access(payload.case_id, user, db)
+    require_case_portal_enabled(db, payload.case_id)
     folder = sanitize_folder_path(payload.folder_path)
     grant = ContactPortalGrant(
         contact_id=contact_id,
@@ -342,10 +384,11 @@ def create_contact_portal_grant(
         meta={"contact_id": str(contact_id), "case_id": str(payload.case_id), "folder_path": folder},
     )
     email_sent = False
+    email_skip_reason: str | None = None
     if payload.send_email:
-        email_sent = _notify_portal_folder_granted(db, contact, grant, actor_user_id=user.id)
+        email_sent, email_skip_reason = _notify_portal_folder_granted(db, contact, grant, actor_user_id=user.id)
     out = _grant_out(db, grant)
-    return out.model_copy(update={"email_sent": email_sent})
+    return out.model_copy(update={"email_sent": email_sent, "email_skip_reason": email_skip_reason})
 
 
 @router.patch("/grants/{grant_id}", response_model=ContactPortalGrantOut)

@@ -7,7 +7,6 @@ import logging
 import uuid
 from typing import Any
 
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.alert_templates import (
@@ -15,13 +14,13 @@ from app.alert_templates import (
     portal_contact_access_granted,
     portal_contact_files_added,
     portal_contact_folder_granted,
+    portal_login_otp,
     portal_staff_upload,
 )
 from app.audit import log_event
 from app.canary_public_url import canary_public_url
-from app.firm_email_service import FirmEmailMessage, try_send_firm_email
-from app.models import Contact, ContactPortalGrant, FirmSettings
-from app.portal_service import contact_display_name, default_grant_label, file_folder_in_grant, grant_is_active
+from app.firm_email_service import FirmEmailMessage, resolve_alert_transport, try_send_firm_email
+from app.models import FirmSettings
 
 log = logging.getLogger(__name__)
 
@@ -32,6 +31,11 @@ class AlertKind(str, enum.Enum):
     portal_contact_access = "portal_contact_access"
     portal_contact_folder = "portal_contact_folder"
     portal_contact_files_added = "portal_contact_files_added"
+    portal_login_otp = "portal_login_otp"
+
+
+def firm_alerts_configured(db: Session) -> bool:
+    return resolve_alert_transport(db) is not None
 
 
 def _firm_name(db: Session) -> str:
@@ -41,7 +45,7 @@ def _firm_name(db: Session) -> str:
     return (firm.trading_name or "").strip() or (firm.registered_company_name or "").strip() or ""
 
 
-def _portal_url() -> str:
+def portal_public_url() -> str:
     base = canary_public_url().rstrip("/")
     return f"{base}/portal"
 
@@ -60,48 +64,59 @@ def dispatch_alert(
         return False
 
     firm = _firm_name(db)
+    body_html: str | None = None
     if kind == AlertKind.calendar_event_reminder:
         subject, body = calendar_event_reminder(
             title=str(context.get("title") or ""),
             anchor_label=str(context.get("anchor_label") or "unknown"),
         )
     elif kind == AlertKind.portal_staff_upload:
-        subject, body = portal_staff_upload(
+        subject, body, body_html = portal_staff_upload(
             firm_name=firm,
             contact_name=str(context.get("contact_name") or "Client"),
             area_label=str(context.get("area_label") or "Documents"),
             filename=str(context.get("filename") or "file"),
         )
     elif kind == AlertKind.portal_contact_access:
-        subject, body = portal_contact_access_granted(
+        subject, body, body_html = portal_contact_access_granted(
             firm_name=firm,
             contact_name=str(context.get("contact_name") or "Client"),
-            portal_url=str(context.get("portal_url") or _portal_url()),
+            portal_url=str(context.get("portal_url") or portal_public_url()),
             access_code=str(context.get("access_code") or ""),
         )
     elif kind == AlertKind.portal_contact_folder:
-        subject, body = portal_contact_folder_granted(
+        subject, body, body_html = portal_contact_folder_granted(
             firm_name=firm,
             contact_name=str(context.get("contact_name") or "Client"),
             area_label=str(context.get("area_label") or "Documents"),
-            portal_url=str(context.get("portal_url") or _portal_url()),
+            portal_url=str(context.get("portal_url") or portal_public_url()),
         )
     elif kind == AlertKind.portal_contact_files_added:
         filenames = context.get("filenames") or []
         if isinstance(filenames, str):
             filenames = [filenames]
-        subject, body = portal_contact_files_added(
+        subject, body, body_html = portal_contact_files_added(
             firm_name=firm,
             contact_name=str(context.get("contact_name") or "Client"),
             area_label=str(context.get("area_label") or "Documents"),
             filenames=[str(x) for x in filenames],
-            portal_url=str(context.get("portal_url") or _portal_url()),
+            portal_url=str(context.get("portal_url") or portal_public_url()),
+        )
+    elif kind == AlertKind.portal_login_otp:
+        subject, body, body_html = portal_login_otp(
+            firm_name=firm,
+            contact_name=str(context.get("contact_name") or "Client"),
+            portal_url=str(context.get("portal_url") or portal_public_url()),
+            otp_code=str(context.get("otp_code") or ""),
         )
     else:
         log.warning("alert_dispatch: unknown kind %s", kind)
         return False
 
-    transport = try_send_firm_email(db, FirmEmailMessage(to_email=addr, subject=subject, body_text=body))
+    transport = try_send_firm_email(
+        db,
+        FirmEmailMessage(to_email=addr, subject=subject, body_text=body, body_html=body_html),
+    )
     if transport is None:
         return False
 
@@ -124,38 +139,16 @@ def notify_portal_contacts_files_added(
     folder_path: str,
     filenames: list[str],
     exclude_contact_id: uuid.UUID | None = None,
+    actor_user_id: uuid.UUID | None = None,
 ) -> int:
-    """E-mail portal contacts with access to ``folder_path`` that new files were added."""
-    if not filenames:
-        return 0
-    grants = db.execute(select(ContactPortalGrant).where(ContactPortalGrant.case_id == case_id)).scalars().all()
-    sent = 0
-    seen: set[uuid.UUID] = set()
-    portal_url = _portal_url()
-    for grant in grants:
-        if not grant_is_active(grant):
-            continue
-        if not file_folder_in_grant(folder_path, grant.folder_path):
-            continue
-        if grant.contact_id in seen:
-            continue
-        if exclude_contact_id and grant.contact_id == exclude_contact_id:
-            continue
-        contact = db.get(Contact, grant.contact_id)
-        if not contact or not (contact.email or "").strip():
-            continue
-        seen.add(grant.contact_id)
-        area = default_grant_label(db, grant)
-        if dispatch_alert(
-            db,
-            AlertKind.portal_contact_files_added,
-            to_email=contact.email,
-            context={
-                "contact_name": contact_display_name(contact),
-                "area_label": area,
-                "filenames": filenames,
-                "portal_url": portal_url,
-            },
-        ):
-            sent += 1
-    return sent
+    """Batch notify — one e-mail per contact listing all filenames."""
+    from app.portal_notifications import notify_portal_contacts_files_added_batch
+
+    result = notify_portal_contacts_files_added_batch(
+        db,
+        case_id=case_id,
+        folder_path=folder_path,
+        filenames=filenames,
+        actor_user_id=actor_user_id,
+    )
+    return result.contacts_notified

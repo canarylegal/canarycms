@@ -16,13 +16,32 @@ def _category(user: User, db: Session) -> UserPermissionCategory | None:
     return db.get(UserPermissionCategory, user.permission_category_id)
 
 
+def user_may_be_fee_earner(user: User, db: Session) -> bool:
+    """True when the user may be assigned as a matter fee earner (merge codes, portal file owner, etc.)."""
+    if user_effective_admin(user, db):
+        return True
+    cat = _category(user, db)
+    return bool(cat and cat.perm_fee_earner)
+
+
+def assert_may_be_fee_earner(user: User, db: Session) -> None:
+    if not user_may_be_fee_earner(user, db):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="That user is not permitted to act as a fee earner.",
+        )
+
+
 def assert_may_post_ledger(user: User, payload: LedgerPostCreate, db: Session) -> None:
-    """Allow posting if admin, or no category (legacy), or category grants the relevant leg."""
+    """Allow posting if admin, or category grants the relevant leg."""
     if user_effective_admin(user, db):
         return
     cat = _category(user, db)
     if cat is None:
-        return
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="No permission profile is assigned to your account. Ask an administrator to assign one.",
+        )
     if payload.client_direction and not cat.perm_post_client:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,

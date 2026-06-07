@@ -4,9 +4,9 @@ import uuid
 from datetime import datetime, timezone
 from urllib.parse import urlparse
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, EmailStr
-from sqlalchemy import select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.calendar_service import ensure_default_calendar
@@ -15,8 +15,8 @@ from app.deps import get_current_user
 from app.email_crypt import encrypt_password
 from app.email_integration_settings import build_user_public
 from app.models import User
+from app.permission_checks import user_may_approve_invoice, user_may_approve_ledger, user_may_be_fee_earner
 from app.radicale_htpasswd import remove_user, upsert_user
-from app.permission_checks import user_may_approve_invoice, user_may_approve_ledger
 from app.schemas import (
     LedgerPermissionsOut,
     UserAppearanceUpdate,
@@ -66,12 +66,66 @@ class UserSummary(BaseModel):
     initials: str
     role: str
     is_active: bool
+    can_be_fee_earner: bool = False
 
 
 @router.get("", response_model=list[UserSummary])
 def list_users(user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> list[UserSummary]:
     users = db.execute(select(User).order_by(User.display_name.asc())).scalars().all()
-    return [UserSummary.model_validate(u, from_attributes=True) for u in users]
+    return [
+        UserSummary(
+            id=u.id,
+            email=u.email,
+            display_name=u.display_name,
+            initials=u.initials,
+            role=u.role.value if hasattr(u.role, "value") else str(u.role),
+            is_active=u.is_active,
+            can_be_fee_earner=user_may_be_fee_earner(u, db),
+        )
+        for u in users
+    ]
+
+
+@router.get("/search", response_model=list[UserSummary])
+def search_users(
+    q: str = Query(min_length=1, max_length=100),
+    limit: int = Query(default=20, ge=1, le=50),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> list[UserSummary]:
+    needle = q.strip().lower()
+    if not needle:
+        return []
+    pattern = f"%{needle}%"
+    users = (
+        db.execute(
+            select(User)
+            .where(
+                User.is_active.is_(True),
+                or_(
+                    func.lower(User.display_name).like(pattern),
+                    func.lower(User.email).like(pattern),
+                    func.lower(User.initials).like(pattern),
+                ),
+            )
+            .order_by(User.display_name.asc())
+            .limit(limit)
+        )
+        .scalars()
+        .all()
+    )
+    return [
+        UserSummary(
+            id=u.id,
+            email=u.email,
+            display_name=u.display_name,
+            initials=u.initials,
+            role=u.role.value if hasattr(u.role, "value") else str(u.role),
+            is_active=u.is_active,
+            can_be_fee_earner=user_may_be_fee_earner(u, db),
+        )
+        for u in users
+    ]
 
 
 @router.get("/me/ledger-permissions", response_model=LedgerPermissionsOut)

@@ -1,7 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { apiFetch } from './api'
 import { useDialogs } from './DialogProvider'
-import type { ContactPortalAccessCreateOut, ContactPortalAccessOut, ContactPortalGrantOut } from './types'
+import type {
+  ContactPortalAccessCreateOut,
+  ContactPortalAccessOut,
+  ContactPortalGrantOut,
+  ContactPortalNotificationPrefsOut,
+} from './types'
+import { PORTAL_ALERTS_NOT_CONFIGURED_MSG } from './types'
 
 type Props = {
   token: string
@@ -76,7 +82,11 @@ export function ContactPortalPanel({ token, contactId, contactName, contactEmail
       })
       setRevealedCode(out.access_code)
       if (sendEmail) {
-        setEmailNotice(out.email_sent ? `Access e-mail sent to ${contactEmail}.` : 'Access e-mail could not be sent (check Admin → E-mail).')
+        setEmailNotice(
+          out.email_sent
+            ? `Access e-mail sent to ${contactEmail}.`
+            : out.email_skip_reason ?? PORTAL_ALERTS_NOT_CONFIGURED_MSG,
+        )
       }
       await load()
     } catch (e: unknown) {
@@ -99,7 +109,11 @@ export function ContactPortalPanel({ token, contactId, contactName, contactEmail
       })
       setRevealedCode(out.access_code)
       if (sendEmail) {
-        setEmailNotice(out.email_sent ? `Access e-mail sent to ${contactEmail}.` : 'Access e-mail could not be sent (check Admin → E-mail).')
+        setEmailNotice(
+          out.email_sent
+            ? `Access e-mail sent to ${contactEmail}.`
+            : out.email_skip_reason ?? PORTAL_ALERTS_NOT_CONFIGURED_MSG,
+        )
       }
       await load()
     } catch (e: unknown) {
@@ -156,7 +170,7 @@ export function ContactPortalPanel({ token, contactId, contactName, contactEmail
     const body = [
       `Dear ${contactName},`,
       '',
-      'You can access your documents using our secure client portal:',
+      'You can access your documents using Canary Portal:',
       '',
       portalUrl,
       '',
@@ -168,12 +182,37 @@ export function ContactPortalPanel({ token, contactId, contactName, contactEmail
     void showAlert('Invite text copied to clipboard.', 'Copied')
   }
 
+  async function updateNotificationPref(key: 'notify_files_added' | 'notify_folder_shared', value: boolean) {
+    setBusy(true)
+    setErr(null)
+    try {
+      const out = await apiFetch<ContactPortalNotificationPrefsOut>(`/contacts/${contactId}/portal/access/notifications`, {
+        token,
+        method: 'PATCH',
+        json: { [key]: value },
+      })
+      setAccess((prev) =>
+        prev
+          ? {
+              ...prev,
+              notify_files_added: out.notify_files_added,
+              notify_folder_shared: out.notify_folder_shared,
+            }
+          : prev,
+      )
+    } catch (e: unknown) {
+      setErr((e as { message?: string }).message ?? 'Could not update notification preferences')
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const displayCode = access?.has_access ? revealedCode || access?.access_code : null
 
   return (
     <div className="stack contactPortalPanel" style={{ marginTop: 20, paddingTop: 16, borderTop: '1px solid var(--border)' }}>
       <div>
-        <h3 style={{ margin: 0 }}>Client portal</h3>
+        <h3 style={{ margin: 0 }}>Canary Portal</h3>
         <p className="muted" style={{ margin: '6px 0 0' }}>
           Grant portal login here. Share folders from each matter (Documents → right-click folder → Portal → Share).
         </p>
@@ -221,6 +260,27 @@ export function ContactPortalPanel({ token, contactId, contactName, contactEmail
           ) : (
             <div className="muted">Rotate the access code to generate a new code you can copy.</div>
           )}
+          <div className="card stack" style={{ padding: 12, gap: 8 }}>
+            <div className="muted">E-mail notifications</div>
+            <label className="row" style={{ gap: 10, alignItems: 'center', cursor: 'pointer' }}>
+              <input
+                type="checkbox"
+                checked={access?.notify_files_added !== false}
+                disabled={busy}
+                onChange={(e) => void updateNotificationPref('notify_files_added', e.target.checked)}
+              />
+              <span>New files added to shared folders</span>
+            </label>
+            <label className="row" style={{ gap: 10, alignItems: 'center', cursor: 'pointer' }}>
+              <input
+                type="checkbox"
+                checked={access?.notify_folder_shared !== false}
+                disabled={busy}
+                onChange={(e) => void updateNotificationPref('notify_folder_shared', e.target.checked)}
+              />
+              <span>Folder shared with this contact</span>
+            </label>
+          </div>
         </div>
       )}
 

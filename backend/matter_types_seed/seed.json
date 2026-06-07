@@ -1,44 +1,57 @@
 {
   "version": 1,
+  "default_sub_menus": [
+    "Events",
+    "Finance",
+    "Property",
+    "Tasks"
+  ],
   "matter_types": [
     {
       "name": "Conveyancing, Residential",
       "sub_types": [
         {
           "name": "Purchase",
-          "prefix": "Purchase of",
-          "menus": [
-            "Events",
-            "Finance",
-            "Property"
-          ]
+          "prefix": "Purchase of"
         },
         {
           "name": "Remortgage",
-          "prefix": "Remortgage of",
-          "menus": [
-            "Events",
-            "Finance",
-            "Property"
-          ]
+          "prefix": "Remortgage of"
         },
         {
           "name": "Sale",
-          "prefix": "Sale of",
-          "menus": [
-            "Events",
-            "Finance",
-            "Property"
-          ]
+          "prefix": "Sale of"
         },
         {
           "name": "Transfer",
-          "prefix": "Transfer of",
-          "menus": [
-            "Events",
-            "Finance",
-            "Property"
-          ]
+          "prefix": "Transfer of"
+        },
+        {
+          "name": "General"
+        }
+      ]
+    },
+    {
+      "name": "Conveyancing, Commercial",
+      "sub_types": [
+        {
+          "name": "Purchase",
+          "prefix": "Purchase of"
+        },
+        {
+          "name": "Refinance",
+          "prefix": "Refinance of"
+        },
+        {
+          "name": "Sale",
+          "prefix": "Sale of"
+        },
+        {
+          "name": "Lease",
+          "prefix": "Lease of"
+        },
+        {
+          "name": "General"
         }
       ]
     }

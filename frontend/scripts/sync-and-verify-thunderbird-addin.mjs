@@ -39,10 +39,20 @@ const REQUIRED = [
   'icons/icon128.png',
 ]
 
+const SYNC_SKIP_NAMES = new Set([
+  'package.json',
+  'package-lock.json',
+  'node_modules',
+  'dist',
+  'web-ext-artifacts',
+  '.amo-upload-uuid',
+  'scripts',
+])
+
 function copyRecursive(srcDir, destDir) {
   fs.mkdirSync(destDir, { recursive: true })
   for (const name of fs.readdirSync(srcDir)) {
-    if (name.endsWith('.nextcloud')) continue
+    if (name.endsWith('.nextcloud') || SYNC_SKIP_NAMES.has(name)) continue
     const s = path.join(srcDir, name)
     const d = path.join(destDir, name)
     const st = fs.statSync(s)

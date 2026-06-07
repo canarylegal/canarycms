@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.db import get_db
 from app.deps import require_admin
-from app.models import User, UserRole
+from app.models import User, UserPermissionCategory, UserRole
 from app.schemas import AdminUserCreate, AdminUserPublic, AdminUserSetPassword, AdminUserUpdate, AdminSendPasswordResetResponse
 from app.audit import log_event
 from app.security import hash_password
@@ -42,6 +42,10 @@ def create_user(payload: AdminUserCreate, admin: User = Depends(require_admin), 
             status_code=status.HTTP_409_CONFLICT,
             detail="Initials are already in use by another user.",
         )
+
+    category = db.get(UserPermissionCategory, payload.permission_category_id)
+    if category is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Permission category not found")
 
     jt = (payload.job_title or "").strip() or None
     user = User(
@@ -112,6 +116,19 @@ def update_user(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="Initials are already in use by another user.",
             )
+    if "permission_category_id" in data and data["permission_category_id"] is not None:
+        if db.get(UserPermissionCategory, data["permission_category_id"]) is None:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Permission category not found")
+    final_role = data.get("role", user.role)
+    if "permission_category_id" in fields_set:
+        final_category_id = data.get("permission_category_id")
+    else:
+        final_category_id = user.permission_category_id
+    if final_role == UserRole.user and final_category_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Staff users must have a permission category assigned.",
+        )
     for k, v in data.items():
         setattr(user, k, v)
     user.updated_at = datetime.utcnow()

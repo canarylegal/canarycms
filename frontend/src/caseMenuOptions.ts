@@ -3,9 +3,9 @@
  * Add entries here to make them available in Admin console > Matters > Default menus.
  */
 export const CASE_MENU_OPTIONS: string[] = [
-  'Calendar',
+  'Events',
   'Finance',
   'Property',
-  'Quotes',
   'Tasks',
+  'Quotes',
 ]

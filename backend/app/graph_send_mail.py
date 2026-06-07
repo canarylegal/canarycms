@@ -20,6 +20,7 @@ def send_graph_mail_message(
     to_email: str,
     subject: str,
     body_text: str,
+    body_html: str | None = None,
     from_name: str | None = None,
     save_to_sent_items: bool = True,
 ) -> None:
@@ -33,10 +34,12 @@ def send_graph_mail_message(
 
     token = app_access_token(db)
     url = f"https://graph.microsoft.com/v1.0/users/{quote(mailbox)}/sendMail"
+    content_type = "HTML" if body_html else "Text"
+    content = body_html if body_html else body_text
     payload = {
         "message": {
             "subject": subject,
-            "body": {"contentType": "Text", "content": body_text},
+            "body": {"contentType": content_type, "content": content},
             "toRecipients": [{"emailAddress": {"address": to_addr}}],
         },
         "saveToSentItems": bool(save_to_sent_items),

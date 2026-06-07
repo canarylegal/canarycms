@@ -18,6 +18,7 @@ The root `docker-compose.yml` includes an `onlyoffice` service and wires:
 | `ONLYOFFICE_DOCUMENT_URL` | Optional override for **`document.url`** only, after you prove **`curl` from the `onlyoffice` container** to that URL works. |
 | `VITE_ONLYOFFICE_URL` | Browser base for ONLYOFFICE. In compose this is **`/office-ds`**: Vite proxies to Document Server (`ONLYOFFICE_PROXY_TARGET`, default **`http://onlyoffice:80`** in Docker). On the **host** (no Docker for Vite), the proxy defaults to **`http://127.0.0.1:${ONLYOFFICE_HOST_PORT:-18080}`** — not port 8080. |
 | `ONLYOFFICE_PROXY_TARGET` | **Vite dev server only** (not bundled): upstream for the `/office-ds` proxy. |
+| `ONLYOFFICE_CALLBACK_REQUIRE_JWT` | When **`1`**, reject unsigned Document Server save callbacks (plain `{status, key}` bodies). **Default off** for older DS builds that omit outbox JWTs; **enable at go-live** on DS 8+ / 9.x. Requires `ONLYOFFICE_JWT_SECRET` to match the DS container. |
 
 Also set **`ALLOW_PRIVATE_IP_ADDRESS=true`** and **`ALLOW_META_IP_ADDRESS=true`** on the Document Server (see [ONLYOFFICE Docker README](https://github.com/ONLYOFFICE/Docker-DocumentServer/blob/master/README.md)). Without both, **Document Server logs** may show `DNS lookup … is not allowed. Because, It is private IP address` when resolving `backend` → `172.x.x.x`, even though `curl http://backend:8000/health` works.
 

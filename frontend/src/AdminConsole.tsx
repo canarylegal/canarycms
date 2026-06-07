@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { AdminAudit } from './AdminAudit'
 import { AdminBilling } from './AdminBilling'
 import { AdminDeploy } from './AdminDeploy'
 import { AdminEmail } from './AdminEmail'
@@ -11,7 +12,6 @@ import { CASE_MENU_OPTIONS } from './caseMenuOptions'
 import { useDialogs } from './DialogProvider'
 import { openOnlyOfficePrecedentEditor } from './onlyofficeEditorWindow'
 import type {
-  AdminAuditEvent,
   AdminSendPasswordResetResponse,
   AdminUserPublic,
   FirmSettingsOut,
@@ -27,11 +27,6 @@ import type {
 } from './types'
 import { GLOBAL_PRECEDENT_SCOPE } from './types'
 
-function formatTs(s: string) {
-  const d = new Date(s)
-  if (Number.isNaN(d.getTime())) return s
-  return d.toLocaleString()
-}
 function AdminMatters({ token }: { token: string }) {
   const { askConfirm } = useDialogs()
   const [heads, setHeads] = useState<MatterHeadTypeOut[]>([])
@@ -1957,8 +1952,8 @@ function AdminUsers({ token, embedded }: { token: string; embedded?: boolean }) 
       <div className="card">
         <h3>User categories</h3>
         <p className="muted" style={{ marginTop: 0 }}>
-          Assign each user to a category to control ledger posting and approvals. Categories are visible only in the admin
-          console.
+          Assign each user to a category to control fee-earner status, ledger posting, and approvals. Categories are
+          visible only in the admin console.
         </p>
         <div className="stack" style={{ gap: 10, maxWidth: 720 }}>
           <div className="row" style={{ flexWrap: 'wrap', gap: 8, alignItems: 'flex-end' }}>
@@ -2448,9 +2443,14 @@ function AdminUsers({ token, embedded }: { token: string; embedded?: boolean }) 
                 </select>
               </label>
               <label className="field" style={{ marginBottom: 0 }}>
-                <span>Permission category</span>
+                <span>Permission category{editRole === 'user' ? '' : ' (optional for admins)'}</span>
                 <select value={editCategoryId} onChange={(e) => setEditCategoryId(e.target.value)} disabled={busy}>
-                  <option value="">— None —</option>
+                  {editRole === 'admin' ? <option value="">— None —</option> : null}
+                  {!editCategoryId && editRole === 'user' ? (
+                    <option value="" disabled>
+                      — Select category —
+                    </option>
+                  ) : null}
                   {categories.map((c) => (
                     <option key={c.id} value={c.id}>
                       {c.name}
@@ -2564,6 +2564,7 @@ function AdminUsers({ token, embedded }: { token: string; embedded?: boolean }) 
                     !editEmail.trim() ||
                     !editDisplayName.trim() ||
                     !(editInitials ?? '').trim() ||
+                    (editRole === 'user' && !editCategoryId) ||
                     (editPw.length > 0 && (editPw.length < 12 || editPw !== editPw2))
                   }
                   onClick={async () => {
@@ -2639,66 +2640,3 @@ function AdminUsers({ token, embedded }: { token: string; embedded?: boolean }) 
   )
 }
 
-function AdminAudit({ token, embedded }: { token: string; embedded?: boolean }) {
-  const [events, setEvents] = useState<AdminAuditEvent[]>([])
-  const [action, setAction] = useState('')
-  const [busy, setBusy] = useState(false)
-  const [err, setErr] = useState<string | null>(null)
-
-  async function load() {
-    setBusy(true)
-    setErr(null)
-    try {
-      const qs = new URLSearchParams()
-      if (action) qs.set('action', action)
-      qs.set('limit', '50')
-      const data = await apiFetch<AdminAuditEvent[]>(`/admin/audit-events?${qs.toString()}`, { token })
-      setEvents(data)
-    } catch (e: any) {
-      setErr(e?.message ?? 'Failed to load audit events')
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  useEffect(() => {
-    void load()
-  }, [])
-
-  return (
-    <div className="stack">
-      <div className="paneHead">
-        {embedded ? <h3 style={{ margin: 0 }}>Audit</h3> : <h2>Admin · Audit</h2>}
-        <button type="button" className="btn" onClick={() => void load()}>
-          Refresh
-        </button>
-      </div>
-      <div className="card">
-        <div className="row">
-          <input placeholder="Filter by action (e.g. auth.login)" value={action} onChange={(e) => setAction(e.target.value)} />
-          <button type="button" className="btn primary" disabled={busy} onClick={() => void load()}>
-            Apply
-          </button>
-        </div>
-        {err ? <div className="error">{err}</div> : null}
-      </div>
-      <div className="card">
-        <h3>Recent events</h3>
-        <div className="list">
-          {events.map((e) => (
-            <div key={e.id} className="listCard">
-              <div className="row" style={{ justifyContent: 'space-between' }}>
-                <div className="listTitle">{e.action}</div>
-                <div className="muted">{formatTs(e.created_at)}</div>
-              </div>
-              <div className="muted">
-                {e.entity_type ?? '-'} {e.entity_id ?? ''} · actor {e.actor_user_id ?? '-'}
-              </div>
-            </div>
-          ))}
-          {events.length === 0 ? <div className="muted">No events found.</div> : null}
-        </div>
-      </div>
-    </div>
-  )
-}

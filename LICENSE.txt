@@ -1,0 +1,64 @@
+Internal Use Source-Available License
+
+Copyright © 2026 Colin McWilliams. All rights reserved.
+
+1. Purpose
+
+This licence allows individuals and organisations to use this software internally at no charge, while reserving all rights for external commercial exploitation to the Licensor.
+
+2. Definitions
+
+Software means the source code, binaries, documentation, and related materials made available by the Licensor.
+
+Licensor means Colin James McWilliams.
+
+Internal Use means use of the Software solely for the internal operations of the licensee and its controlled affiliates, and not for providing the Software itself as a service to third parties.
+
+Commercial Service Use means making the Software available to third parties for a fee or commercial benefit, including hosted, SaaS, managed service, outsourcing, bureau, white-label, or reseller offerings.
+
+3. Licence Grant
+
+Subject to this licence, Licensor grants you a worldwide, non-exclusive, non-transferable, revocable licence to:
+
+- use the Software for Internal Use;
+- install and run unlimited internal instances;
+- modify the Software for Internal Use;
+- create private internal forks for Internal Use;
+- permit employees and contractors acting on your behalf to access and operate the Software for Internal Use.
+
+4. Restrictions
+
+You may not, without prior written permission from the Licensor:
+
+- use the Software for Commercial Service Use;
+- sell, sublicense, lease, rent, or commercially distribute the Software;
+- offer paid support or consulting services primarily based on the Software;
+- provide the Software to third parties as a hosted or managed offering;
+- redistribute modified versions for commercial purposes;
+- remove copyright or licence notices.
+
+5. Ownership
+
+The Software is licensed, not sold. All intellectual property rights remain with the Licensor.
+
+6. Commercial Licensing
+
+If you wish to use the Software in any manner prohibited above, contact:
+
+colin@canarylegalsoftware.co.uk
+
+7. No Warranty
+
+The Software is provided "as is", without warranties of any kind, to the maximum extent permitted by law.
+
+8. Limitation of Liability
+
+To the maximum extent permitted by law, Licensor shall not be liable for any indirect, incidental, special, or consequential damages arising from use of the Software.
+
+9. Termination
+
+This licence terminates automatically if you materially breach its terms. Upon termination, you must cease use of the Software and destroy copies under your control, except where law requires otherwise.
+
+10. Governing Law
+
+This licence is governed by the laws of England and Wales, and disputes shall be subject to the courts of England and Wales.

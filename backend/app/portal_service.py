@@ -12,7 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.file_storage import sanitize_folder_path
-from app.models import Case, Contact, ContactPortalAccess, ContactPortalGrant, File, FileCategory
+from app.models import Case, Contact, ContactPortalAccess, ContactPortalGrant, File, FileCategory, PortalLoginOtp
 
 PORTAL_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 PORTAL_CODE_GROUPS = (4, 4, 4)
@@ -126,6 +126,9 @@ def get_grant_for_contact(db: Session, *, contact_id: uuid.UUID, grant_id: uuid.
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Area not found")
     if not grant_is_active(grant):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="This area is no longer available")
+    from app.portal_case import require_case_portal_enabled
+
+    require_case_portal_enabled(db, grant.case_id)
     return grant
 
 
@@ -214,3 +217,116 @@ def grant_folder_display_name(grant: ContactPortalGrant) -> str:
 
 def contact_display_name(contact: Contact) -> str:
     return (contact.name or "").strip() or "Client"
+
+
+def relative_folder_under_grant(*, grant_folder: str, absolute_folder: str) -> str:
+    """Return folder path relative to grant root for display (may be empty)."""
+    gf = sanitize_folder_path(grant_folder)
+    ff = sanitize_folder_path(absolute_folder or "")
+    if gf == ff:
+        return ""
+    if gf and ff.startswith(gf + "/"):
+        return ff[len(gf) + 1 :]
+    if not gf:
+        return ff
+    return ff
+
+
+def browse_grant_folder(
+    db: Session,
+    grant: ContactPortalGrant,
+    *,
+    subfolder: str = "",
+) -> tuple[str, list[str], list[File]]:
+    """Return (relative_subfolder, immediate_child_folder_names, files_in_current_folder)."""
+    grant_root = sanitize_folder_path(grant.folder_path)
+    rel = sanitize_folder_path(subfolder)
+    if grant_root:
+        current = sanitize_folder_path(f"{grant_root}/{rel}" if rel else grant_root)
+    else:
+        current = rel
+
+    if not file_folder_in_grant(file_folder=current, grant_folder=grant_root):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Folder is outside this area")
+
+    all_files = list_grant_files(db, grant)
+    current_norm = sanitize_folder_path(current)
+    files_here = [f for f in all_files if sanitize_folder_path(f.folder_path or "") == current_norm]
+    child_names: set[str] = set()
+    prefix = f"{current_norm}/" if current_norm else ""
+    for f in all_files:
+        fp = sanitize_folder_path(f.folder_path or "")
+        if current_norm:
+            if fp != current_norm and not fp.startswith(prefix):
+                continue
+            rest = fp[len(prefix) :] if fp.startswith(prefix) else ""
+        else:
+            if not fp:
+                continue
+            rest = fp
+        if not rest:
+            continue
+        child_names.add(rest.split("/")[0])
+    return rel, sorted(child_names, key=str.lower), files_here
+
+
+PORTAL_OTP_TTL_MINUTES = 15
+
+
+def _otp_hash(code: str) -> str:
+    return hashlib.sha256(code.strip().encode("utf-8")).hexdigest()
+
+
+def issue_portal_login_otp(db: Session, contact_id: uuid.UUID) -> str:
+    code = f"{secrets.randbelow(900000) + 100000:06d}"
+    row = PortalLoginOtp(
+        contact_id=contact_id,
+        code_sha256=_otp_hash(code),
+        expires_at=utcnow() + timedelta(minutes=PORTAL_OTP_TTL_MINUTES),
+    )
+    db.add(row)
+    db.flush()
+    return code
+
+
+def verify_portal_login_otp(db: Session, contact_id: uuid.UUID, code: str) -> bool:
+    digest = _otp_hash(code)
+    now = utcnow()
+    row = (
+        db.execute(
+            select(PortalLoginOtp)
+            .where(
+                PortalLoginOtp.contact_id == contact_id,
+                PortalLoginOtp.code_sha256 == digest,
+                PortalLoginOtp.used_at.is_(None),
+            )
+            .order_by(PortalLoginOtp.created_at.desc())
+        )
+        .scalars()
+        .first()
+    )
+    if row is None:
+        return False
+    exp = row.expires_at
+    if exp.tzinfo is None:
+        exp = exp.replace(tzinfo=timezone.utc)
+    if now >= exp:
+        return False
+    row.used_at = now
+    db.add(row)
+    return True
+
+
+def find_portal_contact_by_email(db: Session, email: str) -> Contact | None:
+    addr = (email or "").strip().lower()
+    if not addr:
+        return None
+    rows = db.execute(select(Contact)).scalars().all()
+    for c in rows:
+        if (c.email or "").strip().lower() == addr:
+            access = db.execute(
+                select(ContactPortalAccess).where(ContactPortalAccess.contact_id == c.id)
+            ).scalar_one_or_none()
+            if access and portal_access_is_active(access):
+                return c
+    return None

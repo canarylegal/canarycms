@@ -95,6 +95,7 @@ def build_user_public(user: User, db: Session) -> UserPublic:
     base["organization_requires_password_rotation"] = rotation_enabled
     base["password_rotation_days"] = rotation_days
     base["has_passkeys"] = user_has_any_passkey(db, user.id)
+    base["pending_authenticator_setup"] = bool(user.totp_secret and not user.is_2fa_enabled)
     base["appearance"] = user_appearance_out(user)
     base["ui_preferences"] = user_ui_preferences_out(user.ui_preferences)
     base.update(user_public_email_fields(db))

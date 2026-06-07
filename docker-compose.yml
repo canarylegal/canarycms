@@ -73,6 +73,7 @@ services:
       POSTGRES_HOST: db
       POSTGRES_PORT: "5432"
       JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env — see .env.example}
+      DATA_ENCRYPTION_KEY: ${DATA_ENCRYPTION_KEY:?Set DATA_ENCRYPTION_KEY in .env — see .env.example}
       BOOTSTRAP_ADMIN_TOKEN: ${BOOTSTRAP_ADMIN_TOKEN:?Set BOOTSTRAP_ADMIN_TOKEN in .env — see .env.example}
       TOTP_ISSUER: ${TOTP_ISSUER:-Canary}
       FILES_ROOT: /data/files
@@ -122,6 +123,7 @@ services:
       CANARY_OPEN_PDF_IN_ONLYOFFICE: ${CANARY_OPEN_PDF_IN_ONLYOFFICE:-}
       # Document Server major version: ``auto`` (probe) or e.g. ``9``. See onlyoffice_ds_version.py.
       ONLYOFFICE_DS_MAJOR: ${ONLYOFFICE_DS_MAJOR:-auto}
+      ONLYOFFICE_CALLBACK_REQUIRE_JWT: ${ONLYOFFICE_CALLBACK_REQUIRE_JWT:-}
     volumes:
       - ./data/files:/data/files
       - radicale-data:/radicale-data

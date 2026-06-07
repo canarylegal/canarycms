@@ -12,7 +12,7 @@ import {
 import { apiFetch } from '../api'
 import type { ApiError } from '../api'
 import { useDialogs } from '../DialogProvider'
-import { SearchInput } from '../SearchInput'
+import { ContactSearchPicker } from '../ContactSearchPicker'
 import type { CaseContactOut, ContactOut } from '../types'
 import { applyCaseContactFieldPatch } from './caseContactPatch'
 import { CaseContactPortalSection } from './CaseContactPortalSection'
@@ -34,9 +34,6 @@ export function CaseContactsAddDocForm({
   setMatterContactReference,
   lawyerLinkClientIds,
   setLawyerLinkClientIds,
-  contacts,
-  contactAddSearch,
-  setContactAddSearch,
   selectedGlobalContactId,
   setSelectedGlobalContactId,
   matterTypeOptions,
@@ -51,17 +48,14 @@ export function CaseContactsAddDocForm({
   busy: boolean
   setBusy: (v: boolean) => void
   onDone: () => void
-  /** After PATCH /contacts/{id}, reload global contacts in the parent. */
-  onGlobalContactsUpdated: () => Promise<void>
+  /** After PATCH /contacts/{id}, parent may refresh search results. */
+  onGlobalContactsUpdated: () => void
   matterContactType: string
   setMatterContactType: (v: string) => void
   matterContactReference: string
   setMatterContactReference: (v: string) => void
   lawyerLinkClientIds: string[]
   setLawyerLinkClientIds: Dispatch<SetStateAction<string[]>>
-  contacts: ContactOut[]
-  contactAddSearch: string
-  setContactAddSearch: (v: string) => void
   selectedGlobalContactId: string | null
   setSelectedGlobalContactId: (v: string | null) => void
   matterTypeOptions: MatterOpt[]
@@ -99,8 +93,7 @@ export function CaseContactsAddDocForm({
               if (v.trim().toLowerCase() !== LAWYERS_TYPE_SLUG) {
                 setLawyerLinkClientIds([])
               } else if (selectedGlobalContactId) {
-                const sel = contacts.find((x) => x.id === selectedGlobalContactId)
-                if (sel && sel.type === 'person') setSelectedGlobalContactId(null)
+                setSelectedGlobalContactId(null)
               }
             }}
             disabled={busy}
@@ -156,61 +149,23 @@ export function CaseContactsAddDocForm({
         ) : null}
       </div>
       {contactAddErr ? <div className="error">{contactAddErr}</div> : null}
-      <div className="row">
-        <SearchInput
-          placeholder="Search global contacts…"
-          value={contactAddSearch}
-          onChange={(e) => setContactAddSearch(e.target.value)}
-          onClear={() => setContactAddSearch('')}
-          style={{ flex: 1 }}
-          aria-label="Search global contacts to add"
-        />
-      </div>
-
       <div className="card" style={{ padding: 12 }}>
         <div className="muted" style={{ marginBottom: 8 }}>
           Existing contacts
         </div>
-        <div className="list" style={{ maxHeight: 140, overflow: 'auto' }}>
-          {contacts
-            .filter((c) => {
-              if (matterContactType.trim().toLowerCase() === LAWYERS_TYPE_SLUG && c.type !== 'organisation') {
-                return false
-              }
-              const s = contactAddSearch.trim().toLowerCase()
-              if (!s) return true
-              return (
-                c.name.toLowerCase().includes(s) ||
-                (c.email ?? '').toLowerCase().includes(s) ||
-                (c.phone ?? '').toLowerCase().includes(s)
-              )
-            })
-            .slice(0, 25)
-            .map((c) => (
-              <div key={c.id} className="listCard row" style={{ justifyContent: 'space-between' }}>
-                <div>
-                  <div className="listTitle">
-                    {c.name} <span className="muted">· {c.type}</span>
-                  </div>
-                  <div className="muted">{c.email ?? c.phone ?? '—'}</div>
-                </div>
-                <div className="row" style={{ gap: 6, alignItems: 'center', flexShrink: 0 }}>
-                  <button type="button" className="btn" disabled={busy} onClick={() => openGlobalEdit(c)}>
-                    Edit
-                  </button>
-                  <button
-                    type="button"
-                    className={`btn ${selectedGlobalContactId === c.id ? 'primary' : ''}`}
-                    disabled={busy}
-                    onClick={() => setSelectedGlobalContactId(c.id)}
-                  >
-                    {selectedGlobalContactId === c.id ? 'Selected' : 'Select'}
-                  </button>
-                </div>
-              </div>
-            ))}
-          {contacts.length === 0 ? <div className="muted">No contacts yet.</div> : null}
-        </div>
+        <ContactSearchPicker
+          token={token}
+          value={selectedGlobalContactId}
+          onChange={(id) => setSelectedGlobalContactId(id)}
+          disabled={busy}
+          organisationOnly={matterContactType.trim().toLowerCase() === LAWYERS_TYPE_SLUG}
+          listMaxHeight={140}
+          renderActions={(c) => (
+            <button type="button" className="btn" disabled={busy} onClick={() => openGlobalEdit(c)}>
+              Edit
+            </button>
+          )}
+        />
       </div>
 
       {globalEditContact ? (

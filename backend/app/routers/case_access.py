@@ -7,6 +7,7 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from app.admin_access import subject_user_effective_admin, user_effective_admin
+from app.permission_checks import user_may_be_fee_earner
 from app.db import get_db
 from app.deps import get_current_user, require_case_access
 from app.models import Case, CaseAccessMode, CaseAccessRule, CaseLockMode, User
@@ -29,7 +30,11 @@ class CaseAccessRuleOut(BaseModel):
 
 
 def _may_manage_access_rules(user: User, case: Case, db) -> bool:
-    return user_effective_admin(user, db) or (case.fee_earner_user_id is not None and user.id == case.fee_earner_user_id)
+    return user_effective_admin(user, db) or (
+        case.fee_earner_user_id is not None
+        and user.id == case.fee_earner_user_id
+        and user_may_be_fee_earner(user, db)
+    )
 
 
 def _sync_case_access_flags(case_id: uuid.UUID, db: Session) -> None:
@@ -37,14 +42,14 @@ def _sync_case_access_flags(case_id: uuid.UUID, db: Session) -> None:
     case = db.get(Case, case_id)
     if not case or case.lock_mode == CaseLockMode.none:
         return
-    if case.lock_mode == CaseLockMode.whitelist:
+    if case.lock_mode == CaseLockMode.open_by_default:
         n = db.scalar(
             select(func.count())
             .select_from(CaseAccessRule)
             .where(CaseAccessRule.case_id == case_id, CaseAccessRule.mode == CaseAccessMode.deny)
         ) or 0
         case.is_locked = int(n) > 0
-    elif case.lock_mode == CaseLockMode.blacklist:
+    elif case.lock_mode == CaseLockMode.allow_list:
         case.is_locked = True
     case.updated_at = datetime.utcnow()
     db.add(case)
@@ -87,13 +92,13 @@ def upsert_rule(
             detail="Cannot revoke access for the fee earner.",
         )
 
-    if case.lock_mode == CaseLockMode.blacklist:
+    if case.lock_mode == CaseLockMode.allow_list:
         if payload.mode != CaseAccessMode.allow:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="In allow-list mode, grant access with allow rules only.",
             )
-    elif case.lock_mode == CaseLockMode.whitelist:
+    elif case.lock_mode == CaseLockMode.open_by_default:
         if payload.mode != CaseAccessMode.deny:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,

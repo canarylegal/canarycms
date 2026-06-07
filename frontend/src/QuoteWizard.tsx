@@ -1,18 +1,17 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { apiFetch } from './api'
+import { fetchCaseById } from './apiSearch'
 import { BusyIcon } from './BusyIcon'
 import { poundsToPence } from './FeeScaleEditor'
+import { MatterSearchPicker } from './MatterSearchPicker'
 import { openOnlyOfficeCaseEditor } from './onlyofficeEditorWindow'
 import { QuoteReviewEditor } from './QuoteReviewEditor'
 import { SearchInput } from './SearchInput'
 import { SingleSelectDropdown } from './SingleSelectDropdown'
-import type { CaseContactOut, CaseOut, FeeScaleOut, QuoteDraftCategory, QuotePreviewOut, UserSummary } from './types'
-import { formatCaseStatusLabel } from './types'
+import type { CaseContactOut, CaseOut, FeeScaleOut, QuoteDraftCategory, QuotePreviewOut } from './types'
 
 type Props = {
   token: string
-  cases: CaseOut[]
-  users: UserSummary[]
   open: boolean
   onClose: () => void
   onOpenNewMatter: () => void
@@ -27,26 +26,6 @@ type Props = {
 }
 
 type Step = 'matter' | 'fee-scale' | 'contact' | 'review' | 'send'
-
-function feeEarnerLabel(c: CaseOut, users: UserSummary[]): string {
-  const u = users.find((x) => x.id === c.fee_earner_user_id)
-  return u?.display_name ?? '—'
-}
-
-function caseMatchesQuoteSearch(c: CaseOut, users: UserSummary[], search: string): boolean {
-  const s = search.trim().toLowerCase()
-  if (!s) return false
-  const parts = [
-    c.case_number,
-    c.client_name ?? '',
-    c.matter_description ?? '',
-    formatCaseStatusLabel(c.status),
-    feeEarnerLabel(c, users),
-    c.matter_head_type_name ?? '',
-    c.matter_sub_type_name ?? '',
-  ]
-  return parts.join(' ').toLowerCase().includes(s)
-}
 
 function feeScaleMatchesSearch(f: FeeScaleOut, search: string): boolean {
   const s = search.trim().toLowerCase()
@@ -68,8 +47,6 @@ function feeScalesUrlForCase(c: CaseOut | null | undefined): string {
 
 export function QuoteWizard({
   token,
-  cases,
-  users,
   open,
   onClose,
   onOpenNewMatter,
@@ -83,7 +60,7 @@ export function QuoteWizard({
 }: Props) {
   const [step, setStep] = useState<Step>('matter')
   const [caseId, setCaseId] = useState<string | null>(null)
-  const [caseMatterSearch, setCaseMatterSearch] = useState('')
+  const [loadedCase, setLoadedCase] = useState<CaseOut | null>(null)
   const [feeScales, setFeeScales] = useState<FeeScaleOut[]>([])
   const [feeScaleId, setFeeScaleId] = useState<string | 'none'>('none')
   const [feeScaleSearch, setFeeScaleSearch] = useState('')
@@ -101,9 +78,27 @@ export function QuoteWizard({
   const wasOpenRef = useRef(false)
 
   const selectedCase = useMemo(
-    () => presetCase ?? cases.find((c) => c.id === caseId) ?? null,
-    [presetCase, cases, caseId],
+    () => presetCase ?? loadedCase,
+    [presetCase, loadedCase],
   )
+
+  useEffect(() => {
+    if (presetCase) {
+      setLoadedCase(null)
+      return
+    }
+    if (!caseId || !token) {
+      setLoadedCase(null)
+      return
+    }
+    let cancelled = false
+    void fetchCaseById(token, caseId).then((row) => {
+      if (!cancelled) setLoadedCase(row)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [presetCase, caseId, token])
 
   /** Reset wizard only when the dialog opens — not when parent case data refreshes mid-flow. */
   useEffect(() => {
@@ -113,7 +108,6 @@ export function QuoteWizard({
     }
     if (wasOpenRef.current) return
     wasOpenRef.current = true
-    setCaseMatterSearch('')
     setFeeScaleId('none')
     setFeeScaleSearch('')
     setPickMatterCcId('none')
@@ -170,12 +164,6 @@ export function QuoteWizard({
       setQuotePreview(null)
     }
   }, [step, feeScaleId])
-
-  const matchingCases = useMemo(() => {
-    const q = caseMatterSearch.trim()
-    if (!q) return []
-    return cases.filter((c) => caseMatchesQuoteSearch(c, users, q)).slice(0, 25)
-  }, [cases, users, caseMatterSearch])
 
   const displayedFeeScales = useMemo(() => {
     const q = feeScaleSearch.trim()
@@ -277,44 +265,14 @@ export function QuoteWizard({
               </p>
               <label className="field">
                 <span>Find matter</span>
-                <SearchInput
-                  className="calendarMatterPickerSearch"
-                  placeholder="Reference, client, description, status, fee earner…"
-                  value={caseMatterSearch}
+                <MatterSearchPicker
+                  token={token}
+                  value={caseId ?? ''}
+                  disabled={busy}
                   autoFocus
-                  onChange={(e) => {
-                    setCaseMatterSearch(e.target.value)
-                    setCaseId(null)
-                  }}
-                  onClear={() => {
-                    setCaseMatterSearch('')
-                    setCaseId(null)
-                  }}
-                  aria-label="Search matters"
+                  onChange={(id) => setCaseId(id || null)}
                 />
               </label>
-              <div className="list" style={{ maxHeight: 220, overflow: 'auto' }}>
-                {matchingCases.map((c) => (
-                  <button
-                    key={c.id}
-                    type="button"
-                    className={`listItem ${caseId === c.id ? 'active' : ''}`}
-                    onClick={() => setCaseId(c.id)}
-                  >
-                    <div className="listTitle">{c.case_number}</div>
-                    <div className="muted">
-                      {[c.client_name, c.matter_description, formatCaseStatusLabel(c.status)]
-                        .filter(Boolean)
-                        .join(' · ')}
-                    </div>
-                  </button>
-                ))}
-                {!caseMatterSearch.trim() ? (
-                  <div className="muted">Type in the search box above to find a matter.</div>
-                ) : matchingCases.length === 0 ? (
-                  <div className="muted">No matters match your search.</div>
-                ) : null}
-              </div>
               <div className="row" style={{ justifyContent: 'flex-end', marginTop: 12, gap: 8 }}>
                 <button
                   type="button"

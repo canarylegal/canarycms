@@ -10,6 +10,8 @@ export type UserPublic = {
   role: 'admin' | 'user'
   is_active: boolean
   is_2fa_enabled: boolean
+  /** TOTP setup was started but not confirmed — resume requires Canary password. */
+  pending_authenticator_setup?: boolean
   /** Organisation policy: user must enable TOTP or register at least one passkey (non-admin enforcement). */
   organization_requires_second_factor?: boolean
   has_passkeys?: boolean
@@ -366,15 +368,16 @@ export type CaseOut = {
   source_name?: string | null
   created_by: string
   is_locked: boolean
-  lock_mode: 'none' | 'whitelist' | 'blacklist'
+  lock_mode: 'none' | 'open_by_default' | 'allow_list'
+  portal_enabled?: boolean
   created_at: string
   updated_at: string
 }
 
 /** True when the matter should show as access-locked (🔒 / “Locked”). */
 export function caseHasRevokedUserAccess(c: Pick<CaseOut, 'is_locked' | 'lock_mode'>): boolean {
-  if (c.lock_mode === 'blacklist') return true
-  if (c.lock_mode === 'whitelist') return Boolean(c.is_locked)
+  if (c.lock_mode === 'allow_list') return true
+  if (c.lock_mode === 'open_by_default') return Boolean(c.is_locked)
   return false
 }
 
@@ -562,6 +565,7 @@ export type UserSummary = {
   initials?: string
   role: string
   is_active: boolean
+  can_be_fee_earner?: boolean
 }
 
 export type CaseNoteOut = {
@@ -712,12 +716,18 @@ export type EmailIntegrationSettingsOut = {
 export type AdminAuditEvent = {
   id: string
   actor_user_id: string | null
+  actor_display_name: string | null
+  actor_initials: string | null
   action: string
+  summary: string
   entity_type: string | null
   entity_id: string | null
+  case_id: string | null
+  case_number: string | null
+  case_title: string | null
   ip: string | null
   user_agent: string | null
-  meta: unknown
+  meta: Record<string, unknown> | null
   created_at: string
 }
 
@@ -801,6 +811,8 @@ export type LedgerEntryOut = {
   description: string
   reference?: string | null
   contact_label?: string | null
+  case_contact_id?: string | null
+  contact_id?: string | null
   posted_by_user_id?: string | null
   posted_at: string
   is_approved?: boolean
@@ -821,6 +833,8 @@ export type LedgerPostCreate = {
   description: string
   reference?: string | null
   contact_label?: string | null
+  case_contact_id?: string | null
+  contact_id?: string | null
   amount_pence: number
   client_direction?: 'debit' | 'credit' | null
   office_direction?: 'debit' | 'credit' | null
@@ -1062,9 +1076,67 @@ export type PortalFileOut = {
   mime_type: string
   size_bytes: number
   folder_path: string
+  folder_display?: string
   created_at: string
   updated_at: string
 }
+
+export type PortalBrowseOut = {
+  subfolder: string
+  breadcrumb: string[]
+  subfolders: string[]
+  files: PortalFileOut[]
+}
+
+export type CasePortalActivityOut = {
+  id: string
+  action: string
+  summary: string
+  contact_name: string | null
+  created_at: string
+}
+
+export type CasePortalStaffUserOut = {
+  id: string
+  display_name: string
+  email: string
+}
+
+export type CasePortalNotificationSettingsOut = {
+  staff_user_ids: string[]
+  staff_users?: CasePortalStaffUserOut[]
+}
+
+export type CasePortalShareStatusOut = {
+  portal_enabled: boolean
+  active_grant_count: number
+  contact_count: number
+}
+
+export type CasePortalPreviewContactOut = {
+  contact_id: string
+  contact_name: string
+  shared_folder_count: number
+}
+
+export type CasePortalPreviewOut = {
+  exchange_token: string
+  contact_name: string
+  preview_url: string
+}
+
+export type CasePortalNotifyFilesOut = {
+  contacts_notified: number
+  alerts_skipped_reason?: string | null
+}
+
+export type ContactPortalNotificationPrefsOut = {
+  notify_files_added: boolean
+  notify_folder_shared: boolean
+}
+
+export const PORTAL_ALERTS_NOT_CONFIGURED_MSG =
+  'Automated e-mail is not configured. Ask an administrator to enable Admin → E-mail → "Enable automated alert e-mail" and set up Graph or SMTP.'
 
 export type ContactPortalAccessOut = {
   enabled: boolean
@@ -1074,6 +1146,8 @@ export type ContactPortalAccessOut = {
   has_access: boolean
   access_code?: string | null
   access_record_exists?: boolean
+  notify_files_added?: boolean
+  notify_folder_shared?: boolean
 }
 
 export type ContactPortalAccessCreateOut = {
@@ -1081,6 +1155,7 @@ export type ContactPortalAccessCreateOut = {
   enabled: boolean
   expires_at: string | null
   email_sent?: boolean
+  email_skip_reason?: string | null
 }
 
 export type ContactPortalGrantOut = {
@@ -1095,6 +1170,7 @@ export type ContactPortalGrantOut = {
   expires_at: string | null
   created_at: string
   email_sent?: boolean
+  email_skip_reason?: string | null
 }
 
 export type ContactPortalGrantCreateIn = {

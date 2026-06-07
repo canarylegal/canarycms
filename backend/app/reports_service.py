@@ -12,6 +12,7 @@ from sqlalchemy import case as sql_case, func, select
 from sqlalchemy.orm import Session
 
 from app.admin_access import user_effective_admin
+from app.permission_checks import user_may_be_fee_earner
 from app.invoice_service import INV_APPROVED, INV_PENDING
 from app.models import (
     Case,
@@ -49,7 +50,17 @@ def enforce_fee_earner_ids(user: User, db: Session, requested: list[uuid.UUID]) 
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="One of the selected fee earners is unknown or inactive.",
                 )
+            if not user_may_be_fee_earner(u, db):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="One of the selected users is not permitted to act as a fee earner.",
+                )
         return uniq
+    if not user_may_be_fee_earner(user, db):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Your permission profile does not allow fee-earner reporting.",
+        )
     if set(uniq) != {user.id}:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -63,8 +74,11 @@ def enforce_fee_earner_ids(user: User, db: Session, requested: list[uuid.UUID]) 
 
 def list_fee_earner_pick_users(user: User, db: Session) -> list[User]:
     if user_effective_admin(user, db):
-        return db.execute(select(User).where(User.is_active.is_(True)).order_by(User.display_name.asc())).scalars().all()
-    return [user]
+        rows = db.execute(select(User).where(User.is_active.is_(True)).order_by(User.display_name.asc())).scalars().all()
+        return [u for u in rows if user_may_be_fee_earner(u, db)]
+    if user_may_be_fee_earner(user, db):
+        return [user]
+    return []
 
 
 def _signed_amount_expr():

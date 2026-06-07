@@ -43,7 +43,7 @@ export function CaseContactPortalSection({ token, globalContactId, contactName, 
   if (!globalContactId) {
     return (
       <div className="stack" style={{ marginTop: 16, paddingTop: 12, borderTop: '1px solid var(--border)' }}>
-        <h4 style={{ margin: 0 }}>Client portal</h4>
+        <h4 style={{ margin: 0 }}>Canary Portal</h4>
         <p className="muted" style={{ margin: 0, lineHeight: 1.5 }}>
           This matter contact is not linked to a global contact card. Link or add a global contact before granting portal
           access.
@@ -93,7 +93,7 @@ export function CaseContactPortalSection({ token, globalContactId, contactName, 
 
   return (
     <div className="stack" style={{ marginTop: 16, paddingTop: 12, borderTop: '1px solid var(--border)' }}>
-      <h4 style={{ margin: 0 }}>Client portal</h4>
+      <h4 style={{ margin: 0 }}>Canary Portal</h4>
       {err ? <div className="error">{err}</div> : null}
       {notice ? <div className="muted">{notice}</div> : null}
       {!hasAccess ? (

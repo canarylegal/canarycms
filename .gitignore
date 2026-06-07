@@ -22,3 +22,11 @@ claudecanary1.txt
 
 # Portable Node.js toolchain (used when system npm is unavailable)
 .tools/
+
+# Thunderbird add-on build artifacts
+thunderbird-addin/dist/
+thunderbird-addin/node_modules/
+thunderbird-addin/web-ext-artifacts/
+thunderbird-addin/.amo-upload-uuid
+canary-thunderbird*.xpi
+canary-thunderbird*.zip

@@ -12,6 +12,7 @@ import { CaseViewRoute } from './CaseViewRoute'
 import { CalendarPage } from './CalendarPage'
 import { FeeScalesPanel } from './FeeScalesPanel'
 import { QuoteSourcesPanel } from './QuoteSourcesPanel'
+import { QuoteConvertModal } from './QuoteConvertModal'
 import { QuoteWizard } from './QuoteWizard'
 import { ReportsPage } from './ReportsPage'
 import { TaskCreateModal } from './TaskCreateModal'
@@ -25,6 +26,7 @@ import {
 } from './GlobalContactCreateForm'
 import { ContactPortalPanel } from './ContactPortalPanel'
 import type { CaseOpenDocPanel } from './case/CaseDetail'
+import { closeMatterBlockMessage } from './case/closeMatterCheck'
 import { matterContactTypeLabel } from './case/matterLabels'
 import { PropertyDetailsForm } from './case/PropertyDetailsForm'
 import {
@@ -34,6 +36,7 @@ import {
 } from './case/propertyMatterHelpers'
 import { releaseAllBodyCursorLocks } from './bodyCursorLock'
 import { apiFetch, type ApiError } from './api'
+import { fetchContactSearch } from './apiSearch'
 import {
   ACCENT_COLOR_PRESETS,
   DEFAULT_ACCENT,
@@ -43,7 +46,7 @@ import {
 } from './theme'
 import { persistUserAppearance, useAppearanceFormState, useServerAppearance } from './useServerAppearance'
 import { useUserUiPreferences } from './useUserUiPreferences'
-import { useColumnWidths } from './useColumnWidths'
+import { useDebouncedValue } from './useDebouncedValue'
 import { MainMenuFilterCheckboxDropdown } from './MainMenuFilterCheckboxDropdown'
 import {
   CONTACTS_COLUMN_COUNT,
@@ -60,6 +63,7 @@ import {
   LEGACY_AUTO_MAIN_MENU_COLUMN_WIDTHS,
   LEGACY_AUTO_TASKS_MENU_COLUMN_WIDTHS,
 } from './columnGridDefaults'
+import { useColumnWidths } from './useColumnWidths'
 import { normalizeUiPreferences, resetMenuColumnWidths } from './userUiPreferences'
 import { AppLogo } from './AppLogo'
 import {
@@ -68,6 +72,7 @@ import {
   OUTLOOK_WEB_WITHOUT_GRAPH_CONFIRM_MESSAGE,
 } from './emailLauncher'
 import { useDialogs } from './DialogProvider'
+import { ContactSearchPicker } from './ContactSearchPicker'
 import { SearchInput } from './SearchInput'
 import { CaseSourceField, resolveCaseSourcePayload, useCaseSources } from './CaseSourceField'
 import { copyTextToClipboard } from './copyToClipboard'
@@ -766,7 +771,7 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
     }
   }, [])
   useServerAppearance(auth.me, auth.token)
-  const { askConfirm } = useDialogs()
+  const { askConfirm, alert } = useDialogs()
   const [view, setViewState] = useState<View>(bootNav.view)
   const viewRef = useRef(view)
   viewRef.current = view
@@ -1058,7 +1063,74 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
     setShowNewMatter(false)
     setNewMatterFromQuotes(false)
   }, [])
-  const onRefreshCases = useCallback(() => void refreshCases(), [token])
+  const onRefreshCases = useCallback(() => refreshCases(), [token])
+
+  const [quotesNotice, setQuotesNotice] = useState<string | null>(null)
+  const [quoteConvertCaseId, setQuoteConvertCaseId] = useState<string | null>(null)
+  useEffect(() => {
+    if (!quotesNotice) return
+    const tid = window.setTimeout(() => setQuotesNotice(null), 8000)
+    return () => window.clearTimeout(tid)
+  }, [quotesNotice])
+
+  const onQuoteConvert = useCallback(
+    (caseId: string) => {
+      if (!cases.some((c) => c.id === caseId && c.status === 'quote')) return
+      setQuoteConvertCaseId(caseId)
+    },
+    [cases],
+  )
+
+  const quoteConvertCase = useMemo(() => {
+    if (!quoteConvertCaseId) return null
+    const row = cases.find((c) => c.id === quoteConvertCaseId)
+    return row?.status === 'quote' ? row : null
+  }, [quoteConvertCaseId, cases])
+
+  const onQuoteConverted = useCallback(
+    async ({ caseId, openAfter }: { caseId: string; openAfter: boolean }) => {
+      setQuoteConvertCaseId(null)
+      setCases((prev) => prev.map((c) => (c.id === caseId ? { ...c, status: 'open' as const } : c)))
+      await refreshCases()
+      setQuotesNotice('Quote converted to Active.')
+      if (openAfter) openCaseView(caseId)
+    },
+    [openCaseView, refreshCases],
+  )
+
+  const onQuoteClose = useCallback(
+    async (caseId: string) => {
+      if (!token) return
+      try {
+        const blockMsg = await closeMatterBlockMessage(token, caseId)
+        if (blockMsg) {
+          void alert(blockMsg, 'Cannot close matter')
+          return
+        }
+      } catch {
+        /* fall through — server will reject if balances are non-zero */
+      }
+      const ok = await askConfirm({
+        title: 'Close matter',
+        message: 'Do you want to close this matter?',
+        confirmLabel: 'Yes',
+        cancelLabel: 'No',
+      })
+      if (!ok || !token) return
+      try {
+        await apiFetch(`/cases/${caseId}`, { method: 'PATCH', token, json: { status: 'closed' } })
+        void refreshCases()
+      } catch (e: unknown) {
+        const msg =
+          e && typeof e === 'object' && 'message' in e
+            ? String((e as { message?: string }).message)
+            : 'Could not close matter'
+        void alert(msg, 'Close matter')
+      }
+    },
+    [alert, askConfirm, token],
+  )
+
   const onMainMenuCaseCreated = useCallback(
     async (created?: CaseOut) => {
       setShowNewMatter(false)
@@ -1136,16 +1208,63 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
         <>
         <div className="mainMenuShell mainMenuShell--mainMenu">
           <div className={`mainMenuFilterBar${tasksMenuFilterOpen ? ' mainMenuFilterBar--dropdownOpen' : ''}`}>
-            <div className="row mainMenuFilterRow mainMenuFilterRow--toolbar">
+            <div className="row mainMenuFilterRow mainMenuFilterRow--toolbar mainMenuFilterRow--searchRight">
               <div className="mainMenuFilterRowLeft">
-            <SearchInput
-              placeholder="Search tasks (reference, client, matter, task, date, assigned)…"
-              value={taskMenuSearch}
-              onChange={(e) => setTaskMenuSearch(e.target.value)}
-              onClear={() => setTaskMenuSearch('')}
-              className="mainMenuSearchInput"
-              aria-label="Search tasks"
-            />
+                {taskMenuCaseFilter ? (
+                  <button type="button" className="btn" onClick={() => setTaskMenuCaseFilter(null)}>
+                    Show all tasks
+                  </button>
+                ) : null}
+                <button type="button" className="btn primary" onClick={() => setGlobalTaskCreateOpen(true)}>
+                  New task
+                </button>
+                <div className="tasksToolbarLayoutGroup">
+                  <span className="tasksToolbarLayoutLabel">View</span>
+                  <select
+                    className="tasksToolbarLayoutSelect"
+                    value={uiPrefs.tasks_menu_layout}
+                    onChange={(e) => setUiPreference('tasks_menu_layout', e.target.value as 'list' | 'kanban')}
+                    aria-label="Task layout"
+                  >
+                    <option value="list">List</option>
+                    <option value="kanban">Kanban</option>
+                  </select>
+                </div>
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={() => {
+                    void refreshCases()
+                    void refreshTaskMenu()
+                  }}
+                >
+                  Refresh
+                </button>
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={() => void (async () => {
+                    if (!token) return
+                    const ok = await askConfirm({
+                      title: 'Clear completed tasks',
+                      message: taskMenuCaseFilter
+                        ? 'Remove all completed tasks for this matter from the list?'
+                        : 'Remove all of your completed tasks from the list?',
+                    })
+                    if (!ok) return
+                    try {
+                      const q = taskMenuCaseFilter ? `?case_id=${encodeURIComponent(taskMenuCaseFilter)}` : ''
+                      await apiFetch(`/tasks/completed${q}`, { token, method: 'DELETE' })
+                      void refreshTaskMenu()
+                    } catch {
+                      // ignore
+                    }
+                  })()}
+                >
+                  Clear completed tasks
+                </button>
+              </div>
+              <div className="mainMenuFilterRowRight">
                 <div className="caseToolbarDropdownWrap">
                   <button
                     type="button"
@@ -1210,61 +1329,14 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
                     </div>
                   ) : null}
                 </div>
-              </div>
-              <div className="mainMenuFilterRowRight">
-                {taskMenuCaseFilter ? (
-                  <button type="button" className="btn" onClick={() => setTaskMenuCaseFilter(null)}>
-                    Show all tasks
-                  </button>
-                ) : null}
-                <button type="button" className="btn primary" onClick={() => setGlobalTaskCreateOpen(true)}>
-                  New task
-                </button>
-                <div className="tasksToolbarLayoutGroup">
-                  <span className="tasksToolbarLayoutLabel">View</span>
-                  <select
-                    className="tasksToolbarLayoutSelect"
-                    value={uiPrefs.tasks_menu_layout}
-                    onChange={(e) => setUiPreference('tasks_menu_layout', e.target.value as 'list' | 'kanban')}
-                    aria-label="Task layout"
-                  >
-                    <option value="list">List</option>
-                    <option value="kanban">Kanban</option>
-                  </select>
-                </div>
-                <button
-                  type="button"
-                  className="btn"
-                  onClick={() => {
-                    void refreshCases()
-                    void refreshTaskMenu()
-                  }}
-                >
-                  Refresh
-                </button>
-                <button
-                  type="button"
-                  className="btn"
-                  onClick={() => void (async () => {
-                    if (!token) return
-                    const ok = await askConfirm({
-                      title: 'Clear completed tasks',
-                      message: taskMenuCaseFilter
-                        ? 'Remove all completed tasks for this matter from the list?'
-                        : 'Remove all of your completed tasks from the list?',
-                    })
-                    if (!ok) return
-                    try {
-                      const q = taskMenuCaseFilter ? `?case_id=${encodeURIComponent(taskMenuCaseFilter)}` : ''
-                      await apiFetch(`/tasks/completed${q}`, { token, method: 'DELETE' })
-                      void refreshTaskMenu()
-                    } catch {
-                      // ignore
-                    }
-                  })()}
-                >
-                  Clear completed tasks
-                </button>
+            <SearchInput
+              placeholder="Search"
+              value={taskMenuSearch}
+              onChange={(e) => setTaskMenuSearch(e.target.value)}
+              onClear={() => setTaskMenuSearch('')}
+              className="mainMenuSearchInput"
+              aria-label="Search tasks"
+            />
               </div>
             </div>
           </div>
@@ -1299,7 +1371,6 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
           token={token}
           users={caseListUsers}
           caseIdFixed={null}
-          casesForPicker={cases}
           preset={null}
           onClose={() => setGlobalTaskCreateOpen(false)}
           onCreated={() => void refreshTaskMenu()}
@@ -1376,6 +1447,9 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
       createButtonLabel="New quote"
       onCreateClick={() => setQuoteWizardOpen(true)}
       toolbarMiddle={quotesFeeScalesButton}
+      contextMenuVariant="quotes"
+      onQuoteConvert={onQuoteConvert}
+      onQuoteClose={onQuoteClose}
     />
   ) : null
 
@@ -1525,6 +1599,11 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
                 : 'mainMenuCasesHost mainMenuCasesHost--hidden'
             }
           >
+            {quotesNotice ? (
+              <div className="notice" style={{ margin: '0 0 10px' }}>
+                {quotesNotice}
+              </div>
+            ) : null}
             {quotesCasesPanel}
           </div>
         ) : null}
@@ -1540,8 +1619,6 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
         {quoteWizardOpen && token ? (
           <QuoteWizard
             token={token}
-            cases={cases}
-            users={caseListUsers}
             open={quoteWizardOpen}
             onClose={() => setQuoteWizardOpen(false)}
             onOpenNewMatter={() => {
@@ -1562,6 +1639,15 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
               setPendingComposeKind('email')
               setQuoteComposeLetterhead(true)
             }}
+          />
+        ) : null}
+        {quoteConvertCase && token ? (
+          <QuoteConvertModal
+            token={token}
+            quoteCase={quoteConvertCase}
+            users={caseListUsers}
+            onClose={() => setQuoteConvertCaseId(null)}
+            onConverted={(result) => void onQuoteConverted(result)}
           />
         ) : null}
         {renderMainContent()}
@@ -1599,16 +1685,15 @@ function NewMatterModal({
   const [feeEarner, setFeeEarner] = useState<string>(currentUserId)
   /** Active = open; Quote = quote (only these may be set on create). */
   const [newMatterStatus, setNewMatterStatus] = useState<'open' | 'quote'>(defaultStatus)
+  const [portalEnabled, setPortalEnabled] = useState(false)
   const [step, setStep] = useState<'details' | 'property' | 'description' | 'contacts'>('details')
   const [propertyDraft, setPropertyDraft] = useState<CasePropertyPayload | null>(null)
   const [users, setUsers] = useState<UserSummary[]>([])
   const [matterHeadTypes, setMatterHeadTypes] = useState<MatterHeadTypeOut[]>([])
-  const [contacts, setContacts] = useState<ContactOut[]>([])
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
 
-  const [contactSearch, setContactSearch] = useState('')
-  const [selectedGlobalContactId, setSelectedGlobalContactId] = useState<string | null>(null)
+  const [selectedGlobalContact, setSelectedGlobalContact] = useState<ContactOut | null>(null)
   const [contactErr, setContactErr] = useState<string | null>(null)
   /** Client contacts to link after the matter is created (Finish). */
   const [pendingClientLinks, setPendingClientLinks] = useState<NewMatterPendingClient[]>([])
@@ -1635,10 +1720,10 @@ function NewMatterModal({
       try {
         const data = await apiFetch<UserSummary[]>('/users', { token })
         if (!cancelled) {
-          const active = (Array.isArray(data) ? data : []).filter((u) => u.is_active)
+          const active = (Array.isArray(data) ? data : []).filter((u) => u.is_active && u.can_be_fee_earner !== false)
           setUsers(active)
           setFeeEarner((prev) => {
-            if (prev) return prev
+            if (prev && active.some((u) => u.id === prev)) return prev
             if (currentUserId && active.some((u) => u.id === currentUserId)) return currentUserId
             return active[0]?.id ?? ''
           })
@@ -1668,23 +1753,6 @@ function NewMatterModal({
       cancelled = true
     }
   }, [token])
-
-  useEffect(() => {
-    if (step !== 'contacts') return
-    let cancelled = false
-    async function loadContacts() {
-      try {
-        const data = await apiFetch<ContactOut[]>('/contacts', { token })
-        if (!cancelled) setContacts(data)
-      } catch {
-        // ignore
-      }
-    }
-    void loadContacts()
-    return () => {
-      cancelled = true
-    }
-  }, [step, token])
 
   return (
     <div className="modalOverlay" role="dialog" aria-modal="true">
@@ -1769,6 +1837,21 @@ function NewMatterModal({
               </label>
             </div>
           </div>
+          <label className="row field" style={{ gap: 10, alignItems: 'flex-start', cursor: busy ? 'default' : 'pointer' }}>
+            <input
+              type="checkbox"
+              checked={portalEnabled}
+              disabled={busy}
+              onChange={(e) => setPortalEnabled(e.target.checked)}
+              style={{ marginTop: 3 }}
+            />
+            <span>
+              Enable portal
+              <span className="muted" style={{ display: 'block', fontSize: 13, marginTop: 2 }}>
+                Allow client folder sharing and portal notifications for this matter.
+              </span>
+            </span>
+          </label>
           {err ? <div className="error">{err}</div> : null}
           <div className="row" style={{ justifyContent: 'flex-end' }}>
             <button className="btn" onClick={onClose} disabled={busy}>
@@ -1939,67 +2022,27 @@ function NewMatterModal({
 
               <label className="field">
                 <span>Search existing global contacts</span>
-                <input
-                  value={contactSearch}
-                  onChange={(e) => {
-                    const next = e.target.value
-                    setContactSearch(next)
-                    if (!next.trim()) setSelectedGlobalContactId(null)
-                  }}
+                <ContactSearchPicker
+                  token={token}
+                  value={selectedGlobalContact?.id ?? null}
+                  onChange={(_id, contact) => setSelectedGlobalContact(contact ?? null)}
+                  disabled={busy}
+                  filterContact={(c) => !pendingClientLinks.some((p) => p.contact_id === c.id)}
+                  listMaxHeight={160}
                 />
               </label>
-
-              <div className="list" style={{ maxHeight: 160, overflow: 'auto' }}>
-                {(() => {
-                  const query = contactSearch.trim().toLowerCase()
-                  if (!query) {
-                    return <div className="muted">Type in the search box to find contacts.</div>
-                  }
-                  const matching = contacts.filter(
-                    (c) =>
-                      c.name.toLowerCase().includes(query) ||
-                      (c.email ?? '').toLowerCase().includes(query) ||
-                      (c.phone ?? '').toLowerCase().includes(query),
-                  )
-                  if (matching.length === 0) {
-                    return <div className="muted">No contacts match your search.</div>
-                  }
-                  return matching.slice(0, 25).map((c) => (
-                    <div key={c.id} className="listCard row" style={{ justifyContent: 'space-between' }}>
-                      <div>
-                        <div className="listTitle">
-                          {c.name} <span className="muted">· {c.type}</span>
-                        </div>
-                        <div className="muted">{c.email ?? c.phone ?? '—'}</div>
-                      </div>
-                      <button
-                        className={`btn ${selectedGlobalContactId === c.id ? 'primary' : ''}`}
-                        disabled={busy || pendingClientLinks.some((p) => p.contact_id === c.id)}
-                        onClick={() => setSelectedGlobalContactId(c.id)}
-                      >
-                        {pendingClientLinks.some((p) => p.contact_id === c.id)
-                          ? 'Added'
-                          : selectedGlobalContactId === c.id
-                            ? 'Selected'
-                            : 'Select'}
-                      </button>
-                    </div>
-                  ))
-                })()}
-              </div>
 
               <div className="row" style={{ justifyContent: 'flex-end' }}>
                 <button
                   className="btn primary"
                   disabled={
                     busy ||
-                    !selectedGlobalContactId ||
-                    pendingClientLinks.some((p) => p.contact_id === selectedGlobalContactId)
+                    !selectedGlobalContact ||
+                    pendingClientLinks.some((p) => p.contact_id === selectedGlobalContact.id)
                   }
                   onClick={() => {
-                    if (!selectedGlobalContactId) return
-                    const c = contacts.find((x) => x.id === selectedGlobalContactId)
-                    if (!c) return
+                    if (!selectedGlobalContact) return
+                    const c = selectedGlobalContact
                     setContactErr(null)
                     setErr(null)
                     setPendingClientLinks((prev) => [
@@ -2011,7 +2054,7 @@ function NewMatterModal({
                         phone: c.phone,
                       },
                     ])
-                    setSelectedGlobalContactId(null)
+                    setSelectedGlobalContact(null)
                   }}
                 >
                   Link as client
@@ -2037,10 +2080,6 @@ function NewMatterModal({
                         token,
                         method: 'POST',
                         json: payload,
-                      })
-                      setContacts((prev) => {
-                        const without = prev.filter((x) => x.id !== created.id)
-                        return [created, ...without]
                       })
                       setPendingClientLinks((prev) => [
                         ...prev,
@@ -2085,6 +2124,7 @@ function NewMatterModal({
                           status: newMatterStatus,
                           matter_sub_type_id: practiceArea || null,
                           fee_earner_user_id: feeEarner,
+                          portal_enabled: portalEnabled,
                           ...resolveCaseSourcePayload(caseSources, sourceId, sourceCustomName),
                         },
                       })
@@ -2246,6 +2286,9 @@ function CasesTable({
   gridTemplateColumns,
   startColumnResize,
   showSourceColumn = false,
+  contextMenuVariant = 'main',
+  onQuoteConvert,
+  onQuoteClose,
 }: {
   cases: CaseOut[]
   users: UserSummary[]
@@ -2262,6 +2305,9 @@ function CasesTable({
   gridTemplateColumns?: string
   startColumnResize: (colIndex: number, startClientX: number, measureRow?: HTMLElement | null) => void
   showSourceColumn?: boolean
+  contextMenuVariant?: 'main' | 'quotes'
+  onQuoteConvert?: (caseId: string) => void
+  onQuoteClose?: (caseId: string) => void
 }) {
   const [caseCtx, setCaseCtx] = useState<null | { id: string; x: number; y: number }>(null)
   const caseCtxRef = useRef<HTMLDivElement | null>(null)
@@ -2308,6 +2354,7 @@ function CasesTable({
   }, [showSourceColumn])
 
   const lastColIndex = columns.length - 1
+  const ctxCase = caseCtx ? cases.find((c) => c.id === caseCtx.id) : null
 
   return (
     <div className="card casesTableCard" style={{ padding: 0, overflow: 'hidden' }}>
@@ -2393,18 +2440,49 @@ function CasesTable({
           >
             Open
           </div>
-          <div
-            className="docContextItem"
-            role="menuitem"
-            tabIndex={0}
-            onClick={() => {
-              const id = caseCtx.id
-              setCaseCtx(null)
-              onSelect(id, { docPanel: 'accounts' })
-            }}
-          >
-            Accounts
-          </div>
+          {contextMenuVariant === 'quotes' ? (
+            <>
+              {ctxCase?.status === 'quote' ? (
+                <div
+                  className="docContextItem"
+                  role="menuitem"
+                  tabIndex={0}
+                  onClick={() => {
+                    const id = caseCtx.id
+                    setCaseCtx(null)
+                    onQuoteConvert?.(id)
+                  }}
+                >
+                  Convert
+                </div>
+              ) : null}
+              <div
+                className="docContextItem"
+                role="menuitem"
+                tabIndex={0}
+                onClick={() => {
+                  const id = caseCtx.id
+                  setCaseCtx(null)
+                  onQuoteClose?.(id)
+                }}
+              >
+                Close
+              </div>
+            </>
+          ) : (
+            <div
+              className="docContextItem"
+              role="menuitem"
+              tabIndex={0}
+              onClick={() => {
+                const id = caseCtx.id
+                setCaseCtx(null)
+                onSelect(id, { docPanel: 'accounts' })
+              }}
+            >
+              Accounts
+            </div>
+          )}
         </div>
       ) : null}
     </div>
@@ -2444,6 +2522,9 @@ const MainMenuCasesPanel = memo(function MainMenuCasesPanel({
   onCreateClick,
   toolbarMiddle,
   showSourceColumn = false,
+  contextMenuVariant = 'main',
+  onQuoteConvert,
+  onQuoteClose,
 }: {
   cases: CaseOut[]
   casesErr: string | null
@@ -2473,6 +2554,9 @@ const MainMenuCasesPanel = memo(function MainMenuCasesPanel({
   onCreateClick?: () => void
   toolbarMiddle?: ReactNode
   showSourceColumn?: boolean
+  contextMenuVariant?: 'main' | 'quotes'
+  onQuoteConvert?: (caseId: string) => void
+  onQuoteClose?: (caseId: string) => void
 }) {
   const [caseSearch, setCaseSearch] = useState('')
   const [filterOpen, setFilterOpen] = useState(false)
@@ -2491,6 +2575,7 @@ const MainMenuCasesPanel = memo(function MainMenuCasesPanel({
   const feeEarnerOptions = useMemo(() => {
     const byId = new Map<string, UserSummary>()
     for (const u of users) {
+      if (u.can_be_fee_earner === false) continue
       if (!byId.has(u.id)) byId.set(u.id, u)
     }
     return Array.from(byId.values())
@@ -2615,7 +2700,7 @@ const MainMenuCasesPanel = memo(function MainMenuCasesPanel({
               </div>
             </div>
             <SearchInput
-              placeholder="Search cases (reference, client, matter, fee earner, status)…"
+              placeholder="Search"
               value={caseSearch}
               onChange={(e) => setCaseSearch(e.target.value)}
               onClear={() => setCaseSearch('')}
@@ -2642,6 +2727,9 @@ const MainMenuCasesPanel = memo(function MainMenuCasesPanel({
         sortKey={sortKey}
         sortDir={sortDir}
         onSort={onSort}
+        contextMenuVariant={contextMenuVariant}
+        onQuoteConvert={onQuoteConvert}
+        onQuoteClose={onQuoteClose}
       />
     </div>
   )
@@ -2700,6 +2788,7 @@ function UserSettingsPage({
   const [disablePwd, setDisablePwd] = useState('')
   const [disableTotp, setDisableTotp] = useState('')
   const [cancelSetupPwd, setCancelSetupPwd] = useState('')
+  const [setupResumePwd, setSetupResumePwd] = useState('')
   const [accountLoadErr, setAccountLoadErr] = useState<string | null>(null)
 
   const [passkeys, setPasskeys] = useState<WebAuthnCredentialOut[]>([])
@@ -2833,12 +2922,17 @@ function UserSettingsPage({
     }
   }
 
-  async function start2faSetup() {
+  async function start2faSetup(resumePassword?: string) {
     setFaErr(null)
     setFaOk(false)
     setSecBusy(true)
     try {
-      const res = await apiFetch<{ secret: string; otpauth_uri: string }>('/auth/2fa/setup', { method: 'POST', token })
+      const pwd = (resumePassword ?? setupResumePwd).trim()
+      const res = await apiFetch<{ secret: string; otpauth_uri: string }>('/auth/2fa/setup', {
+        method: 'POST',
+        token,
+        json: account?.pending_authenticator_setup || pwd ? { password: pwd || null } : {},
+      })
       setFaSetup(res)
       setFaCode('')
     } catch (e: unknown) {
@@ -3361,13 +3455,29 @@ function UserSettingsPage({
                 Use an app such as Google Authenticator, Microsoft Authenticator, or 1Password. You will scan a QR code or
                 enter the secret key, then confirm with a one-time code.
               </p>
+              {account?.pending_authenticator_setup ? (
+                <label className="field">
+                  <span>Canary password (required to resume pending setup)</span>
+                  <input
+                    type="password"
+                    autoComplete="current-password"
+                    value={setupResumePwd}
+                    onChange={(e) => setSetupResumePwd(e.target.value)}
+                    disabled={busy || secBusy}
+                  />
+                </label>
+              ) : null}
               <button
                 type="button"
                 className="btn primary"
-                disabled={busy || secBusy}
+                disabled={
+                  busy ||
+                  secBusy ||
+                  Boolean(account?.pending_authenticator_setup && !setupResumePwd.trim())
+                }
                 onClick={() => void start2faSetup()}
               >
-                Begin 2FA setup
+                {account?.pending_authenticator_setup ? 'Continue 2FA setup' : 'Begin 2FA setup'}
               </button>
             </div>
           ) : (
@@ -3787,6 +3897,11 @@ function Contacts({ token, me }: { token: string; me?: UserPublic | null }) {
   const { prefs: uiPrefs, setPreference: setUiPreference, setPreferenceDebounced: setUiPreferenceDebounced } =
     useUserUiPreferences(me, token)
   const [contactsSearch, setContactsSearch] = useState('')
+  const debouncedContactsSearch = useDebouncedValue(contactsSearch.trim(), 300)
+  const [contactsFilterOpen, setContactsFilterOpen] = useState(false)
+  const [contactsFilterType, setContactsFilterType] = useState<'' | ContactOut['type']>('')
+  const [contactsFilterEmail, setContactsFilterEmail] = useState<'' | 'has' | 'missing'>('')
+  const [contactsFilterPhone, setContactsFilterPhone] = useState<'' | 'has' | 'missing'>('')
   const { gridTemplateColumns: contactsGridColumns, startResize: contactsStartResize } = useColumnWidths(
     CONTACTS_COLUMN_COUNT,
     {
@@ -3815,7 +3930,14 @@ function Contacts({ token, me }: { token: string; me?: UserPublic | null }) {
     setBusy(true)
     setErr(null)
     try {
-      const data = await apiFetch<ContactOut[]>('/contacts', { token })
+      const data = await fetchContactSearch(token, {
+        q: debouncedContactsSearch || undefined,
+        type: contactsFilterType || undefined,
+        hasEmail:
+          contactsFilterEmail === 'has' ? true : contactsFilterEmail === 'missing' ? false : undefined,
+        hasPhone:
+          contactsFilterPhone === 'has' ? true : contactsFilterPhone === 'missing' ? false : undefined,
+      })
       setContacts(data)
     } catch (e: any) {
       setErr(e?.message ?? 'Failed to load contacts')
@@ -3826,7 +3948,7 @@ function Contacts({ token, me }: { token: string; me?: UserPublic | null }) {
 
   useEffect(() => {
     void load()
-  }, [token])
+  }, [token, debouncedContactsSearch, contactsFilterType, contactsFilterEmail, contactsFilterPhone])
 
   useEffect(() => {
     if (!contactCtx) return
@@ -3839,18 +3961,18 @@ function Contacts({ token, me }: { token: string; me?: UserPublic | null }) {
     return () => document.removeEventListener('mousedown', handleMouseDown)
   }, [contactCtx])
 
+  const contactsActiveFilterCount = useMemo(
+    () =>
+      (contactsFilterType ? 1 : 0) +
+      (contactsFilterEmail ? 1 : 0) +
+      (contactsFilterPhone ? 1 : 0),
+    [contactsFilterType, contactsFilterEmail, contactsFilterPhone],
+  )
+
   const rows = useMemo(() => {
-    const s = contactsSearch.trim().toLowerCase()
-    let list = contacts
-    if (s) {
-      list = contacts.filter((c) => {
-        const parts = [c.name, c.email ?? '', c.phone ?? '', c.type]
-        return parts.join(' ').toLowerCase().includes(s)
-      })
-    }
     const dir = uiPrefs.contacts_sort_dir === 'asc' ? 1 : -1
     const key = uiPrefs.contacts_sort_key
-    return [...list].sort((a, b) => {
+    return [...contacts].sort((a, b) => {
       const av =
         key === 'name'
           ? a.name
@@ -3869,7 +3991,7 @@ function Contacts({ token, me }: { token: string; me?: UserPublic | null }) {
               : b.phone ?? ''
       return String(av).localeCompare(String(bv)) * dir
     })
-  }, [contacts, contactsSearch, uiPrefs.contacts_sort_key, uiPrefs.contacts_sort_dir])
+  }, [contacts, uiPrefs.contacts_sort_key, uiPrefs.contacts_sort_dir])
 
   function toggleContactsSort(key: 'name' | 'type' | 'email' | 'phone') {
     if (uiPrefs.contacts_sort_key === key) {
@@ -3889,19 +4011,9 @@ function Contacts({ token, me }: { token: string; me?: UserPublic | null }) {
   return (
     <div className="mainMenuShell mainMenuShell--mainMenu">
       {err ? <div className="error">{err}</div> : null}
-      <div className="mainMenuFilterBar">
-        <div className="row mainMenuFilterRow mainMenuFilterRow--toolbar">
+      <div className={`mainMenuFilterBar${contactsFilterOpen ? ' mainMenuFilterBar--dropdownOpen' : ''}`}>
+        <div className="row mainMenuFilterRow mainMenuFilterRow--toolbar mainMenuFilterRow--searchRight">
           <div className="mainMenuFilterRowLeft">
-            <SearchInput
-              placeholder="Search contacts (name, email, phone)…"
-              value={contactsSearch}
-              onChange={(e) => setContactsSearch(e.target.value)}
-              onClear={() => setContactsSearch('')}
-              className="mainMenuSearchInput"
-              aria-label="Search contacts"
-            />
-          </div>
-          <div className="mainMenuFilterRowRight">
             <button type="button" className="btn" onClick={() => void load()} disabled={busy}>
               Refresh
             </button>
@@ -3915,6 +4027,101 @@ function Contacts({ token, me }: { token: string; me?: UserPublic | null }) {
             >
               New contact…
             </button>
+          </div>
+          <div className="mainMenuFilterRowRight">
+            <div className="caseToolbarDropdownWrap">
+              <button
+                type="button"
+                className="btn mainMenuFilterBtn"
+                aria-expanded={contactsFilterOpen}
+                aria-haspopup="true"
+                aria-controls="contacts-menu-filter-menu"
+                id="contacts-menu-filter-button"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  setContactsFilterOpen((o) => !o)
+                }}
+              >
+                <span className="mainMenuFilterBtnInner">
+                  <svg
+                    className="mainMenuFilterBtnIcon"
+                    width={16}
+                    height={16}
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    xmlns="http://www.w3.org/2000/svg"
+                    aria-hidden
+                  >
+                    <polygon
+                      points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      fill="none"
+                    />
+                  </svg>
+                  <span>Filter</span>
+                  <span className="mainMenuFilterBtnCount">({contactsActiveFilterCount})</span>
+                </span>
+              </button>
+              {contactsFilterOpen ? (
+                <div
+                  id="contacts-menu-filter-menu"
+                  className="caseToolbarDropdown mainMenuFilterDropdown"
+                  role="group"
+                  aria-labelledby="contacts-menu-filter-button"
+                  onMouseDown={(e) => e.stopPropagation()}
+                >
+                  <div className="stack mainMenuFilterDropdownBody">
+                    <label className="field">
+                      <span>Type</span>
+                      <select
+                        value={contactsFilterType}
+                        onChange={(e) => setContactsFilterType(e.target.value as '' | ContactOut['type'])}
+                        aria-label="Filter contacts by type"
+                      >
+                        <option value="">All</option>
+                        <option value="person">Person</option>
+                        <option value="organisation">Organisation</option>
+                      </select>
+                    </label>
+                    <label className="field">
+                      <span>Email</span>
+                      <select
+                        value={contactsFilterEmail}
+                        onChange={(e) => setContactsFilterEmail(e.target.value as '' | 'has' | 'missing')}
+                        aria-label="Filter contacts by email"
+                      >
+                        <option value="">Any</option>
+                        <option value="has">Has email</option>
+                        <option value="missing">Missing email</option>
+                      </select>
+                    </label>
+                    <label className="field">
+                      <span>Phone</span>
+                      <select
+                        value={contactsFilterPhone}
+                        onChange={(e) => setContactsFilterPhone(e.target.value as '' | 'has' | 'missing')}
+                        aria-label="Filter contacts by phone"
+                      >
+                        <option value="">Any</option>
+                        <option value="has">Has phone</option>
+                        <option value="missing">Missing phone</option>
+                      </select>
+                    </label>
+                  </div>
+                </div>
+              ) : null}
+            </div>
+            <SearchInput
+              placeholder="Search"
+              value={contactsSearch}
+              onChange={(e) => setContactsSearch(e.target.value)}
+              onClear={() => setContactsSearch('')}
+              className="mainMenuSearchInput"
+              aria-label="Search contacts"
+            />
           </div>
         </div>
       </div>

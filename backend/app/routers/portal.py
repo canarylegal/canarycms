@@ -13,6 +13,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, File as FastAPIFile, Form, HTTPException, Query, UploadFile, status
 from fastapi.responses import FileResponse
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 from starlette.background import BackgroundTask
 
@@ -20,33 +21,46 @@ from app.audit import log_event
 from app.db import get_db
 from app.deps import get_portal_contact
 from app.file_storage import FILES_ROOT, case_file_paths, ensure_files_root
-from app.models import Case, Contact, File, FileCategory, FirmSettings, User
+from app.models import Case, Contact, ContactPortalAccess, ContactPortalGrant, File, FileCategory, FirmSettings, User
+from app.permission_checks import user_may_be_fee_earner
+from app.portal_activity import log_portal_activity
+from app.portal_notifications import notify_portal_staff_client_upload
+from app.portal_case import filter_grants_for_portal_enabled_cases
 from app.portal_service import (
+    browse_grant_folder,
     contact_display_name,
     default_grant_label,
     ensure_upload_folder_allowed,
+    find_portal_contact_by_email,
     get_grant_file,
     get_grant_for_contact,
     get_portal_access_by_code,
     grant_folder_display_name,
     grant_is_active,
+    issue_portal_login_otp,
     list_active_grants_for_contact,
     list_grant_files,
     normalize_access_code,
     portal_access_is_active,
     record_portal_auth_failure,
     record_portal_auth_success,
+    relative_folder_under_grant,
+    verify_portal_login_otp,
 )
 from app.schemas import (
     PortalAuthIn,
     PortalAuthOut,
+    PortalBrowseOut,
     PortalConfigOut,
     PortalFileOut,
     PortalGrantSummaryOut,
+    PortalOtpRequestIn,
+    PortalOtpVerifyIn,
+    PortalPreviewExchangeIn,
     PortalSessionOut,
 )
-from app.alert_dispatch import AlertKind, dispatch_alert
-from app.security import create_portal_session_token
+from app.alert_dispatch import AlertKind, dispatch_alert, portal_public_url
+from app.security import create_portal_session_token, decode_portal_preview_exchange_token
 
 log = logging.getLogger(__name__)
 
@@ -66,7 +80,7 @@ def _safe_zip_name(name: str) -> str:
 
 
 def _grant_summaries(db: Session, contact_id: uuid.UUID) -> list[PortalGrantSummaryOut]:
-    grants = list_active_grants_for_contact(db, contact_id)
+    grants = filter_grants_for_portal_enabled_cases(db, list_active_grants_for_contact(db, contact_id))
     out: list[PortalGrantSummaryOut] = []
     for g in grants:
         case = db.get(Case, g.case_id)
@@ -95,7 +109,7 @@ def portal_config(db: Session = Depends(get_db)) -> PortalConfigOut:
     name = (firm.trading_name or "").strip() if firm else ""
     if not name and firm and firm.registered_company_name:
         name = (firm.registered_company_name or "").strip()
-    return PortalConfigOut(firm_name=name or "Client portal")
+    return PortalConfigOut(firm_name=name)
 
 
 @router.post("/auth", response_model=PortalAuthOut)
@@ -131,12 +145,154 @@ def portal_auth(payload: PortalAuthIn, db: Session = Depends(get_db)) -> PortalA
     )
 
 
+@router.post("/auth/request-otp", status_code=status.HTTP_204_NO_CONTENT)
+def portal_request_otp(payload: PortalOtpRequestIn, db: Session = Depends(get_db)) -> None:
+    """Send a one-time sign-in code if this e-mail has active portal access."""
+    contact = find_portal_contact_by_email(db, payload.email)
+    if contact is None:
+        return
+    code = issue_portal_login_otp(db, contact.id)
+    db.commit()
+    dispatch_alert(
+        db,
+        AlertKind.portal_login_otp,
+        to_email=contact.email or "",
+        context={
+            "contact_name": contact_display_name(contact),
+            "otp_code": code,
+            "portal_url": portal_public_url(),
+        },
+    )
+
+
+@router.post("/auth/verify-otp", response_model=PortalAuthOut)
+def portal_verify_otp(payload: PortalOtpVerifyIn, db: Session = Depends(get_db)) -> PortalAuthOut:
+    contact = find_portal_contact_by_email(db, payload.email)
+    if contact is None or not verify_portal_login_otp(db, contact.id, payload.code.strip()):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired sign-in code")
+    grants = list_active_grants_for_contact(db, contact.id)
+    if not grants:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No document areas are available for this access code")
+    access_row = db.execute(
+        select(ContactPortalAccess).where(ContactPortalAccess.contact_id == contact.id)
+    ).scalar_one_or_none()
+    if access_row:
+        record_portal_auth_success(db, access_row)
+    db.commit()
+    token = create_portal_session_token(contact_id=str(contact.id))
+    log_event(
+        db,
+        actor_user_id=None,
+        action="portal.auth.otp",
+        entity_type="contact",
+        entity_id=str(contact.id),
+        meta={"contact_id": str(contact.id)},
+    )
+    return PortalAuthOut(
+        session_token=token,
+        contact_name=contact_display_name(contact),
+        grants=_grant_summaries(db, contact.id),
+    )
+
+
+@router.post("/auth/preview-exchange", response_model=PortalAuthOut)
+def portal_preview_exchange(payload: PortalPreviewExchangeIn, db: Session = Depends(get_db)) -> PortalAuthOut:
+    """Exchange a short-lived staff-issued preview token for a client portal session."""
+    try:
+        preview = decode_portal_preview_exchange_token(payload.exchange_token.strip())
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
+    try:
+        contact_id = uuid.UUID(preview.contact_id)
+        case_id = uuid.UUID(preview.case_id)
+        staff_user_id = uuid.UUID(preview.staff_user_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid preview link") from exc
+
+    contact = db.get(Contact, contact_id)
+    if contact is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid preview link")
+    access_row = db.execute(
+        select(ContactPortalAccess).where(ContactPortalAccess.contact_id == contact_id)
+    ).scalar_one_or_none()
+    if access_row is None or not portal_access_is_active(access_row):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Portal access is not active for this contact")
+    grants = list_active_grants_for_contact(db, contact_id)
+    if not grants:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No document areas are available for this contact")
+    case_grants = [g for g in grants if g.case_id == case_id and grant_is_active(g)]
+    if not case_grants:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No shared folders on this matter for this contact")
+
+    from app.portal_case import require_case_portal_enabled
+
+    require_case_portal_enabled(db, case_id)
+    token = create_portal_session_token(contact_id=str(contact.id))
+    log_event(
+        db,
+        actor_user_id=staff_user_id,
+        action="portal.preview.exchange",
+        entity_type="contact",
+        entity_id=str(contact.id),
+        meta={"case_id": str(case_id), "contact_id": str(contact.id)},
+    )
+    db.commit()
+    return PortalAuthOut(
+        session_token=token,
+        contact_name=contact_display_name(contact),
+        grants=_grant_summaries(db, contact.id),
+    )
+
+
+def _file_out(grant: ContactPortalGrant, row: File) -> PortalFileOut:
+    rel = relative_folder_under_grant(grant_folder=grant.folder_path or "", absolute_folder=row.folder_path or "")
+    display = rel.split("/")[-1] if rel else (row.folder_path or "Documents")
+    if rel and "/" in rel:
+        display = rel
+    elif rel:
+        display = rel
+    else:
+        display = ""
+    return PortalFileOut(
+        id=row.id,
+        original_filename=row.original_filename,
+        mime_type=row.mime_type,
+        size_bytes=row.size_bytes,
+        folder_path=row.folder_path or "",
+        folder_display=display,
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+    )
+
+
 @router.get("/session", response_model=PortalSessionOut)
 def portal_session(contact: Contact = Depends(get_portal_contact), db: Session = Depends(get_db)) -> PortalSessionOut:
     grants = list_active_grants_for_contact(db, contact.id)
     if not grants:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No document areas are available")
     return PortalSessionOut(contact_name=contact_display_name(contact), grants=_grant_summaries(db, contact.id))
+
+
+@router.get("/grants/{grant_id}/browse", response_model=PortalBrowseOut)
+def portal_browse_grant(
+    grant_id: uuid.UUID,
+    subfolder: str = Query(default=""),
+    contact: Contact = Depends(get_portal_contact),
+    db: Session = Depends(get_db),
+) -> PortalBrowseOut:
+    grant = get_grant_for_contact(db, contact_id=contact.id, grant_id=grant_id)
+    if not grant.can_download:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Download is not allowed for this area")
+    rel, child_names, files_here = browse_grant_folder(db, grant, subfolder=subfolder)
+    crumbs: list[str] = []
+    if rel:
+        crumbs = rel.split("/")
+    return PortalBrowseOut(
+        subfolder=rel,
+        breadcrumb=crumbs,
+        subfolders=child_names,
+        files=[_file_out(grant, f) for f in files_here],
+    )
 
 
 @router.get("/grants/{grant_id}/files", response_model=list[PortalFileOut])
@@ -149,18 +305,7 @@ def portal_list_files(
     if not grant.can_download:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Download is not allowed for this area")
     rows = list_grant_files(db, grant)
-    return [
-        PortalFileOut(
-            id=f.id,
-            original_filename=f.original_filename,
-            mime_type=f.mime_type,
-            size_bytes=f.size_bytes,
-            folder_path=f.folder_path or "",
-            created_at=f.created_at,
-            updated_at=f.updated_at,
-        )
-        for f in rows
-    ]
+    return [_file_out(grant, f) for f in rows]
 
 
 @router.get("/grants/{grant_id}/files/download-zip")
@@ -247,6 +392,15 @@ def portal_download_file(
         entity_id=str(row.id),
         meta={"contact_id": str(contact.id), "grant_id": str(grant.id), "case_id": str(grant.case_id)},
     )
+    log_portal_activity(
+        db,
+        case_id=grant.case_id,
+        contact_id=contact.id,
+        grant_id=grant.id,
+        action="portal.file.download" if download else "portal.file.open",
+        summary=f"{contact_display_name(contact)} {'downloaded' if download else 'opened'} {row.original_filename}",
+    )
+    db.commit()
     return FileResponse(
         path=str(abs_path),
         media_type=row.mime_type,
@@ -269,8 +423,13 @@ def portal_upload_file(
     if case is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Matter not found")
     owner = db.get(User, case.fee_earner_user_id)
-    if owner is None:
+    if owner is None or not owner.is_active:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Matter fee earner missing")
+    if not user_may_be_fee_earner(owner, db):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="This matter's fee earner is not configured correctly. Ask your firm to assign a fee earner.",
+        )
 
     ensure_files_root()
     file_id = uuid.uuid4()
@@ -326,24 +485,20 @@ def portal_upload_file(
             "filename": row.original_filename,
         },
     )
-    if owner.email:
-        area = default_grant_label(db, grant)
-        dispatch_alert(
-            db,
-            AlertKind.portal_staff_upload,
-            to_email=owner.email,
-            context={
-                "contact_name": contact_display_name(contact),
-                "area_label": area,
-                "filename": row.original_filename,
-            },
-        )
-    return PortalFileOut(
-        id=row.id,
-        original_filename=row.original_filename,
-        mime_type=row.mime_type,
-        size_bytes=row.size_bytes,
-        folder_path=row.folder_path or "",
-        created_at=row.created_at,
-        updated_at=row.updated_at,
+    log_portal_activity(
+        db,
+        case_id=grant.case_id,
+        contact_id=contact.id,
+        grant_id=grant.id,
+        action="portal.file.upload",
+        summary=f"{contact_display_name(contact)} uploaded {row.original_filename}",
     )
+    notify_portal_staff_client_upload(
+        db,
+        case_id=grant.case_id,
+        contact=contact,
+        grant=grant,
+        filename=row.original_filename,
+    )
+    db.commit()
+    return _file_out(grant, row)

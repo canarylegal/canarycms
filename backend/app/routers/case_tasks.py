@@ -193,6 +193,7 @@ def delete_task(
     if not case_task_visible_to_user(task, user.id):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
 
+    task_title = task.title
     db.delete(task)
     try:
         db.commit()
@@ -206,6 +207,6 @@ def delete_task(
         action="case.task.delete",
         entity_type="case_task",
         entity_id=str(task_id),
-        meta={"case_id": str(case_id)},
+        meta={"case_id": str(case_id), "title": task_title},
     )
     return None

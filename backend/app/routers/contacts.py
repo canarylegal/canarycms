@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -9,7 +9,8 @@ from app.audit import log_event
 from app.contact_validation import ensure_organisation_trading_name
 from app.db import get_db
 from app.deps import get_current_user
-from app.models import Contact, User
+from app.list_search import search_contacts
+from app.models import Contact, ContactType, User
 from app.schemas import ContactCreate, ContactOut, ContactUpdate
 
 
@@ -30,9 +31,24 @@ def create_contact(
 
 
 @router.get("", response_model=list[ContactOut])
-def list_contacts(user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> list[ContactOut]:
-    contacts = db.execute(select(Contact).order_by(Contact.created_at.desc())).scalars().all()
-    return [ContactOut.model_validate(c, from_attributes=True) for c in contacts]
+def list_contacts(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    q: str | None = Query(default=None, description="Search name, email, phone, address fields"),
+    limit: int | None = Query(default=None, ge=1, le=200),
+    type: ContactType | None = Query(default=None, alias="type"),
+    has_email: bool | None = Query(default=None),
+    has_phone: bool | None = Query(default=None),
+) -> list[ContactOut]:
+    rows = search_contacts(
+        db,
+        q=q,
+        limit=limit,
+        type_filter=type,
+        has_email=has_email,
+        has_phone=has_phone,
+    )
+    return [ContactOut.model_validate(c, from_attributes=True) for c in rows]
 
 
 @router.get("/{contact_id}", response_model=ContactOut)

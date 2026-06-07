@@ -1,0 +1,78 @@
+name: Thunderbird add-in release
+
+on:
+  workflow_dispatch:
+    inputs:
+      sign:
+        description: Sign with ATN API (requires ATN_API_KEY / ATN_API_SECRET secrets)
+        type: boolean
+        default: false
+  push:
+    tags:
+      - 'thunderbird-v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: thunderbird-addin
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: thunderbird-addin/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint add-on
+        run: npm run lint
+
+      - name: Package unsigned zip
+        run: npm run package
+
+      - name: Sign with ATN
+        if: >-
+          (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/thunderbird-v'))
+          || (github.event_name == 'workflow_dispatch' && inputs.sign)
+        env:
+          ATN_API_KEY: ${{ secrets.ATN_API_KEY }}
+          ATN_API_SECRET: ${{ secrets.ATN_API_SECRET }}
+        run: npm run sign
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: canary-thunderbird-addin
+          path: |
+            thunderbird-addin/dist/*.zip
+            thunderbird-addin/dist/*.xpi
+          if-no-files-found: warn
+
+      - name: Publish GitHub Release
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/thunderbird-v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          files=(dist/*.xpi dist/*.zip)
+          if ((${#files[@]} == 0)); then
+            echo "No release files in dist/" >&2
+            exit 1
+          fi
+          if ! gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
+            gh release create "${GITHUB_REF_NAME}" \
+              --title "Thunderbird add-in ${GITHUB_REF_NAME}" \
+              --generate-notes \
+              "${files[@]}"
+          else
+            gh release upload "${GITHUB_REF_NAME}" "${files[@]}" --clobber
+          fi

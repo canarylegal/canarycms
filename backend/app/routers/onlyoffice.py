@@ -35,6 +35,7 @@ from app.deps import get_current_user
 from app.file_storage import FILES_ROOT, case_file_paths, ensure_files_root
 from app.models import FeeScale, File as DbFile, FileCategory, FileEditSession, Precedent, User
 from app.audit import log_event
+from app.feature_flags import onlyoffice_callback_require_jwt
 from app.docx_util import finalize_stored_docx_bytes, normalize_onlyoffice_persisted_docx_bytes
 
 router = APIRouter(prefix="/onlyoffice", tags=["onlyoffice"])
@@ -150,9 +151,19 @@ def _decode_callback_payload(request: Request, body: Any) -> dict[str, Any]:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
 
     # OO DS 7.5 does not include an outbox JWT in callbacks despite local.json configuration.
-    # Accept plain callbacks when the body contains the expected OO DS fields (key + status).
-    # The handler validates case_id / file_id against the DB, limiting the blast radius.
+    # Accept plain callbacks when the body contains the expected OO DS fields (key + status),
+    # unless ONLYOFFICE_CALLBACK_REQUIRE_JWT=1 (recommended for production / DS 8+).
     if isinstance(body, dict) and "status" in body and "key" in body:
+        if onlyoffice_callback_require_jwt():
+            log.warning(
+                "onlyoffice_callback: unsigned payload rejected (ONLYOFFICE_CALLBACK_REQUIRE_JWT=1; key=%s status=%s)",
+                body.get("key"),
+                body.get("status"),
+            )
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="ONLYOFFICE callback JWT required",
+            )
         log.warning(
             "onlyoffice_callback: no JWT in callback body — accepting plain payload "
             "(OO DS outbox JWT not sent by this version; key=%s status=%s)",

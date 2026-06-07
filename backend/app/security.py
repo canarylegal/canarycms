@@ -166,11 +166,19 @@ def decode_eml_open_token(token: str) -> EmlOpenTokenPayload:
 
 
 PORTAL_SESSION_TTL_SECONDS = int(os.getenv("PORTAL_SESSION_TTL_SECONDS", "28800"))  # 8h
+PORTAL_PREVIEW_EXCHANGE_TTL_SECONDS = int(os.getenv("PORTAL_PREVIEW_EXCHANGE_TTL_SECONDS", "300"))  # 5m
 
 
 @dataclass(frozen=True)
 class PortalSessionPayload:
     contact_id: str
+
+
+@dataclass(frozen=True)
+class PortalPreviewExchangePayload:
+    contact_id: str
+    case_id: str
+    staff_user_id: str
 
 
 def create_portal_session_token(*, contact_id: str) -> str:
@@ -195,6 +203,38 @@ def decode_portal_session_token(token: str) -> PortalSessionPayload:
     if not isinstance(sub, str) or not sub.strip():
         raise ValueError("Invalid session")
     return PortalSessionPayload(contact_id=sub)
+
+
+def create_portal_preview_exchange_token(*, contact_id: str, case_id: str, staff_user_id: str) -> str:
+    now = int(time.time())
+    payload = {
+        "contact_id": contact_id,
+        "case_id": case_id,
+        "staff_user_id": staff_user_id,
+        "purpose": "portal_preview_exchange",
+        "iat": now,
+        "exp": now + PORTAL_PREVIEW_EXCHANGE_TTL_SECONDS,
+    }
+    return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALG)
+
+
+def decode_portal_preview_exchange_token(token: str) -> PortalPreviewExchangePayload:
+    try:
+        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALG])
+    except JWTError as e:
+        raise ValueError("Invalid or expired preview link") from e
+    if payload.get("purpose") != "portal_preview_exchange":
+        raise ValueError("Invalid preview link")
+    contact_id = payload.get("contact_id")
+    case_id = payload.get("case_id")
+    staff_user_id = payload.get("staff_user_id")
+    if not all(isinstance(v, str) and v.strip() for v in (contact_id, case_id, staff_user_id)):
+        raise ValueError("Invalid preview link")
+    return PortalPreviewExchangePayload(
+        contact_id=contact_id.strip(),
+        case_id=case_id.strip(),
+        staff_user_id=staff_user_id.strip(),
+    )
 
 
 def decode_access_token(token: str) -> TokenPayload:

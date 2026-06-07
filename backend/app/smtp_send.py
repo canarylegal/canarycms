@@ -18,6 +18,7 @@ def send_smtp_message(
     to_email: str,
     subject: str,
     body: str,
+    body_html: str | None = None,
 ) -> None:
     """Send a plain-text message using org SMTP settings."""
     row = get_smtp_notification_settings(db)
@@ -40,6 +41,8 @@ def send_smtp_message(
     msg["From"] = f"{row.from_name} <{from_email}>" if (row.from_name or "").strip() else from_email
     msg["To"] = to_email
     msg.set_content(body)
+    if body_html:
+        msg.add_alternative(body_html, subtype="html")
 
     if use_tls and port == 465:
         with smtplib.SMTP_SSL(host, port, context=ssl.create_default_context()) as smtp:

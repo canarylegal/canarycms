@@ -22,6 +22,7 @@ import {
   isUsableOutlookMessageWebLink,
   normalizeOutlookWebReadLink,
 } from '../emailLauncher'
+import { ContactSearchPicker } from '../ContactSearchPicker'
 import { useDialogs } from '../DialogProvider'
 import { SearchInput } from '../SearchInput'
 import { SingleSelectDropdown } from '../SingleSelectDropdown'
@@ -54,6 +55,8 @@ import type {
   UserPublic,
   UserSummary,
   CasePortalFolderAccessGrantOut,
+  CasePortalNotifyFilesOut,
+  CasePortalShareStatusOut,
 } from '../types'
 import { TasksTable } from '../TasksTable'
 import { useUserUiPreferences } from '../useUserUiPreferences'
@@ -83,6 +86,7 @@ import {
   portalSharedFolderMoveConfirmMessage,
   portalSharedFolderUploadNotifyMessage,
 } from './portalFolderAccess'
+import { CasePortalPanel } from './CasePortalPanel'
 import { PortalFolderSharePanel } from './PortalFolderSharePanel'
 
 function fileDocOwnerLabel(f: FileSummary): string {
@@ -315,6 +319,7 @@ export function CaseDetail({
   void _tasks
   const { askConfirm } = useDialogs()
   const caseId = caseDetail?.id
+  const portalEnabled = Boolean(caseDetail?.portal_enabled)
   /** Resolved matter id for API calls: null while ``caseDetail`` is stale vs. ``selectedCaseId``. */
   const matterScopeId = useMemo(() => {
     if (!caseId) return null
@@ -325,14 +330,14 @@ export function CaseDetail({
   const [busy, setBusy] = useState(false)
   const [portalFolderGrants, setPortalFolderGrants] = useState<CasePortalFolderAccessGrantOut[]>([])
   const refreshPortalFolderGrants = useCallback(() => {
-    if (!matterScopeId || !token) {
+    if (!matterScopeId || !token || !portalEnabled) {
       setPortalFolderGrants([])
       return
     }
     void apiFetch<CasePortalFolderAccessGrantOut[]>(`/cases/${matterScopeId}/files/portal-folder-access`, { token })
       .then((rows) => setPortalFolderGrants(rows))
       .catch(() => setPortalFolderGrants([]))
-  }, [matterScopeId, token])
+  }, [matterScopeId, token, portalEnabled])
   useEffect(() => {
     refreshPortalFolderGrants()
   }, [refreshPortalFolderGrants, files])
@@ -368,7 +373,6 @@ export function CaseDetail({
         onConfirm: (value: string) => void
       }
   >(null)
-  const [contacts, setContacts] = useState<ContactOut[]>([])
   const [editSnapshot, setEditSnapshot] = useState<CaseContactOut | null>(null)
   const [pushToGlobal, setPushToGlobal] = useState(false)
 
@@ -505,6 +509,7 @@ export function CaseDetail({
     | 'edit-details'
     | 'accounts'
     | 'portal-share'
+    | 'portal-hub'
   const [caseDocPanel, setCaseDocPanel] = useState<CaseDocPanel>(() =>
     openDocPanel === 'accounts' ? 'accounts' : 'documents',
   )
@@ -545,11 +550,10 @@ export function CaseDetail({
     null,
   )
   const [pickMatterCcId, setPickMatterCcId] = useState<string>('none') // 'none' | 'all_clients' | case contact id
-  const [pickGlobalId, setPickGlobalId] = useState<string | null>(null)
+  const [pickSelectedContact, setPickSelectedContact] = useState<ContactOut | null>(null)
   const [pickLinkGlobal, setPickLinkGlobal] = useState(false)
   const [pickLinkType, setPickLinkType] = useState('')
   const [pickLawyerClientIds, setPickLawyerClientIds] = useState<string[]>([])
-  const [pickSearch, setPickSearch] = useState('')
   const [contactPickMatterOpen, setContactPickMatterOpen] = useState(false)
   const [contactPickTypeOpen, setContactPickTypeOpen] = useState(false)
   const [manageAccessOpen, setManageAccessOpen] = useState(false)
@@ -558,13 +562,13 @@ export function CaseDetail({
   const [editFeeEarner, setEditFeeEarner] = useState<string>('')
   const [editCaseStatus, setEditCaseStatus] = useState<CaseWorkflowStatus>('open')
   const [editSourceId, setEditSourceId] = useState('')
+  const [editPortalEnabled, setEditPortalEnabled] = useState(false)
   const [caseSources, setCaseSources] = useState<CaseSourceOut[]>([])
   /** Edit-case save/API errors only (shown inside the edit card, never in the case shell). */
   const [editCaseErr, setEditCaseErr] = useState<string | null>(null)
   const [matterHeadTypes, setMatterHeadTypes] = useState<MatterHeadTypeOut[]>([])
 
   const [contactAddOpen, setContactAddOpen] = useState(false)
-  const [contactAddSearch, setContactAddSearch] = useState('')
   const [selectedGlobalContactId, setSelectedGlobalContactId] = useState<string | null>(null)
   const [contactAddErr, setContactAddErr] = useState<string | null>(null)
   const [matterContactType, setMatterContactType] = useState('')
@@ -607,12 +611,64 @@ export function CaseDetail({
     setPortalShareFolderPath(null)
   }, [caseDocPanel, propertyBaseline])
 
+  useEffect(() => {
+    if (portalEnabled) return
+    if (caseDocPanel === 'portal-hub' || caseDocPanel === 'portal-share') {
+      setCaseDocPanel('documents')
+      setPortalShareFolderPath(null)
+    }
+  }, [portalEnabled, caseDocPanel])
+
   const openPortalSharePanel = useCallback((folderPath: string) => {
+    if (!portalEnabled) return
     setPortalShareFolderPath(folderPath)
     setCaseDocPanel('portal-share')
     setDocMenu(null)
     setPortalMenu(null)
-  }, [])
+  }, [portalEnabled])
+
+  async function onEditPortalEnabledChange(checked: boolean) {
+    if (checked) {
+      setEditPortalEnabled(true)
+      return
+    }
+    if (!caseDetail?.portal_enabled) {
+      setEditPortalEnabled(false)
+      return
+    }
+    if (!caseId) return
+    let grantCount = portalFolderGrants.length
+    let contactCount = new Set(portalFolderGrants.map((g) => g.contact_id)).size
+    if (grantCount === 0) {
+      try {
+        const status = await apiFetch<CasePortalShareStatusOut>(`/cases/${caseId}/portal/share-status`, { token })
+        grantCount = status.active_grant_count
+        contactCount = status.contact_count
+      } catch {
+        /* proceed with zero counts */
+      }
+    }
+    if (grantCount > 0) {
+      const shareNoun = grantCount === 1 ? '1 active folder share' : `${grantCount} active folder shares`
+      const contactNoun = contactCount === 1 ? '1 contact' : `${contactCount} contacts`
+      const ok = await askConfirm({
+        title: 'Disable portal for this matter?',
+        message: [
+          `This matter has ${shareNoun} for ${contactNoun}.`,
+          '',
+          'Clients will immediately lose access to shared documents through the portal.',
+          'Folder sharing settings are kept but inactive until portal is re-enabled.',
+          '',
+          'Disable portal for this matter?',
+        ].join('\n'),
+        danger: true,
+        confirmLabel: 'Disable portal',
+        cancelLabel: 'Keep portal enabled',
+      })
+      if (!ok) return
+    }
+    setEditPortalEnabled(false)
+  }
 
   const finishContactsDoc = useCallback(() => {
     setContactAddOpen(false)
@@ -620,15 +676,6 @@ export function CaseDetail({
     setCaseDocPanel('documents')
     onRefresh()
   }, [onRefresh])
-
-  const refreshGlobalContacts = useCallback(async () => {
-    try {
-      const data = await apiFetch<ContactOut[]>('/contacts', { token })
-      setContacts(data)
-    } catch {
-      /* ignore */
-    }
-  }, [token])
 
   useEffect(() => {
     if (caseDocPanel !== 'tasks' || !caseId) return
@@ -688,29 +735,6 @@ export function CaseDetail({
     document.addEventListener('mousedown', onDown)
     return () => document.removeEventListener('mousedown', onDown)
   }, [contactRowMenu])
-
-  // lazy-load global contacts when viewing a case
-  useEffect(() => {
-    if (!caseId) return
-    let cancelled = false
-    async function loadContacts() {
-      try {
-        const data = await apiFetch<ContactOut[]>('/contacts', { token })
-        if (!cancelled) setContacts(data)
-      } catch {
-        // ignore; case view still usable without contacts
-      }
-    }
-    void loadContacts()
-    return () => {
-      cancelled = true
-    }
-  }, [caseId, token])
-
-  useEffect(() => {
-    if (!contactPickModal) return
-    void refreshGlobalContacts()
-  }, [contactPickModal, refreshGlobalContacts])
 
   useEffect(() => {
     let cancelled = false
@@ -888,6 +912,7 @@ export function CaseDetail({
     setEditFeeEarner(caseDetail?.fee_earner_user_id ? String(caseDetail.fee_earner_user_id) : '')
     setEditCaseStatus(caseDetail?.status ?? 'open')
     setEditSourceId(caseDetail?.source_id ?? '')
+    setEditPortalEnabled(Boolean(caseDetail?.portal_enabled))
   }, [caseDocPanel, caseDetail])
 
   useEffect(() => {
@@ -1233,8 +1258,8 @@ export function CaseDetail({
   async function uploadFilesToCurrentFolder(incomingFiles: File[]) {
     if (incomingFiles.length === 0) return
     let notifyPortalContacts = false
-    const sharedContacts = portalContactsForFolder(docFolder, portalFolderGrants)
-    if (isPortalSharedFolder(docFolder, portalFolderGrants)) {
+    const sharedContacts = portalEnabled ? portalContactsForFolder(docFolder, portalFolderGrants) : []
+    if (portalEnabled && isPortalSharedFolder(docFolder, portalFolderGrants)) {
       const choice = await askConfirm({
         title: 'Notify portal contacts?',
         message: portalSharedFolderUploadNotifyMessage(sharedContacts, incomingFiles.length),
@@ -1250,9 +1275,6 @@ export function CaseDetail({
         const form = new FormData()
         form.append('upload', f)
         form.append('folder', docFolder)
-        if (notifyPortalContacts) {
-          form.append('notify_portal_contacts', 'true')
-        }
         await fetch(apiUrl(`/cases/${caseId}/files`), {
           method: 'POST',
           headers: caseAuthHeaders(token),
@@ -1265,6 +1287,25 @@ export function CaseDetail({
           }
           if (!r.ok) throw new Error((await r.text()) || r.statusText)
         })
+      }
+      if (notifyPortalContacts) {
+        const notifyOut = await apiFetch<CasePortalNotifyFilesOut>(`/cases/${caseId}/portal/notify-files-added`, {
+          token,
+          method: 'POST',
+          json: {
+            folder_path: docFolder,
+            filenames: incomingFiles.map((f) => f.name),
+          },
+        })
+        if (notifyOut.alerts_skipped_reason) {
+          setActionNotice(notifyOut.alerts_skipped_reason)
+        } else if (notifyOut.contacts_notified > 0) {
+          setActionNotice(
+            notifyOut.contacts_notified === 1
+              ? 'Portal contact notified by e-mail.'
+              : `${notifyOut.contacts_notified} portal contacts notified by e-mail.`,
+          )
+        }
       }
       onRefresh()
     } catch (err: any) {
@@ -1710,11 +1751,10 @@ export function CaseDetail({
 
   function resetContactPickForm() {
     setPickMatterCcId('none')
-    setPickGlobalId(null)
+    setPickSelectedContact(null)
     setPickLinkGlobal(false)
     setPickLinkType('')
     setPickLawyerClientIds([])
-    setPickSearch('')
     setContactPickMatterOpen(false)
     setContactPickTypeOpen(false)
   }
@@ -1746,12 +1786,7 @@ export function CaseDetail({
     setBusy(true)
     setActionErr(null)
     try {
-      if (pickGlobalId) {
-        const g = contacts.find((c) => c.id === pickGlobalId)
-        if (!g) {
-          setActionErr('Global contact not found.')
-          return
-        }
+      if (pickSelectedContact) {
         if (pickLinkGlobal) {
           if (!pickLinkType.trim()) {
             setActionErr('Contact type is required when linking to this matter.')
@@ -1762,7 +1797,7 @@ export function CaseDetail({
             return
           }
           const linkJson: Record<string, unknown> = {
-            contact_id: pickGlobalId,
+            contact_id: pickSelectedContact.id,
             matter_contact_type: pickLinkType.trim(),
             matter_contact_reference: null,
           }
@@ -1787,9 +1822,9 @@ export function CaseDetail({
       } else if (pickMatterCcId && pickMatterCcId !== 'none') {
         label = caseContacts.find((c) => c.id === pickMatterCcId)?.name ?? 'Letter'
         caseContactIdForMerge = pickMatterCcId
-      } else if (pickGlobalId) {
-        label = contacts.find((c) => c.id === pickGlobalId)?.name ?? 'Letter'
-        globalContactIdForMerge = pickGlobalId
+      } else if (pickSelectedContact) {
+        label = pickSelectedContact.name ?? 'Letter'
+        globalContactIdForMerge = pickSelectedContact.id
       }
 
       const composeKind = contactPickModal.composeKind ?? 'letter'
@@ -1992,7 +2027,6 @@ export function CaseDetail({
                           setLawyerLinkClientIds([])
                           setContactAddErr(null)
                           setSelectedGlobalContactId(null)
-                          setContactAddSearch('')
                           setContactAddOpen(true)
                           setCaseDocPanel('contacts')
                         }}
@@ -2479,6 +2513,11 @@ export function CaseDetail({
                   >
                     Export
                   </button>
+                  {portalEnabled ? (
+                    <button type="button" className="btn btnCaseChrome" disabled={busy} onClick={() => setCaseDocPanel('portal-hub')}>
+                      Portal
+                    </button>
+                  ) : null}
                   <button type="button" className="btn btnCaseChrome" disabled={busy} onClick={() => onRefresh()}>
                     Refresh
                   </button>
@@ -2614,7 +2653,7 @@ export function CaseDetail({
                   >
                     <DocsFolderDescCell
                       name={decodeFolderPathSegment(folderName)}
-                      shared={isPortalSharedFolder(next, portalFolderGrants)}
+                      shared={portalEnabled && isPortalSharedFolder(next, portalFolderGrants)}
                     />
                     <div className="td muted docsCenter">—</div>
                     <div className="td muted docsCenter">—</div>
@@ -2760,7 +2799,11 @@ export function CaseDetail({
                             Select fee earner
                           </option>
                           {users
-                            .filter((u) => u.is_active)
+                            .filter(
+                              (u) =>
+                                u.is_active &&
+                                (u.can_be_fee_earner !== false || u.id === caseDetail?.fee_earner_user_id),
+                            )
                             .map((u) => (
                               <option key={u.id} value={u.id}>
                                 {u.display_name} ({u.email})
@@ -2796,6 +2839,20 @@ export function CaseDetail({
                             </option>
                           ))}
                         </select>
+                      </label>
+                      <label className="row field" style={{ gap: 10, alignItems: 'center', cursor: busy ? 'default' : 'pointer' }}>
+                        <input
+                          type="checkbox"
+                          checked={editPortalEnabled}
+                          disabled={busy}
+                          onChange={(e) => void onEditPortalEnabledChange(e.target.checked)}
+                        />
+                        <span>
+                          Enable portal
+                          <span className="muted" style={{ display: 'block', fontSize: 13, marginTop: 2 }}>
+                            Allow folder sharing, client preview, and portal notifications for this matter.
+                          </span>
+                        </span>
                       </label>
                       <div className="row" style={{ justifyContent: 'flex-start', marginTop: 8 }}>
                         <button
@@ -2834,6 +2891,7 @@ export function CaseDetail({
                                   ...(editPracticeArea.trim()
                                     ? { matter_sub_type_id: editPracticeArea.trim() }
                                     : { matter_sub_type_id: null, matter_head_type_id: null }),
+                                  portal_enabled: editPortalEnabled,
                                 },
                               })
                               backToDocuments()
@@ -2853,7 +2911,25 @@ export function CaseDetail({
                     </div>
                   </CaseDocPanelZoomFit>
                 </div>
-              ) : caseDocPanel === 'portal-share' && caseId && portalShareFolderPath !== null ? (
+              ) : caseDocPanel === 'portal-hub' && caseId && portalEnabled ? (
+                <div
+                  className="caseDocPanelInset caseDocPanelHost stack"
+                  style={{ gap: 12, padding: '8px 12px 16px', minHeight: 0 }}
+                >
+                  <div className="row caseDocPanelBar" style={{ alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                    <button type="button" className="btn" onClick={backToDocuments}>
+                      ← Documents
+                    </button>
+                    <span className="muted">Portal</span>
+                    <button className="btn" style={{ marginLeft: 'auto' }} onClick={backToDocuments} disabled={busy}>
+                      Close
+                    </button>
+                  </div>
+                  <CaseDocPanelZoomFit>
+                    <CasePortalPanel token={token} caseId={caseId} />
+                  </CaseDocPanelZoomFit>
+                </div>
+              ) : caseDocPanel === 'portal-share' && caseId && portalEnabled && portalShareFolderPath !== null ? (
                 <div
                   className="caseDocPanelInset caseDocPanelHost stack"
                   style={{ gap: 12, padding: '8px 12px 16px', minHeight: 0 }}
@@ -3114,9 +3190,6 @@ export function CaseDetail({
                           setMatterContactReference={setMatterContactReference}
                           lawyerLinkClientIds={lawyerLinkClientIds}
                           setLawyerLinkClientIds={setLawyerLinkClientIds}
-                          contacts={contacts}
-                          contactAddSearch={contactAddSearch}
-                          setContactAddSearch={setContactAddSearch}
                           selectedGlobalContactId={selectedGlobalContactId}
                           setSelectedGlobalContactId={setSelectedGlobalContactId}
                           matterTypeOptions={matterTypeOptions}
@@ -3124,7 +3197,7 @@ export function CaseDetail({
                           contactAddErr={contactAddErr}
                           setContactAddErr={setContactAddErr}
                           setActionErr={setActionErr}
-                          onGlobalContactsUpdated={refreshGlobalContacts}
+                          onGlobalContactsUpdated={() => {}}
                         />
                       </>
                     ) : editSnapshot ? (
@@ -3295,7 +3368,6 @@ export function CaseDetail({
           token={token}
           users={users}
           caseIdFixed={caseId ?? null}
-          casesForPicker={null}
           preset={taskCreatePreset}
           onClose={() => {
             setTaskCreateOpen(false)
@@ -3335,8 +3407,6 @@ export function CaseDetail({
         {quoteWizardOpen && caseDetail ? (
           <QuoteWizard
             token={token}
-            cases={[caseDetail]}
-            users={users}
             open={quoteWizardOpen}
             presetCase={caseDetail}
             onClose={closeQuoteWizard}
@@ -3545,7 +3615,7 @@ export function CaseDetail({
                   value={pickMatterCcId}
                   onChange={(v) => {
                     setPickMatterCcId(v)
-                    setPickGlobalId(null)
+                    setPickSelectedContact(null)
                   }}
                   open={contactPickMatterOpen}
                   onOpenChange={(next) => {
@@ -3557,53 +3627,19 @@ export function CaseDetail({
                 <div className="muted" style={{ fontSize: 12 }}>
                   Or search for a global contact (results appear when your search matches):
                 </div>
-                <SearchInput
-                  placeholder="Search global…"
-                  value={pickSearch}
-                  onChange={(e) => setPickSearch(e.target.value)}
-                  onClear={() => setPickSearch('')}
-                  aria-label="Search global contacts"
+                <ContactSearchPicker
+                  token={token}
+                  value={pickSelectedContact?.id ?? null}
+                  onChange={(id, contact) => {
+                    setPickSelectedContact(contact ?? null)
+                    if (id) setPickMatterCcId('none')
+                  }}
+                  disabled={busy}
+                  organisationOnly={pickLinkType.trim().toLowerCase() === LAWYERS_TYPE_SLUG}
+                  listMaxHeight={120}
+                  searchPlaceholder="Search global…"
                 />
-                <div className="list" style={{ maxHeight: 120, overflow: 'auto' }}>
-                  {(() => {
-                    const q = pickSearch.trim().toLowerCase()
-                    if (!q) {
-                      return (
-                        <div className="muted" style={{ padding: '6px 0' }}>
-                          Type in the search box to find global contacts.
-                        </div>
-                      )
-                    }
-                    const filtered = contacts.filter((c) => {
-                      if (pickLinkType.trim().toLowerCase() === LAWYERS_TYPE_SLUG && c.type !== 'organisation') {
-                        return false
-                      }
-                      return c.name.toLowerCase().includes(q) || (c.email ?? '').toLowerCase().includes(q)
-                    })
-                    if (filtered.length === 0) {
-                      return (
-                        <div className="muted" style={{ padding: '6px 0' }}>
-                          No global contacts match.
-                        </div>
-                      )
-                    }
-                    return filtered.slice(0, 20).map((c) => (
-                      <button
-                        key={c.id}
-                        type="button"
-                        className={`listItem ${pickGlobalId === c.id ? 'active' : ''}`}
-                        onClick={() => {
-                          setPickGlobalId(c.id)
-                          setPickMatterCcId('none')
-                        }}
-                      >
-                        <div className="listTitle">{c.name}</div>
-                        <div className="muted">{c.email ?? '—'}</div>
-                      </button>
-                    ))
-                  })()}
-                </div>
-                {pickGlobalId ? (
+                {pickSelectedContact ? (
                   <label className="row" style={{ alignItems: 'center', gap: 8 }}>
                     <input
                       type="checkbox"
@@ -3622,9 +3658,8 @@ export function CaseDetail({
                       setPickLinkType(v)
                       if (v.trim().toLowerCase() !== LAWYERS_TYPE_SLUG) {
                         setPickLawyerClientIds([])
-                      } else if (pickGlobalId) {
-                        const sel = contacts.find((x) => x.id === pickGlobalId)
-                        if (sel && sel.type === 'person') setPickGlobalId(null)
+                      } else if (pickSelectedContact?.type === 'person') {
+                        setPickSelectedContact(null)
                       }
                     }}
                     open={contactPickTypeOpen}
@@ -3846,6 +3881,7 @@ export function CaseDetail({
                   ) : null}
                 </div>
 
+                {portalEnabled ? (
                 <div
                   className="docContextSubWrap"
                   onMouseEnter={() => setPortalMenu({ folderPath: docMenu.folderPath })}
@@ -3862,6 +3898,17 @@ export function CaseDetail({
                       <div
                         className="docContextItem"
                         role="menuitem"
+                        onClick={() => {
+                          setDocMenu(null)
+                          setPortalMenu(null)
+                          setCaseDocPanel('portal-hub')
+                        }}
+                      >
+                        Activity & settings
+                      </div>
+                      <div
+                        className="docContextItem"
+                        role="menuitem"
                         onClick={() => openPortalSharePanel(docMenu.folderPath)}
                       >
                         Share
@@ -3869,13 +3916,14 @@ export function CaseDetail({
                     </div>
                   ) : null}
                 </div>
+                ) : null}
 
                 <div
                   className="docContextItem"
                   onClick={() => {
                     void (async () => {
                       const current = docMenu.folderPath
-                      const sharedContacts = portalContactsForFolder(current, portalFolderGrants)
+                      const sharedContacts = portalEnabled ? portalContactsForFolder(current, portalFolderGrants) : []
                       const ok = await askConfirm({
                         title: 'Delete folder',
                         message: portalSharedFolderDeleteConfirmMessage(

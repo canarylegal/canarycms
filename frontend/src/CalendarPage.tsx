@@ -16,6 +16,7 @@ import { apiFetch } from './api'
 import type { ApiError } from './api'
 import { ConfirmModal } from './ConfirmModal'
 import { useDialogs } from './DialogProvider'
+import { MatterSearchPicker } from './MatterSearchPicker'
 import { SearchInput } from './SearchInput'
 import { useUserUiPreferences, type CalendarView } from './useUserUiPreferences'
 import type {
@@ -24,7 +25,6 @@ import type {
   CalendarEventOut,
   CalendarShareOut,
   CaseEventOut,
-  CaseOut,
   UserCalendarListItem,
   UserPublic,
   UserSummary,
@@ -402,14 +402,6 @@ function stripLeadingCalendarTitle(title: string): string {
   return once.length > 0 ? once : title
 }
 
-const CALENDAR_MATTER_PICKER_LIMIT = 50
-
-function calendarMatterSummary(c: CaseOut): { primary: string; secondary: string | null } {
-  const primary = c.case_number
-  const bits = [c.client_name?.trim(), c.matter_description?.trim()].filter(Boolean) as string[]
-  return { primary, secondary: bits.length ? bits.join(' · ') : null }
-}
-
 /** Coerce FullCalendar event start/end to YYYY-MM-DD for api_all_day transform. */
 function eventInputToYmd(v: EventInput['start']): string | undefined {
   if (v == null) return undefined
@@ -446,8 +438,6 @@ export function CalendarPage({
   const [selectedCalIds, setSelectedCalIds] = useState<string[]>([])
   const [showManage, setShowManage] = useState(false)
   const [eventCategories, setEventCategories] = useState<CalendarCategoryOut[]>([])
-  const [matterPickerCases, setMatterPickerCases] = useState<CaseOut[]>([])
-  const [createMatterSearch, setCreateMatterSearch] = useState('')
   const [caseEventsForCreate, setCaseEventsForCreate] = useState<CaseEventOut[]>([])
 
   const [draft, setDraft] = useState<
@@ -505,28 +495,6 @@ export function CalendarPage({
   const createCaseId = draft?.kind === 'create' ? draft.caseId : ''
 
   useEffect(() => {
-    if (!token) {
-      setMatterPickerCases([])
-      return
-    }
-    let cancel = false
-    void apiFetch<CaseOut[]>('/cases', { token })
-      .then((rows) => {
-        if (!cancel) setMatterPickerCases(Array.isArray(rows) ? rows : [])
-      })
-      .catch(() => {
-        if (!cancel) setMatterPickerCases([])
-      })
-    return () => {
-      cancel = true
-    }
-  }, [token])
-
-  useEffect(() => {
-    if (!draft || draft.kind !== 'create') setCreateMatterSearch('')
-  }, [draft])
-
-  useEffect(() => {
     if (!createCaseId || !token) {
       setCaseEventsForCreate([])
       return
@@ -543,32 +511,6 @@ export function CalendarPage({
       cancel = true
     }
   }, [createCaseId, token])
-
-  const filteredCreateMatters = useMemo(() => {
-    const s = createMatterSearch.trim().toLowerCase()
-    if (!s) return []
-    const sorted = [...matterPickerCases].sort((a, b) => a.case_number.localeCompare(b.case_number))
-    return sorted.filter((c) => {
-      const parts = [c.case_number, c.client_name ?? '', c.matter_description ?? '', c.status]
-      return parts.join(' ').toLowerCase().includes(s)
-    })
-  }, [matterPickerCases, createMatterSearch])
-
-  const visibleCreateMatters = useMemo(
-    () => filteredCreateMatters.slice(0, CALENDAR_MATTER_PICKER_LIMIT),
-    [filteredCreateMatters],
-  )
-  const createMatterListTruncated = filteredCreateMatters.length > visibleCreateMatters.length
-
-  const selectedCreateMatter = useMemo(() => {
-    if (!draft || draft.kind !== 'create' || !draft.caseId.trim()) return null
-    return matterPickerCases.find((c) => c.id === draft.caseId) ?? null
-  }, [draft, matterPickerCases])
-
-  const selectedCreateMatterLines = useMemo(
-    () => (selectedCreateMatter ? calendarMatterSummary(selectedCreateMatter) : null),
-    [selectedCreateMatter],
-  )
 
   /** When a case template row is chosen, mirror ``CaseEventCreateModal`` name + track defaults. */
   useEffect(() => {
@@ -788,7 +730,7 @@ export function CalendarPage({
   }
 
   function onSelect(selectInfo: DateSelectArg) {
-    if (matterPickerCases.length === 0) return
+    if (needCaldav) return
     const start = selectInfo.start
     const end = selectInfo.end
     const allDaySel = Boolean(selectInfo.allDay)
@@ -824,10 +766,6 @@ export function CalendarPage({
     setBanner(null)
     if (needCaldav) {
       setBanner('Turn on CalDAV in User settings to create events.')
-      return
-    }
-    if (matterPickerCases.length === 0) {
-      setBanner('You need at least one matter to create an event.')
       return
     }
     const start = new Date()
@@ -1132,7 +1070,9 @@ export function CalendarPage({
         <div>
           <h2 style={{ margin: 0 }}>Calendar</h2>
           <div className="muted" style={{ marginTop: 4 }}>
-            Radicale-backed; shared and public calendars sync here. External CalDAV still sees only your own principal.
+            In Canary you see your calendars plus any shared with you or subscribed from the directory. External CalDAV
+            apps (Outlook, Apple Calendar, etc.) only sync calendars under your own login — not colleagues&apos; shared
+            calendars.
           </div>
         </div>
         <div className="row" style={{ gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -1224,7 +1164,7 @@ export function CalendarPage({
           }}
           height={calendarPixelHeight}
           editable={!needCaldav}
-          selectable={!needCaldav && matterPickerCases.length > 0}
+          selectable={!needCaldav}
           selectMirror
           dayMaxEvents
           weekends
@@ -1287,111 +1227,21 @@ export function CalendarPage({
               {draft.kind === 'create' ? (
                 <div className="field" style={{ minWidth: 0 }}>
                   <span>Matter</span>
-                  <div className="calendarMatterPicker">
-                    {draft.caseId.trim() ? (
-                      <div className="calendarMatterPickerSelected">
-                        <div className="calendarMatterPickerSelectedText">
-                          {selectedCreateMatterLines ? (
-                            <>
-                              <div className="calendarMatterPickerSelectedPrimary">
-                                {selectedCreateMatterLines.primary}
-                              </div>
-                              {selectedCreateMatterLines.secondary ? (
-                                <div className="calendarMatterPickerSelectedSecondary muted">
-                                  {selectedCreateMatterLines.secondary}
-                                </div>
-                              ) : null}
-                            </>
-                          ) : (
-                            <div className="calendarMatterPickerSelectedPrimary muted">
-                              Matter selected (reload list if this persists)
-                            </div>
-                          )}
-                        </div>
-                        <button
-                          type="button"
-                          className="btn"
-                          disabled={busy}
-                          onClick={() => {
-                            setCreateMatterSearch('')
-                            setDraft({
-                              ...draft,
-                              caseId: '',
-                              eventCategory: 'custom',
-                              title: '',
-                              trackInCalendar: true,
-                              emailAlert: false,
-                            })
-                          }}
-                        >
-                          Change
-                        </button>
-                      </div>
-                    ) : (
-                      <>
-                        <SearchInput
-                          className="calendarMatterPickerSearch"
-                          placeholder="Search matters (reference, client, description, status)…"
-                          value={createMatterSearch}
-                          onChange={(e) => setCreateMatterSearch(e.target.value)}
-                          onClear={() => setCreateMatterSearch('')}
-                          disabled={busy}
-                          aria-label="Search matters"
-                          autoComplete="off"
-                        />
-                        {!createMatterSearch.trim() ? (
-                          <p className="muted calendarMatterPickerHint" style={{ margin: 0 }}>
-                            {matterPickerCases.length === 0
-                              ? 'No matters available.'
-                              : 'Type to search matters (reference, client, description, status).'}
-                          </p>
-                        ) : visibleCreateMatters.length === 0 ? (
-                          <p className="muted calendarMatterPickerHint" style={{ margin: 0 }}>
-                            No matters match your search.
-                          </p>
-                        ) : (
-                          <>
-                            <ul className="calendarMatterPickerList" role="listbox" aria-label="Matching matters">
-                              {visibleCreateMatters.map((c) => {
-                                const lines = calendarMatterSummary(c)
-                                return (
-                                  <li key={c.id} role="none">
-                                    <button
-                                      type="button"
-                                      disabled={busy}
-                                      role="option"
-                                      onClick={() => {
-                                        setCreateMatterSearch('')
-                                        setDraft({
-                                          ...draft,
-                                          caseId: c.id,
-                                          eventCategory: 'custom',
-                                          title: '',
-                                          trackInCalendar: true,
-                                          emailAlert: false,
-                                        })
-                                      }}
-                                    >
-                                      <span className="calendarMatterPickerRowPrimary">{lines.primary}</span>
-                                      {lines.secondary ? (
-                                        <span className="calendarMatterPickerRowSecondary muted">{lines.secondary}</span>
-                                      ) : null}
-                                    </button>
-                                  </li>
-                                )
-                              })}
-                            </ul>
-                            {createMatterListTruncated ? (
-                              <p className="muted calendarMatterPickerHint" style={{ margin: 0 }}>
-                                Showing the first {CALENDAR_MATTER_PICKER_LIMIT} matches — refine your search to narrow
-                                results.
-                              </p>
-                            ) : null}
-                          </>
-                        )}
-                      </>
-                    )}
-                  </div>
+                  <MatterSearchPicker
+                    token={token}
+                    value={draft.caseId}
+                    disabled={busy}
+                    onChange={(caseId) => {
+                      setDraft({
+                        ...draft,
+                        caseId,
+                        eventCategory: 'custom',
+                        title: '',
+                        trackInCalendar: true,
+                        emailAlert: false,
+                      })
+                    }}
+                  />
                 </div>
               ) : null}
               {draft.kind === 'create' ? (
@@ -2025,7 +1875,8 @@ function CalendarManageModal({
 
             <h4 style={{ margin: '0 0 8px' }}>Access</h4>
             <div className="muted" style={{ fontSize: 13, marginBottom: 8 }}>
-              Grant Canary users access (in-app + CalDAV via server). External clients only see their own principal.
+              Other Canary users you add here see this calendar in the app (merged by the server). It does not appear in
+              their external CalDAV client — only calendars on their own account sync there.
             </div>
             <div className="row" style={{ gap: 8, flexWrap: 'wrap', alignItems: 'center', marginBottom: 8 }}>
               <select value={pickGrantee} onChange={(e) => setPickGrantee(e.target.value)}>

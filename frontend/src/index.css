@@ -695,6 +695,7 @@ html.dark .topbar .btn:not(.primary):not(.danger) {
 }
 
 .mainMenuShell--mainMenu .casesTableScroll .tr.rowbtn.casesRowInactive.active {
+  opacity: 0.72;
   background: rgba(var(--primary-rgb), 0.08);
 }
 
@@ -1088,6 +1089,192 @@ html.dark .topbar .btn:not(.primary):not(.danger) {
   border-radius: 14px;
   padding: 14px;
   box-shadow: var(--shadow);
+}
+
+/* Admin → Audit */
+.auditPage {
+  min-height: 0;
+}
+
+.auditToolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px 16px;
+  padding: 12px 14px;
+}
+
+.auditToolbarFields {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px 14px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.auditToolbarField {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  flex: 0 0 auto;
+  width: 200px;
+  max-width: 100%;
+  margin: 0;
+}
+
+.auditToolbarField--matter {
+  width: 280px;
+  flex: 1 1 240px;
+  max-width: 360px;
+  min-width: 0;
+}
+
+.auditToolbarField--matter .calendarMatterPicker {
+  width: 100%;
+}
+
+.auditToolbarField--action {
+  width: 220px;
+}
+
+.auditToolbarField select,
+.auditToolbarField input {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.auditToolbarLabel {
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.2;
+}
+
+.auditToolbarActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+.auditTableCard {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+.auditTableScroll {
+  flex: 1 1 auto;
+  min-height: 200px;
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.auditTableScroll .auditTableHead {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--panel);
+}
+
+/* Override global .tr five-column defaults (140px … 120px) for audit rows. */
+.auditTableCard .auditTableScroll .tr {
+  align-items: start;
+}
+
+.auditTableCard .auditTableScroll .tr:not([style*='grid-template-columns']) {
+  grid-template-columns:
+    minmax(10.5rem, 0.7fr)
+    minmax(9.5rem, 0.85fr)
+    minmax(9.5rem, 0.85fr)
+    minmax(14rem, 2.4fr)
+    minmax(11rem, 1.1fr);
+}
+
+.auditTableCard .auditTableScroll .tr.auditTableRow--message {
+  grid-template-columns: 1fr !important;
+}
+
+.auditTableCard .auditTableScroll .td {
+  overflow: visible;
+  text-overflow: unset;
+  white-space: normal;
+  word-break: break-word;
+  align-self: start;
+  min-width: 0;
+}
+
+.auditTableCard .auditTableScroll .td.auditColWhen {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.auditThLabel {
+  flex: 1;
+  min-width: 0;
+  padding: 0 8px;
+  font-size: var(--canary-table-font-size);
+  font-weight: 600;
+  line-height: var(--canary-table-line-height);
+}
+
+.auditTableRow .auditColSummary {
+  line-height: 1.45;
+}
+
+.auditActionCode {
+  display: block;
+  font-size: 0.82rem;
+  line-height: 1.35;
+  word-break: break-word;
+}
+
+.auditMetaDetails {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.auditMetaDetails summary {
+  cursor: pointer;
+  user-select: none;
+}
+
+.auditMetaPre {
+  margin: 8px 0 0;
+  padding: 8px 10px;
+  font-size: 11px;
+  overflow: auto;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: rgba(0, 0, 0, 0.15);
+  max-height: 160px;
+}
+
+@media (max-width: 900px) {
+  .auditToolbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .auditToolbarFields {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .auditToolbarField,
+  .auditToolbarField--matter,
+  .auditToolbarField--action {
+    width: 100%;
+  }
+
+  .auditToolbarActions {
+    justify-content: flex-start;
+  }
 }
 
 .muted {
@@ -3106,6 +3293,20 @@ html.dark .ledgerBalanceBand--client {
   padding-top: 4px;
 }
 
+.ledgerGlobalContactPick {
+  margin-top: 8px;
+}
+
+.ledgerGlobalContactPanel {
+  margin-top: 8px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--panel2);
+  max-height: 220px;
+  overflow: auto;
+}
+
 /* ---------------------------------------------------------------------------
    Shared debit/credit badge (ledger + finance)
    --------------------------------------------------------------------------- */
@@ -4168,8 +4369,108 @@ html.dark .emlPreviewBodyWrap {
   align-items: center;
 }
 
+.portalFilesTableIconCol {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding-left: 4px;
+  padding-right: 4px;
+}
+
+.portalBreadcrumb .btnLink,
+.portalSignInTabs .btn {
+  font-size: inherit;
+}
+
+.btnLink {
+  background: none;
+  border: none;
+  padding: 0;
+  color: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+  font: inherit;
+}
+
+.btnLink:hover {
+  opacity: 0.85;
+}
+
 html.dark .portalShell {
   background: var(--page-bg);
+}
+
+.portalPreviewSection {
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--card-bg, rgba(255, 255, 255, 0.02));
+}
+
+.portalStaffChipRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.portalStaffChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--card-bg, rgba(255, 255, 255, 0.04));
+  font-size: 13px;
+}
+
+.portalStaffChipRemove {
+  border: none;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  padding: 0 2px;
+  opacity: 0.75;
+}
+
+.portalStaffChipRemove:hover {
+  opacity: 1;
+}
+
+.portalStaffSearchResults {
+  max-height: 220px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 4px;
+}
+
+.portalStaffSearchHit {
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: transparent;
+  padding: 8px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+}
+
+.portalStaffSearchHit:hover {
+  background: var(--hover-bg, rgba(127, 127, 127, 0.12));
+}
+
+.portalStaffPreviewBanner {
+  margin-bottom: 16px;
+}
+
+.portalPreviewContactSelect {
+  flex: 1;
+  min-width: 220px;
+  max-width: 420px;
 }
 
 /* E-mail compose: attach from Canary / local */

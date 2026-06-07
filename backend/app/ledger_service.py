@@ -9,6 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.admin_access import user_effective_admin
+from app.ledger_party import resolve_ledger_party
 from app.models import LedgerAccount, LedgerAccountType, LedgerDirection, LedgerEntry, User
 from app.permission_checks import assert_may_post_ledger
 from app.schemas import LedgerAccountSummary, LedgerEntryOut, LedgerOut, LedgerPostCreate
@@ -81,6 +82,7 @@ def post_transaction(
         )
 
     assert_may_post_ledger(user, payload, db)
+    party = resolve_ledger_party(case_id, payload, db)
 
     accounts = _get_or_create_accounts(case_id, db)
     pair_id = uuid.uuid4()
@@ -98,7 +100,9 @@ def post_transaction(
                 amount_pence=payload.amount_pence,
                 description=payload.description,
                 reference=payload.reference,
-                contact_label=payload.contact_label,
+                contact_label=party.contact_label,
+                case_contact_id=party.case_contact_id,
+                contact_id=party.contact_id,
                 posted_by_user_id=user.id,
                 posted_at=now,
                 is_approved=is_approved,
@@ -115,7 +119,9 @@ def post_transaction(
                 amount_pence=payload.amount_pence,
                 description=payload.description,
                 reference=payload.reference,
-                contact_label=payload.contact_label,
+                contact_label=party.contact_label,
+                case_contact_id=party.case_contact_id,
+                contact_id=party.contact_id,
                 posted_by_user_id=user.id,
                 posted_at=now,
                 is_approved=is_approved,
@@ -202,6 +208,8 @@ def get_ledger(case_id: uuid.UUID, db: Session) -> LedgerOut:
                 description=e.description,
                 reference=e.reference,
                 contact_label=e.contact_label,
+                case_contact_id=e.case_contact_id,
+                contact_id=e.contact_id,
                 posted_by_user_id=e.posted_by_user_id,
                 posted_at=e.posted_at,
                 is_approved=e.is_approved,

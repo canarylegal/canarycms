@@ -141,8 +141,8 @@ class CaseStatus(str, enum.Enum):
 
 class CaseLockMode(str, enum.Enum):
     none = "none"
-    whitelist = "whitelist"
-    blacklist = "blacklist"
+    open_by_default = "open_by_default"
+    allow_list = "allow_list"
 
 
 class CaseAccessMode(str, enum.Enum):
@@ -266,11 +266,12 @@ class Case(Base):
     lock_mode: Mapped[CaseLockMode] = mapped_column(
         Enum(CaseLockMode, name="case_lock_mode"),
         nullable=False,
-        default=CaseLockMode.whitelist,
+        default=CaseLockMode.open_by_default,
     )
     source_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("case_source.id", ondelete="SET NULL"), nullable=True, index=True
     )
+    portal_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
@@ -399,6 +400,21 @@ class PasswordResetToken(Base):
     token_sha256: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+
+
+class AuthRateLimitEntry(Base):
+    """Failed auth / reset attempts keyed by scope + identifier (email or IP)."""
+
+    __tablename__ = "auth_rate_limit_entry"
+    __table_args__ = (UniqueConstraint("scope", "identifier", name="uq_auth_rate_limit_scope_identifier"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    scope: Mapped[str] = mapped_column(String(64), nullable=False)
+    identifier: Mapped[str] = mapped_column(String(320), nullable=False)
+    failed_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
 
 
 class WebAuthnChallenge(Base):
@@ -656,6 +672,8 @@ class ContactPortalAccess(Base):
     failed_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    notify_files_added: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    notify_folder_shared: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_by_user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("user.id"), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
@@ -679,6 +697,43 @@ class ContactPortalGrant(Base):
     created_by_user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("user.id"), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+
+
+class CasePortalStaffRecipient(Base):
+    """Staff users who receive portal notification e-mails for a matter."""
+
+    __tablename__ = "case_portal_staff_recipient"
+
+    case_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("case.id", ondelete="CASCADE"), primary_key=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("user.id", ondelete="CASCADE"), primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+
+
+class PortalActivityEvent(Base):
+    __tablename__ = "portal_activity_event"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    case_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("case.id", ondelete="CASCADE"), nullable=False, index=True)
+    contact_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("contact.id", ondelete="SET NULL"), nullable=True
+    )
+    grant_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("contact_portal_grant.id", ondelete="SET NULL"), nullable=True
+    )
+    action: Mapped[str] = mapped_column(String(80), nullable=False)
+    summary: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+
+
+class PortalLoginOtp(Base):
+    __tablename__ = "portal_login_otp"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    contact_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("contact.id", ondelete="CASCADE"), nullable=False)
+    code_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
 
 
 class CaseContact(Base):
@@ -953,6 +1008,12 @@ class LedgerEntry(Base):
     description: Mapped[str] = mapped_column(Text, nullable=False)
     reference: Mapped[str | None] = mapped_column(String(200), nullable=True)
     contact_label: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    case_contact_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("case_contact.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    contact_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("contact.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     posted_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("user.id", ondelete="SET NULL"), nullable=True
     )

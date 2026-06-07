@@ -1,8 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { applyAuthHeaders, apiUrl, formatApiErrorDetail } from './api'
-import type { PortalAuthOut, PortalFileOut, PortalGrantSummaryOut, PortalSessionOut } from './types'
+import { DocMimeIcon } from './case/DocCells'
+import type { PortalAuthOut, PortalBrowseOut, PortalFileOut, PortalGrantSummaryOut, PortalSessionOut } from './types'
+
+const PORTAL_FILES_GRID = '32px 1fr 120px 100px 180px'
 
 const PORTAL_TOKEN_KEY = 'canary_portal_token'
+const PORTAL_TITLE = 'Canary Portal'
+
+type SignInMode = 'code' | 'email'
 
 function getStoredPortalToken(): string {
   try {
@@ -52,6 +58,13 @@ function formatBytes(n: number): string {
   return `${(n / (1024 * 1024)).toFixed(1)} MB`
 }
 
+function uploadFolderForGrant(grant: PortalGrantSummaryOut, subfolder: string): string {
+  const root = (grant.folder_path || '').trim()
+  const rel = (subfolder || '').trim()
+  if (!rel) return root
+  return root ? `${root}/${rel}` : rel
+}
+
 type MatterGroup = {
   caseId: string
   caseTitle: string
@@ -72,17 +85,24 @@ function groupGrantsByMatter(grants: PortalGrantSummaryOut[]): MatterGroup[] {
 }
 
 export default function PortalPage() {
-  const [firmName, setFirmName] = useState('Client portal')
+  const [firmDisplayName, setFirmDisplayName] = useState('')
+  const [signInMode, setSignInMode] = useState<SignInMode>('code')
   const [accessCode, setAccessCode] = useState('')
+  const [otpEmail, setOtpEmail] = useState('')
+  const [otpCode, setOtpCode] = useState('')
+  const [otpSent, setOtpSent] = useState(false)
   const [sessionToken, setSessionToken] = useState(() => getStoredPortalToken())
   const [contactName, setContactName] = useState('')
   const [grants, setGrants] = useState<PortalGrantSummaryOut[]>([])
   const [activeCaseId, setActiveCaseId] = useState<string | null>(null)
   const [activeGrantId, setActiveGrantId] = useState<string | null>(null)
-  const [files, setFiles] = useState<PortalFileOut[]>([])
+  const [browseSubfolder, setBrowseSubfolder] = useState('')
+  const [browse, setBrowse] = useState<PortalBrowseOut | null>(null)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
+  const [info, setInfo] = useState<string | null>(null)
   const [uploadBusy, setUploadBusy] = useState(false)
+  const [previewExchangeBusy, setPreviewExchangeBusy] = useState(false)
 
   const matterGroups = useMemo(() => groupGrantsByMatter(grants), [grants])
   const activeMatter = useMemo(
@@ -91,13 +111,51 @@ export default function PortalPage() {
   )
   const activeGrant = useMemo(() => grants.find((g) => g.id === activeGrantId) ?? null, [grants, activeGrantId])
 
+  const staffPreview = useMemo(() => {
+    if (typeof window === 'undefined') return false
+    return new URLSearchParams(window.location.search).get('staff_preview') === '1'
+  }, [])
+
   const loadConfig = useCallback(async () => {
     try {
       const cfg = await portalFetch<{ firm_name: string }>('/portal/config')
-      if (cfg.firm_name?.trim()) setFirmName(cfg.firm_name.trim())
+      setFirmDisplayName(cfg.firm_name?.trim() ?? '')
     } catch {
       /* optional */
     }
+  }, [])
+
+  useEffect(() => {
+    document.title = PORTAL_TITLE
+  }, [])
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const exchange = params.get('preview_exchange')?.trim()
+    if (!exchange) return
+    void (async () => {
+      setPreviewExchangeBusy(true)
+      setErr(null)
+      try {
+        const out = await portalFetch<PortalAuthOut>('/portal/auth/preview-exchange', {
+          method: 'POST',
+          json: { exchange_token: exchange },
+        })
+        storePortalToken(out.session_token)
+        setSessionToken(out.session_token)
+        setContactName(out.contact_name)
+        setGrants(out.grants)
+        params.delete('preview_exchange')
+        const qs = params.toString()
+        window.history.replaceState(null, '', `${window.location.pathname}${qs ? `?${qs}` : ''}${window.location.hash}`)
+      } catch (e: unknown) {
+        storePortalToken('')
+        setSessionToken('')
+        setErr((e as { message?: string }).message ?? 'Preview link expired or invalid')
+      } finally {
+        setPreviewExchangeBusy(false)
+      }
+    })()
   }, [])
 
   const refreshSession = useCallback(async (token: string) => {
@@ -107,9 +165,11 @@ export default function PortalPage() {
     return sess
   }, [])
 
-  const loadFiles = useCallback(async (grantId: string, token: string) => {
-    const rows = await portalFetch<PortalFileOut[]>(`/portal/grants/${grantId}/files`, { portalToken: token })
-    setFiles(rows)
+  const loadBrowse = useCallback(async (grantId: string, subfolder: string, token: string) => {
+    const q = subfolder ? `?subfolder=${encodeURIComponent(subfolder)}` : ''
+    const data = await portalFetch<PortalBrowseOut>(`/portal/grants/${grantId}/browse${q}`, { portalToken: token })
+    setBrowse(data)
+    setBrowseSubfolder(data.subfolder)
   }, [])
 
   useEffect(() => {
@@ -118,7 +178,7 @@ export default function PortalPage() {
 
   useEffect(() => {
     const token = sessionToken.trim()
-    if (!token) return
+    if (!token || previewExchangeBusy) return
     void (async () => {
       setBusy(true)
       setErr(null)
@@ -132,7 +192,7 @@ export default function PortalPage() {
         setBusy(false)
       }
     })()
-  }, [sessionToken, refreshSession])
+  }, [sessionToken, refreshSession, previewExchangeBusy])
 
   useEffect(() => {
     const token = sessionToken.trim()
@@ -141,19 +201,20 @@ export default function PortalPage() {
       setBusy(true)
       setErr(null)
       try {
-        await loadFiles(activeGrantId, token)
+        await loadBrowse(activeGrantId, browseSubfolder, token)
       } catch (e: unknown) {
-        setErr((e as { message?: string }).message ?? 'Could not load files')
+        setErr((e as { message?: string }).message ?? 'Could not load folder')
       } finally {
         setBusy(false)
       }
     })()
-  }, [activeGrantId, sessionToken, loadFiles])
+  }, [activeGrantId, sessionToken, browseSubfolder, loadBrowse])
 
-  async function signIn(e: React.FormEvent) {
+  async function signInWithCode(e: React.FormEvent) {
     e.preventDefault()
     setBusy(true)
     setErr(null)
+    setInfo(null)
     try {
       const out = await portalFetch<PortalAuthOut>('/portal/auth', {
         method: 'POST',
@@ -165,8 +226,52 @@ export default function PortalPage() {
       setGrants(out.grants)
       setActiveCaseId(null)
       setActiveGrantId(null)
-      setFiles([])
+      setBrowse(null)
+      setBrowseSubfolder('')
       setAccessCode('')
+    } catch (e: unknown) {
+      setErr((e as { message?: string }).message ?? 'Sign-in failed')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function requestOtp(e: React.FormEvent) {
+    e.preventDefault()
+    setBusy(true)
+    setErr(null)
+    setInfo(null)
+    try {
+      await portalFetch('/portal/auth/request-otp', { method: 'POST', json: { email: otpEmail.trim() } })
+      setOtpSent(true)
+      setInfo('If this e-mail has portal access, a sign-in code has been sent.')
+    } catch (e: unknown) {
+      setErr((e as { message?: string }).message ?? 'Could not send sign-in code')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function verifyOtp(e: React.FormEvent) {
+    e.preventDefault()
+    setBusy(true)
+    setErr(null)
+    setInfo(null)
+    try {
+      const out = await portalFetch<PortalAuthOut>('/portal/auth/verify-otp', {
+        method: 'POST',
+        json: { email: otpEmail.trim(), code: otpCode.trim() },
+      })
+      storePortalToken(out.session_token)
+      setSessionToken(out.session_token)
+      setContactName(out.contact_name)
+      setGrants(out.grants)
+      setActiveCaseId(null)
+      setActiveGrantId(null)
+      setBrowse(null)
+      setBrowseSubfolder('')
+      setOtpCode('')
+      setOtpSent(false)
     } catch (e: unknown) {
       setErr((e as { message?: string }).message ?? 'Sign-in failed')
     } finally {
@@ -181,7 +286,8 @@ export default function PortalPage() {
     setGrants([])
     setActiveCaseId(null)
     setActiveGrantId(null)
-    setFiles([])
+    setBrowse(null)
+    setBrowseSubfolder('')
   }
 
   async function uploadFiles(fileList: FileList | null) {
@@ -190,11 +296,12 @@ export default function PortalPage() {
     if (!token) return
     setUploadBusy(true)
     setErr(null)
+    const folder = uploadFolderForGrant(activeGrant, browseSubfolder)
     try {
       for (const file of Array.from(fileList)) {
         const fd = new FormData()
         fd.append('upload', file)
-        fd.append('folder', '')
+        fd.append('folder', folder)
         const headers = new Headers()
         applyAuthHeaders(headers, token)
         const res = await fetch(apiUrl(`/portal/grants/${activeGrantId}/files`), { method: 'POST', headers, body: fd })
@@ -209,7 +316,7 @@ export default function PortalPage() {
           throw new Error(formatApiErrorDetail(parsed, res.statusText))
         }
       }
-      await loadFiles(activeGrantId, token)
+      await loadBrowse(activeGrantId, browseSubfolder, token)
     } catch (e: unknown) {
       setErr((e as { message?: string }).message ?? 'Upload failed')
     } finally {
@@ -242,9 +349,9 @@ export default function PortalPage() {
     setErr(null)
     try {
       const blob = await fetchFileBlob(file, false)
-      const obj = URL.createObjectURL(blob)
-      const opened = window.open(obj, '_blank', 'noopener')
-      if (!opened) setErr('Pop-up blocked — allow pop-ups to open files.')
+      const typed = file.mime_type ? new Blob([blob], { type: file.mime_type }) : blob
+      const obj = URL.createObjectURL(typed)
+      window.open(obj, '_blank', 'noopener,noreferrer')
       window.setTimeout(() => URL.revokeObjectURL(obj), 60_000)
     } catch (e: unknown) {
       setErr((e as { message?: string }).message ?? 'Could not open file')
@@ -300,40 +407,163 @@ export default function PortalPage() {
     }
   }
 
-  if (!sessionToken) {
+  function openGrant(grantId: string) {
+    setActiveGrantId(grantId)
+    setBrowseSubfolder('')
+    setBrowse(null)
+  }
+
+  function navigateToSubfolder(name: string) {
+    const next = browseSubfolder ? `${browseSubfolder}/${name}` : name
+    setBrowseSubfolder(next)
+  }
+
+  function navigateBreadcrumb(index: number) {
+    if (index < 0) {
+      setBrowseSubfolder('')
+      return
+    }
+    const crumbs = browse?.breadcrumb ?? []
+    setBrowseSubfolder(crumbs.slice(0, index + 1).join('/'))
+  }
+
+  if (previewExchangeBusy) {
     return (
       <div className="portalShell">
         <div className="portalCard card">
-          <h1>{firmName}</h1>
-          <p className="muted">Enter your personal access code to view and upload documents.</p>
-          <form className="stack" onSubmit={(e) => void signIn(e)}>
-            <label className="stack" style={{ gap: 6 }}>
-              <span>Access code</span>
-              <input
-                value={accessCode}
-                onChange={(e) => setAccessCode(e.target.value)}
-                autoComplete="off"
-                autoFocus
-                placeholder="XXXX-XXXX-XXXX"
-                disabled={busy}
-              />
-            </label>
-            {err ? <div className="error">{err}</div> : null}
-            <button type="submit" className="btn primary" disabled={busy || !accessCode.trim()}>
-              {busy ? 'Signing in…' : 'Sign in'}
-            </button>
-          </form>
+          <h1>{PORTAL_TITLE}</h1>
+          <div className="muted" style={{ marginTop: 12 }}>Opening preview…</div>
         </div>
       </div>
     )
   }
+
+  if (!sessionToken) {
+    return (
+      <div className="portalShell">
+        <div className="portalCard card">
+          <h1>{PORTAL_TITLE}</h1>
+          {firmDisplayName ? <p className="muted" style={{ marginTop: 4 }}>{firmDisplayName}</p> : null}
+          <p className="muted">Sign in with your access code or e-mail one-time code.</p>
+
+          {staffPreview ? (
+            <div className="notice portalStaffPreviewBanner">
+              Staff preview — choose a contact from the matter Portal panel, or sign in manually with an access code or
+              e-mail code.
+            </div>
+          ) : null}
+
+          <div className="portalSignInTabs row" style={{ gap: 8, marginBottom: 16 }}>
+            <button
+              type="button"
+              className={`btn${signInMode === 'code' ? ' primary' : ''}`}
+              onClick={() => {
+                setSignInMode('code')
+                setErr(null)
+                setInfo(null)
+              }}
+            >
+              Access code
+            </button>
+            <button
+              type="button"
+              className={`btn${signInMode === 'email' ? ' primary' : ''}`}
+              onClick={() => {
+                setSignInMode('email')
+                setErr(null)
+                setInfo(null)
+              }}
+            >
+              E-mail code
+            </button>
+          </div>
+
+          {signInMode === 'code' ? (
+            <form className="stack" onSubmit={(e) => void signInWithCode(e)}>
+              <label className="stack" style={{ gap: 6 }}>
+                <span>Access code</span>
+                <input
+                  value={accessCode}
+                  onChange={(e) => setAccessCode(e.target.value)}
+                  autoComplete="off"
+                  autoFocus
+                  placeholder="XXXX-XXXX-XXXX"
+                  disabled={busy}
+                />
+              </label>
+              {err ? <div className="error">{err}</div> : null}
+              {info ? <div className="notice">{info}</div> : null}
+              <button type="submit" className="btn primary" disabled={busy || !accessCode.trim()}>
+                {busy ? 'Signing in…' : 'Sign in'}
+              </button>
+            </form>
+          ) : (
+            <form className="stack" onSubmit={(e) => void (otpSent ? verifyOtp(e) : requestOtp(e))}>
+              <label className="stack" style={{ gap: 6 }}>
+                <span>E-mail address</span>
+                <input
+                  type="email"
+                  value={otpEmail}
+                  onChange={(e) => setOtpEmail(e.target.value)}
+                  autoComplete="email"
+                  autoFocus
+                  disabled={busy || otpSent}
+                />
+              </label>
+              {otpSent ? (
+                <label className="stack" style={{ gap: 6 }}>
+                  <span>Sign-in code</span>
+                  <input
+                    value={otpCode}
+                    onChange={(e) => setOtpCode(e.target.value)}
+                    autoComplete="one-time-code"
+                    placeholder="123456"
+                    disabled={busy}
+                  />
+                </label>
+              ) : null}
+              {err ? <div className="error">{err}</div> : null}
+              {info ? <div className="notice">{info}</div> : null}
+              {otpSent ? (
+                <>
+                  <button type="submit" className="btn primary" disabled={busy || !otpCode.trim()}>
+                    {busy ? 'Signing in…' : 'Verify code'}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn"
+                    disabled={busy}
+                    onClick={() => {
+                      setOtpSent(false)
+                      setOtpCode('')
+                      setInfo(null)
+                    }}
+                  >
+                    Use a different e-mail
+                  </button>
+                </>
+              ) : (
+                <button type="submit" className="btn primary" disabled={busy || !otpEmail.trim()}>
+                  {busy ? 'Sending…' : 'Send sign-in code'}
+                </button>
+              )}
+            </form>
+          )}
+        </div>
+      </div>
+    )
+  }
+
+  const files = browse?.files ?? []
+  const subfolders = browse?.subfolders ?? []
 
   return (
     <div className="portalShell">
       <div className="portalCard card portalCardWide">
         <div className="row" style={{ justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap' }}>
           <div>
-            <h1 style={{ margin: 0 }}>{firmName}</h1>
+            <h1 style={{ margin: 0 }}>{PORTAL_TITLE}</h1>
+            {firmDisplayName ? <div className="muted">{firmDisplayName}</div> : null}
             <div className="muted">Signed in as {contactName}</div>
           </div>
           <button type="button" className="btn" onClick={signOut}>
@@ -342,6 +572,12 @@ export default function PortalPage() {
         </div>
 
         {err ? <div className="error" style={{ marginTop: 12 }}>{err}</div> : null}
+
+        {staffPreview ? (
+          <div className="notice portalStaffPreviewBanner" style={{ marginTop: 12 }}>
+            Staff preview — viewing as {contactName}. This is what this contact sees in the portal.
+          </div>
+        ) : null}
 
         {!activeCaseId && !activeGrantId ? (
           <div style={{ marginTop: 20 }}>
@@ -380,7 +616,7 @@ export default function PortalPage() {
                   type="button"
                   className="listCard rowbtn"
                   style={{ width: '100%', textAlign: 'left' }}
-                  onClick={() => setActiveGrantId(g.id)}
+                  onClick={() => openGrant(g.id)}
                 >
                   <div className="listTitle">{g.folder_label}</div>
                   <div className="muted">
@@ -399,13 +635,14 @@ export default function PortalPage() {
                 className="btn"
                 onClick={() => {
                   setActiveGrantId(null)
-                  setFiles([])
+                  setBrowse(null)
+                  setBrowseSubfolder('')
                 }}
               >
                 ← Folders
               </button>
               <h2 style={{ margin: 0, flex: 1 }}>{activeGrant?.folder_label ?? 'Documents'}</h2>
-              {activeGrant?.can_download && files.length > 0 ? (
+              {activeGrant?.can_download && (files.length > 0 || subfolders.length > 0) ? (
                 <button type="button" className="btn" disabled={busy} onClick={() => void downloadAllFiles()}>
                   Download all
                 </button>
@@ -428,16 +665,49 @@ export default function PortalPage() {
             </div>
             {activeMatter ? <div className="muted" style={{ marginBottom: 12 }}>{activeMatter.caseTitle}</div> : null}
 
-            {busy && files.length === 0 ? <div className="muted">Loading files…</div> : null}
+            <div className="portalBreadcrumb muted" style={{ marginBottom: 12, display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
+              <button type="button" className="btnLink" onClick={() => navigateBreadcrumb(-1)}>
+                {activeGrant?.folder_label ?? 'Root'}
+              </button>
+              {(browse?.breadcrumb ?? []).map((part, idx) => (
+                <span key={`${part}-${idx}`} style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
+                  <span aria-hidden>/</span>
+                  <button type="button" className="btnLink" onClick={() => navigateBreadcrumb(idx)}>
+                    {part}
+                  </button>
+                </span>
+              ))}
+            </div>
+
+            {busy && !browse ? <div className="muted">Loading…</div> : null}
             <div className="table portalFilesTable">
-              <div className="tr th" style={{ gridTemplateColumns: '1fr 100px 180px' }}>
+              <div className="tr th" style={{ gridTemplateColumns: PORTAL_FILES_GRID }}>
+                <div className="thCell portalFilesTableIconCol" aria-hidden />
                 <div className="thCell">Name</div>
+                <div className="thCell">Folder</div>
                 <div className="thCell">Size</div>
                 <div className="thCell">Actions</div>
               </div>
+              {subfolders.map((name) => (
+                <div key={`dir-${name}`} className="tr rowbtn" style={{ gridTemplateColumns: PORTAL_FILES_GRID }} onClick={() => navigateToSubfolder(name)}>
+                  <div className="td portalFilesTableIconCol">
+                    <span className="docsTypeIcon" aria-hidden>📁</span>
+                  </div>
+                  <div className="td">{name}</div>
+                  <div className="td muted">—</div>
+                  <div className="td muted">—</div>
+                  <div className="td muted">Folder</div>
+                </div>
+              ))}
               {files.map((f) => (
-                <div key={f.id} className="tr" style={{ gridTemplateColumns: '1fr 100px 180px' }}>
+                <div key={f.id} className="tr" style={{ gridTemplateColumns: PORTAL_FILES_GRID }}>
+                  <div className="td portalFilesTableIconCol">
+                    <span className="docsTypeIcon" aria-hidden>
+                      <DocMimeIcon mime={f.mime_type} filename={f.original_filename} />
+                    </span>
+                  </div>
                   <div className="td">{f.original_filename}</div>
+                  <div className="td muted">{f.folder_display || '—'}</div>
                   <div className="td muted">{formatBytes(f.size_bytes)}</div>
                   <div className="td row" style={{ gap: 6, flexWrap: 'wrap' }}>
                     {activeGrant?.can_download ? (
@@ -455,7 +725,7 @@ export default function PortalPage() {
                   </div>
                 </div>
               ))}
-              {!busy && files.length === 0 ? (
+              {!busy && subfolders.length === 0 && files.length === 0 ? (
                 <div className="muted" style={{ padding: 12 }}>
                   No files in this folder yet.
                 </div>

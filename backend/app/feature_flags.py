@@ -16,6 +16,11 @@ def open_pdf_in_onlyoffice() -> bool:
     return _truthy_env("CANARY_OPEN_PDF_IN_ONLYOFFICE")
 
 
+def onlyoffice_callback_require_jwt() -> bool:
+    """When true, reject unsigned ONLYOFFICE Document Server save callbacks."""
+    return _truthy_env("ONLYOFFICE_CALLBACK_REQUIRE_JWT")
+
+
 def onlyoffice_editor_customization(*, file_type: str) -> dict[str, bool | str]:
     """Editor customization block for ONLYOFFICE JWT / DocsAPI config."""
     custom: dict[str, bool | str] = {

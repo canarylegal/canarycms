@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { apiFetch } from './api'
 import type { ApiError } from './api'
-import type { CaseOut, MatterSubTypeStandardTaskOut, UserSummary } from './types'
+import { MatterSearchPicker } from './MatterSearchPicker'
+import type { MatterSubTypeStandardTaskOut, UserSummary } from './types'
 import { CANARY_FOLLOW_UP_STANDARD_TASK_ID } from './standardTasks'
 
 export function TaskCreateModal({
@@ -9,7 +10,6 @@ export function TaskCreateModal({
   token,
   users,
   caseIdFixed,
-  casesForPicker,
   preset,
   onClose,
   onCreated,
@@ -18,7 +18,6 @@ export function TaskCreateModal({
   token: string
   users: UserSummary[]
   caseIdFixed: string | null
-  casesForPicker: CaseOut[] | null
   /** Optional seed when opening (e.g. document context Follow up). */
   preset: { standardTaskId?: string; title?: string } | null
   onClose: () => void
@@ -37,11 +36,6 @@ export function TaskCreateModal({
   const [isPrivate, setIsPrivate] = useState(false)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
-
-  const sortedCases = useMemo(() => {
-    const list = casesForPicker ?? []
-    return [...list].sort((a, b) => a.case_number.localeCompare(b.case_number))
-  }, [casesForPicker])
 
   useEffect(() => {
     if (!open) return
@@ -128,7 +122,7 @@ export function TaskCreateModal({
       aria-labelledby="task-create-title"
       onClick={(e) => e.target === e.currentTarget && !busy && onClose()}
     >
-      <div className="modal card" style={{ maxWidth: 480 }} onClick={(e) => e.stopPropagation()}>
+      <div className="modal card" style={{ maxWidth: 480, minWidth: 0 }} onClick={(e) => e.stopPropagation()}>
         <div className="paneHead">
           <h2 id="task-create-title" style={{ margin: 0, fontSize: 18 }}>
             New task
@@ -137,26 +131,20 @@ export function TaskCreateModal({
             Cancel
           </button>
         </div>
-        <div className="stack" style={{ marginTop: 12, gap: 12 }}>
+        <div className="stack" style={{ marginTop: 12, gap: 12, minWidth: 0 }}>
           {err ? <div className="error">{err}</div> : null}
           {needsCasePick ? (
-            <label className="field">
+            <div className="field" style={{ minWidth: 0 }}>
               <span>Matter</span>
-              <select
+              <MatterSearchPicker
+                token={token}
                 value={pickedCaseId}
+                onChange={setPickedCaseId}
                 disabled={busy}
-                onChange={(e) => setPickedCaseId(e.target.value)}
-                aria-label="Select matter"
-              >
-                <option value="">— Select matter —</option>
-                {sortedCases.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.case_number}
-                    {c.matter_description ? ` — ${c.matter_description}` : ''}
-                  </option>
-                ))}
-              </select>
-            </label>
+                autoFocus
+                listMaxHeight={180}
+              />
+            </div>
           ) : null}
           <label className="field">
             <span>Task</span>

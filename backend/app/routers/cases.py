@@ -1,13 +1,14 @@
 import uuid
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 _MISSING = object()
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from app.admin_access import user_effective_admin
+from app.permission_checks import assert_may_be_fee_earner
 from app.db import get_db
 from app.deps import get_current_user, require_case_access
 from app.models import (
@@ -27,6 +28,7 @@ from app.models import (
 from app.schemas import CaseCreate, CaseOut, CaseUpdate, MatterSubTypeStandardTaskOut
 from app.audit import log_event
 from app.ledger_service import get_ledger
+from app.list_search import search_cases
 
 
 router = APIRouter(prefix="/cases", tags=["cases"])
@@ -72,6 +74,7 @@ def _require_active_fee_earner(db: Session, fee_earner_user_id: uuid.UUID) -> Us
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Fee earner must be an active user.",
         )
+    assert_may_be_fee_earner(fe, db)
     return fe
 
 
@@ -143,6 +146,7 @@ def _case_dict(
         "created_by": case.created_by,
         "is_locked": case.is_locked,
         "lock_mode": case.lock_mode,
+        "portal_enabled": case.portal_enabled,
         "created_at": case.created_at,
         "updated_at": case.updated_at,
     }
@@ -225,7 +229,8 @@ def create_case(
         source_id=resolved_source_id,
         created_by=user.id,
         is_locked=False,
-        lock_mode=CaseLockMode.whitelist,
+        lock_mode=CaseLockMode.open_by_default,
+        portal_enabled=payload.portal_enabled,
     )
     db.add(counter)
     db.add(case)
@@ -246,11 +251,9 @@ def create_case(
     return _case_out(case, db)
 
 
-@router.get("", response_model=list[CaseOut])
-def list_cases(user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> list[CaseOut]:
-    cases = db.execute(select(Case).order_by(Case.created_at.desc())).scalars().all()
-
-    # Bulk load sub/head type names to avoid N+1 queries.
+def _cases_to_out_list(cases: list[Case], db: Session) -> list[CaseOut]:
+    if not cases:
+        return []
     sub_ids = {c.matter_sub_type_id for c in cases if c.matter_sub_type_id}
     head_ids: set[uuid.UUID] = {c.matter_head_type_id for c in cases if c.matter_head_type_id}
     sub_map: dict[uuid.UUID, MatterSubType] = {}
@@ -269,7 +272,7 @@ def list_cases(user: User = Depends(get_current_user), db: Session = Depends(get
     if source_ids:
         src_rows = db.execute(select(CaseSource).where(CaseSource.id.in_(source_ids))).scalars().all()
         source_map = {s.id: s.name for s in src_rows}
-    result = []
+    result: list[CaseOut] = []
     for c in cases:
         sub_name = None
         head_name = None
@@ -284,6 +287,23 @@ def list_cases(user: User = Depends(get_current_user), db: Session = Depends(get
         src_name = source_map.get(c.source_id) if c.source_id else None
         result.append(CaseOut.model_validate(_case_dict(c, sub_name, head_name, menus, src_name)))
     return result
+
+
+@router.get("", response_model=list[CaseOut])
+def list_cases(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    q: str | None = Query(default=None, description="Search reference, client, description, fee earner"),
+    limit: int | None = Query(default=None, ge=1, le=100),
+    status: CaseStatus | None = Query(default=None),
+) -> list[CaseOut]:
+    q_trim = (q or "").strip()
+    if q_trim:
+        cases = search_cases(db, user, q=q_trim, limit=limit, status_filter=status)
+        return _cases_to_out_list(cases, db)
+
+    cases = db.execute(select(Case).order_by(Case.created_at.desc())).scalars().all()
+    return _cases_to_out_list(list(cases), db)
 
 
 @router.get("/{case_id}/standard-tasks", response_model=list[MatterSubTypeStandardTaskOut])
@@ -367,14 +387,14 @@ def update_case(
         new_lm = data["lock_mode"]
         if new_lm == CaseLockMode.none:
             db.execute(delete(CaseAccessRule).where(CaseAccessRule.case_id == case_id))
-        elif new_lm == CaseLockMode.blacklist:
+        elif new_lm == CaseLockMode.allow_list:
             db.execute(
                 delete(CaseAccessRule).where(
                     CaseAccessRule.case_id == case_id,
                     CaseAccessRule.mode == CaseAccessMode.deny,
                 )
             )
-        elif new_lm == CaseLockMode.whitelist:
+        elif new_lm == CaseLockMode.open_by_default:
             db.execute(
                 delete(CaseAccessRule).where(
                     CaseAccessRule.case_id == case_id,
@@ -382,9 +402,9 @@ def update_case(
                 )
             )
         db.flush()
-        if new_lm == CaseLockMode.blacklist:
+        if new_lm == CaseLockMode.allow_list:
             case.is_locked = True
-        elif new_lm == CaseLockMode.whitelist:
+        elif new_lm == CaseLockMode.open_by_default:
             n_deny = db.scalar(
                 select(func.count())
                 .select_from(CaseAccessRule)
@@ -445,20 +465,14 @@ def update_case(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=(
                     "Cannot set a matter to Closed or Archived while the client or office account "
-                    "has a non-zero balance (approved ledger entries only). "
-                    f"Client balance: £{c_bal / 100:.2f}; office balance: £{o_bal / 100:.2f}. "
-                    "Both must be £0.00."
+                    "has a non-zero balance."
                 ),
             )
 
-    if "source_id" in data:
-        sid = data.pop("source_id")
-        if sid is not None:
-            if db.get(CaseSource, sid) is None:
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Source not found.")
-            case.source_id = sid
-        else:
-            case.source_id = None
+    if "source_id" in data or "source_name" in data:
+        sid = data.pop("source_id") if "source_id" in data else None
+        sname = data.pop("source_name") if "source_name" in data else None
+        case.source_id = _resolve_case_source_id(db, source_id=sid, source_name=sname)
 
     for key, value in data.items():
         setattr(case, key, value)

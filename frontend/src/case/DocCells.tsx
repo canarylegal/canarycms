@@ -63,7 +63,7 @@ function caseMailIconOutbound(f: FileSummary): boolean {
 export function DocFolderIcon({ shared = false }: { shared?: boolean }) {
   if (shared) {
     return (
-      <span className="docsFolderIconWrap docsFolderIconWrap--shared" aria-hidden title="Externally shared via client portal">
+      <span className="docsFolderIconWrap docsFolderIconWrap--shared" aria-hidden title="Externally shared via Canary Portal">
         <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" className="docsFolderIconSvg docsSharedFolderIconSvg">
           <path fill="#f0b429" d="M3 7.5V19a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-7.2L9.6 5H5a2 2 0 0 0-2 2v.5z" />
           <path fill="#e07b1a" d="M3 7.5h6.4L9.6 5H5a2 2 0 0 0-2 2v.5z" />
