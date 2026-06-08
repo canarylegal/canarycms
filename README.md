@@ -43,13 +43,26 @@ See **[thunderbird-addin/README.md](thunderbird-addin/README.md)** for firm inst
 
 ## Licence
 
-This project is **source-available** and **free for internal self-hosted use** by individuals and organisations, under the **Internal Use Source-Available License**.
+This project is source-available and free for internal self-hosted use by individuals and organisations.
 
-See [LICENSE.txt](LICENSE.txt) for the full terms.
+If you want to offer this software as a hosted service, managed service, reseller product, or other commercial external offering, you must obtain a separate commercial licence.
 
-**Free for internal use:** self-host, use inside your organisation, modify for internal needs, run unlimited internal instances.
+See [LICENSE.txt](LICENSE.txt) for details or contact [colin@canarylegalsoftware.co.uk](mailto:colin@canarylegalsoftware.co.uk).
 
-**Commercial licence required** if you wish to offer Canary as a hosted service, managed service, reseller product, white-label offering, or other commercial external use — contact [colin@canarylegalsoftware.co.uk](mailto:colin@canarylegalsoftware.co.uk).
+### What you can do for free
+
+- Self-host internally
+- Use inside your company
+- Modify for internal needs
+- Run unlimited internal instances
+
+### When you need a commercial licence
+
+- Hosting for customers
+- Managed service provision
+- White-label resale
+- Commercial redistribution
+- Paid support centred on this software
 
 ## Contact
 
