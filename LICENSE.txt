@@ -10,7 +10,7 @@ This licence allows individuals and organisations to use this software internall
 
 Software means the source code, binaries, documentation, and related materials made available by the Licensor.
 
-Licensor means Colin James McWilliams.
+Licensor means Colin James McWilliams
 
 Internal Use means use of the Software solely for the internal operations of the licensee and its controlled affiliates, and not for providing the Software itself as a service to third parties.
 
