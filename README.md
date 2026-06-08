@@ -20,6 +20,8 @@ Production stack: nginx frontend, FastAPI backend, PostgreSQL, ONLYOFFICE Docume
 
 First-time setup uses `BOOTSTRAP_ADMIN_TOKEN` from `.env` to create the initial administrator account.
 
+For a full production setup (DNS, TLS, reverse proxy, WAF, bootstrap, mail add-ons, and go-live), see **[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)**.
+
 ## Deploy checklist (after `git pull`)
 
 When you update an existing installation, rebuild **both** the backend and frontend so API and UI stay in sync (stale frontend bundles can show old filters, missing buttons, or broken admin pages).
