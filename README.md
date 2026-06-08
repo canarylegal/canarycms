@@ -20,7 +20,18 @@ Production stack: nginx frontend, FastAPI backend, PostgreSQL, ONLYOFFICE Docume
 
 First-time setup uses `BOOTSTRAP_ADMIN_TOKEN` from `.env` to create the initial administrator account.
 
-For a full production setup (DNS, TLS, reverse proxy, WAF, bootstrap, mail add-ons, and go-live), see **[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)**.
+## Documentation
+
+Operational guides live under **[docs/](docs/)**:
+
+| Guide | Description |
+|-------|-------------|
+| [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | Production setup: DNS, TLS, reverse proxy, WAF, bootstrap, mail add-ons, go-live |
+| [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | Docker dev: 502 errors, LAN access, firewall |
+| [docs/ONLYOFFICE_BROWSER_EDIT.md](docs/ONLYOFFICE_BROWSER_EDIT.md) | In-browser editing (ONLYOFFICE) |
+| [docs/WEBDAV_DESKTOP_EDIT.md](docs/WEBDAV_DESKTOP_EDIT.md) | Desktop editing via WebDAV |
+
+Mail add-on detail: [thunderbird-addin/README.md](thunderbird-addin/README.md), [frontend/public/outlook-addin/README.md](frontend/public/outlook-addin/README.md).
 
 ## Deploy checklist (after `git pull`)
 
@@ -36,12 +47,6 @@ docker compose --profile prod exec backend alembic upgrade head
 - Run **database migrations** whenever the pull includes new files under `backend/alembic/versions/`.
 - If behaviour still looks wrong after rebuild, hard-refresh the browser (Ctrl+Shift+R) to clear cached JavaScript.
 - ONLYOFFICE and other services only need rebuilding when their images or config changed.
-
-## Thunderbird add-on (signed release)
-
-The Thunderbird MailExtension is **not** part of the Docker stack. Firms install a **signed `.xpi`** so the add-on survives Thunderbird restarts (temporary debug loads do not).
-
-See **[thunderbird-addin/README.md](thunderbird-addin/README.md)** for firm install steps, maintainer signing (`npm run package` / `npm run sign`), and the optional GitHub Actions release workflow (tag `thunderbird-v*`).
 
 ## Licence
 
