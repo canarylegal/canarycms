@@ -3,8 +3,14 @@ import { apiFetch } from './api'
 import { canaryDocumentTitle } from './tabTitle'
 import type { ApiError } from './api'
 import { useDialogs } from './DialogProvider'
+import { SingleSelectDropdown } from './SingleSelectDropdown'
 import type { CaseOut, FinanceCategoryOut, FinanceItemOut, FinanceOut } from './types'
 import { openOnlyOfficeCaseEditor } from './onlyofficeEditorWindow'
+
+const FIN_DIRECTION_OPTIONS = [
+  { value: 'debit', label: 'Debit' },
+  { value: 'credit', label: 'Credit' },
+] as const
 
 interface Props {
   caseId: string
@@ -466,16 +472,16 @@ export function FinancePage({ caseId, token, onClose, embedded = false }: Props)
                         {cat.credit_only ? (
                           <span className="finDirBadge finDirBadge--credit">Credit</span>
                         ) : (
-                          <select
-                            className="select"
-                            style={{ width: 92 }}
-                            value={d.direction}
-                            onChange={(e) => setDraft(item.id, { direction: e.target.value as 'debit' | 'credit' })}
-                            disabled={busy}
-                          >
-                            <option value="debit">Debit</option>
-                            <option value="credit">Credit</option>
-                          </select>
+                          <div className="finDirSelect">
+                            <SingleSelectDropdown
+                              hideLabel
+                              label="Direction"
+                              options={[...FIN_DIRECTION_OPTIONS]}
+                              value={d.direction}
+                              onChange={(v) => setDraft(item.id, { direction: v as 'debit' | 'credit' })}
+                              disabled={busy}
+                            />
+                          </div>
                         )}
                       </td>
                       <td>
@@ -539,16 +545,16 @@ export function FinancePage({ caseId, token, onClose, embedded = false }: Props)
                 {cat.credit_only ? (
                   <span className="finDirBadge finDirBadge--credit">Credit</span>
                 ) : (
-                  <select
-                    className="select"
-                    style={{ width: 92 }}
-                    value={addItemDir}
-                    onChange={(e) => setAddItemDir(e.target.value as 'debit' | 'credit')}
-                    disabled={busy}
-                  >
-                    <option value="debit">Debit</option>
-                    <option value="credit">Credit</option>
-                  </select>
+                  <div className="finDirSelect">
+                    <SingleSelectDropdown
+                      hideLabel
+                      label="Direction"
+                      options={[...FIN_DIRECTION_OPTIONS]}
+                      value={addItemDir}
+                      onChange={(v) => setAddItemDir(v as 'debit' | 'credit')}
+                      disabled={busy}
+                    />
+                  </div>
                 )}
                 <input
                   className="input"

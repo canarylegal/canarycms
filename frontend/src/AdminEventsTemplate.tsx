@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { apiFetch } from './api'
 import { useDialogs } from './DialogProvider'
+import { SingleSelectDropdown } from './SingleSelectDropdown'
 import type { ApiError } from './api'
 import type { MatterSubTypeEventTemplateOut } from './types'
 
@@ -12,6 +13,13 @@ interface Props {
 
 const SMALL: React.CSSProperties = { padding: '3px 8px', fontSize: '0.82em' }
 const INLINE: React.CSSProperties = { flex: 1, width: 'auto', minWidth: 120 }
+
+const NOTIFY_UNIT_OPTIONS = [
+  { value: '', label: '—' },
+  { value: 'days', label: 'days' },
+  { value: 'weeks', label: 'weeks' },
+  { value: 'months', label: 'months' },
+] as const
 
 function reminderSummary(r: MatterSubTypeEventTemplateOut): string {
   const parts: string[] = []
@@ -208,22 +216,22 @@ export function AdminEventsTemplate({ token, subTypeId, subTypeName }: Props) {
                     onChange={(e) => setEdit({ ...edit, notify_every_n: e.target.value })}
                     disabled={busy}
                   />
-                  <select
-                    value={edit.notify_every_unit}
-                    disabled={busy}
-                    onChange={(e) =>
-                      setEdit({
-                        ...edit,
-                        notify_every_unit: e.target.value as EditRow['notify_every_unit'],
-                      })
-                    }
-                    aria-label="Repeat unit"
-                  >
-                    <option value="">—</option>
-                    <option value="days">days</option>
-                    <option value="weeks">weeks</option>
-                    <option value="months">months</option>
-                  </select>
+                  <div className="adminInlineSelect">
+                    <SingleSelectDropdown
+                      hideLabel
+                      label="Repeat unit"
+                      options={[...NOTIFY_UNIT_OPTIONS]}
+                      value={edit.notify_every_unit}
+                      disabled={busy}
+                      onChange={(v) =>
+                        setEdit({
+                          ...edit,
+                          notify_every_unit: v as EditRow['notify_every_unit'],
+                        })
+                      }
+                      placeholder="—"
+                    />
+                  </div>
                   <span className="muted" style={{ fontSize: '0.85em' }}>before (lead-up)</span>
                 </div>
                 <div className="row" style={{ gap: 4 }}>
@@ -321,17 +329,17 @@ export function AdminEventsTemplate({ token, subTypeId, subTypeName }: Props) {
             onChange={(e) => setNewEveryN(e.target.value)}
             disabled={busy}
           />
-          <select
-            value={newEveryUnit}
-            disabled={busy}
-            onChange={(e) => setNewEveryUnit(e.target.value as typeof newEveryUnit)}
-            aria-label="Repeat unit for new lines"
-          >
-            <option value="">—</option>
-            <option value="days">days</option>
-            <option value="weeks">weeks</option>
-            <option value="months">months</option>
-          </select>
+          <div className="adminInlineSelect">
+            <SingleSelectDropdown
+              hideLabel
+              label="Repeat unit for new lines"
+              options={[...NOTIFY_UNIT_OPTIONS]}
+              value={newEveryUnit}
+              disabled={busy}
+              onChange={(v) => setNewEveryUnit(v as typeof newEveryUnit)}
+              placeholder="—"
+            />
+          </div>
           <span className="muted" style={{ fontSize: '0.85em' }}>before (lead-up)</span>
         </div>
       </div>

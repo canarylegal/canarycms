@@ -19,6 +19,21 @@ type Props = {
   changeLabel?: string
   /** Optional matter status filter (e.g. `quote` in quote wizard). */
   status?: string
+  /** Selected matter chip: default uses case number + client/description lines. */
+  selectedSummary?: 'default' | 'referenceAndDescription'
+}
+
+function selectedMatterLines(
+  c: CaseOut,
+  mode: 'default' | 'referenceAndDescription',
+): { primary: string; secondary: string | null } {
+  if (mode === 'referenceAndDescription') {
+    const desc = c.matter_description?.trim()
+    const primary = desc ? `${c.case_number} — ${desc}` : c.case_number
+    const client = c.client_name?.trim()
+    return { primary, secondary: client || null }
+  }
+  return matterPickerSummary(c)
 }
 
 export function MatterSearchPicker({
@@ -32,6 +47,7 @@ export function MatterSearchPicker({
   idleHint = 'Type to search matters (reference, client, description, status).',
   changeLabel = 'Change',
   status,
+  selectedSummary = 'default',
 }: Props) {
   const [search, setSearch] = useState('')
   const debouncedSearch = useDebouncedValue(search.trim(), 300)
@@ -76,7 +92,7 @@ export function MatterSearchPicker({
     }
   }, [token, debouncedSearch, status])
 
-  const selectedLines = selectedCase ? matterPickerSummary(selectedCase) : null
+  const selectedLines = selectedCase ? selectedMatterLines(selectedCase, selectedSummary) : null
 
   if (value && selectedLines) {
     return (
@@ -124,9 +140,11 @@ export function MatterSearchPicker({
         autoComplete="off"
       />
       {!search.trim() ? (
-        <p className="muted calendarMatterPickerHint" style={{ margin: 0 }}>
-          {idleHint}
-        </p>
+        idleHint ? (
+          <p className="muted calendarMatterPickerHint" style={{ margin: 0 }}>
+            {idleHint}
+          </p>
+        ) : null
       ) : searchBusy ? (
         <p className="muted calendarMatterPickerHint" style={{ margin: 0 }}>
           Searching…

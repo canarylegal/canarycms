@@ -2,7 +2,9 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { TASKS_MENU_TABLE_GRID } from './columnGridDefaults'
 import { useDialogs } from './DialogProvider'
 import { apiFetch } from './api'
+import { SingleSelectDropdown } from './SingleSelectDropdown'
 import type { CaseTaskOut, TaskMenuRow, UserSummary } from './types'
+import { useExclusiveDropdownOpen } from './useExclusiveDropdownOpen'
 
 export { TASKS_MENU_TABLE_GRID }
 
@@ -84,6 +86,7 @@ export function TasksTable({
   } | null>(null)
   const [editBusy, setEditBusy] = useState(false)
   const [editErr, setEditErr] = useState<string | null>(null)
+  const editDropdown = useExclusiveDropdownOpen<'priority' | 'assign'>()
   const [taskRowFocusId, setTaskRowFocusId] = useState<string | null>(null)
   const [kanbanTitles, setKanbanTitles] = useState<string[]>([])
 
@@ -101,6 +104,25 @@ export function TasksTable({
       cancel = true
     }
   }, [layoutMode, token])
+
+  const editAssignOptions = useMemo(
+    () =>
+      users
+        .filter((u) => u.is_active)
+        .slice()
+        .sort((a, b) => a.display_name.localeCompare(b.display_name))
+        .map((u) => ({ value: u.id, label: u.display_name })),
+    [users],
+  )
+
+  const editPriorityOptions = useMemo(
+    () => [
+      { value: 'low', label: 'Low' },
+      { value: 'normal', label: 'Normal' },
+      { value: 'high', label: 'High' },
+    ],
+    [],
+  )
 
   const visible = useMemo(() => {
     const s = search.trim().toLowerCase()
@@ -202,6 +224,7 @@ export function TasksTable({
 
   async function openEdit(r: TaskMenuRow) {
     setEditErr(null)
+    editDropdown.closeAll()
     setEditRow(r)
     setEditBusy(true)
     try {
@@ -589,33 +612,26 @@ export function TasksTable({
                 <span>Due date</span>
                 <input type="date" value={editDue} onChange={(e) => setEditDue(e.target.value)} disabled={editBusy} />
               </label>
-              <label className="field">
-                <span>Priority</span>
-                <select
-                  value={editPriority}
-                  disabled={editBusy}
-                  onChange={(e) => setEditPriority(e.target.value as 'low' | 'normal' | 'high')}
-                >
-                  <option value="low">Low</option>
-                  <option value="normal">Normal</option>
-                  <option value="high">High</option>
-                </select>
-              </label>
-              <label className="field">
-                <span>Assigned to</span>
-                <select value={editAssign} disabled={editBusy} onChange={(e) => setEditAssign(e.target.value)}>
-                  <option value="">— Unassigned —</option>
-                  {users
-                    .filter((u) => u.is_active)
-                    .slice()
-                    .sort((a, b) => a.display_name.localeCompare(b.display_name))
-                    .map((u) => (
-                      <option key={u.id} value={u.id}>
-                        {u.display_name}
-                      </option>
-                    ))}
-                </select>
-              </label>
+              <SingleSelectDropdown
+                label="Priority"
+                options={editPriorityOptions}
+                value={editPriority}
+                onChange={(v) => setEditPriority(v as 'low' | 'normal' | 'high')}
+                open={editDropdown.isOpen('priority')}
+                onOpenChange={(next) => editDropdown.setOpen('priority', next)}
+                disabled={editBusy}
+                placeholder="— select —"
+              />
+              <SingleSelectDropdown
+                label="Assigned to"
+                options={editAssignOptions}
+                value={editAssign}
+                onChange={setEditAssign}
+                open={editDropdown.isOpen('assign')}
+                onOpenChange={(next) => editDropdown.setOpen('assign', next)}
+                disabled={editBusy}
+                placeholder="— Unassigned —"
+              />
               <label className="row taskEditCheckboxRow" style={{ gap: 8 }}>
                 <input
                   type="checkbox"

@@ -451,6 +451,469 @@ def report_events(
     return out
 
 
+@dataclass
+class LedgerActivityRow:
+    pair_id: uuid.UUID
+    case_id: uuid.UUID
+    case_number: str
+    client_name: str | None
+    matter_description: str
+    fee_earner_name: str
+    posted_at: datetime
+    posted_by_name: str
+    description: str
+    reference: str | None
+    amount_pence: int
+    client_direction: str | None
+    office_direction: str | None
+    is_approved: bool
+    contact_label: str | None
+
+
+def report_ledger_activity(
+    fee_earner_user_ids: list[uuid.UUID],
+    db: Session,
+    *,
+    date_from: date | None = None,
+    date_to: date | None = None,
+    approved_only: bool = False,
+) -> list[LedgerActivityRow]:
+    q = (
+        select(LedgerEntry, LedgerAccount, Case, User)
+        .join(LedgerAccount, LedgerEntry.account_id == LedgerAccount.id)
+        .join(Case, LedgerAccount.case_id == Case.id)
+        .outerjoin(User, LedgerEntry.posted_by_user_id == User.id)
+        .where(
+            Case.fee_earner_user_id.in_(fee_earner_user_ids),
+            Case.fee_earner_user_id.isnot(None),
+        )
+        .order_by(LedgerEntry.posted_at.desc(), Case.case_number.asc())
+    )
+    if date_from is not None:
+        q = q.where(LedgerEntry.posted_at >= _utc_day_start(date_from))
+    if date_to is not None:
+        q = q.where(LedgerEntry.posted_at < _utc_day_end_exclusive(date_to))
+    if approved_only:
+        q = q.where(LedgerEntry.is_approved.is_(True))
+
+    rows = db.execute(q).all()
+    by_pair: dict[uuid.UUID, dict] = {}
+    for entry, account, case, poster in rows:
+        pid = entry.pair_id
+        bucket = by_pair.get(pid)
+        if bucket is None:
+            poster_name = _fee_earner_label(db, entry.posted_by_user_id) if entry.posted_by_user_id else "—"
+            if poster and poster.display_name:
+                poster_name = poster.display_name.strip() or poster.email
+            bucket = {
+                "pair_id": pid,
+                "case_id": case.id,
+                "case_number": case.case_number,
+                "client_name": case.client_name,
+                "matter_description": case.title,
+                "fee_earner_name": _fee_earner_label(db, case.fee_earner_user_id),
+                "posted_at": entry.posted_at,
+                "posted_by_name": poster_name,
+                "description": entry.description or "",
+                "reference": entry.reference,
+                "amount_pence": int(entry.amount_pence),
+                "client_direction": None,
+                "office_direction": None,
+                "is_approved": entry.is_approved,
+                "contact_label": entry.contact_label,
+            }
+            by_pair[pid] = bucket
+        else:
+            if entry.is_approved:
+                bucket["is_approved"] = True
+            if entry.contact_label and not bucket.get("contact_label"):
+                bucket["contact_label"] = entry.contact_label
+        if account.account_type == LedgerAccountType.client:
+            bucket["client_direction"] = entry.direction.value
+        elif account.account_type == LedgerAccountType.office:
+            bucket["office_direction"] = entry.direction.value
+
+    out: list[LedgerActivityRow] = []
+    for b in by_pair.values():
+        out.append(LedgerActivityRow(**b))
+    out.sort(key=lambda r: (r.posted_at, r.case_number), reverse=True)
+    return out
+
+
+def _age_bucket_label(age_days: int) -> str:
+    if age_days <= 30:
+        return "0-30"
+    if age_days <= 60:
+        return "31-60"
+    if age_days <= 90:
+        return "61-90"
+    return "90+"
+
+
+def _as_utc_date(dt: datetime) -> date:
+    if dt.tzinfo is not None:
+        return dt.astimezone(timezone.utc).date()
+    return dt.date()
+
+
+@dataclass
+class AgedDebtRow:
+    invoice_id: uuid.UUID
+    case_id: uuid.UUID
+    case_number: str
+    client_name: str | None
+    matter_description: str
+    fee_earner_name: str
+    invoice_number: str
+    approved_at: datetime
+    age_days: int
+    age_bucket: str
+    invoice_total_pence: int
+    office_balance_pence: int
+
+
+def report_aged_debt(
+    fee_earner_user_ids: list[uuid.UUID],
+    db: Session,
+    *,
+    as_of: date | None = None,
+) -> tuple[list[AgedDebtRow], dict[str, int]]:
+    """Approved invoices on matters whose office balance is still debit (client owes).
+
+    Age is measured from ``approved_at`` (fallback ``created_at``). There is no separate
+    paid flag — matter office balance is the debt indicator.
+    """
+    ref = as_of or datetime.now(timezone.utc).date()
+    pairs = (
+        db.execute(
+            select(CaseInvoice, Case)
+            .join(Case, Case.id == CaseInvoice.case_id)
+            .where(
+                Case.fee_earner_user_id.in_(fee_earner_user_ids),
+                Case.fee_earner_user_id.isnot(None),
+                CaseInvoice.status == INV_APPROVED,
+            )
+            .order_by(CaseInvoice.approved_at.desc().nullslast(), CaseInvoice.created_at.desc())
+        )
+        .all()
+    )
+    if not pairs:
+        return [], {"0-30": 0, "31-60": 0, "61-90": 0, "90+": 0}
+    case_ids = list({c.id for _inv, c in pairs})
+    bal = balances_by_case_ids(case_ids, db)
+    out: list[AgedDebtRow] = []
+    bucket_totals = {"0-30": 0, "31-60": 0, "61-90": 0, "90+": 0}
+    for inv, case in pairs:
+        _client, office = bal.get(case.id, (0, 0))
+        if office >= 0:
+            continue
+        anchor = inv.approved_at or inv.created_at
+        age_days = max(0, (ref - _as_utc_date(anchor)).days)
+        bucket = _age_bucket_label(age_days)
+        total = int(inv.total_pence)
+        bucket_totals[bucket] += total
+        out.append(
+            AgedDebtRow(
+                invoice_id=inv.id,
+                case_id=case.id,
+                case_number=case.case_number,
+                client_name=case.client_name,
+                matter_description=case.title,
+                fee_earner_name=_fee_earner_label(db, case.fee_earner_user_id),
+                invoice_number=inv.invoice_number,
+                approved_at=anchor,
+                age_days=age_days,
+                age_bucket=bucket,
+                invoice_total_pence=total,
+                office_balance_pence=office,
+            )
+        )
+    out.sort(key=lambda r: (r.age_days, r.case_number), reverse=True)
+    return out, bucket_totals
+
+
+@dataclass
+class PendingLedgerApprovalRow:
+    pair_id: uuid.UUID
+    case_id: uuid.UUID
+    case_number: str
+    client_name: str | None
+    matter_description: str
+    fee_earner_name: str
+    posted_at: datetime
+    posted_by_name: str
+    description: str
+    amount_pence: int
+    client_direction: str | None
+    office_direction: str | None
+
+
+@dataclass
+class PendingInvoiceRow:
+    invoice_id: uuid.UUID
+    case_id: uuid.UUID
+    case_number: str
+    client_name: str | None
+    matter_description: str
+    fee_earner_name: str
+    invoice_number: str
+    created_at: datetime
+    total_pence: int
+
+
+@dataclass
+class CaseBalanceExceptionRow:
+    case_id: uuid.UUID
+    case_number: str
+    client_name: str | None
+    matter_description: str
+    status: str
+    status_label: str
+    fee_earner_name: str
+    client_balance_pence: int
+    office_balance_pence: int
+
+
+@dataclass
+class LargePostingRow:
+    pair_id: uuid.UUID
+    case_id: uuid.UUID
+    case_number: str
+    client_name: str | None
+    matter_description: str
+    fee_earner_name: str
+    posted_at: datetime
+    posted_by_name: str
+    description: str
+    amount_pence: int
+    client_direction: str | None
+    office_direction: str | None
+    is_approved: bool
+
+
+@dataclass
+class ExceptionsReport:
+    pending_ledger_approvals: list[PendingLedgerApprovalRow]
+    pending_invoices: list[PendingInvoiceRow]
+    client_balance_closed_archived: list[CaseBalanceExceptionRow]
+    negative_client_balance: list[CaseBalanceExceptionRow]
+    large_postings: list[LargePostingRow]
+
+
+def _pending_ledger_approvals(
+    fee_earner_user_ids: list[uuid.UUID], db: Session
+) -> list[PendingLedgerApprovalRow]:
+    rows = (
+        db.execute(
+            select(LedgerEntry, LedgerAccount, Case, User)
+            .join(LedgerAccount, LedgerEntry.account_id == LedgerAccount.id)
+            .join(Case, LedgerAccount.case_id == Case.id)
+            .outerjoin(User, LedgerEntry.posted_by_user_id == User.id)
+            .where(
+                Case.fee_earner_user_id.in_(fee_earner_user_ids),
+                Case.fee_earner_user_id.isnot(None),
+                LedgerEntry.is_approved.is_(False),
+            )
+            .order_by(LedgerEntry.posted_at.desc())
+        )
+        .all()
+    )
+    by_pair: dict[uuid.UUID, dict] = {}
+    for entry, account, case, poster in rows:
+        pid = entry.pair_id
+        bucket = by_pair.get(pid)
+        if bucket is None:
+            poster_name = "—"
+            if poster and (poster.display_name or poster.email):
+                poster_name = (poster.display_name or poster.email or "").strip()
+            bucket = {
+                "pair_id": pid,
+                "case_id": case.id,
+                "case_number": case.case_number,
+                "client_name": case.client_name,
+                "matter_description": case.title,
+                "fee_earner_name": _fee_earner_label(db, case.fee_earner_user_id),
+                "posted_at": entry.posted_at,
+                "posted_by_name": poster_name,
+                "description": entry.description or "",
+                "amount_pence": int(entry.amount_pence),
+                "client_direction": None,
+                "office_direction": None,
+            }
+            by_pair[pid] = bucket
+        if account.account_type == LedgerAccountType.client:
+            bucket["client_direction"] = entry.direction.value
+        elif account.account_type == LedgerAccountType.office:
+            bucket["office_direction"] = entry.direction.value
+    out = [PendingLedgerApprovalRow(**b) for b in by_pair.values()]
+    out.sort(key=lambda r: r.posted_at, reverse=True)
+    return out
+
+
+def _pending_invoices(fee_earner_user_ids: list[uuid.UUID], db: Session) -> list[PendingInvoiceRow]:
+    pairs = (
+        db.execute(
+            select(CaseInvoice, Case)
+            .join(Case, Case.id == CaseInvoice.case_id)
+            .where(
+                Case.fee_earner_user_id.in_(fee_earner_user_ids),
+                Case.fee_earner_user_id.isnot(None),
+                CaseInvoice.status == INV_PENDING,
+            )
+            .order_by(CaseInvoice.created_at.desc())
+        )
+        .all()
+    )
+    return [
+        PendingInvoiceRow(
+            invoice_id=inv.id,
+            case_id=case.id,
+            case_number=case.case_number,
+            client_name=case.client_name,
+            matter_description=case.title,
+            fee_earner_name=_fee_earner_label(db, case.fee_earner_user_id),
+            invoice_number=inv.invoice_number,
+            created_at=inv.created_at,
+            total_pence=int(inv.total_pence),
+        )
+        for inv, case in pairs
+    ]
+
+
+def _case_balance_exceptions(
+    fee_earner_user_ids: list[uuid.UUID],
+    db: Session,
+    *,
+    statuses: list[CaseStatus] | None,
+    client_balance_filter: str,
+) -> list[CaseBalanceExceptionRow]:
+    q = select(Case).where(
+        Case.fee_earner_user_id.in_(fee_earner_user_ids),
+        Case.fee_earner_user_id.isnot(None),
+    )
+    if statuses is not None:
+        q = q.where(Case.status.in_(statuses))
+    cases = db.execute(q.order_by(Case.case_number.asc())).scalars().all()
+    if not cases:
+        return []
+    bal = balances_by_case_ids([c.id for c in cases], db)
+    out: list[CaseBalanceExceptionRow] = []
+    for case in cases:
+        client, office = bal.get(case.id, (0, 0))
+        if client_balance_filter == "nonzero_closed" and client == 0:
+            continue
+        if client_balance_filter == "negative" and client >= 0:
+            continue
+        out.append(
+            CaseBalanceExceptionRow(
+                case_id=case.id,
+                case_number=case.case_number,
+                client_name=case.client_name,
+                matter_description=case.title,
+                status=case.status.value,
+                status_label=_case_status_label(case.status),
+                fee_earner_name=_fee_earner_label(db, case.fee_earner_user_id),
+                client_balance_pence=client,
+                office_balance_pence=office,
+            )
+        )
+    return out
+
+
+def _large_postings(
+    fee_earner_user_ids: list[uuid.UUID],
+    db: Session,
+    *,
+    date_from: date | None,
+    date_to: date | None,
+    min_amount_pence: int,
+) -> list[LargePostingRow]:
+    q = (
+        select(LedgerEntry, LedgerAccount, Case, User)
+        .join(LedgerAccount, LedgerEntry.account_id == LedgerAccount.id)
+        .join(Case, LedgerAccount.case_id == Case.id)
+        .outerjoin(User, LedgerEntry.posted_by_user_id == User.id)
+        .where(
+            Case.fee_earner_user_id.in_(fee_earner_user_ids),
+            Case.fee_earner_user_id.isnot(None),
+            LedgerEntry.amount_pence >= min_amount_pence,
+        )
+        .order_by(LedgerEntry.posted_at.desc())
+    )
+    if date_from is not None:
+        q = q.where(LedgerEntry.posted_at >= _utc_day_start(date_from))
+    if date_to is not None:
+        q = q.where(LedgerEntry.posted_at < _utc_day_end_exclusive(date_to))
+    rows = db.execute(q).all()
+    by_pair: dict[uuid.UUID, dict] = {}
+    for entry, account, case, poster in rows:
+        pid = entry.pair_id
+        bucket = by_pair.get(pid)
+        if bucket is None:
+            poster_name = "—"
+            if poster and (poster.display_name or poster.email):
+                poster_name = (poster.display_name or poster.email or "").strip()
+            bucket = {
+                "pair_id": pid,
+                "case_id": case.id,
+                "case_number": case.case_number,
+                "client_name": case.client_name,
+                "matter_description": case.title,
+                "fee_earner_name": _fee_earner_label(db, case.fee_earner_user_id),
+                "posted_at": entry.posted_at,
+                "posted_by_name": poster_name,
+                "description": entry.description or "",
+                "amount_pence": int(entry.amount_pence),
+                "client_direction": None,
+                "office_direction": None,
+                "is_approved": entry.is_approved,
+            }
+            by_pair[pid] = bucket
+        else:
+            if entry.is_approved:
+                bucket["is_approved"] = True
+        if account.account_type == LedgerAccountType.client:
+            bucket["client_direction"] = entry.direction.value
+        elif account.account_type == LedgerAccountType.office:
+            bucket["office_direction"] = entry.direction.value
+    out = [LargePostingRow(**b) for b in by_pair.values()]
+    out.sort(key=lambda r: r.posted_at, reverse=True)
+    return out
+
+
+def report_exceptions(
+    fee_earner_user_ids: list[uuid.UUID],
+    db: Session,
+    *,
+    date_from: date | None = None,
+    date_to: date | None = None,
+    large_posting_min_pence: int = 500_000,
+) -> ExceptionsReport:
+    return ExceptionsReport(
+        pending_ledger_approvals=_pending_ledger_approvals(fee_earner_user_ids, db),
+        pending_invoices=_pending_invoices(fee_earner_user_ids, db),
+        client_balance_closed_archived=_case_balance_exceptions(
+            fee_earner_user_ids,
+            db,
+            statuses=[CaseStatus.closed, CaseStatus.archived],
+            client_balance_filter="nonzero_closed",
+        ),
+        negative_client_balance=_case_balance_exceptions(
+            fee_earner_user_ids,
+            db,
+            statuses=None,
+            client_balance_filter="negative",
+        ),
+        large_postings=_large_postings(
+            fee_earner_user_ids,
+            db,
+            date_from=date_from,
+            date_to=date_to,
+            min_amount_pence=large_posting_min_pence,
+        ),
+    )
+
+
 def pence_to_pounds_str(p: int) -> str:
     neg = p < 0
     a = abs(p)

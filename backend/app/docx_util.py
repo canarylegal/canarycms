@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -2243,3 +2243,119 @@ def extract_plain_text_from_docx_bytes(data: bytes) -> str:
                     if t:
                         parts.append(t)
     return "\n\n".join(parts) if parts else ""
+
+
+def write_client_account_reconcile_report_docx(
+    path: Path,
+    *,
+    firm_trading_name: str,
+    firm_registered_name: str | None,
+    client_bank_account_name: str | None,
+    client_bank_sort_code: str | None,
+    client_bank_account_number_last4: str | None,
+    period_end_date: date,
+    ledger_client_total_pence: int,
+    ledger_office_total_pence: int,
+    bank_statement_balance_pence: int,
+    difference_pence: int,
+    prepared_by_name: str | None,
+    prepared_at: datetime | None,
+    approved_by_name: str | None,
+    approved_at: datetime | None,
+    notes: str | None,
+    status: str,
+) -> None:
+    """Write a client account reconcile report .docx for month-end sign-off."""
+    from docx import Document
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.shared import Inches, Pt
+
+    def _fmt_pence(p: int) -> str:
+        val = p / 100
+        sign = "-" if val < 0 else ""
+        return f"{sign}£{abs(val):,.2f}"
+
+    def _fmt_dt(dt: datetime | None) -> str:
+        if dt is None:
+            return "—"
+        local = dt
+        if local.tzinfo is not None:
+            local = local.replace(tzinfo=None)
+        return local.strftime("%d %B %Y %H:%M")
+
+    doc = Document()
+    _set_default_proofing_language_en_gb(doc)
+
+    for section in doc.sections:
+        section.top_margin = Inches(0.9)
+        section.bottom_margin = Inches(0.9)
+        section.left_margin = Inches(1.0)
+        section.right_margin = Inches(1.0)
+
+    title_para = doc.add_paragraph()
+    title_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    run = title_para.add_run("CLIENT ACCOUNT RECONCILE REPORT")
+    run.bold = True
+    run.font.size = Pt(16)
+
+    firm_line = (firm_trading_name or "").strip()
+    if firm_registered_name and firm_registered_name.strip() and firm_registered_name.strip() != firm_line:
+        firm_line = f"{firm_line} ({firm_registered_name.strip()})" if firm_line else firm_registered_name.strip()
+    if firm_line:
+        firm_para = doc.add_paragraph()
+        firm_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        firm_run = firm_para.add_run(firm_line)
+        firm_run.font.size = Pt(12)
+
+    period_para = doc.add_paragraph()
+    period_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    period_run = period_para.add_run(f"Period ended: {period_end_date.strftime('%d %B %Y')}")
+    period_run.font.size = Pt(11)
+
+    doc.add_paragraph()
+
+    bank_bits: list[str] = []
+    if client_bank_account_name:
+        bank_bits.append(client_bank_account_name.strip())
+    if client_bank_sort_code:
+        bank_bits.append(f"Sort code {client_bank_sort_code.strip()}")
+    if client_bank_account_number_last4:
+        bank_bits.append(f"Account •••• {client_bank_account_number_last4.strip()}")
+    if bank_bits:
+        bank_para = doc.add_paragraph("Client bank account: " + " · ".join(bank_bits))
+        bank_para.runs[0].font.size = Pt(10)
+
+    table = doc.add_table(rows=5, cols=2)
+    table.style = "Table Grid"
+    rows_data = [
+        ("Ledger client total (all matters)", _fmt_pence(ledger_client_total_pence)),
+        ("Bank statement closing balance", _fmt_pence(bank_statement_balance_pence)),
+        ("Difference (bank minus ledger)", _fmt_pence(difference_pence)),
+        ("Office ledger total (reference)", _fmt_pence(ledger_office_total_pence)),
+        ("Status", status.capitalize()),
+    ]
+    for i, (label, value) in enumerate(rows_data):
+        table.rows[i].cells[0].text = label
+        table.rows[i].cells[1].text = value
+
+    doc.add_paragraph()
+
+    prep_para = doc.add_paragraph(f"Prepared by: {prepared_by_name or '—'}")
+    prep_para.runs[0].font.size = Pt(10)
+    prep_at = doc.add_paragraph(f"Prepared at: {_fmt_dt(prepared_at)}")
+    prep_at.runs[0].font.size = Pt(10)
+
+    appr_para = doc.add_paragraph(f"Approved by: {approved_by_name or '—'}")
+    appr_para.runs[0].font.size = Pt(10)
+    appr_at = doc.add_paragraph(f"Approved at: {_fmt_dt(approved_at)}")
+    appr_at.runs[0].font.size = Pt(10)
+
+    if notes and notes.strip():
+        doc.add_paragraph()
+        notes_heading = doc.add_paragraph("Notes")
+        notes_heading.runs[0].bold = True
+        for line in notes.strip().splitlines():
+            doc.add_paragraph(line)
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    doc.save(str(path))

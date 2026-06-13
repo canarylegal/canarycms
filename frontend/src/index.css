@@ -104,7 +104,17 @@ select,
 [contenteditable='true'],
 .allow-select {
   user-select: text;
-  -webkit-user-select: text;
+  -webkit-user-select: auto;
+}
+
+/* Native selects inside chrome that sets user-select:none must stay interactive (Firefox). */
+.appShell select,
+.mainMenuShell select,
+.caseShell select,
+.modalOverlay select {
+  user-select: auto;
+  -webkit-user-select: auto;
+  cursor: pointer;
 }
 
 /* Avoid shrinking the effective viewport (was 1.2); case view should fit one screen when maximised. */
@@ -490,6 +500,10 @@ html.dark .topbar .btn:not(.primary):not(.danger) {
   color: var(--text);
   box-shadow: 0 10px 40px rgba(15, 23, 42, 0.12);
   min-width: 260px;
+}
+
+.reportsDdPanel--portal {
+  z-index: 5000;
 }
 
 .reportsDdPanelBody {
@@ -887,10 +901,16 @@ html.dark .topbar .btn:not(.primary):not(.danger) {
   padding: 8px 10px;
   border: 1px solid var(--border);
   border-radius: 8px;
-  background: var(--bg);
+  background: #ffffff;
   color: var(--text);
   cursor: pointer;
   text-align: left;
+}
+
+html.dark .mainMenuFilterSelectTrigger {
+  background: var(--panel2);
+  color: var(--text);
+  border-color: var(--border);
 }
 
 .mainMenuFilterSelectTrigger:hover {
@@ -926,11 +946,16 @@ html.dark .topbar .btn:not(.primary):not(.danger) {
   padding: 4px;
 }
 
+.mainMenuFilterSelectMenu--portal {
+  z-index: 5000;
+}
+
 .singleSelectDropdownField {
   position: relative;
 }
 
 .singleSelectDropdown {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -946,10 +971,16 @@ html.dark .topbar .btn:not(.primary):not(.danger) {
   padding: 8px 10px;
   border: 1px solid var(--border);
   border-radius: 8px;
-  background: var(--bg);
+  background: #ffffff;
   color: var(--text);
   cursor: pointer;
   text-align: left;
+}
+
+html.dark .singleSelectDropdownTrigger {
+  background: var(--panel2);
+  color: var(--text);
+  border-color: var(--border);
 }
 
 .singleSelectDropdownTrigger:hover:not(:disabled) {
@@ -970,6 +1001,7 @@ html.dark .topbar .btn:not(.primary):not(.danger) {
 }
 
 .singleSelectDropdownTriggerLabel {
+  color: var(--text);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -989,6 +1021,11 @@ html.dark .topbar .btn:not(.primary):not(.danger) {
 }
 
 .singleSelectDropdownMenu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 350;
   max-height: min(220px, 40vh);
   overflow-y: auto;
   background: var(--panel);
@@ -996,6 +1033,12 @@ html.dark .topbar .btn:not(.primary):not(.danger) {
   border-radius: 8px;
   box-shadow: 0 8px 24px rgba(15, 23, 42, 0.12);
   padding: 4px;
+}
+
+.singleSelectDropdownMenu--portal {
+  position: fixed;
+  right: auto;
+  z-index: 5000;
 }
 
 .singleSelectDropdownOption {
@@ -1094,49 +1137,113 @@ html.dark .topbar .btn:not(.primary):not(.danger) {
 /* Admin → Audit */
 .auditPage {
   min-height: 0;
+  overflow: visible;
+}
+
+.auditToolbar.card {
+  overflow: visible;
 }
 
 .auditToolbar {
   display: flex;
   flex-wrap: wrap;
-  align-items: flex-end;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 12px 16px;
   padding: 12px 14px;
+  overflow: visible;
 }
 
 .auditToolbarFields {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
+  display: grid;
+  grid-template-columns: minmax(160px, 200px) minmax(220px, 1fr) minmax(160px, 220px) minmax(140px, 180px);
   gap: 10px 14px;
+  align-items: start;
   min-width: 0;
-  flex: 1 1 auto;
+  flex: 1 1 480px;
+  overflow: visible;
 }
 
 .auditToolbarField {
   display: flex;
   flex-direction: column;
   gap: 5px;
-  flex: 0 0 auto;
-  width: 200px;
-  max-width: 100%;
+  min-width: 0;
   margin: 0;
+  overflow: visible;
 }
 
 .auditToolbarField--matter {
-  width: 280px;
-  flex: 1 1 240px;
-  max-width: 360px;
+  position: relative;
   min-width: 0;
 }
 
 .auditToolbarField--matter .calendarMatterPicker {
   width: 100%;
+  position: relative;
 }
 
-.auditToolbarField--action {
-  width: 220px;
+.auditToolbarField--matter:focus-within {
+  z-index: 30;
+}
+
+.auditToolbarField--matter .calendarMatterPickerHint,
+.auditToolbarField--matter .calendarMatterPickerList {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 40;
+  margin: 0;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: var(--shadow);
+}
+
+.auditToolbarField--matter .calendarMatterPickerHint {
+  padding: 8px 10px;
+  font-size: 12px;
+}
+
+.auditToolbarField--matter .calendarMatterPickerList {
+  padding: 4px;
+}
+
+.auditToolbarField--matter .calendarMatterPickerSelected {
+  padding: 6px 10px;
+  align-items: flex-start;
+  min-height: 42px;
+  box-sizing: border-box;
+}
+
+.auditToolbarField--matter .calendarMatterPickerSelectedPrimary {
+  font-weight: 600;
+  font-size: 13px;
+  white-space: normal;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.auditToolbarField--matter .calendarMatterPickerSelectedSecondary {
+  font-size: 12px;
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.auditToolbarField--matter .calendarMatterPickerSelected .btn {
+  padding: 4px 10px;
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.auditToolbarField--matter .calendarMatterPickerSearch .searchInputField {
+  min-height: 42px;
+  box-sizing: border-box;
 }
 
 .auditToolbarField select,
@@ -1144,12 +1251,14 @@ html.dark .topbar .btn:not(.primary):not(.danger) {
   width: 100%;
   min-width: 0;
   box-sizing: border-box;
+  min-height: 42px;
 }
 
 .auditToolbarLabel {
   font-size: 12px;
   color: var(--muted);
   line-height: 1.2;
+  min-height: 14px;
 }
 
 .auditToolbarActions {
@@ -1157,6 +1266,9 @@ html.dark .topbar .btn:not(.primary):not(.danger) {
   align-items: center;
   gap: 8px;
   flex: 0 0 auto;
+  align-self: start;
+  /* Align buttons with input row (label + gap above). */
+  padding-top: 19px;
 }
 
 .auditTableCard {
@@ -1255,6 +1367,12 @@ html.dark .topbar .btn:not(.primary):not(.danger) {
   max-height: 160px;
 }
 
+@media (max-width: 1200px) {
+  .auditToolbarFields {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
 @media (max-width: 900px) {
   .auditToolbar {
     flex-direction: column;
@@ -1262,18 +1380,12 @@ html.dark .topbar .btn:not(.primary):not(.danger) {
   }
 
   .auditToolbarFields {
-    flex-direction: column;
-    align-items: stretch;
-  }
-
-  .auditToolbarField,
-  .auditToolbarField--matter,
-  .auditToolbarField--action {
-    width: 100%;
+    grid-template-columns: 1fr;
   }
 
   .auditToolbarActions {
     justify-content: flex-start;
+    padding-top: 0;
   }
 }
 
@@ -1312,6 +1424,24 @@ html.dark .topbar .btn:not(.primary):not(.danger) {
   border-color: rgba(var(--primary-rgb), 0.45);
   color: var(--primary);
   font-weight: 600;
+}
+
+/* Primary CTAs in main-menu toolbars sit on --page-bg (dark blue in light mode). */
+.mainMenuFilterBar .btn.primary {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: var(--text-on-page-bg);
+}
+
+.mainMenuFilterBar .btn.primary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--primary) 88%, #0f172a);
+  border-color: color-mix(in srgb, var(--primary) 88%, #0f172a);
+}
+
+html.dark .mainMenuFilterBar .btn.primary {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: var(--text-on-page-bg);
 }
 
 .btn.danger {
@@ -1393,6 +1523,55 @@ select {
   max-width: 11rem;
   padding: 8px 10px;
   margin: 0;
+}
+
+.tasksToolbarLayoutGroup .singleSelectDropdownField {
+  flex: 0 0 auto;
+  min-width: 6.75rem;
+  max-width: 11rem;
+}
+
+.tasksToolbarLayoutGroup .singleSelectDropdown {
+  min-width: 6.75rem;
+  max-width: 11rem;
+}
+
+.tasksToolbarLayoutGroup .singleSelectDropdownTrigger {
+  min-height: 34px;
+  padding: 8px 10px;
+}
+
+.adminInlineSelect,
+.finDirSelect {
+  flex: 0 0 auto;
+  min-width: 5.5rem;
+}
+
+.adminInlineSelect .singleSelectDropdownTrigger,
+.finDirSelect .singleSelectDropdownTrigger {
+  min-height: 34px;
+  padding: 6px 10px;
+}
+
+.auditToolbarField .singleSelectDropdownField {
+  width: 100%;
+}
+
+.auditToolbarField .singleSelectDropdownTrigger {
+  min-height: 42px;
+}
+
+.adminUsersCreateRow .singleSelectDropdownField {
+  min-width: 200px;
+  margin-bottom: 0;
+}
+
+.reportsReportSelect {
+  max-width: min(100%, 420px);
+}
+
+.reportsReportSelect .singleSelectDropdown {
+  width: 100%;
 }
 
 .list {
@@ -3682,13 +3861,22 @@ html.dark .ledgerBalanceBand--client {
   min-width: max-content;
 }
 
-.feeScaleQuoteTable .feeScaleTypeCell .select {
-  width: 100%;
-  max-width: none;
+.feeScaleLineCells .feeScaleLineAmountKind .singleSelectDropdown,
+.feeScaleLineCells .feeScaleLineBandSet .singleSelectDropdown {
+  width: auto;
 }
 
-.feeScaleQuoteTable .feeScaleVatTreatmentCol .select {
+.feeScaleQuoteTable .feeScaleTypeCell .singleSelectDropdown,
+.feeScaleQuoteTable .feeScaleVatTreatmentCol .singleSelectDropdown {
   width: 100%;
+}
+
+.feeScaleQuoteTable .feeScaleTypeCell .singleSelectDropdownTrigger,
+.feeScaleQuoteTable .feeScaleVatTreatmentCol .singleSelectDropdownTrigger {
+  width: 100%;
+}
+
+.feeScaleQuoteTable .feeScaleVatTreatmentCol .singleSelectDropdown {
   max-width: 11.75rem;
 }
 

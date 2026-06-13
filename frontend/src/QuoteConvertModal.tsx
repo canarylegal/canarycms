@@ -8,7 +8,14 @@ import {
   useCaseSources,
 } from './CaseSourceField'
 import { useDialogs } from './DialogProvider'
+import {
+  matterHeadDropdownOptions,
+  matterHeadIdForSubType,
+  matterSubDropdownOptions,
+} from './matterTypeOptions'
+import { SingleSelectDropdown } from './SingleSelectDropdown'
 import type { CaseOut, CasePortalShareStatusOut, MatterHeadTypeOut, UserSummary } from './types'
+import { useExclusiveDropdownOpen } from './useExclusiveDropdownOpen'
 
 type Props = {
   token: string
@@ -22,6 +29,7 @@ export function QuoteConvertModal({ token, quoteCase, users, onClose, onConverte
   const { askConfirm } = useDialogs()
   const caseSources = useCaseSources(token)
   const [matterHeadTypes, setMatterHeadTypes] = useState<MatterHeadTypeOut[]>([])
+  const [matterHeadTypeId, setMatterHeadTypeId] = useState('')
   const [feeEarner, setFeeEarner] = useState('')
   const [practiceArea, setPracticeArea] = useState('')
   const [sourceId, setSourceId] = useState('')
@@ -30,6 +38,7 @@ export function QuoteConvertModal({ token, quoteCase, users, onClose, onConverte
   const [openAfter, setOpenAfter] = useState(true)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
+  const dropdown = useExclusiveDropdownOpen<'feeEarner' | 'head' | 'sub' | 'source'>()
 
   useEffect(() => {
     let cancelled = false
@@ -47,7 +56,11 @@ export function QuoteConvertModal({ token, quoteCase, users, onClose, onConverte
 
   useEffect(() => {
     setFeeEarner(quoteCase.fee_earner_user_id)
-    setPracticeArea(quoteCase.matter_sub_type_id ?? '')
+    const subId = quoteCase.matter_sub_type_id ?? ''
+    setPracticeArea(subId)
+    setMatterHeadTypeId(
+      quoteCase.matter_head_type_id ?? matterHeadIdForSubType(matterHeadTypes, subId),
+    )
     if (quoteCase.source_id) {
       setSourceId(quoteCase.source_id)
       setSourceCustomName('')
@@ -61,7 +74,7 @@ export function QuoteConvertModal({ token, quoteCase, users, onClose, onConverte
     setPortalEnabled(Boolean(quoteCase.portal_enabled))
     setOpenAfter(true)
     setErr(null)
-  }, [quoteCase])
+  }, [quoteCase, matterHeadTypes])
 
   async function onPortalEnabledChange(checked: boolean) {
     if (checked) {
@@ -104,12 +117,20 @@ export function QuoteConvertModal({ token, quoteCase, users, onClose, onConverte
 
   const feeEarnerOptions = useMemo(
     () =>
-      users.filter(
-        (u) =>
-          u.is_active &&
-          (u.can_be_fee_earner !== false || u.id === quoteCase.fee_earner_user_id),
-      ),
+      users
+        .filter(
+          (u) =>
+            u.is_active &&
+            (u.can_be_fee_earner !== false || u.id === quoteCase.fee_earner_user_id),
+        )
+        .map((u) => ({ value: u.id, label: `${u.display_name} (${u.email})` })),
     [users, quoteCase.fee_earner_user_id],
+  )
+
+  const matterHeadOptions = useMemo(() => matterHeadDropdownOptions(matterHeadTypes), [matterHeadTypes])
+  const matterSubOptions = useMemo(
+    () => matterSubDropdownOptions(matterHeadTypes, matterHeadTypeId),
+    [matterHeadTypes, matterHeadTypeId],
   )
 
   async function submit() {
@@ -157,34 +178,56 @@ export function QuoteConvertModal({ token, quoteCase, users, onClose, onConverte
               {[quoteCase.client_name, quoteCase.matter_description].filter(Boolean).join(' · ')}
             </div>
           </div>
-          <label className="field">
-            <span>Fee earner</span>
-            <select value={feeEarner} onChange={(e) => setFeeEarner(e.target.value)} disabled={busy} required>
-              <option value="" disabled>
-                Select fee earner
-              </option>
-              {feeEarnerOptions.map((u) => (
-                <option key={u.id} value={u.id}>
-                  {u.display_name} ({u.email})
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="field">
-            <span>Matter type</span>
-            <select value={practiceArea} onChange={(e) => setPracticeArea(e.target.value)} disabled={busy}>
-              <option value="">— select —</option>
-              {matterHeadTypes.map((head) => (
-                <optgroup key={head.id} label={head.name}>
-                  {head.sub_types.map((sub) => (
-                    <option key={sub.id} value={sub.id}>
-                      {sub.name}
-                    </option>
-                  ))}
-                </optgroup>
-              ))}
-            </select>
-          </label>
+          <SingleSelectDropdown
+            label="Fee earner"
+            options={feeEarnerOptions}
+            value={feeEarner}
+            onChange={setFeeEarner}
+            open={dropdown.isOpen('feeEarner')}
+            onOpenChange={(next) => dropdown.setOpen('feeEarner', next)}
+            disabled={busy}
+            placeholder="Select fee earner"
+            emptyMessage={feeEarnerOptions.length === 0 ? 'No fee earners available.' : undefined}
+          />
+          <SingleSelectDropdown
+            label="Matter type"
+            options={matterHeadOptions}
+            value={matterHeadTypeId}
+            onChange={(v) => {
+              setMatterHeadTypeId(v)
+              setPracticeArea('')
+            }}
+            open={dropdown.isOpen('head')}
+            onOpenChange={(next) => dropdown.setOpen('head', next)}
+            disabled={busy}
+            placeholder="— select —"
+            emptyMessage={
+              matterHeadOptions.length === 0
+                ? 'No matter types available — add them under Admin → Matters.'
+                : undefined
+            }
+          />
+          {matterHeadTypeId ? (
+            <SingleSelectDropdown
+              label="Sub-type"
+              options={matterSubOptions}
+              value={practiceArea}
+              onChange={setPracticeArea}
+              open={dropdown.isOpen('sub')}
+              onOpenChange={(next) => dropdown.setOpen('sub', next)}
+              disabled={busy}
+              placeholder="— select —"
+              emptyMessage={
+                matterSubOptions.length === 0
+                  ? 'No sub-types for this matter type — add them under Admin → Matters.'
+                  : undefined
+              }
+            />
+          ) : (
+            <p className="muted" style={{ margin: 0, fontSize: 13 }}>
+              Choose a matter type, then pick a sub-type.
+            </p>
+          )}
           <CaseSourceField
             sources={caseSources}
             sourceId={sourceId}
@@ -192,6 +235,8 @@ export function QuoteConvertModal({ token, quoteCase, users, onClose, onConverte
             onSourceIdChange={setSourceId}
             onCustomNameChange={setSourceCustomName}
             disabled={busy}
+            open={dropdown.isOpen('source')}
+            onOpenChange={(next) => dropdown.setOpen('source', next)}
           />
           <label className="row field" style={{ gap: 10, alignItems: 'flex-start', cursor: busy ? 'default' : 'pointer' }}>
             <input

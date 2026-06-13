@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { fetchContactSearch } from './apiSearch'
 import { SearchInput } from './SearchInput'
 import { useDebouncedValue } from './useDebouncedValue'
@@ -34,12 +34,17 @@ export function ContactSearchPicker({
 }: Props) {
   const [search, setSearch] = useState('')
   const debouncedSearch = useDebouncedValue(search.trim(), 300)
-  const [matches, setMatches] = useState<ContactOut[]>([])
+  const [rawMatches, setRawMatches] = useState<ContactOut[]>([])
   const [busy, setBusy] = useState(false)
+
+  const matches = useMemo(
+    () => (filterContact ? rawMatches.filter(filterContact) : rawMatches),
+    [rawMatches, filterContact],
+  )
 
   useEffect(() => {
     if (!token || !debouncedSearch) {
-      setMatches([])
+      setRawMatches([])
       setBusy(false)
       return
     }
@@ -51,10 +56,10 @@ export function ContactSearchPicker({
       type: organisationOnly ? 'organisation' : undefined,
     })
       .then((rows) => {
-        if (!cancelled) setMatches(filterContact ? rows.filter(filterContact) : rows)
+        if (!cancelled) setRawMatches(rows)
       })
       .catch(() => {
-        if (!cancelled) setMatches([])
+        if (!cancelled) setRawMatches([])
       })
       .finally(() => {
         if (!cancelled) setBusy(false)
@@ -62,7 +67,7 @@ export function ContactSearchPicker({
     return () => {
       cancelled = true
     }
-  }, [token, debouncedSearch, organisationOnly, filterContact])
+  }, [token, debouncedSearch, organisationOnly])
 
   return (
     <div className="stack" style={{ gap: 8 }}>

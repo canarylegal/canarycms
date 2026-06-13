@@ -1,13 +1,16 @@
+import logging
 import uuid
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
+from app.auth_principal import AuthPrincipal
 from app.db import get_db
-from app.deps import require_admin
-from app.models import User, UserPermissionCategory, UserRole
+from app.deps import require_recovery_operator
+from app.master_admin import is_reserved_master_login, normalize_master_login
+from app.models import User, UserPermissionCategory, UserRole, WebAuthnCredential
 from app.schemas import AdminUserCreate, AdminUserPublic, AdminUserSetPassword, AdminUserUpdate, AdminSendPasswordResetResponse
 from app.audit import log_event
 from app.security import hash_password
@@ -18,19 +21,40 @@ from app.password_reset_service import (
     touch_password_changed,
 )
 
+log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/admin/users", tags=["admin-users"])
 
 
+def _clear_user_second_factors(db: Session, user_id: uuid.UUID) -> None:
+    db.execute(delete(WebAuthnCredential).where(WebAuthnCredential.user_id == user_id))
+
+
+def _reject_reserved_login(email: str) -> None:
+    if is_reserved_master_login(email):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="That login id is reserved for the master recovery operator.",
+        )
+
+
 @router.get("", response_model=list[AdminUserPublic])
-def list_users(admin: User = Depends(require_admin), db: Session = Depends(get_db)) -> list[AdminUserPublic]:
+def list_users(
+    _operator: AuthPrincipal = Depends(require_recovery_operator),
+    db: Session = Depends(get_db),
+) -> list[AdminUserPublic]:
     users = db.execute(select(User).order_by(User.created_at.desc())).scalars().all()
     return [AdminUserPublic.model_validate(u, from_attributes=True) for u in users]
 
 
 @router.post("", response_model=AdminUserPublic, status_code=status.HTTP_201_CREATED)
-def create_user(payload: AdminUserCreate, admin: User = Depends(require_admin), db: Session = Depends(get_db)) -> AdminUserPublic:
-    email = str(payload.email).lower()
+def create_user(
+    payload: AdminUserCreate,
+    operator: AuthPrincipal = Depends(require_recovery_operator),
+    db: Session = Depends(get_db),
+) -> AdminUserPublic:
+    email = normalize_master_login(str(payload.email))
+    _reject_reserved_login(email)
     existing = db.execute(select(User).where(User.email == email)).scalar_one_or_none()
     if existing:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already exists")
@@ -66,9 +90,11 @@ def create_user(payload: AdminUserCreate, admin: User = Depends(require_admin), 
     db.add(user)
     db.commit()
     db.refresh(user)
+    if operator.is_master_recovery:
+        log.info("Master recovery created user %s", user.email)
     log_event(
         db,
-        actor_user_id=admin.id,
+        actor_user_id=operator.actor_user_id,
         action="admin.user.create",
         entity_type="user",
         entity_id=str(user.id),
@@ -81,7 +107,7 @@ def create_user(payload: AdminUserCreate, admin: User = Depends(require_admin), 
 def update_user(
     user_id: uuid.UUID,
     payload: AdminUserUpdate,
-    admin: User = Depends(require_admin),
+    operator: AuthPrincipal = Depends(require_recovery_operator),
     db: Session = Depends(get_db),
 ) -> AdminUserPublic:
     user = db.get(User, user_id)
@@ -89,8 +115,6 @@ def update_user(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
     data = payload.model_dump(exclude_unset=True)
-    # Ensure PATCH honours initials when the client sends them: avoid relying solely on
-    # exclude_unset edge cases with optional fields on partial updates.
     fields_set = getattr(payload, "model_fields_set", set()) or set()
     if "initials" in fields_set:
         if payload.initials is not None:
@@ -98,7 +122,8 @@ def update_user(
         else:
             data.pop("initials", None)
     if "email" in data and data["email"] is not None:
-        new_email = str(data["email"]).lower().strip()
+        new_email = normalize_master_login(str(data["email"]))
+        _reject_reserved_login(new_email)
         conflict = db.execute(
             select(User).where(User.email == new_email, User.id != user_id)
         ).scalar_one_or_none()
@@ -135,9 +160,11 @@ def update_user(
     db.add(user)
     db.commit()
     db.refresh(user)
+    if operator.is_master_recovery:
+        log.info("Master recovery updated user %s", user.email)
     log_event(
         db,
-        actor_user_id=admin.id,
+        actor_user_id=operator.actor_user_id,
         action="admin.user.update",
         entity_type="user",
         entity_id=str(user.id),
@@ -150,7 +177,7 @@ def update_user(
 def set_password(
     user_id: uuid.UUID,
     payload: AdminUserSetPassword,
-    admin: User = Depends(require_admin),
+    operator: AuthPrincipal = Depends(require_recovery_operator),
     db: Session = Depends(get_db),
 ) -> None:
     user = db.get(User, user_id)
@@ -159,15 +186,17 @@ def set_password(
 
     user.password_hash = hash_password(payload.password)
     touch_password_changed(user)
-    # Security: if admin resets password, force 2FA re-enrolment
     user.totp_secret = None
     user.is_2fa_enabled = False
+    _clear_user_second_factors(db, user.id)
 
     db.add(user)
     db.commit()
+    if operator.is_master_recovery:
+        log.info("Master recovery reset password for user %s (2FA and passkeys cleared)", user.email)
     log_event(
         db,
-        actor_user_id=admin.id,
+        actor_user_id=operator.actor_user_id,
         action="admin.user.set_password",
         entity_type="user",
         entity_id=str(user.id),
@@ -178,7 +207,7 @@ def set_password(
 @router.post("/{user_id}/send-password-reset-email", response_model=AdminSendPasswordResetResponse)
 def send_user_password_reset_email(
     user_id: uuid.UUID,
-    admin: User = Depends(require_admin),
+    operator: AuthPrincipal = Depends(require_recovery_operator),
     db: Session = Depends(get_db),
 ) -> AdminSendPasswordResetResponse:
     if not password_reset_email_configured(db):
@@ -197,7 +226,7 @@ def send_user_password_reset_email(
     if not (user.email or "").strip():
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This user has no e-mail address on file.")
     raw = create_password_reset_token(db, user)
-    sent = send_password_reset_email(db, user, raw, actor_user_id=admin.id)
+    sent = send_password_reset_email(db, user, raw, actor_user_id=operator.actor_user_id)
     if not sent:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
@@ -212,7 +241,7 @@ def send_user_password_reset_email(
 @router.post("/{user_id}/disable-2fa", status_code=status.HTTP_204_NO_CONTENT)
 def disable_2fa(
     user_id: uuid.UUID,
-    admin: User = Depends(require_admin),
+    operator: AuthPrincipal = Depends(require_recovery_operator),
     db: Session = Depends(get_db),
 ) -> None:
     user = db.get(User, user_id)
@@ -220,15 +249,17 @@ def disable_2fa(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
     user.totp_secret = None
     user.is_2fa_enabled = False
+    _clear_user_second_factors(db, user.id)
     user.updated_at = datetime.utcnow()
     db.add(user)
     db.commit()
+    if operator.is_master_recovery:
+        log.info("Master recovery disabled 2FA/passkeys for user %s", user.email)
     log_event(
         db,
-        actor_user_id=admin.id,
+        actor_user_id=operator.actor_user_id,
         action="admin.user.disable_2fa",
         entity_type="user",
         entity_id=str(user.id),
     )
     return None
-

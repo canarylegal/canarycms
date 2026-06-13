@@ -26,7 +26,13 @@ import { ContactSearchPicker } from '../ContactSearchPicker'
 import { useDialogs } from '../DialogProvider'
 import { SearchInput } from '../SearchInput'
 import { SingleSelectDropdown } from '../SingleSelectDropdown'
+import {
+  matterHeadDropdownOptions,
+  matterHeadIdForSubType,
+  matterSubDropdownOptions,
+} from '../matterTypeOptions'
 import { TaskCreateModal } from '../TaskCreateModal'
+import { useExclusiveDropdownOpen } from '../useExclusiveDropdownOpen'
 import { QuoteWizard } from '../QuoteWizard'
 import { CANARY_FOLLOW_UP_STANDARD_TASK_ID } from '../standardTasks'
 import { TextPromptModal } from '../TextPromptModal'
@@ -516,6 +522,7 @@ export function CaseDetail({
   const [portalShareFolderPath, setPortalShareFolderPath] = useState<string | null>(null)
   const [caseTaskMenuRows, setCaseTaskMenuRows] = useState<TaskMenuRow[]>([])
   const [caseTasksSearch, setCaseTasksSearch] = useState('')
+  const [caseTasksLayoutOpen, setCaseTasksLayoutOpen] = useState(false)
   const { prefs: uiPrefs, setPreference: setUiPreference, setPreferenceDebounced: setUiPreferenceDebounced } =
     useUserUiPreferences(currentUser, token)
   const { gridTemplateColumns: tasksGridColumns, startResize: tasksStartResize } = useColumnWidths(
@@ -558,11 +565,13 @@ export function CaseDetail({
   const [contactPickTypeOpen, setContactPickTypeOpen] = useState(false)
   const [manageAccessOpen, setManageAccessOpen] = useState(false)
   const [editMatterDescription, setEditMatterDescription] = useState('')
+  const [editMatterHeadTypeId, setEditMatterHeadTypeId] = useState('')
   const [editPracticeArea, setEditPracticeArea] = useState('')
   const [editFeeEarner, setEditFeeEarner] = useState<string>('')
   const [editCaseStatus, setEditCaseStatus] = useState<CaseWorkflowStatus>('open')
   const [editSourceId, setEditSourceId] = useState('')
   const [editPortalEnabled, setEditPortalEnabled] = useState(false)
+  const editCaseDropdown = useExclusiveDropdownOpen<'head' | 'sub' | 'feeEarner' | 'status' | 'source'>()
   const [caseSources, setCaseSources] = useState<CaseSourceOut[]>([])
   /** Edit-case save/API errors only (shown inside the edit card, never in the case shell). */
   const [editCaseErr, setEditCaseErr] = useState<string | null>(null)
@@ -786,6 +795,40 @@ export function CaseDetail({
     }
   }, [token])
 
+  const editMatterHeadOptions = useMemo(() => matterHeadDropdownOptions(matterHeadTypes), [matterHeadTypes])
+  const editMatterSubOptions = useMemo(
+    () => matterSubDropdownOptions(matterHeadTypes, editMatterHeadTypeId),
+    [matterHeadTypes, editMatterHeadTypeId],
+  )
+  const editFeeEarnerOptions = useMemo(
+    () =>
+      users
+        .filter(
+          (u) =>
+            u.is_active &&
+            (u.can_be_fee_earner !== false || u.id === caseDetail?.fee_earner_user_id),
+        )
+        .map((u) => ({ value: u.id, label: `${u.display_name} (${u.email})` })),
+    [users, caseDetail?.fee_earner_user_id],
+  )
+  const editStatusOptions = useMemo(() => {
+    const opts = [
+      { value: 'open', label: 'Active' },
+      ...(caseDetail?.status === 'quote' ? [{ value: 'quote', label: 'Quote' }] : []),
+      { value: 'post_completion', label: 'Post-completion' },
+      { value: 'closed', label: 'Closed' },
+      { value: 'archived', label: 'Archived' },
+    ]
+    return opts
+  }, [caseDetail?.status])
+  const editSourceOptions = useMemo(
+    () => [
+      { value: '', label: '— none —' },
+      ...caseSources.map((s) => ({ value: s.id, label: s.name })),
+    ],
+    [caseSources],
+  )
+
   const hasPropertyMenu = useMemo(
     () => Boolean(caseDetail?.matter_menus?.some((m) => m.name.trim().toLowerCase() === 'property')),
     [caseDetail?.matter_menus],
@@ -907,13 +950,18 @@ export function CaseDetail({
 
   useEffect(() => {
     if (caseDocPanel !== 'edit-details') return
+    editCaseDropdown.closeAll()
     setEditMatterDescription(caseDetail?.matter_description ?? '')
-    setEditPracticeArea(caseDetail?.matter_sub_type_id ?? '')
+    const subId = caseDetail?.matter_sub_type_id ?? ''
+    setEditPracticeArea(subId)
+    setEditMatterHeadTypeId(
+      caseDetail?.matter_head_type_id ?? matterHeadIdForSubType(matterHeadTypes, subId),
+    )
     setEditFeeEarner(caseDetail?.fee_earner_user_id ? String(caseDetail.fee_earner_user_id) : '')
     setEditCaseStatus(caseDetail?.status ?? 'open')
     setEditSourceId(caseDetail?.source_id ?? '')
     setEditPortalEnabled(Boolean(caseDetail?.portal_enabled))
-  }, [caseDocPanel, caseDetail])
+  }, [caseDocPanel, caseDetail, matterHeadTypes, editCaseDropdown.closeAll])
 
   useEffect(() => {
     if (caseDocPanel !== 'edit-details' || !token) return
@@ -2765,21 +2813,45 @@ export function CaseDetail({
                         Reference is immutable and generated automatically. Client name comes from matter contacts with type
                         &quot;Client&quot;. Use Contacts in the left menu → Edit to change names.
                       </div>
-                      <label className="field">
-                        <span>Matter type</span>
-                        <select value={editPracticeArea} onChange={(e) => setEditPracticeArea(e.target.value)} disabled={busy}>
-                          <option value="">— select —</option>
-                          {matterHeadTypes.map((head) => (
-                            <optgroup key={head.id} label={head.name}>
-                              {head.sub_types.map((sub) => (
-                                <option key={sub.id} value={sub.id}>
-                                  {sub.name}
-                                </option>
-                              ))}
-                            </optgroup>
-                          ))}
-                        </select>
-                      </label>
+                      <SingleSelectDropdown
+                        label="Matter type"
+                        options={editMatterHeadOptions}
+                        value={editMatterHeadTypeId}
+                        onChange={(v) => {
+                          setEditMatterHeadTypeId(v)
+                          setEditPracticeArea('')
+                        }}
+                        open={editCaseDropdown.isOpen('head')}
+                        onOpenChange={(next) => editCaseDropdown.setOpen('head', next)}
+                        disabled={busy}
+                        placeholder="— select —"
+                        emptyMessage={
+                          editMatterHeadOptions.length === 0
+                            ? 'No matter types available — add them under Admin → Matters.'
+                            : undefined
+                        }
+                      />
+                      {editMatterHeadTypeId ? (
+                        <SingleSelectDropdown
+                          label="Sub-type"
+                          options={editMatterSubOptions}
+                          value={editPracticeArea}
+                          onChange={setEditPracticeArea}
+                          open={editCaseDropdown.isOpen('sub')}
+                          onOpenChange={(next) => editCaseDropdown.setOpen('sub', next)}
+                          disabled={busy}
+                          placeholder="— select —"
+                          emptyMessage={
+                            editMatterSubOptions.length === 0
+                              ? 'No sub-types for this matter type — add them under Admin → Matters.'
+                              : undefined
+                          }
+                        />
+                      ) : (
+                        <p className="muted" style={{ margin: 0, fontSize: 13 }}>
+                          Choose a matter type, then pick a sub-type.
+                        </p>
+                      )}
                       <label className="field">
                         <span>Description</span>
                         <input
@@ -2787,59 +2859,37 @@ export function CaseDetail({
                           onChange={(e) => setEditMatterDescription(e.target.value)}
                         />
                       </label>
-                      <label className="field">
-                        <span>Fee earner</span>
-                        <select
-                          value={editFeeEarner}
-                          onChange={(e) => setEditFeeEarner(e.target.value)}
-                          disabled={busy}
-                          required
-                        >
-                          <option value="" disabled>
-                            Select fee earner
-                          </option>
-                          {users
-                            .filter(
-                              (u) =>
-                                u.is_active &&
-                                (u.can_be_fee_earner !== false || u.id === caseDetail?.fee_earner_user_id),
-                            )
-                            .map((u) => (
-                              <option key={u.id} value={u.id}>
-                                {u.display_name} ({u.email})
-                              </option>
-                            ))}
-                        </select>
-                      </label>
-                      <label className="field">
-                        <span>Status</span>
-                        <select
-                          value={editCaseStatus}
-                          onChange={(e) => setEditCaseStatus(e.target.value as CaseWorkflowStatus)}
-                          disabled={busy}
-                        >
-                          <option value="open">Active</option>
-                          {caseDetail?.status === 'quote' ? <option value="quote">Quote</option> : null}
-                          <option value="post_completion">Post-completion</option>
-                          <option value="closed">Closed</option>
-                          <option value="archived">Archived</option>
-                        </select>
-                      </label>
-                      <label className="field">
-                        <span>Source</span>
-                        <select
-                          value={editSourceId}
-                          onChange={(e) => setEditSourceId(e.target.value)}
-                          disabled={busy}
-                        >
-                          <option value="">— none —</option>
-                          {caseSources.map((s) => (
-                            <option key={s.id} value={s.id}>
-                              {s.name}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
+                      <SingleSelectDropdown
+                        label="Fee earner"
+                        options={editFeeEarnerOptions}
+                        value={editFeeEarner}
+                        onChange={setEditFeeEarner}
+                        open={editCaseDropdown.isOpen('feeEarner')}
+                        onOpenChange={(next) => editCaseDropdown.setOpen('feeEarner', next)}
+                        disabled={busy}
+                        placeholder="Select fee earner"
+                        emptyMessage={editFeeEarnerOptions.length === 0 ? 'No fee earners available.' : undefined}
+                      />
+                      <SingleSelectDropdown
+                        label="Status"
+                        options={editStatusOptions}
+                        value={editCaseStatus}
+                        onChange={(v) => setEditCaseStatus(v as CaseWorkflowStatus)}
+                        open={editCaseDropdown.isOpen('status')}
+                        onOpenChange={(next) => editCaseDropdown.setOpen('status', next)}
+                        disabled={busy}
+                        placeholder="— select —"
+                      />
+                      <SingleSelectDropdown
+                        label="Source"
+                        options={editSourceOptions}
+                        value={editSourceId}
+                        onChange={setEditSourceId}
+                        open={editCaseDropdown.isOpen('source')}
+                        onOpenChange={(next) => editCaseDropdown.setOpen('source', next)}
+                        disabled={busy}
+                        placeholder="— none —"
+                      />
                       <label className="row field" style={{ gap: 10, alignItems: 'center', cursor: busy ? 'default' : 'pointer' }}>
                         <input
                           type="checkbox"
@@ -2985,15 +3035,18 @@ export function CaseDetail({
                     </button>
                     <div className="tasksToolbarLayoutGroup">
                       <span className="tasksToolbarLayoutLabel">View</span>
-                      <select
-                        className="tasksToolbarLayoutSelect"
+                      <SingleSelectDropdown
+                        hideLabel
+                        label="Task layout"
+                        options={[
+                          { value: 'list', label: 'List' },
+                          { value: 'kanban', label: 'Kanban' },
+                        ]}
                         value={uiPrefs.case_tasks_layout}
-                        onChange={(e) => setUiPreference('case_tasks_layout', e.target.value as 'list' | 'kanban')}
-                        aria-label="Task layout"
-                      >
-                        <option value="list">List</option>
-                        <option value="kanban">Kanban</option>
-                      </select>
+                        onChange={(v) => setUiPreference('case_tasks_layout', v as 'list' | 'kanban')}
+                        open={caseTasksLayoutOpen}
+                        onOpenChange={setCaseTasksLayoutOpen}
+                      />
                     </div>
                     <SearchInput
                       placeholder="Search tasks…"

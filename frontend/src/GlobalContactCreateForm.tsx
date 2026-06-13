@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { SingleSelectDropdown } from './SingleSelectDropdown'
 import type { ContactOut } from './types'
 
 export const CONTACT_PERSON_TITLE_OPTIONS = [
@@ -176,6 +177,21 @@ export function ContactPersonOrgAddressFields({
   organisationOnly = false,
 }: FieldsProps) {
   const patch = onChange
+  const [typeOpen, setTypeOpen] = useState(false)
+  const [titleOpen, setTitleOpen] = useState(false)
+
+  const typeOptions = useMemo(
+    () => [
+      { value: 'person', label: 'Person' },
+      { value: 'organisation', label: 'Organisation' },
+    ],
+    [],
+  )
+
+  const titleOptions = useMemo(
+    () => CONTACT_PERSON_TITLE_OPTIONS.map((t) => ({ value: t, label: t })),
+    [],
+  )
 
   useEffect(() => {
     if (!organisationOnly || s.type === 'organisation') return
@@ -186,37 +202,45 @@ export function ContactPersonOrgAddressFields({
 
   return (
     <>
-      <label className="field">
-        <span>Type</span>
-        {organisationOnly ? (
+      {organisationOnly ? (
+        <label className="field">
+          <span>Type</span>
           <div className="muted" style={{ padding: '6px 0' }}>
             Organisation (required for Lawyers)
           </div>
-        ) : (
-          <select
-            value={s.type}
-            onChange={(e) => patch({ type: e.target.value as 'person' | 'organisation' })}
-            disabled={busy}
-            style={{ maxWidth: 220 }}
-          >
-            <option value="person">Person</option>
-            <option value="organisation">Organisation</option>
-          </select>
-        )}
-      </label>
+        </label>
+      ) : (
+        <SingleSelectDropdown
+          label="Type"
+          options={typeOptions}
+          value={s.type}
+          onChange={(v) => patch({ type: v as 'person' | 'organisation' })}
+          open={typeOpen}
+          onOpenChange={(next) => {
+            setTypeOpen(next)
+            if (next) setTitleOpen(false)
+          }}
+          disabled={busy}
+          placeholder="— select —"
+        />
+      )}
       {effectiveType === 'person' ? (
         <div className="row" style={{ gap: 8 }}>
-          <label className="field" style={{ flex: '0 0 100px' }}>
-            <span>Title</span>
-            <select value={s.title} onChange={(e) => patch({ title: e.target.value })} disabled={busy}>
-              <option value="">—</option>
-              {CONTACT_PERSON_TITLE_OPTIONS.map((t) => (
-                <option key={t} value={t}>
-                  {t}
-                </option>
-              ))}
-            </select>
-          </label>
+          <div style={{ flex: '0 0 100px' }}>
+            <SingleSelectDropdown
+              label="Title"
+              options={titleOptions}
+              value={s.title}
+              onChange={(v) => patch({ title: v })}
+              open={titleOpen}
+              onOpenChange={(next) => {
+                setTitleOpen(next)
+                if (next) setTypeOpen(false)
+              }}
+              disabled={busy}
+              placeholder="—"
+            />
+          </div>
           <label className="field" style={{ flex: 1, minWidth: 0 }}>
             <span>First name</span>
             <input value={s.firstName} onChange={(e) => patch({ firstName: e.target.value })} disabled={busy} />

@@ -9,17 +9,35 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.auth_principal import AuthPrincipal
 from app.db import get_db
-from app.deps import require_admin
+from app.deps import require_recovery_operator
+from app.permission_category_bootstrap import is_builtin_category_id
 from app.models import User, UserPermissionCategory
 from app.schemas import UserPermissionCategoryCreate, UserPermissionCategoryOut, UserPermissionCategoryPatch
 
 router = APIRouter(prefix="/admin/permission-categories", tags=["admin-permission-categories"])
 
 
+def _category_out(row: UserPermissionCategory) -> UserPermissionCategoryOut:
+    return UserPermissionCategoryOut(
+        id=row.id,
+        name=row.name,
+        perm_fee_earner=row.perm_fee_earner,
+        perm_post_client=row.perm_post_client,
+        perm_post_office=row.perm_post_office,
+        perm_approve_payments=row.perm_approve_payments,
+        perm_approve_invoices=row.perm_approve_invoices,
+        perm_admin=row.perm_admin,
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+        is_builtin_template=is_builtin_category_id(row.id),
+    )
+
+
 @router.get("", response_model=list[UserPermissionCategoryOut])
 def list_categories(
-    admin: User = Depends(require_admin),
+    _operator: AuthPrincipal = Depends(require_recovery_operator),
     db: Session = Depends(get_db),
 ) -> list[UserPermissionCategoryOut]:
     rows = (
@@ -27,13 +45,14 @@ def list_categories(
         .scalars()
         .all()
     )
-    return [UserPermissionCategoryOut.model_validate(r, from_attributes=True) for r in rows]
+    rows.sort(key=lambda r: (not is_builtin_category_id(r.id), r.name.lower()))
+    return [_category_out(r) for r in rows]
 
 
 @router.post("", response_model=UserPermissionCategoryOut, status_code=status.HTTP_201_CREATED)
 def create_category(
     payload: UserPermissionCategoryCreate,
-    admin: User = Depends(require_admin),
+    _operator: AuthPrincipal = Depends(require_recovery_operator),
     db: Session = Depends(get_db),
 ) -> UserPermissionCategoryOut:
     now = datetime.utcnow()
@@ -56,14 +75,14 @@ def create_category(
         db.rollback()
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Category name may already exist.")
     db.refresh(row)
-    return UserPermissionCategoryOut.model_validate(row, from_attributes=True)
+    return _category_out(row)
 
 
 @router.patch("/{category_id}", response_model=UserPermissionCategoryOut)
 def patch_category(
     category_id: uuid.UUID,
     payload: UserPermissionCategoryPatch,
-    admin: User = Depends(require_admin),
+    _operator: AuthPrincipal = Depends(require_recovery_operator),
     db: Session = Depends(get_db),
 ) -> UserPermissionCategoryOut:
     row = db.get(UserPermissionCategory, category_id)
@@ -90,13 +109,13 @@ def patch_category(
         db.rollback()
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Update failed.")
     db.refresh(row)
-    return UserPermissionCategoryOut.model_validate(row, from_attributes=True)
+    return _category_out(row)
 
 
 @router.delete("/{category_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_category(
     category_id: uuid.UUID,
-    admin: User = Depends(require_admin),
+    _operator: AuthPrincipal = Depends(require_recovery_operator),
     db: Session = Depends(get_db),
 ) -> None:
     row = db.get(UserPermissionCategory, category_id)

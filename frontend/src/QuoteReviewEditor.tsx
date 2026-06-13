@@ -3,6 +3,7 @@ import { apiFetch } from './api'
 import { poundsToPence, penceToPounds } from './FeeScaleEditor'
 import { VAT_TREATMENT_OPTIONS, type FeeScaleVatTreatment } from './feeScaleVat'
 import { useDialogs } from './DialogProvider'
+import { SingleSelectDropdown } from './SingleSelectDropdown'
 import type {
   FeeScaleDetailOut,
   FeeScaleLineKind,
@@ -376,20 +377,15 @@ export function QuoteReviewEditor({
                     return (
                       <tr key={ln.key} className={`finRow${computed?.is_bold ? ' quoteReviewRowBold' : ''}`}>
                         <td>
-                          <select
-                            className="select"
-                            style={{ width: '100%', maxWidth: 124 }}
+                          <SingleSelectDropdown
+                            hideLabel
+                            label="Line type"
+                            options={LINE_KIND_OPTIONS}
                             value={ln.line_kind}
-                            onChange={(e) =>
-                              setLineField(cat.key, ln.key, { line_kind: e.target.value as FeeScaleLineKind })
+                            onChange={(v) =>
+                              setLineField(cat.key, ln.key, { line_kind: v as FeeScaleLineKind })
                             }
-                          >
-                            {LINE_KIND_OPTIONS.map((o) => (
-                              <option key={o.value} value={o.value}>
-                                {o.label}
-                              </option>
-                            ))}
-                          </select>
+                          />
                         </td>
                         <td>
                           <input
@@ -417,21 +413,17 @@ export function QuoteReviewEditor({
                         </td>
                         <td className="feeScaleVatTreatmentCol">
                           {isItem ? (
-                            <select
-                              className="select"
+                            <SingleSelectDropdown
+                              hideLabel
+                              label="VAT treatment"
+                              options={VAT_TREATMENT_OPTIONS}
                               value={(ln.vat_treatment ?? 'included') as FeeScaleVatTreatment}
-                              onChange={(e) =>
+                              onChange={(v) =>
                                 setLineField(cat.key, ln.key, {
-                                  vat_treatment: e.target.value as FeeScaleVatTreatment,
+                                  vat_treatment: v as FeeScaleVatTreatment,
                                 })
                               }
-                            >
-                              {VAT_TREATMENT_OPTIONS.map((o) => (
-                                <option key={o.value} value={o.value}>
-                                  {o.label}
-                                </option>
-                              ))}
-                            </select>
+                            />
                           ) : (
                             <span className="muted">—</span>
                           )}

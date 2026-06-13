@@ -1,7 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { apiFetch } from './api'
 import type { ApiError } from './api'
+import { SingleSelectDropdown } from './SingleSelectDropdown'
 import type { CaseEventOut, CaseEventsOut } from './types'
+import { useExclusiveDropdownOpen } from './useExclusiveDropdownOpen'
 
 function timeToApi(t: string): string {
   const s = t.trim()
@@ -34,12 +36,25 @@ export function CaseEventCreateModal({
   const [allDay, setAllDay] = useState(true)
   const [startTime, setStartTime] = useState('09:00')
   const [track, setTrack] = useState(false)
+  const dropdown = useExclusiveDropdownOpen<'category'>()
+
+  const categoryOptions = useMemo(
+    () => [
+      { value: 'custom', label: 'Custom' },
+      ...events.map((ev) => ({
+        value: ev.id,
+        label: `${ev.name}${ev.template_id ? '' : ' (custom line)'}`,
+      })),
+    ],
+    [events],
+  )
 
   useEffect(() => {
     if (!open) return
     let cancel = false
     setErr(null)
     setBusy(true)
+    dropdown.closeAll()
     void apiFetch<CaseEventsOut>(`/cases/${caseId}/events`, { token })
       .then((out) => {
         if (cancel) return
@@ -61,7 +76,7 @@ export function CaseEventCreateModal({
     return () => {
       cancel = true
     }
-  }, [open, caseId, token])
+  }, [open, caseId, token, dropdown.closeAll])
 
   useEffect(() => {
     if (category === 'custom') return
@@ -162,23 +177,16 @@ export function CaseEventCreateModal({
         <div className="stack" style={{ marginTop: 12, gap: 12 }}>
           {caseLabel ? <div className="muted" style={{ fontSize: 13 }}>{caseLabel}</div> : null}
           {err ? <div className="error">{err}</div> : null}
-          <label className="field">
-            <span>Event category</span>
-            <select
-              value={category}
-              disabled={busy}
-              onChange={(e) => onCategoryChange(e.target.value as 'custom' | string)}
-              aria-label="Event category"
-            >
-              <option value="custom">Custom</option>
-              {events.map((ev) => (
-                <option key={ev.id} value={ev.id}>
-                  {ev.name}
-                  {ev.template_id ? '' : ' (custom line)'}
-                </option>
-              ))}
-            </select>
-          </label>
+          <SingleSelectDropdown
+            label="Event category"
+            options={categoryOptions}
+            value={category}
+            onChange={(v) => onCategoryChange(v as 'custom' | string)}
+            open={dropdown.isOpen('category')}
+            onOpenChange={(next) => dropdown.setOpen('category', next)}
+            disabled={busy}
+            placeholder="— select —"
+          />
           <label className="field">
             <span>Name</span>
             <input value={name} disabled={busy} onChange={(e) => setName(e.target.value)} placeholder="Event name…" />

@@ -52,10 +52,16 @@ from app.routers import (
     portal,
     precedents,
     reports,
+    reconciliations,
     users,
     webauthn,
     webdav,
 )
+
+
+from app.master_admin import validate_master_admin_config_at_startup
+
+validate_master_admin_config_at_startup()
 
 
 @asynccontextmanager
@@ -65,6 +71,7 @@ async def lifespan(app: FastAPI):
     from app.db import SessionLocal
     from app.matter_type_bootstrap import sync_matter_types_from_seed
     from app.merge_code_catalog_sync import sync_merge_code_catalog
+    from app.permission_category_bootstrap import ensure_builtin_permission_categories
     from app.precedent_bootstrap import apply_precedent_seed_if_empty
 
     _log = logging.getLogger("uvicorn.error")
@@ -74,6 +81,11 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         db.rollback()
         _log.warning("Matter type seed skipped: %s", e)
+    try:
+        ensure_builtin_permission_categories(db)
+    except Exception as e:
+        db.rollback()
+        _log.warning("Permission category bootstrap skipped: %s", e)
     try:
         apply_precedent_seed_if_empty(db)
     except Exception as e:
@@ -225,6 +237,7 @@ app.include_router(users.router)
 app.include_router(me_calendar_events.router)
 app.include_router(me_calendars.router)
 app.include_router(reports.router)
+app.include_router(reconciliations.router)
 app.include_router(portal.router)
 
 @app.get("/health")

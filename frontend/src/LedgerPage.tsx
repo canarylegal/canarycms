@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { apiFetch } from './api'
 import { ContactSearchPicker } from './ContactSearchPicker'
 import { canaryDocumentTitle } from './tabTitle'
+import { SingleSelectDropdown } from './SingleSelectDropdown'
 import type { ApiError } from './api'
 import { ConfirmModal } from './ConfirmModal'
 import { useModalDrag } from './useModalDrag'
@@ -474,6 +475,62 @@ export function LedgerPage({ caseId, token }: Props) {
     [matterContactIds],
   )
 
+  const partySelectValue = useMemo(() => {
+    if (contactMode === 'matter') return `matter:${contactPickId}`
+    if (contactMode === 'global') return ''
+    return contactMode
+  }, [contactMode, contactPickId])
+
+  const partySelectOptions = useMemo(
+    () => [
+      { value: '', label: '— select party —' },
+      { value: 'na', label: 'N/A' },
+      ...caseContacts.map((c) => ({
+        value: `matter:${c.id}`,
+        label: `${c.name}${c.matter_contact_type ? ` (${c.matter_contact_type})` : ''}`,
+      })),
+      { value: 'other', label: 'Other (enter below)' },
+    ],
+    [caseContacts],
+  )
+
+  const invCreditUserOptions = useMemo(
+    () =>
+      (invBillingDefaults?.users ?? []).map((u) => ({
+        value: u.id,
+        label: u.display_name || u.email,
+      })),
+    [invBillingDefaults],
+  )
+
+  const invLineTypeOptions = useMemo(
+    () => [
+      { value: 'fee', label: 'Fee' },
+      { value: 'disbursement', label: 'Disbursement' },
+      { value: 'vat', label: 'VAT' },
+    ],
+    [],
+  )
+
+  function onPartySelectChange(val: string) {
+    setContactPickId('')
+    setContactOther('')
+    setGlobalPickerOpen(false)
+    if (val === 'na') {
+      setContactMode('na')
+    } else if (val === 'other') {
+      setContactMode('other')
+      clearGlobalContact()
+    } else if (val.startsWith('matter:')) {
+      setContactMode('matter')
+      setContactPickId(val.slice(7))
+      clearGlobalContact()
+    } else {
+      setContactMode('')
+      clearGlobalContact()
+    }
+  }
+
   return (
     <div className="ledgerShell">
       <div className="ledgerHeader ledgerHeader--ledger">
@@ -766,52 +823,18 @@ export function LedgerPage({ caseId, token }: Props) {
             </h3>
 
             {/* ── Party / Contact ── */}
-            <label className="ledgerPostLabel">
-              Party <span aria-hidden>*</span>
-              <select
-                className="select"
-                value={
-                  contactMode === 'matter'
-                    ? `matter:${contactPickId}`
-                    : contactMode === 'global'
-                      ? ''
-                      : contactMode
-                }
-                onChange={(e) => {
-                  const val = e.target.value
-                  setContactPickId('')
-                  setContactOther('')
-                  setGlobalPickerOpen(false)
-                  if (val === 'na') {
-                    setContactMode('na')
-                  } else if (val === 'other') {
-                    setContactMode('other')
-                    clearGlobalContact()
-                  } else if (val.startsWith('matter:')) {
-                    setContactMode('matter')
-                    setContactPickId(val.slice(7))
-                    clearGlobalContact()
-                  } else {
-                    setContactMode('')
-                    clearGlobalContact()
-                  }
-                }}
-              >
-                <option value="">— select party —</option>
-                <option value="na">N/A</option>
-                {caseContacts.length > 0 ? (
-                  <optgroup label="Matter contacts">
-                    {caseContacts.map((c) => (
-                      <option key={c.id} value={`matter:${c.id}`}>
-                        {c.name}
-                        {c.matter_contact_type ? ` (${c.matter_contact_type})` : ''}
-                      </option>
-                    ))}
-                  </optgroup>
-                ) : null}
-                <option value="other">Other (enter below)</option>
-              </select>
-            </label>
+            <div className="ledgerPostLabel">
+              <span>
+                Party <span aria-hidden>*</span>
+              </span>
+              <SingleSelectDropdown
+                hideLabel
+                label="Party"
+                options={partySelectOptions}
+                value={partySelectValue}
+                onChange={onPartySelectChange}
+              />
+            </div>
 
             {caseContacts.length === 0 ? (
               <p className="muted" style={{ margin: '4px 0 0', fontSize: '0.92em' }}>
@@ -1005,21 +1028,19 @@ export function LedgerPage({ caseId, token }: Props) {
             <p className="muted" style={{ marginTop: 0, fontSize: 13 }}>
               Creates a pending office posting for the total. An authorised user can approve or void it.
             </p>
-            <label className="ledgerPostLabel">
-              Credit <span aria-hidden>*</span>
-              <select
-                className="select"
+            <div className="ledgerPostLabel">
+              <span>
+                Credit <span aria-hidden>*</span>
+              </span>
+              <SingleSelectDropdown
+                hideLabel
+                label="Credit"
+                options={invCreditUserOptions}
                 value={invCreditUserId}
                 disabled={invBusy || !(invBillingDefaults?.users.length)}
-                onChange={(e) => setInvCreditUserId(e.target.value)}
-              >
-                {(invBillingDefaults?.users ?? []).map((u) => (
-                  <option key={u.id} value={u.id}>
-                    {u.display_name || u.email}
-                  </option>
-                ))}
-              </select>
-            </label>
+                onChange={setInvCreditUserId}
+              />
+            </div>
             <div className="stack" style={{ gap: 10 }}>
               <div className="muted" style={{ fontSize: 13 }}>
                 Lines <span aria-hidden>*</span>
@@ -1035,36 +1056,34 @@ export function LedgerPage({ caseId, token }: Props) {
                     style={{ padding: 10, background: 'var(--surface-2, rgba(0,0,0,0.04))' }}
                   >
                     <div className="row" style={{ gap: 8, flexWrap: 'wrap', alignItems: 'flex-end', marginBottom: 8 }}>
-                      <label className="field" style={{ marginBottom: 0, minWidth: 120 }}>
-                        <span>Type</span>
-                        <select
-                          className="select"
+                      <div className="field" style={{ marginBottom: 0, minWidth: 120 }}>
+                        <SingleSelectDropdown
+                          label="Type"
+                          options={invLineTypeOptions}
                           value={ln.line_type}
                           disabled={invBusy}
-                          onChange={(e) =>
+                          onChange={(v) =>
                             setInvLines((prev) =>
                               prev.map((x) =>
                                 x.id === ln.id
-                                  ? { ...x, line_type: e.target.value as InvLineDraft['line_type'], presetId: '' }
+                                  ? { ...x, line_type: v as InvLineDraft['line_type'], presetId: '' }
                                   : x,
                               ),
                             )
                           }
-                        >
-                          <option value="fee">Fee</option>
-                          <option value="disbursement">Disbursement</option>
-                          <option value="vat">VAT</option>
-                        </select>
-                      </label>
+                        />
+                      </div>
                       {ln.line_type !== 'vat' ? (
-                        <label className="field" style={{ marginBottom: 0, minWidth: 160 }}>
-                          <span>Preset</span>
-                          <select
-                            className="select"
+                        <div className="field" style={{ marginBottom: 0, minWidth: 160 }}>
+                          <SingleSelectDropdown
+                            label="Preset"
+                            options={[
+                              { value: '', label: '— Custom —' },
+                              ...presets.map((t) => ({ value: t.id, label: t.label })),
+                            ]}
                             value={ln.presetId}
                             disabled={invBusy}
-                            onChange={(e) => {
-                              const v = e.target.value
+                            onChange={(v) => {
                               if (!v) {
                                 setInvLines((prev) =>
                                   prev.map((x) => (x.id === ln.id ? { ...x, presetId: '' } : x)),
@@ -1086,15 +1105,8 @@ export function LedgerPage({ caseId, token }: Props) {
                                 ),
                               )
                             }}
-                          >
-                            <option value="">— Custom —</option>
-                            {presets.map((t) => (
-                              <option key={t.id} value={t.id}>
-                                {t.label}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
+                          />
+                        </div>
                       ) : null}
                       {invLines.length > 1 ? (
                         <button

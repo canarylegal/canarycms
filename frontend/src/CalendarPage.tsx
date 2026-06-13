@@ -18,6 +18,8 @@ import { ConfirmModal } from './ConfirmModal'
 import { useDialogs } from './DialogProvider'
 import { MatterSearchPicker } from './MatterSearchPicker'
 import { SearchInput } from './SearchInput'
+import { SingleSelectDropdown } from './SingleSelectDropdown'
+import { useExclusiveDropdownOpen } from './useExclusiveDropdownOpen'
 import { useUserUiPreferences, type CalendarView } from './useUserUiPreferences'
 import type {
   CalendarCategoryOut,
@@ -256,9 +258,20 @@ const DUR_HOURS_0_24 = Array.from({ length: 25 }, (_, i) => i)
 /** Duration minutes 1–60; bold 15, 30, 45 in UI */
 const DUR_MINS_1_60 = Array.from({ length: 60 }, (_, i) => i + 1)
 
-function minuteOptionStyle(m: number): CSSProperties | undefined {
-  return m === 15 || m === 30 || m === 45 ? { fontWeight: 700 } : undefined
-}
+const HOUR_SELECT_OPTIONS = HOURS_00_23.map((h) => ({ value: String(h), label: pad2(h) }))
+const START_MIN_SELECT_OPTIONS = START_MINS_00_59.map((m) => ({ value: String(m), label: pad2(m) }))
+const DUR_DAY_SELECT_OPTIONS = DUR_DAYS_0_99.map((d) => ({ value: String(d), label: String(d) }))
+const DUR_HOUR_SELECT_OPTIONS = DUR_HOURS_0_24.map((h) => ({ value: String(h), label: String(h) }))
+const DUR_MIN_SELECT_OPTIONS = DUR_MINS_1_60.map((m) => ({ value: String(m), label: String(m) }))
+
+type CalendarEventDropdownKey =
+  | 'createCat'
+  | 'editCat'
+  | 'startH'
+  | 'startM'
+  | 'durD'
+  | 'durH'
+  | 'durM'
 
 function startOfLocalDay(d: Date): Date {
   const x = new Date(d)
@@ -493,6 +506,30 @@ export function CalendarPage({
 
   const createEventCategory = draft?.kind === 'create' ? draft.eventCategory : null
   const createCaseId = draft?.kind === 'create' ? draft.caseId : ''
+  const eventDropdown = useExclusiveDropdownOpen<CalendarEventDropdownKey>()
+
+  const createEventCategoryOptions = useMemo(
+    () => [
+      { value: 'custom', label: 'Custom' },
+      ...caseEventsForCreate.map((ev) => ({
+        value: ev.id,
+        label: `${ev.name}${ev.template_id ? '' : ' (custom line)'}`,
+      })),
+    ],
+    [caseEventsForCreate],
+  )
+
+  const editEventCategoryOptions = useMemo(
+    () => [
+      { value: '', label: 'Custom (no category)' },
+      ...eventCategories.map((c) => ({ value: c.id, label: c.name })),
+    ],
+    [eventCategories],
+  )
+
+  useEffect(() => {
+    if (!draft) eventDropdown.closeAll()
+  }, [draft, eventDropdown.closeAll])
 
   useEffect(() => {
     if (!createCaseId || !token) {
@@ -1245,55 +1282,37 @@ export function CalendarPage({
                 </div>
               ) : null}
               {draft.kind === 'create' ? (
-                <label className="field" style={{ minWidth: 0 }}>
-                  <span>Event category</span>
-                  <select
-                    value={draft.eventCategory}
-                    disabled={busy || !draft.caseId}
-                    onChange={(e) => {
-                      const v = e.target.value as 'custom' | string
-                      if (v === 'custom') {
-                        setDraft({ ...draft, eventCategory: 'custom', title: '', trackInCalendar: true, emailAlert: false })
-                      } else {
-                        setDraft({ ...draft, eventCategory: v })
-                      }
-                    }}
-                    aria-label="Event category"
-                    style={{ width: '100%', maxWidth: '100%', minWidth: 0 }}
-                  >
-                    <option value="custom">Custom</option>
-                    {caseEventsForCreate.map((ev) => (
-                      <option key={ev.id} value={ev.id}>
-                        {ev.name}
-                        {ev.template_id ? '' : ' (custom line)'}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                <SingleSelectDropdown
+                  label="Event category"
+                  options={createEventCategoryOptions}
+                  value={draft.eventCategory}
+                  disabled={busy || !draft.caseId}
+                  open={eventDropdown.isOpen('createCat')}
+                  onOpenChange={(next) => eventDropdown.setOpen('createCat', next)}
+                  onChange={(v) => {
+                    if (v === 'custom') {
+                      setDraft({ ...draft, eventCategory: 'custom', title: '', trackInCalendar: true, emailAlert: false })
+                    } else {
+                      setDraft({ ...draft, eventCategory: v })
+                    }
+                  }}
+                />
               ) : null}
               {draft.kind === 'edit' && draft.canEdit && draft.editSource === 'caldav' ? (
-                <label className="field" style={{ minWidth: 0 }}>
-                  <span>Event category</span>
-                  <select
-                    value={draft.categoryId ?? ''}
-                    onChange={(e) =>
-                      setDraft({
-                        ...draft,
-                        categoryId: e.target.value || null,
-                      })
-                    }
-                    disabled={busy}
-                    aria-label="Event category"
-                    style={{ width: '100%', maxWidth: '100%', minWidth: 0 }}
-                  >
-                    <option value="">Custom (no category)</option>
-                    {eventCategories.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                <SingleSelectDropdown
+                  label="Event category"
+                  options={editEventCategoryOptions}
+                  value={draft.categoryId ?? ''}
+                  disabled={busy}
+                  open={eventDropdown.isOpen('editCat')}
+                  onOpenChange={(next) => eventDropdown.setOpen('editCat', next)}
+                  onChange={(v) =>
+                    setDraft({
+                      ...draft,
+                      categoryId: v || null,
+                    })
+                  }
+                />
               ) : null}
               {draft.kind === 'edit' && !draft.canEdit ? (
                 <p className="muted">You can view this event but not edit it (read-only share or subscription).</p>
@@ -1426,84 +1445,74 @@ export function CalendarPage({
                       <div className="field" style={{ marginBottom: 0 }}>
                         <span>Start</span>
                         <div className="row" style={{ gap: 8, marginTop: 6, alignItems: 'center', flexWrap: 'wrap' }}>
-                          <select
-                            aria-label="Start hour"
-                            value={draft.startHour}
+                          <SingleSelectDropdown
+                            hideLabel
+                            label="Start hour"
+                            options={HOUR_SELECT_OPTIONS}
+                            value={String(draft.startHour)}
                             disabled={busy}
-                            onChange={(e) =>
-                              setDraft({ ...draft, startHour: Number.parseInt(e.target.value, 10) })
+                            open={eventDropdown.isOpen('startH')}
+                            onOpenChange={(next) => eventDropdown.setOpen('startH', next)}
+                            onChange={(v) =>
+                              setDraft({ ...draft, startHour: Number.parseInt(v, 10) })
                             }
-                          >
-                            {HOURS_00_23.map((h) => (
-                              <option key={h} value={h}>
-                                {pad2(h)}
-                              </option>
-                            ))}
-                          </select>
+                          />
                           <span className="muted">:</span>
-                          <select
-                            aria-label="Start minute"
-                            value={draft.startMinute}
+                          <SingleSelectDropdown
+                            hideLabel
+                            label="Start minute"
+                            options={START_MIN_SELECT_OPTIONS}
+                            value={String(draft.startMinute)}
                             disabled={busy}
-                            onChange={(e) =>
-                              setDraft({ ...draft, startMinute: Number.parseInt(e.target.value, 10) })
+                            open={eventDropdown.isOpen('startM')}
+                            onOpenChange={(next) => eventDropdown.setOpen('startM', next)}
+                            onChange={(v) =>
+                              setDraft({ ...draft, startMinute: Number.parseInt(v, 10) })
                             }
-                          >
-                            {START_MINS_00_59.map((m) => (
-                              <option key={m} value={m} style={minuteOptionStyle(m)}>
-                                {pad2(m)}
-                              </option>
-                            ))}
-                          </select>
+                          />
                         </div>
                       </div>
                       <div className="field" style={{ marginBottom: 0 }}>
                         <span>Duration</span>
                         <div className="row" style={{ gap: 8, marginTop: 6, alignItems: 'center', flexWrap: 'wrap' }}>
-                          <select
-                            aria-label="Duration days"
-                            value={draft.durDays}
+                          <SingleSelectDropdown
+                            hideLabel
+                            label="Duration days"
+                            options={DUR_DAY_SELECT_OPTIONS}
+                            value={String(draft.durDays)}
                             disabled={busy}
-                            onChange={(e) =>
-                              setDraft({ ...draft, durDays: Number.parseInt(e.target.value, 10) })
+                            open={eventDropdown.isOpen('durD')}
+                            onOpenChange={(next) => eventDropdown.setOpen('durD', next)}
+                            onChange={(v) =>
+                              setDraft({ ...draft, durDays: Number.parseInt(v, 10) })
                             }
-                          >
-                            {DUR_DAYS_0_99.map((d) => (
-                              <option key={d} value={d}>
-                                {d}
-                              </option>
-                            ))}
-                          </select>
+                          />
                           <span className="muted">d</span>
-                          <select
-                            aria-label="Duration hours"
-                            value={draft.durHours}
+                          <SingleSelectDropdown
+                            hideLabel
+                            label="Duration hours"
+                            options={DUR_HOUR_SELECT_OPTIONS}
+                            value={String(draft.durHours)}
                             disabled={busy}
-                            onChange={(e) =>
-                              setDraft({ ...draft, durHours: Number.parseInt(e.target.value, 10) })
+                            open={eventDropdown.isOpen('durH')}
+                            onOpenChange={(next) => eventDropdown.setOpen('durH', next)}
+                            onChange={(v) =>
+                              setDraft({ ...draft, durHours: Number.parseInt(v, 10) })
                             }
-                          >
-                            {DUR_HOURS_0_24.map((h) => (
-                              <option key={h} value={h}>
-                                {h}
-                              </option>
-                            ))}
-                          </select>
+                          />
                           <span className="muted">h</span>
-                          <select
-                            aria-label="Duration minutes"
-                            value={draft.durMinutes}
+                          <SingleSelectDropdown
+                            hideLabel
+                            label="Duration minutes"
+                            options={DUR_MIN_SELECT_OPTIONS}
+                            value={String(draft.durMinutes)}
                             disabled={busy}
-                            onChange={(e) =>
-                              setDraft({ ...draft, durMinutes: Number.parseInt(e.target.value, 10) })
+                            open={eventDropdown.isOpen('durM')}
+                            onOpenChange={(next) => eventDropdown.setOpen('durM', next)}
+                            onChange={(v) =>
+                              setDraft({ ...draft, durMinutes: Number.parseInt(v, 10) })
                             }
-                          >
-                            {DUR_MINS_1_60.map((m) => (
-                              <option key={m} value={m} style={minuteOptionStyle(m)}>
-                                {m}
-                              </option>
-                            ))}
-                          </select>
+                          />
                           <span className="muted">m</span>
                         </div>
                       </div>
@@ -1634,12 +1643,22 @@ function CalendarManageModal({
   const [shares, setShares] = useState<CalendarShareOut[]>([])
   const [pickGrantee, setPickGrantee] = useState('')
   const [pickCanWrite, setPickCanWrite] = useState(false)
+  const [granteeDropdownOpen, setGranteeDropdownOpen] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [editCalId, setEditCalId] = useState<string | null>(null)
   const [editCategoryRows, setEditCategoryRows] = useState<CalendarCategoryOut[]>([])
 
   const owned = useMemo(() => calendars.filter((c) => c.access === 'owner'), [calendars])
+
+  const granteeOptions = useMemo(
+    () =>
+      users.map((u) => ({
+        value: u.id,
+        label: `${u.display_name} (${u.email})`,
+      })),
+    [users],
+  )
 
   const editingCal = useMemo(
     () => (editCalId ? calendars.find((c) => c.id === editCalId) : undefined),
@@ -1878,15 +1897,19 @@ function CalendarManageModal({
               Other Canary users you add here see this calendar in the app (merged by the server). It does not appear in
               their external CalDAV client — only calendars on their own account sync there.
             </div>
-            <div className="row" style={{ gap: 8, flexWrap: 'wrap', alignItems: 'center', marginBottom: 8 }}>
-              <select value={pickGrantee} onChange={(e) => setPickGrantee(e.target.value)}>
-                <option value="">Select user…</option>
-                {users.map((u) => (
-                  <option key={u.id} value={u.id}>
-                    {u.display_name} ({u.email})
-                  </option>
-                ))}
-              </select>
+            <div className="row" style={{ gap: 8, flexWrap: 'wrap', alignItems: 'flex-end', marginBottom: 8 }}>
+              <div style={{ flex: '1 1 220px', minWidth: 0 }}>
+                <SingleSelectDropdown
+                  label="User"
+                  placeholder="Select user…"
+                  options={granteeOptions}
+                  value={pickGrantee}
+                  disabled={busy}
+                  open={granteeDropdownOpen}
+                  onOpenChange={setGranteeDropdownOpen}
+                  onChange={setPickGrantee}
+                />
+              </div>
               <label className="row" style={{ gap: 6, alignItems: 'center' }}>
                 <input type="checkbox" checked={pickCanWrite} onChange={(e) => setPickCanWrite(e.target.checked)} />
                 <span className="muted" style={{ fontSize: 13 }}>Can edit</span>

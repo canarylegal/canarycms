@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { apiFetch } from '../api'
 import { SearchInput } from '../SearchInput'
+import { SingleSelectDropdown } from '../SingleSelectDropdown'
 import type {
   CasePortalActivityOut,
   CasePortalNotificationSettingsOut,
@@ -43,6 +44,20 @@ export function CasePortalPanel({ token, caseId }: Props) {
   const [saving, setSaving] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
+  const [previewContactOpen, setPreviewContactOpen] = useState(false)
+
+  const previewContactOptions = useMemo(
+    () =>
+      previewContacts.map((row) => ({
+        value: row.contact_id,
+        label: `${row.contact_name}${
+          row.shared_folder_count === 1
+            ? ' · 1 shared folder'
+            : ` · ${row.shared_folder_count} shared folders`
+        }`,
+      })),
+    [previewContacts],
+  )
 
   const portalUrl = useMemo(() => {
     if (typeof window === 'undefined') return '/portal'
@@ -187,23 +202,19 @@ export function CasePortalPanel({ token, caseId }: Props) {
           </div>
         ) : null}
         {previewContacts.length > 0 ? (
-          <div className="row" style={{ gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-            <select
-              className="portalPreviewContactSelect"
-              value={previewContactId}
-              disabled={previewBusy || busy}
-              onChange={(e) => setPreviewContactId(e.target.value)}
-              aria-label="Contact to preview"
-            >
-              {previewContacts.map((row) => (
-                <option key={row.contact_id} value={row.contact_id}>
-                  {row.contact_name}
-                  {row.shared_folder_count === 1
-                    ? ' · 1 shared folder'
-                    : ` · ${row.shared_folder_count} shared folders`}
-                </option>
-              ))}
-            </select>
+          <div className="row" style={{ gap: 8, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+            <div style={{ flex: '1 1 220px', minWidth: 0 }}>
+              <SingleSelectDropdown
+                label="Contact to preview"
+                options={previewContactOptions}
+                value={previewContactId}
+                onChange={setPreviewContactId}
+                open={previewContactOpen}
+                onOpenChange={setPreviewContactOpen}
+                disabled={previewBusy || busy}
+                placeholder="Select contact…"
+              />
+            </div>
             <button
               type="button"
               className="btn primary"

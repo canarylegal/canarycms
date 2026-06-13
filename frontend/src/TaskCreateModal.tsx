@@ -1,9 +1,11 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { apiFetch } from './api'
 import type { ApiError } from './api'
 import { MatterSearchPicker } from './MatterSearchPicker'
+import { SingleSelectDropdown } from './SingleSelectDropdown'
 import type { MatterSubTypeStandardTaskOut, UserSummary } from './types'
 import { CANARY_FOLLOW_UP_STANDARD_TASK_ID } from './standardTasks'
+import { useExclusiveDropdownOpen } from './useExclusiveDropdownOpen'
 
 export function TaskCreateModal({
   open,
@@ -36,11 +38,40 @@ export function TaskCreateModal({
   const [isPrivate, setIsPrivate] = useState(false)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
+  const dropdown = useExclusiveDropdownOpen<'task' | 'assign' | 'priority'>()
+
+  const taskOptions = useMemo(
+    () => [
+      ...standardTaskTemplates.map((t) => ({ value: t.id, label: t.title })),
+      { value: '__custom__', label: 'Custom task…' },
+    ],
+    [standardTaskTemplates],
+  )
+
+  const assignOptions = useMemo(
+    () =>
+      users
+        .filter((u) => u.is_active)
+        .slice()
+        .sort((a, b) => a.display_name.localeCompare(b.display_name))
+        .map((u) => ({ value: u.id, label: u.display_name })),
+    [users],
+  )
+
+  const priorityOptions = useMemo(
+    () => [
+      { value: 'low', label: 'Low' },
+      { value: 'normal', label: 'Normal' },
+      { value: 'high', label: 'High' },
+    ],
+    [],
+  )
 
   useEffect(() => {
     if (!open) return
     setErr(null)
     setBusy(false)
+    dropdown.closeAll()
     if (!caseIdFixed) setPickedCaseId('')
     const t = new Date()
     setDueDate(`${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`)
@@ -59,7 +90,7 @@ export function TaskCreateModal({
       setCustomTitle('')
       setTitleOverride(null)
     }
-  }, [open, caseIdFixed, preset])
+  }, [open, caseIdFixed, preset, dropdown.closeAll])
 
   useEffect(() => {
     if (!open || !effectiveCaseId) {
@@ -146,31 +177,24 @@ export function TaskCreateModal({
               />
             </div>
           ) : null}
-          <label className="field">
-            <span>Task</span>
-            <select
-              value={standardId}
-              disabled={busy}
-              onChange={(e) => {
-                const v = e.target.value
-                setStandardId(v)
-                if (v === '__custom__' && titleOverride) {
-                  setCustomTitle(titleOverride)
-                  setTitleOverride(null)
-                } else if (v !== CANARY_FOLLOW_UP_STANDARD_TASK_ID) {
-                  setTitleOverride(null)
-                }
-              }}
-              aria-label="Standard or custom task"
-            >
-              {standardTaskTemplates.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.title}
-                </option>
-              ))}
-              <option value="__custom__">Custom task…</option>
-            </select>
-          </label>
+          <SingleSelectDropdown
+            label="Task"
+            options={taskOptions}
+            value={standardId}
+            onChange={(v) => {
+              setStandardId(v)
+              if (v === '__custom__' && titleOverride) {
+                setCustomTitle(titleOverride)
+                setTitleOverride(null)
+              } else if (v !== CANARY_FOLLOW_UP_STANDARD_TASK_ID) {
+                setTitleOverride(null)
+              }
+            }}
+            open={dropdown.isOpen('task')}
+            onOpenChange={(next) => dropdown.setOpen('task', next)}
+            disabled={busy}
+            placeholder="— select —"
+          />
           {titleOverride !== null ? (
             <label className="field">
               <span>Title</span>
@@ -192,33 +216,26 @@ export function TaskCreateModal({
             <span>Date</span>
             <input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} disabled={busy} />
           </label>
-          <label className="field">
-            <span>Assigned to</span>
-            <select value={assignUserId} disabled={busy} onChange={(e) => setAssignUserId(e.target.value)}>
-              <option value="">— Unassigned —</option>
-              {users
-                .filter((u) => u.is_active)
-                .slice()
-                .sort((a, b) => a.display_name.localeCompare(b.display_name))
-                .map((u) => (
-                  <option key={u.id} value={u.id}>
-                    {u.display_name}
-                  </option>
-                ))}
-            </select>
-          </label>
-          <label className="field">
-            <span>Priority</span>
-            <select
-              value={priority}
-              disabled={busy}
-              onChange={(e) => setPriority(e.target.value as 'low' | 'normal' | 'high')}
-            >
-              <option value="low">Low</option>
-              <option value="normal">Normal</option>
-              <option value="high">High</option>
-            </select>
-          </label>
+          <SingleSelectDropdown
+            label="Assigned to"
+            options={assignOptions}
+            value={assignUserId}
+            onChange={setAssignUserId}
+            open={dropdown.isOpen('assign')}
+            onOpenChange={(next) => dropdown.setOpen('assign', next)}
+            disabled={busy}
+            placeholder="— Unassigned —"
+          />
+          <SingleSelectDropdown
+            label="Priority"
+            options={priorityOptions}
+            value={priority}
+            onChange={(v) => setPriority(v as 'low' | 'normal' | 'high')}
+            open={dropdown.isOpen('priority')}
+            onOpenChange={(next) => dropdown.setOpen('priority', next)}
+            disabled={busy}
+            placeholder="— select —"
+          />
           <label className="row" style={{ alignItems: 'flex-start', gap: 8 }}>
             <input type="checkbox" checked={isPrivate} disabled={busy} onChange={(e) => setIsPrivate(e.target.checked)} />
             <span className="muted" style={{ lineHeight: 1.4 }}>

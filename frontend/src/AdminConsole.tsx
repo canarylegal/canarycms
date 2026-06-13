@@ -10,6 +10,7 @@ import { apiFetch, apiUrl, applyAuthHeaders } from './api'
 import type { ApiError } from './api'
 import { CASE_MENU_OPTIONS } from './caseMenuOptions'
 import { useDialogs } from './DialogProvider'
+import { SingleSelectDropdown } from './SingleSelectDropdown'
 import { openOnlyOfficePrecedentEditor } from './onlyofficeEditorWindow'
 import type {
   AdminSendPasswordResetResponse,
@@ -88,6 +89,15 @@ function AdminMatters({ token }: { token: string }) {
 
   const smallBtn = { padding: '3px 8px', fontSize: '0.82em' } as const
   const inlineInput = { flex: 1, width: 'auto' } as const
+
+  const addMenuOptions = useMemo(
+    () =>
+      CASE_MENU_OPTIONS.filter((opt) => !selectedSub?.menus.some((m) => m.name === opt)).map((opt) => ({
+        value: opt,
+        label: opt,
+      })),
+    [selectedSub],
+  )
 
   // ── Head type visibility (canonical list from Canary; no add/rename/delete) ──
 
@@ -385,20 +395,19 @@ function AdminMatters({ token }: { token: string }) {
                   <div className="muted" style={{ padding: '6px 0' }}>No additional menus configured.</div>
                 )}
               </div>
-              <div className="row" style={{ marginTop: 10, gap: 6 }}>
-                <select
-                  style={inlineInput}
-                  value={newMenuName}
-                  onChange={(e) => setNewMenuName(e.target.value)}
-                  disabled={busy}
-                >
-                  <option value="">— select menu —</option>
-                  {CASE_MENU_OPTIONS.filter(
-                    (opt) => !selectedSub.menus.some((m) => m.name === opt)
-                  ).map((opt) => (
-                    <option key={opt} value={opt}>{opt}</option>
-                  ))}
-                </select>
+              <div className="row" style={{ marginTop: 10, gap: 6, alignItems: 'center' }}>
+                <div style={inlineInput}>
+                  <SingleSelectDropdown
+                    hideLabel
+                    label="Additional case menu"
+                    options={addMenuOptions}
+                    value={newMenuName}
+                    onChange={setNewMenuName}
+                    disabled={busy}
+                    placeholder="— select menu —"
+                    emptyMessage="All menus already added."
+                  />
+                </div>
                 <button className="btn primary" disabled={busy || !newMenuName} onClick={() => void addMenu()}>Add</button>
               </div>
             </div>
@@ -602,6 +611,34 @@ function AdminPrecedents({ token }: { token: string }) {
   }, [matterHeads, uploadHeadTypeId])
 
   const headIsGlobal = uploadHeadTypeId === GLOBAL_PRECEDENT_SCOPE
+
+  const uploadHeadTypeDropdownOptions = useMemo(
+    () => [
+      { value: '', label: '— select —' },
+      { value: GLOBAL_PRECEDENT_SCOPE, label: 'Global (all cases)' },
+      ...matterTypeOptions.map((o) => ({ value: o.id, label: o.label })),
+    ],
+    [matterTypeOptions],
+  )
+
+  const uploadSubTypeDropdownOptions = useMemo(() => {
+    if (!uploadHeadTypeId) return [{ value: '', label: 'Select a matter type first' }]
+    if (headIsGlobal) return [{ value: GLOBAL_PRECEDENT_SCOPE, label: 'Global' }]
+    if (uploadSubTypeOptions.length === 0) return [{ value: '', label: 'No sub-types for this matter type' }]
+    return [
+      { value: '', label: '— select —' },
+      { value: GLOBAL_PRECEDENT_SCOPE, label: 'Global (all sub-types under this matter type)' },
+      ...uploadSubTypeOptions.map((o) => ({ value: o.id, label: o.label })),
+    ]
+  }, [uploadHeadTypeId, headIsGlobal, uploadSubTypeOptions])
+
+  const uploadCategoryDropdownOptions = useMemo(
+    () => [
+      { value: GLOBAL_PRECEDENT_SCOPE, label: 'Global (all categories under this sub-type)' },
+      ...uploadCats.map((c) => ({ value: c.id, label: c.name })),
+    ],
+    [uploadCats],
+  )
   const scopeFormComplete = useMemo(() => {
     if (!uploadHeadTypeId) return false
     if (headIsGlobal) return true
@@ -1090,64 +1127,39 @@ function AdminPrecedents({ token }: { token: string }) {
               unique.
             </span>
           </label>
-          <label className="field">
-            <span>Type</span>
-            <select value={kind} onChange={(e) => setKind(e.target.value as typeof kind)}>
-              <option value="letter">Letter</option>
-              <option value="email">E-mail</option>
-              <option value="document">Document</option>
-            </select>
-          </label>
-          <label className="field">
-            <span>Matter type</span>
-            <select
-              value={uploadHeadTypeId}
-              onChange={(e) => {
-                const v = e.target.value
-                setUploadHeadTypeId(v)
-                setUploadSubTypeId('')
-                setUploadCategoryId(GLOBAL_PRECEDENT_SCOPE)
-              }}
-              disabled={busy}
-            >
-              <option value="">— select —</option>
-              <option value={GLOBAL_PRECEDENT_SCOPE}>Global (all cases)</option>
-              {matterTypeOptions.map((o) => (
-                <option key={o.id} value={o.id}>
-                  {o.label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="field">
-            <span>Sub-type</span>
-            <select
-              value={uploadSubTypeId}
-              onChange={(e) => {
-                setUploadSubTypeId(e.target.value)
-                setUploadCategoryId(GLOBAL_PRECEDENT_SCOPE)
-              }}
-              disabled={busy || !uploadHeadTypeId || headIsGlobal}
-            >
-              {!uploadHeadTypeId ? (
-                <option value="">Select a matter type first</option>
-              ) : headIsGlobal ? (
-                <option value={GLOBAL_PRECEDENT_SCOPE}>Global</option>
-              ) : uploadSubTypeOptions.length === 0 ? (
-                <option value="">No sub-types for this matter type</option>
-              ) : (
-                <>
-                  <option value="">— select —</option>
-                  <option value={GLOBAL_PRECEDENT_SCOPE}>Global (all sub-types under this matter type)</option>
-                  {uploadSubTypeOptions.map((o) => (
-                    <option key={o.id} value={o.id}>
-                      {o.label}
-                    </option>
-                  ))}
-                </>
-              )}
-            </select>
-          </label>
+          <SingleSelectDropdown
+            label="Type"
+            options={[
+              { value: 'letter', label: 'Letter' },
+              { value: 'email', label: 'E-mail' },
+              { value: 'document', label: 'Document' },
+            ]}
+            value={kind}
+            onChange={(v) => setKind(v as typeof kind)}
+          />
+          <SingleSelectDropdown
+            label="Matter type"
+            options={uploadHeadTypeDropdownOptions}
+            value={uploadHeadTypeId}
+            onChange={(v) => {
+              setUploadHeadTypeId(v)
+              setUploadSubTypeId('')
+              setUploadCategoryId(GLOBAL_PRECEDENT_SCOPE)
+            }}
+            disabled={busy}
+            placeholder="— select —"
+          />
+          <SingleSelectDropdown
+            label="Sub-type"
+            options={uploadSubTypeDropdownOptions}
+            value={uploadSubTypeId}
+            onChange={(v) => {
+              setUploadSubTypeId(v)
+              setUploadCategoryId(GLOBAL_PRECEDENT_SCOPE)
+            }}
+            disabled={busy || !uploadHeadTypeId || headIsGlobal}
+            placeholder="— select —"
+          />
           {uploadHeadTypeId &&
           !headIsGlobal &&
           uploadSubTypeId &&
@@ -1174,21 +1186,13 @@ function AdminPrecedents({ token }: { token: string }) {
           uploadSubTypeId &&
           uploadSubTypeId !== GLOBAL_PRECEDENT_SCOPE &&
           !uploadCatsLoading ? (
-            <label className="field">
-              <span>Precedent category</span>
-              <select
-                value={uploadCategoryId}
-                onChange={(e) => setUploadCategoryId(e.target.value)}
-                disabled={busy}
-              >
-                <option value={GLOBAL_PRECEDENT_SCOPE}>Global (all categories under this sub-type)</option>
-                {uploadCats.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <SingleSelectDropdown
+              label="Precedent category"
+              options={uploadCategoryDropdownOptions}
+              value={uploadCategoryId}
+              onChange={setUploadCategoryId}
+              disabled={busy}
+            />
           ) : null}
           <label className="field">
             <span>File</span>
@@ -1857,7 +1861,7 @@ export function AdminConsole({ token, refreshMe }: { token: string; refreshMe: (
   )
 }
 
-function AdminUsers({ token, embedded }: { token: string; embedded?: boolean }) {
+export function AdminUsers({ token, embedded }: { token: string; embedded?: boolean; recoveryMode?: boolean }) {
   const { askConfirm, alert: showAlert } = useDialogs()
   const [users, setUsers] = useState<AdminUserPublic[]>([])
   const [categories, setCategories] = useState<UserPermissionCategoryOut[]>([])
@@ -1901,6 +1905,33 @@ function AdminUsers({ token, embedded }: { token: string; embedded?: boolean }) 
     perm_admin: false,
   })
 
+  const permissionCategoryOptions = useMemo(
+    () => categories.map((c) => ({ value: c.id, label: c.name })),
+    [categories],
+  )
+
+  const editPermissionCategoryOptions = useMemo(
+    () => [
+      {
+        value: '',
+        label: editRole === 'admin' ? '— None —' : '— Select category —',
+      },
+      ...permissionCategoryOptions,
+    ],
+    [editRole, permissionCategoryOptions],
+  )
+
+  const passwordRotationOptions = useMemo(
+    () => [
+      { value: '30', label: '30 days' },
+      { value: '60', label: '60 days' },
+      { value: '90', label: '90 days' },
+      { value: '180', label: '180 days' },
+      { value: '365', label: '365 days' },
+    ],
+    [],
+  )
+
   async function load(): Promise<AdminUserPublic[] | null> {
     setBusy(true)
     setErr(null)
@@ -1913,6 +1944,10 @@ function AdminUsers({ token, embedded }: { token: string; embedded?: boolean }) 
       setUsers(u)
       setCategories(c)
       setFirmSettings(f)
+      const feeEarnerDefault = c.find((cat) => cat.is_builtin_template && cat.name === 'Fee earner')
+      if (feeEarnerDefault) {
+        setNewUserCategoryId((prev) => prev || feeEarnerDefault.id)
+      }
       return u
     } catch (e: any) {
       setErr(e?.message ?? 'Failed to load users')
@@ -1952,8 +1987,9 @@ function AdminUsers({ token, embedded }: { token: string; embedded?: boolean }) 
       <div className="card">
         <h3>User categories</h3>
         <p className="muted" style={{ marginTop: 0 }}>
-          Assign each user to a category to control fee-earner status, ledger posting, and approvals. Categories are
-          visible only in the admin console.
+          Assign each user to a category to control fee-earner status, ledger posting, and approvals.{' '}
+          <strong>Fee earner</strong> and <strong>Cashier</strong> are default templates on every deployment — you
+          may edit their permissions or delete them (reassign users first).
         </p>
         <div className="stack" style={{ gap: 10, maxWidth: 720 }}>
           <div className="row" style={{ flexWrap: 'wrap', gap: 8, alignItems: 'flex-end' }}>
@@ -2086,7 +2122,14 @@ function AdminUsers({ token, embedded }: { token: string; embedded?: boolean }) 
               ) : (
                 <div className="row" style={{ justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
                   <div>
-                    <div className="listTitle">{c.name}</div>
+                    <div className="listTitle">
+                      {c.name}
+                      {c.is_builtin_template ? (
+                        <span className="muted" style={{ fontWeight: 400, fontSize: 12, marginLeft: 8 }}>
+                          Default template
+                        </span>
+                      ) : null}
+                    </div>
                     <div className="muted" style={{ fontSize: 12 }}>
                       {[
                         c.perm_fee_earner ? 'Fee-earner' : null,
@@ -2157,9 +2200,9 @@ function AdminUsers({ token, embedded }: { token: string; embedded?: boolean }) 
       <div className="card">
         <h3>Security</h3>
         <p className="muted" style={{ marginTop: 0 }}>
-          Organisation-wide sign-in policy. When enabled, users who are not admins must enable an authenticator app (2FA) or
-          register at least one passkey before using matters, tasks, and other areas of the app. Admins should enable 2FA or
-          passkeys before turning this on so they can support users who get stuck.
+          Organisation-wide sign-in policy. When enabled, users must enable an authenticator app (2FA) or
+          register at least one passkey before using matters, tasks, and other areas of the app — including
+          firm administrators.
         </p>
         <label className="row" style={{ gap: 10, alignItems: 'center', cursor: firmSettings ? 'pointer' : 'default' }}>
           <input
@@ -2219,13 +2262,15 @@ function AdminUsers({ token, embedded }: { token: string; embedded?: boolean }) 
           <span>Require periodic password updates</span>
         </label>
         {firmSettings?.mandate_password_rotation ? (
-          <label className="field" style={{ marginTop: 12, maxWidth: 280 }}>
-            <span>Update every</span>
-            <select
-              value={String(firmSettings.password_rotation_days ?? 90)}
-              disabled={busy}
-              onChange={async (e) => {
-                const days = Number(e.target.value)
+          <div style={{ marginTop: 12, maxWidth: 280 }}>
+            <SingleSelectDropdown
+              label="Update every"
+            options={passwordRotationOptions}
+            value={String(firmSettings.password_rotation_days ?? 90)}
+            disabled={busy}
+            onChange={(v) => {
+              void (async () => {
+                const days = Number(v)
                 setBusy(true)
                 setErr(null)
                 try {
@@ -2240,18 +2285,13 @@ function AdminUsers({ token, embedded }: { token: string; embedded?: boolean }) 
                 } finally {
                   setBusy(false)
                 }
-              }}
-            >
-              <option value="30">30 days</option>
-              <option value="60">60 days</option>
-              <option value="90">90 days</option>
-              <option value="180">180 days</option>
-              <option value="365">365 days</option>
-            </select>
-          </label>
+              })()
+            }}
+            />
+          </div>
         ) : null}
         <p className="muted" style={{ marginBottom: 0, fontSize: 13 }}>
-          When enabled, users must choose a new password after the interval since their last change. Admins are exempt. Password
+          When enabled, all staff users must choose a new password after the interval since their last change. Password
           reset e-mails require alert notifications under Admin → E-mail.
         </p>
       </div>
@@ -2277,17 +2317,14 @@ function AdminUsers({ token, embedded }: { token: string; embedded?: boolean }) 
             style={{ minWidth: 160 }}
           />
           <input placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} />
-          <label className="field" style={{ marginBottom: 0, minWidth: 200 }}>
-            <span>Category</span>
-            <select value={newUserCategoryId} onChange={(e) => setNewUserCategoryId(e.target.value)} disabled={busy}>
-              <option value="">— Select category —</option>
-              {categories.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
-          </label>
+          <SingleSelectDropdown
+            label="Category"
+            options={permissionCategoryOptions}
+            value={newUserCategoryId}
+            onChange={setNewUserCategoryId}
+            disabled={busy}
+            placeholder="— Select category —"
+          />
           <button
             className="btn primary"
             style={creatingUser ? { cursor: 'wait' } : undefined}
@@ -2435,29 +2472,24 @@ function AdminUsers({ token, embedded }: { token: string; embedded?: boolean }) 
                 <span>Job title (optional)</span>
                 <input value={editJobTitle} onChange={(e) => setEditJobTitle(e.target.value)} disabled={busy} placeholder="Optional" />
               </label>
-              <label className="field" style={{ marginBottom: 0 }}>
-                <span>Role</span>
-                <select value={editRole} onChange={(e) => setEditRole(e.target.value as 'admin' | 'user')} disabled={busy}>
-                  <option value="user">User</option>
-                  <option value="admin">Admin</option>
-                </select>
-              </label>
-              <label className="field" style={{ marginBottom: 0 }}>
-                <span>Permission category{editRole === 'user' ? '' : ' (optional for admins)'}</span>
-                <select value={editCategoryId} onChange={(e) => setEditCategoryId(e.target.value)} disabled={busy}>
-                  {editRole === 'admin' ? <option value="">— None —</option> : null}
-                  {!editCategoryId && editRole === 'user' ? (
-                    <option value="" disabled>
-                      — Select category —
-                    </option>
-                  ) : null}
-                  {categories.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              <SingleSelectDropdown
+                label="Role"
+                options={[
+                  { value: 'user', label: 'User' },
+                  { value: 'admin', label: 'Admin' },
+                ]}
+                value={editRole}
+                onChange={(v) => setEditRole(v as 'admin' | 'user')}
+                disabled={busy}
+              />
+              <SingleSelectDropdown
+                label={`Permission category${editRole === 'user' ? '' : ' (optional for admins)'}`}
+                options={editPermissionCategoryOptions}
+                value={editCategoryId}
+                onChange={setEditCategoryId}
+                disabled={busy}
+                placeholder={editRole === 'admin' ? '— None —' : '— Select category —'}
+              />
               <label className="row" style={{ gap: 8, cursor: 'pointer' }}>
                 <input type="checkbox" checked={editActive} onChange={(e) => setEditActive(e.target.checked)} disabled={busy} />
                 <span>Account active</span>
@@ -2549,8 +2581,8 @@ function AdminUsers({ token, embedded }: { token: string; embedded?: boolean }) 
                 />
               </label>
               <p className="muted" style={{ marginTop: 0, fontSize: 13 }}>
-                When you set a new password here, this user’s authenticator 2FA enrolment is cleared and they sign in with the
-                new password until they enable 2FA again.
+                When you set a new password here, this user’s authenticator 2FA and passkeys are cleared — they sign in with the
+                new password until they enrol again.
               </p>
               <div className="row" style={{ gap: 8, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
                 <button type="button" className="btn" disabled={busy} onClick={() => setEditingUser(null)}>
@@ -2636,6 +2668,27 @@ function AdminUsers({ token, embedded }: { token: string; embedded?: boolean }) 
           </div>
         </div>
       ) : null}
+    </div>
+  )
+}
+
+export function RecoveryConsole({ token }: { token: string }) {
+  return (
+    <div
+      className="mainMenuShell mainMenuShell--surface"
+      style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}
+    >
+      <div className="paneHead">
+        <div>
+          <h2 style={{ margin: 0 }}>Recovery console</h2>
+          <div className="muted" style={{ marginTop: 4 }}>
+            User accounts, permission categories, and organisation security policy. No access to cases or firm data.
+          </div>
+        </div>
+      </div>
+      <div style={{ flex: 1, minHeight: 0, marginTop: 12, overflow: 'auto' }}>
+        <AdminUsers token={token} embedded recoveryMode />
+      </div>
     </div>
   )
 }

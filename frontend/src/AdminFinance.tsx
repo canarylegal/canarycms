@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { apiFetch } from './api'
 import { useDialogs } from './DialogProvider'
+import { SingleSelectDropdown } from './SingleSelectDropdown'
 import type { ApiError } from './api'
 import type { FinanceCategoryTemplateOut, FinanceItemTemplateOut, FinanceTemplateOut } from './types'
 
@@ -12,6 +13,11 @@ interface Props {
 
 const SMALL: React.CSSProperties = { padding: '3px 8px', fontSize: '0.82em' }
 const INLINE: React.CSSProperties = { flex: 1, width: 'auto' }
+
+const FIN_DIRECTION_OPTIONS = [
+  { value: 'debit', label: 'Debit' },
+  { value: 'credit', label: 'Credit' },
+] as const
 
 export function AdminFinance({ token, subTypeId, subTypeName }: Props) {
   const { askConfirm } = useDialogs()
@@ -225,16 +231,16 @@ export function AdminFinance({ token, subTypeId, subTypeName }: Props) {
                       {cat.credit_only ? (
                         <span className="finDirBadge finDirBadge--credit">Credit</span>
                       ) : (
-                        <select
-                          className="select"
-                          style={{ width: 90 }}
-                          value={editItem.direction}
-                          onChange={(e) => setEditItem({ ...editItem, direction: e.target.value as 'debit' | 'credit' })}
-                          disabled={busy}
-                        >
-                          <option value="debit">Debit</option>
-                          <option value="credit">Credit</option>
-                        </select>
+                        <div className="finDirSelect">
+                          <SingleSelectDropdown
+                            hideLabel
+                            label="Direction"
+                            options={[...FIN_DIRECTION_OPTIONS]}
+                            value={editItem.direction}
+                            onChange={(v) => setEditItem({ ...editItem, direction: v as 'debit' | 'credit' })}
+                            disabled={busy}
+                          />
+                        </div>
                       )}
                       <span className="muted" style={{ fontSize: '0.82em' }}>Order:</span>
                       <input
@@ -266,16 +272,16 @@ export function AdminFinance({ token, subTypeId, subTypeName }: Props) {
                 {cat.credit_only ? (
                   <span className="finDirBadge finDirBadge--credit">Credit</span>
                 ) : (
-                  <select
-                    className="select"
-                    style={{ width: 90 }}
-                    value={newItemDir[cat.id] ?? 'debit'}
-                    onChange={(e) => setNewItemDir((p) => ({ ...p, [cat.id]: e.target.value as 'debit' | 'credit' }))}
-                    disabled={busy}
-                  >
-                    <option value="debit">Debit</option>
-                    <option value="credit">Credit</option>
-                  </select>
+                  <div className="finDirSelect">
+                    <SingleSelectDropdown
+                      hideLabel
+                      label="Direction"
+                      options={[...FIN_DIRECTION_OPTIONS]}
+                      value={newItemDir[cat.id] ?? 'debit'}
+                      onChange={(v) => setNewItemDir((p) => ({ ...p, [cat.id]: v as 'debit' | 'credit' }))}
+                      disabled={busy}
+                    />
+                  </div>
                 )}
                 <input
                   className="input"

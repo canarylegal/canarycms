@@ -48,6 +48,10 @@ class UserPublic(BaseModel):
     role: UserRole
     is_active: bool
     is_2fa_enabled: bool
+    is_master_recovery: bool = Field(
+        default=False,
+        description="True for the env-configured master recovery operator (not a firm staff account).",
+    )
     pending_authenticator_setup: bool = Field(
         default=False,
         description="True when TOTP setup was started but not yet confirmed (requires password to resume).",
@@ -263,21 +267,8 @@ class CalendarDirectoryRow(BaseModel):
     can_subscribe: bool
 
 
-class BootstrapAdminRequest(BaseModel):
-    token: str = Field(min_length=10)
-    email: EmailStr
-    password: str = Field(min_length=12)
-    display_name: str = Field(min_length=1, max_length=200)
-    initials: str = Field(min_length=1, max_length=12)
-
-    @field_validator("initials", mode="after")
-    @classmethod
-    def _bootstrap_initials(cls, v: str) -> str:
-        return normalize_initials(v)
-
-
 class LoginRequest(BaseModel):
-    email: EmailStr
+    email: str = Field(min_length=1, max_length=320, description="Staff login id (e-mail or reserved master login).")
     password: str
     totp_code: str | None = None
 
@@ -383,6 +374,7 @@ class UserPermissionCategoryOut(BaseModel):
     perm_admin: bool
     created_at: datetime
     updated_at: datetime
+    is_builtin_template: bool = False
 
     model_config = {"from_attributes": True}
 
@@ -429,6 +421,9 @@ class FirmSettingsOut(BaseModel):
     mandate_two_factor: bool = False
     mandate_password_rotation: bool = False
     password_rotation_days: int | None = None
+    client_bank_account_name: str | None = None
+    client_bank_sort_code: str | None = None
+    client_bank_account_number_last4: str | None = None
 
 
 class MergeCodeCatalogOut(BaseModel):
@@ -466,6 +461,9 @@ class FirmSettingsUpdate(BaseModel):
     mandate_two_factor: bool | None = None
     mandate_password_rotation: bool | None = None
     password_rotation_days: int | None = Field(default=None, ge=1, le=3650)
+    client_bank_account_name: str | None = Field(default=None, max_length=200)
+    client_bank_sort_code: str | None = Field(default=None, max_length=16)
+    client_bank_account_number_last4: str | None = Field(default=None, max_length=4)
 
 
 class MatterHeadTypeVisibilityUpdate(BaseModel):
@@ -2055,6 +2053,106 @@ class EventsReportIn(ReportFeeEarnerIdsIn):
         if self.date_from is not None and self.date_to is not None and self.date_from > self.date_to:
             raise ValueError("date_from must be on or before date_to")
         return self
+
+
+class LedgerActivityReportIn(ReportFeeEarnerIdsIn):
+    date_from: date | None = None
+    date_to: date | None = None
+    approved_only: bool = False
+
+    @model_validator(mode="after")
+    def _dates(self) -> LedgerActivityReportIn:
+        if self.date_from is not None and self.date_to is not None and self.date_from > self.date_to:
+            raise ValueError("date_from must be on or before date_to")
+        return self
+
+
+class AgedDebtReportIn(ReportFeeEarnerIdsIn):
+    as_of: date | None = None
+
+
+class ExceptionsReportIn(ReportFeeEarnerIdsIn):
+    date_from: date | None = None
+    date_to: date | None = None
+    large_posting_min_pence: int = Field(default=500_000, ge=1)
+
+    @model_validator(mode="after")
+    def _dates(self) -> ExceptionsReportIn:
+        if self.date_from is not None and self.date_to is not None and self.date_from > self.date_to:
+            raise ValueError("date_from must be on or before date_to")
+        return self
+
+
+class ReconciliationPreviewOut(BaseModel):
+    ledger_client_total_pence: int
+    ledger_office_total_pence: int
+
+
+class ClientAccountReconciliationOut(BaseModel):
+    id: uuid.UUID
+    period_end_date: date
+    ledger_client_total_pence: int
+    ledger_office_total_pence: int
+    bank_statement_balance_pence: int
+    difference_pence: int
+    prepared_by_user_id: uuid.UUID
+    prepared_by_name: str | None = None
+    prepared_at: datetime
+    approved_by_user_id: uuid.UUID | None = None
+    approved_by_name: str | None = None
+    approved_at: datetime | None = None
+    notes: str | None = None
+    status: str
+
+
+class ClientAccountReconciliationCreateIn(BaseModel):
+    period_end_date: date
+    bank_statement_balance_pence: int
+    notes: str | None = Field(default=None, max_length=8000)
+
+
+class ClientAccountReconciliationUpdateIn(BaseModel):
+    bank_statement_balance_pence: int | None = None
+    notes: str | None = Field(default=None, max_length=8000)
+    refresh_ledger_totals: bool = True
+
+
+class AccountantPackIn(ReportFeeEarnerIdsIn):
+    period_end_date: date
+    date_from: date | None = None
+    date_to: date | None = None
+    include_balances: bool = True
+    include_billing: bool = True
+    include_ledger_activity: bool = True
+    include_aged_debt: bool = True
+    include_exceptions: bool = False
+    include_reconcile_doc: bool = True
+    large_posting_min_pence: int = Field(default=500_000, ge=1)
+
+    @model_validator(mode="after")
+    def _dates(self) -> AccountantPackIn:
+        if self.date_from is not None and self.date_to is not None and self.date_from > self.date_to:
+            raise ValueError("date_from must be on or before date_to")
+        if (self.date_from is None) != (self.date_to is None):
+            raise ValueError("Provide both activity date_from and date_to, or leave both empty.")
+        return self
+
+
+class AccountantPackSectionOut(BaseModel):
+    key: str
+    label: str
+    included: bool
+    row_count: int | None = None
+    note: str | None = None
+
+
+class AccountantPackPreviewOut(BaseModel):
+    period_end_date: date
+    activity_date_from: date
+    activity_date_to: date
+    fee_earner_count: int
+    reconcile_doc_available: bool
+    sections: list[AccountantPackSectionOut]
 
 
 class FeeEarnerPickOut(BaseModel):

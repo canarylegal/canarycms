@@ -6,8 +6,10 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
+from app.admin_access import user_effective_admin
 from app.db import get_db
 from app.deps import get_current_user, require_case_access
+from app.ledger_audit import log_ledger_approve, log_ledger_post
 from app.ledger_service import approve_ledger_pair, get_ledger, post_transaction
 from app.models import User
 from app.permission_checks import user_may_approve_ledger
@@ -34,8 +36,16 @@ def create_posting(
     db: Session = Depends(get_db),
 ) -> None:
     require_case_access(case_id, user, db)
-    post_transaction(case_id, payload, user, db)
+    pair_id = post_transaction(case_id, payload, user, db)
     db.commit()
+    log_ledger_post(
+        db,
+        actor_user_id=user.id,
+        case_id=case_id,
+        pair_id=pair_id,
+        payload=payload,
+        is_approved=user_effective_admin(user, db),
+    )
 
 
 @router.post("/{case_id}/ledger/approve/{pair_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -53,3 +63,4 @@ def approve_posting(
     require_case_access(case_id, user, db)
     approve_ledger_pair(case_id, pair_id, db)
     db.commit()
+    log_ledger_approve(db, actor_user_id=user.id, case_id=case_id, pair_id=pair_id)

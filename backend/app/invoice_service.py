@@ -9,6 +9,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
+from app.ledger_audit import log_invoice_approve, log_invoice_create, log_invoice_void, log_ledger_post
 from app.ledger_service import approve_ledger_pair, delete_ledger_pair_unapproved, get_ledger, post_transaction
 from app.models import Case, CaseInvoice, CaseInvoiceLine, InvoiceSeq, LedgerEntry, User
 from app.permission_checks import user_may_approve_invoice
@@ -154,7 +155,34 @@ def create_case_invoice(case_id: uuid.UUID, payload: CaseInvoiceCreate, user: Us
     for ln in line_rows:
         db.add(ln)
     db.flush()
-    return list_case_invoices(case_id, db).invoices[0]
+    inv_out = list_case_invoices(case_id, db).invoices[0]
+    post_payload = LedgerPostCreate(
+        description=f"Invoice {inv_num} (pending approval)",
+        reference=inv_num,
+        contact_label=None,
+        amount_pence=total,
+        client_direction=None,
+        office_direction="debit",
+    )
+    log_ledger_post(
+        db,
+        actor_user_id=user.id,
+        case_id=case_id,
+        pair_id=pair_id,
+        payload=post_payload,
+        is_approved=False,
+        invoice_number=inv_num,
+    )
+    log_invoice_create(
+        db,
+        actor_user_id=user.id,
+        case_id=case_id,
+        invoice_id=inv_id,
+        invoice_number=inv_num,
+        total_pence=total,
+        pair_id=pair_id,
+    )
+    return inv_out
 
 
 def approve_case_invoice(case_id: uuid.UUID, invoice_id: uuid.UUID, user: User, db: Session) -> None:
@@ -185,6 +213,15 @@ def approve_case_invoice(case_id: uuid.UUID, invoice_id: uuid.UUID, user: User, 
     inv.approved_at = datetime.utcnow()
     db.add(inv)
     db.flush()
+    log_invoice_approve(
+        db,
+        actor_user_id=user.id,
+        case_id=case_id,
+        invoice_id=invoice_id,
+        invoice_number=inv.invoice_number,
+        total_pence=int(inv.total_pence),
+        pair_id=inv.ledger_pair_id,
+    )
 
 
 def void_case_invoice(case_id: uuid.UUID, invoice_id: uuid.UUID, user: User, db: Session) -> None:
@@ -207,6 +244,15 @@ def void_case_invoice(case_id: uuid.UUID, invoice_id: uuid.UUID, user: User, db:
         inv.voided_at = now
         db.add(inv)
         db.flush()
+        log_invoice_void(
+            db,
+            actor_user_id=user.id,
+            case_id=case_id,
+            invoice_id=invoice_id,
+            invoice_number=inv.invoice_number,
+            total_pence=int(inv.total_pence),
+            was_pending=True,
+        )
         return
 
     # Approved: post reversal (office credit) and require office balance check per spec
@@ -246,3 +292,30 @@ def void_case_invoice(case_id: uuid.UUID, invoice_id: uuid.UUID, user: User, db:
     inv.reversal_pair_id = rev_id
     db.add(inv)
     db.flush()
+    rev_payload = LedgerPostCreate(
+        description=f"Reversal of invoice {inv.invoice_number}",
+        reference=inv.invoice_number,
+        contact_label=None,
+        amount_pence=total,
+        client_direction=None,
+        office_direction="credit",
+    )
+    log_ledger_post(
+        db,
+        actor_user_id=user.id,
+        case_id=case_id,
+        pair_id=rev_id,
+        payload=rev_payload,
+        is_approved=True,
+        invoice_number=inv.invoice_number,
+    )
+    log_invoice_void(
+        db,
+        actor_user_id=user.id,
+        case_id=case_id,
+        invoice_id=invoice_id,
+        invoice_number=inv.invoice_number,
+        total_pence=total,
+        was_pending=False,
+        reversal_pair_id=rev_id,
+    )

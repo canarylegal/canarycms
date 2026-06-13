@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { apiFetch } from './api'
 import { useDialogs } from './DialogProvider'
+import { SingleSelectDropdown } from './SingleSelectDropdown'
 import { FeeScaleBandRowModal } from './FeeScaleBandRowModal'
 import { TextPromptModal } from './TextPromptModal'
 import {
@@ -706,19 +707,14 @@ function LineEditor({
   return (
     <tr className="finRow">
       <td className="feeScaleTypeCell">
-        <select
-          className="select"
-          style={{ width: '100%' }}
+        <SingleSelectDropdown
+          hideLabel
+          label="Line type"
+          options={LINE_KINDS}
           value={line.line_kind}
           disabled={busy}
-          onChange={(e) => onUpdate({ line_kind: e.target.value })}
-        >
-          {LINE_KINDS.map((o) => (
-            <option key={o.value} value={o.value}>
-              {o.label}
-            </option>
-          ))}
-        </select>
+          onChange={(v) => onUpdate({ line_kind: v })}
+        />
       </td>
       <td className="feeScaleDescCol">
         <div
@@ -736,33 +732,30 @@ function LineEditor({
           />
           {isItem ? (
             <>
-              <select
-                className="select feeScaleLineAmountKind"
-                style={{ flex: '0 0 auto', width: 'auto' }}
-                value={line.amount_kind ?? 'fixed'}
-                disabled={busy}
-                onChange={(e) => onUpdate({ amount_kind: e.target.value })}
-              >
-                {AMOUNT_KINDS.map((o) => (
-                  <option key={o.value} value={o.value}>
-                    {o.label}
-                  </option>
-                ))}
-              </select>
-              {line.amount_kind === 'band' ? (
-                <select
-                  className="select feeScaleLineBandSet"
-                  value={line.band_set_id ?? ''}
+              <div className="feeScaleLineAmountKind">
+                <SingleSelectDropdown
+                  hideLabel
+                  label="Amount kind"
+                  options={AMOUNT_KINDS}
+                  value={line.amount_kind ?? 'fixed'}
                   disabled={busy}
-                  onChange={(e) => onUpdate({ band_set_id: e.target.value || null })}
-                >
-                  <option value="">Band set…</option>
-                  {bandSetOptions.map((b) => (
-                    <option key={b.id} value={b.id}>
-                      {b.label}
-                    </option>
-                  ))}
-                </select>
+                  onChange={(v) => onUpdate({ amount_kind: v })}
+                />
+              </div>
+              {line.amount_kind === 'band' ? (
+                <div className="feeScaleLineBandSet">
+                  <SingleSelectDropdown
+                    hideLabel
+                    label="Band set"
+                    options={[
+                      { value: '', label: 'Band set…' },
+                      ...bandSetOptions.map((b) => ({ value: b.id, label: b.label })),
+                    ]}
+                    value={line.band_set_id ?? ''}
+                    disabled={busy}
+                    onChange={(v) => onUpdate({ band_set_id: v || null })}
+                  />
+                </div>
               ) : null}
             </>
           ) : null}
@@ -787,19 +780,14 @@ function LineEditor({
       </td>
       <td className="feeScaleVatTreatmentCol">
         {isItem ? (
-          <select
-            className="select"
-            style={{ width: '100%' }}
+          <SingleSelectDropdown
+            hideLabel
+            label="VAT treatment"
+            options={VAT_TREATMENT_OPTIONS}
             value={treatment}
             disabled={busy}
-            onChange={(e) => onUpdate({ vat_treatment: e.target.value })}
-          >
-            {VAT_TREATMENT_OPTIONS.map((o) => (
-              <option key={o.value} value={o.value}>
-                {o.label}
-              </option>
-            ))}
-          </select>
+            onChange={(v) => onUpdate({ vat_treatment: v })}
+          />
         ) : (
           <span className="muted">—</span>
         )}
