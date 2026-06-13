@@ -308,7 +308,12 @@ def webauthn_register_finish(
         entity_id=str(user.id),
         meta={"credential_id_prefix": _b64url_encode(cred_id)[:16]},
     )
-    access_token = create_access_token(user_id=str(user.id), role=user.role.value, mfa_verified=True)
+    access_token = create_access_token(
+        user_id=str(user.id),
+        role=user.role.value,
+        mfa_verified=True,
+        auth_token_version=int(user.auth_token_version),
+    )
     return TokenResponse(access_token=access_token)
 
 

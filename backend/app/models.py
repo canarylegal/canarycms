@@ -67,6 +67,7 @@ class User(Base):
     totp_secret: Mapped[str | None] = mapped_column(Text, nullable=True)
     is_2fa_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     password_changed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    auth_token_version: Mapped[int] = mapped_column(nullable=False, default=1)
 
     # Fernet-encrypted CalDAV app password (Radicale htpasswd); plaintext shown only on enable/reset.
     caldav_password_enc: Mapped[str | None] = mapped_column(Text, nullable=True)

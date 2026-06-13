@@ -13,7 +13,7 @@ from app.master_admin import is_reserved_master_login, normalize_master_login
 from app.models import User, UserPermissionCategory, UserRole, WebAuthnCredential
 from app.schemas import AdminUserCreate, AdminUserPublic, AdminUserSetPassword, AdminUserUpdate, AdminSendPasswordResetResponse
 from app.audit import log_event
-from app.security import hash_password
+from app.security import bump_auth_token_version, hash_password
 from app.password_reset_service import (
     create_password_reset_token,
     password_reset_email_configured,
@@ -186,6 +186,7 @@ def set_password(
 
     user.password_hash = hash_password(payload.password)
     touch_password_changed(user)
+    bump_auth_token_version(user)
     user.totp_secret = None
     user.is_2fa_enabled = False
     _clear_user_second_factors(db, user.id)
