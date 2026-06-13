@@ -127,4 +127,5 @@ def login_access_token(db: Session, user: User, *, mfa_verified: bool) -> str:
         role=user.role.value,
         mfa_verified=mfa_verified,
         password_ok=password_ok,
+        auth_token_version=int(user.auth_token_version),
     )

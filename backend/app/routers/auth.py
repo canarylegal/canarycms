@@ -213,6 +213,9 @@ def reset_password(payload: ResetPasswordRequest, db: Session = Depends(get_db))
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired reset link.")
     user.password_hash = hash_password(payload.new_password)
     touch_password_changed(user)
+    from app.security import bump_auth_token_version
+
+    bump_auth_token_version(user)
     cleared_pending_setup = bool(not user.is_2fa_enabled and user.totp_secret)
     if cleared_pending_setup:
         user.totp_secret = None
@@ -380,6 +383,9 @@ def change_password(
 
     user.password_hash = hash_password(payload.new_password)
     touch_password_changed(user)
+    from app.security import bump_auth_token_version
+
+    bump_auth_token_version(user)
 
     db.add(user)
     db.commit()

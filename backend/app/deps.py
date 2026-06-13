@@ -94,6 +94,12 @@ def get_auth_principal(
     if not user or not user.is_active:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User inactive or not found")
 
+    if payload.auth_token_version is None or payload.auth_token_version != int(user.auth_token_version):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Session expired — sign in again.",
+        )
+
     if not user_effective_admin(user, db):
         if user_password_change_required(db, user) and not _path_allows_password_change_only(request.url.path):
             raise HTTPException(

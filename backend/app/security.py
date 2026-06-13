@@ -31,7 +31,14 @@ JWT_ALG = "HS256"
 JWT_TTL_SECONDS = int(os.getenv("JWT_TTL_SECONDS", "28800"))  # 8h
 
 
-def create_access_token(*, user_id: str, role: str, mfa_verified: bool = True, password_ok: bool = True) -> str:
+def create_access_token(
+    *,
+    user_id: str,
+    role: str,
+    mfa_verified: bool = True,
+    password_ok: bool = True,
+    auth_token_version: int | None = None,
+) -> str:
     now = int(time.time())
     payload = {
         "sub": user_id,
@@ -43,7 +50,14 @@ def create_access_token(*, user_id: str, role: str, mfa_verified: bool = True, p
         "iat": now,
         "exp": now + JWT_TTL_SECONDS,
     }
+    if auth_token_version is not None:
+        payload["tv"] = int(auth_token_version)
     return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALG)
+
+
+def bump_auth_token_version(user) -> None:
+    """Invalidate existing staff JWTs for this user (password reset, admin set-password, etc.)."""
+    user.auth_token_version = int(getattr(user, "auth_token_version", 0) or 0) + 1
 
 
 def create_master_recovery_token() -> str:
@@ -65,6 +79,8 @@ class TokenPayload:
     mfa_verified: bool | None = None
     """Present on newer JWTs only; ``None`` means legacy token without a ``pwd`` claim."""
     password_ok: bool | None = None
+    """Present on staff JWTs only; ``None`` means legacy token without a ``tv`` claim."""
+    auth_token_version: int | None = None
 
 
 EML_OPEN_TTL_SECONDS = int(os.getenv("EML_OPEN_TTL_SECONDS", "120"))
@@ -274,7 +290,21 @@ def decode_access_token(token: str) -> TokenPayload:
         password_ok = False
     else:
         password_ok = None
-    return TokenPayload(user_id=sub, role=role, mfa_verified=mfa_verified, password_ok=password_ok)
+    tv_raw = payload.get("tv")
+    auth_token_version: int | None
+    if isinstance(tv_raw, int):
+        auth_token_version = tv_raw
+    elif isinstance(tv_raw, str) and tv_raw.isdigit():
+        auth_token_version = int(tv_raw)
+    else:
+        auth_token_version = None
+    return TokenPayload(
+        user_id=sub,
+        role=role,
+        mfa_verified=mfa_verified,
+        password_ok=password_ok,
+        auth_token_version=auth_token_version,
+    )
 
 
 def generate_totp_secret() -> str:
