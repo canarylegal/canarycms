@@ -49,6 +49,7 @@ openssl rand -hex 32   # ONLYOFFICE_JWT_SECRET
 openssl rand -hex 32   # ONLYOFFICE_SECURE_LINK_SECRET
 openssl rand -hex 16   # MASTER_ADMIN_LOGIN (save securely — break-glass recovery login id)
 openssl rand -hex 32   # MASTER_ADMIN_PASSWORD (save securely)
+python3 -c "import pyotp; print(pyotp.random_base32())"   # MASTER_ADMIN_TOTP_SECRET (authenticator app)
 openssl rand -hex 16   # POSTGRES_PASSWORD
 ```
 
@@ -131,14 +132,18 @@ server {
 
 ## 5. Create the first firm admin account
 
-Set `MASTER_ADMIN_LOGIN` and `MASTER_ADMIN_PASSWORD` in `.env` (long random hex strings are fine — the login id need not be a real e-mail address). The backend **will not start** without these values.
+Set `MASTER_ADMIN_LOGIN`, `MASTER_ADMIN_PASSWORD`, and `MASTER_ADMIN_TOTP_SECRET` in `.env` (long random hex strings are fine for login/password; the login id need not be a real e-mail address). The backend **will not start** without these values. Enrol the TOTP secret in an authenticator app (issuer `TOTP_ISSUER`, account name = your master login id).
 
-1. Sign in at `https://canary.yourfirm.co.uk` using the master recovery login id and password.
+1. Sign in at `https://canary.yourfirm.co.uk` using the master recovery login id, password, and authenticator code.
 2. You will see the **Recovery console** only (users and security policy — no case access).
 3. Create a firm administrator under **Users** (role `admin` or a permission category with **Admin**).
 4. Sign out and sign in as that firm admin for day-to-day use. Reserve the master login for recovery.
 
-Optional: set `MASTER_ADMIN_REQUIRE_2FA=true` and `MASTER_ADMIN_TOTP_SECRET` (base32) on the master account. To recover from lockout, set `MASTER_ADMIN_REQUIRE_2FA=false` in `.env` and restart the backend.
+**Break-glass recovery (server-side only):** edit `.env` and restart the backend to bypass or reset master 2FA:
+
+- Set `MASTER_ADMIN_REQUIRE_2FA=false` to sign in with password only (temporary).
+- Replace `MASTER_ADMIN_TOTP_SECRET` with a new base32 secret and re-enrol your authenticator app.
+- Replace `MASTER_ADMIN_PASSWORD` to rotate the master password.
 
 **Post-login setup (firm admin):**
 
@@ -184,7 +189,7 @@ WAF and in-app rate limits **complement** each other.
 ## 7. Go-live checklist
 
 - [ ] `DATA_ENCRYPTION_KEY` set; re-encrypt script run if migrating existing data
-- [ ] `MASTER_ADMIN_LOGIN` and `MASTER_ADMIN_PASSWORD` stored securely (not in git)
+- [ ] `MASTER_ADMIN_LOGIN`, `MASTER_ADMIN_PASSWORD`, and `MASTER_ADMIN_TOTP_SECRET` stored securely (not in git)
 - [ ] All staff users have permission categories
 - [ ] Mandatory 2FA enabled when ready
 - [ ] WAF / rate rules on login endpoints

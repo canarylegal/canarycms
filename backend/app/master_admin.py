@@ -1,4 +1,8 @@
-"""Env-configured master recovery operator (break-glass; not a DB user)."""
+"""Env-configured master recovery operator (break-glass; not a DB user).
+
+2FA is required by default (``MASTER_ADMIN_REQUIRE_2FA`` defaults to true). Disable or rotate
+credentials only via ``.env`` on the server (see docs/DEPLOYMENT.md).
+"""
 
 from __future__ import annotations
 
@@ -51,11 +55,12 @@ def load_master_admin_config() -> MasterAdminConfig:
         raise RuntimeError("MASTER_ADMIN_LOGIN must be at least 8 characters")
     if len(password) < 12:
         raise RuntimeError("MASTER_ADMIN_PASSWORD must be at least 12 characters")
-    require_2fa = _env_bool("MASTER_ADMIN_REQUIRE_2FA", default=False)
+    require_2fa = _env_bool("MASTER_ADMIN_REQUIRE_2FA", default=True)
     totp_secret = (os.getenv("MASTER_ADMIN_TOTP_SECRET") or "").strip() or None
     if require_2fa and not totp_secret:
         raise RuntimeError(
-            "MASTER_ADMIN_TOTP_SECRET is required when MASTER_ADMIN_REQUIRE_2FA is enabled",
+            "MASTER_ADMIN_TOTP_SECRET is required when MASTER_ADMIN_REQUIRE_2FA is enabled "
+            "(set MASTER_ADMIN_REQUIRE_2FA=false in .env to disable 2FA for break-glass recovery)",
         )
     return MasterAdminConfig(
         login=login,
