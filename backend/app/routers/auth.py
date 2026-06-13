@@ -1,3 +1,4 @@
+import logging
 import os
 from datetime import datetime, timezone
 
@@ -6,7 +7,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.admin_access import user_effective_admin
+from app.auth_principal import AuthPrincipal
 from app.auth_rate_limit import (
     check_forgot_password_rate_limits,
     check_staff_login_rate_limits,
@@ -16,9 +17,10 @@ from app.auth_rate_limit import (
 )
 from app.client_ip import client_ip_from_request
 from app.db import get_db
-from app.deps import _jwt_raw_from_request, get_current_user
-from app.email_integration_settings import build_user_public
-from app.models import User, UserRole
+from app.deps import _jwt_raw_from_request, get_auth_principal, get_current_user
+from app.email_integration_settings import build_master_recovery_public, build_user_public
+from app.master_admin import is_reserved_master_login, normalize_master_login, try_authenticate_master
+from app.models import User
 from app.org_security import (
     firm_mandates_second_factor,
     firm_password_rotation_policy,
@@ -35,7 +37,6 @@ from app.password_reset_service import (
     touch_password_changed,
 )
 from app.schemas import (
-    BootstrapAdminRequest,
     Cancel2FASetupRequest,
     ChangePasswordRequest,
     ChangePasswordResponse,
@@ -53,7 +54,7 @@ from app.schemas import (
 )
 from app.security import (
     build_totp_uri,
-    create_access_token,
+    create_master_recovery_token,
     decode_access_token,
     generate_totp_secret,
     hash_password,
@@ -62,82 +63,57 @@ from app.security import (
 )
 from app.audit import log_event
 
+log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 _me_bearer = HTTPBearer(auto_error=False)
 
 
-def _bootstrap_token() -> str:
-    token = os.getenv("BOOTSTRAP_ADMIN_TOKEN")
-    if not token:
-        raise RuntimeError("BOOTSTRAP_ADMIN_TOKEN is not set")
-    return token
-
-
-@router.post("/bootstrap-admin", response_model=UserPublic)
-def bootstrap_admin(payload: BootstrapAdminRequest, db: Session = Depends(get_db)) -> UserPublic:
-    if payload.token != _bootstrap_token():
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid bootstrap token")
-
-    existing = db.execute(select(User).where(User.role == UserRole.admin)).scalar_one_or_none()
-    if existing:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Admin already exists")
-
-    ini = payload.initials
-    taken_i = db.execute(select(User).where(User.initials == ini)).scalar_one_or_none()
-    if taken_i:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Initials are already in use by another user.",
-        )
-
-    user = User(
-        email=str(payload.email).lower(),
-        password_hash=hash_password(payload.password),
-        display_name=payload.display_name,
-        initials=ini,
-        role=UserRole.admin,
-        is_active=True,
-        password_changed_at=datetime.now(timezone.utc),
-    )
-    db.add(user)
-    db.commit()
-    db.refresh(user)
-    return build_user_public(user, db)
-
-
 @router.post("/login", response_model=TokenResponse)
 def login(payload: LoginRequest, request: Request, db: Session = Depends(get_db)) -> TokenResponse:
-    email = str(payload.email).lower()
+    login_id = normalize_master_login(str(payload.email))
     ip = client_ip_from_request(request)
-    check_staff_login_rate_limits(db, email=email, ip=ip)
+    check_staff_login_rate_limits(db, email=login_id, ip=ip)
 
-    user = db.execute(select(User).where(User.email == email)).scalar_one_or_none()
+    master_ok, master_err = try_authenticate_master(
+        login=login_id,
+        password=payload.password,
+        totp_code=payload.totp_code,
+    )
+    if master_err == "Invalid credentials":
+        record_staff_login_failure(db, email=login_id, ip=ip)
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
+    if master_err == "2FA required":
+        record_staff_login_failure(db, email=login_id, ip=ip)
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="2FA required")
+    if master_err == "Invalid 2FA code":
+        record_staff_login_failure(db, email=login_id, ip=ip)
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid 2FA code")
+    if master_ok:
+        clear_staff_login_rate_limits(db, email=login_id)
+        return TokenResponse(access_token=create_master_recovery_token())
+
+    user = db.execute(select(User).where(User.email == login_id)).scalar_one_or_none()
     if not user or not user.is_active:
-        record_staff_login_failure(db, email=email, ip=ip)
+        record_staff_login_failure(db, email=login_id, ip=ip)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
     if not verify_password(payload.password, user.password_hash):
-        record_staff_login_failure(db, email=email, ip=ip)
+        record_staff_login_failure(db, email=login_id, ip=ip)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
 
     mandate = firm_mandates_second_factor(db)
-    effective_admin = user_effective_admin(user, db)
 
     if user.is_2fa_enabled:
         if not payload.totp_code or not user.totp_secret:
-            record_staff_login_failure(db, email=email, ip=ip)
+            record_staff_login_failure(db, email=login_id, ip=ip)
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="2FA required")
         if not verify_totp(secret=user.totp_secret, code=payload.totp_code):
-            record_staff_login_failure(db, email=email, ip=ip)
+            record_staff_login_failure(db, email=login_id, ip=ip)
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid 2FA code")
 
-    # Under mandate: password sign-in always proves MFA via TOTP when enabled. Users with no TOTP and no passkeys
-    # receive a restricted JWT (mfa_verified=False) so they can only reach second-factor enrolment routes until
-    # they register a passkey or enable authenticator 2FA. Passkey-only accounts cannot get a verified MFA JWT
-    # from password alone — they must use passkey sign-in or enable TOTP (e.g. after passkey login).
     mfa_verified = True
-    if mandate and not effective_admin:
+    if mandate:
         db_ok = user_meets_second_factor_policy(db, user.id, is_2fa_enabled=user.is_2fa_enabled)
         if db_ok and not user.is_2fa_enabled:
             raise HTTPException(
@@ -151,7 +127,7 @@ def login(payload: LoginRequest, request: Request, db: Session = Depends(get_db)
         if not db_ok:
             mfa_verified = False
 
-    clear_staff_login_rate_limits(db, email=email)
+    clear_staff_login_rate_limits(db, email=login_id)
     token = login_access_token(db, user, mfa_verified=mfa_verified)
     log_event(
         db,
@@ -168,13 +144,18 @@ def login(payload: LoginRequest, request: Request, db: Session = Depends(get_db)
 def me(
     request: Request,
     creds: HTTPAuthorizationCredentials | None = Depends(_me_bearer),
-    user: User = Depends(get_current_user),
+    principal: AuthPrincipal = Depends(get_auth_principal),
     db: Session = Depends(get_db),
 ) -> UserPublic:
+    if principal.is_master_recovery:
+        return build_master_recovery_public(db)
+
+    user = principal.user
+    assert user is not None
     pub = build_user_public(user, db)
     mandate = firm_mandates_second_factor(db)
     rotation_enabled, rotation_days = firm_password_rotation_policy(db)
-    if user_effective_admin(user, db) or not mandate:
+    if not mandate:
         sf_ok = True
     else:
         raw = _jwt_raw_from_request(request, creds)
@@ -209,6 +190,10 @@ def forgot_password(
             detail="E-mail password reset has not been configured. Please contact your administrator.",
         )
     email = str(payload.email).lower().strip()
+    if is_reserved_master_login(email):
+        return ForgotPasswordResponse(
+            message="If an account exists for that e-mail address, a password reset link has been sent.",
+        )
     ip = client_ip_from_request(request)
     check_forgot_password_rate_limits(db, email=email, ip=ip)
     record_forgot_password_attempt(db, email=email, ip=ip)
@@ -408,4 +393,3 @@ def change_password(
     )
     access_token = login_access_token(db, user, mfa_verified=True)
     return ChangePasswordResponse(access_token=access_token, user=build_user_public(user, db))
-

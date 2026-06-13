@@ -385,7 +385,43 @@ class FirmSettings(Base):
     mandate_password_rotation: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     password_rotation_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
     storage_limit_bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    client_bank_account_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    client_bank_sort_code: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    client_bank_account_number_last4: Mapped[str | None] = mapped_column(String(4), nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+
+
+class ReconciliationStatus(str, enum.Enum):
+    draft = "draft"
+    approved = "approved"
+
+
+class ClientAccountReconciliation(Base):
+    """Month-end client account reconciliation snapshot (one row per period end date)."""
+
+    __tablename__ = "client_account_reconciliation"
+    __table_args__ = (UniqueConstraint("period_end_date", name="uq_client_account_reconciliation_period_end"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    period_end_date: Mapped[date] = mapped_column(Date, nullable=False)
+    ledger_client_total_pence: Mapped[int] = mapped_column(Integer, nullable=False)
+    ledger_office_total_pence: Mapped[int] = mapped_column(Integer, nullable=False)
+    bank_statement_balance_pence: Mapped[int] = mapped_column(Integer, nullable=False)
+    difference_pence: Mapped[int] = mapped_column(Integer, nullable=False)
+    prepared_by_user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("user.id", ondelete="RESTRICT"), nullable=False
+    )
+    prepared_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+    approved_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("user.id", ondelete="SET NULL"), nullable=True
+    )
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[ReconciliationStatus] = mapped_column(
+        Enum(ReconciliationStatus, name="reconciliation_status"),
+        nullable=False,
+        default=ReconciliationStatus.draft,
+    )
 
 
 class PasswordResetToken(Base):

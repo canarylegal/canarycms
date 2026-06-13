@@ -6,7 +6,7 @@ import {
 } from '@simplewebauthn/browser'
 import { useCallback, useEffect, useMemo, useRef, useState, memo, type FormEvent, type ReactNode } from 'react'
 import { AdminLoginUpdatePrompt } from './AdminLoginUpdatePrompt'
-import { AdminConsole } from './AdminConsole'
+import { AdminConsole, RecoveryConsole } from './AdminConsole'
 import { parseAppNavigation, readBootNavigation, sanitizeAppNavigation, syncAppNavigationUrl, type AppNavState } from './appNavigation'
 import { CaseViewRoute } from './CaseViewRoute'
 import { CalendarPage } from './CalendarPage'
@@ -73,11 +73,12 @@ import {
 } from './emailLauncher'
 import { useDialogs } from './DialogProvider'
 import { ContactSearchPicker } from './ContactSearchPicker'
+import { SingleSelectDropdown } from './SingleSelectDropdown'
 import { SearchInput } from './SearchInput'
 import { CaseSourceField, resolveCaseSourcePayload, useCaseSources } from './CaseSourceField'
 import { copyTextToClipboard } from './copyToClipboard'
 import { canaryDocumentTitle } from './tabTitle'
-import { caseHasRevokedUserAccess, formatCaseStatusLabel, userCanAccessAdminConsole } from './types'
+import { caseHasRevokedUserAccess, formatCaseStatusLabel, userCanAccessAdminConsole, userIsMasterRecovery } from './types'
 import type {
   CaseOut,
   CasePropertyPayload,
@@ -140,18 +141,18 @@ function formatTs(s: string) {
 
 /** Non-admin users who must complete authenticator 2FA or register a passkey before using the rest of the app. */
 function userNeedsSecondFactorSetup(me: UserPublic): boolean {
-  if (me.admin_console_access) return false
+  if (userIsMasterRecovery(me)) return false
   return Boolean(me.organization_requires_second_factor && !me.is_2fa_enabled && !me.has_passkeys)
 }
 
 /** JWT/session did not satisfy org “verified second factor at sign-in” (passkey or password + authenticator). */
 function sessionNeedsVerifiedSecondFactor(me: UserPublic): boolean {
-  if (me.admin_console_access) return false
+  if (userIsMasterRecovery(me)) return false
   return me.session_second_factor_verified === false
 }
 
 function sessionNeedsPasswordChange(me: UserPublic): boolean {
-  if (me.admin_console_access) return false
+  if (userIsMasterRecovery(me)) return false
   return me.session_password_change_required === true
 }
 
@@ -376,6 +377,7 @@ function useAuth() {
       try {
         const res = await apiFetch<TokenResponse>('/auth/login', {
           json: { email, password, totp_code: totpCode ?? null },
+          timeoutMs: 45_000,
         })
         localStorage.setItem('token', res.access_token)
         setToken(res.access_token)
@@ -386,7 +388,11 @@ function useAuth() {
         if (totpEmpty && msg === '2FA required') {
           return 'needs_2fa'
         }
-        setLoginError(msg)
+        if (msg.includes('timed out')) {
+          setLoginError('Sign-in timed out — the server may be busy. Wait a moment and try again.')
+        } else {
+          setLoginError(msg)
+        }
         return 'error'
       }
     },
@@ -565,7 +571,7 @@ function LoginForm({
           <>
             <form className="stack loginForm" style={{ marginTop: 16 }} onSubmit={handlePasswordSubmit}>
               <label className="field">
-                <span>Email</span>
+                <span>Login id</span>
                 <input
                   value={email}
                   onChange={(e) => {
@@ -790,6 +796,8 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
   const [taskMenuCaseFilter, setTaskMenuCaseFilter] = useState<string | null>(bootNav.tasksCaseFilter)
   const [globalTaskCreateOpen, setGlobalTaskCreateOpen] = useState(false)
   const [tasksMenuFilterOpen, setTasksMenuFilterOpen] = useState(false)
+  const [tasksLayoutOpen, setTasksLayoutOpen] = useState(false)
+  const [tasksFilterMatterTypeOpen, setTasksFilterMatterTypeOpen] = useState(false)
 
   const [caseListUsers, setCaseListUsers] = useState<UserSummary[]>([])
   const canAdminConsole = userCanAccessAdminConsole(auth.me)
@@ -921,6 +929,22 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
     return Array.from(s).sort((a, b) => a.localeCompare(b))
   }, [taskMenuRows])
 
+  const tasksFilterMatterTypeOptions = useMemo(
+    () => [
+      { value: '', label: 'All' },
+      ...tasksMenuMatterTypeOptions.map((label) => ({ value: label, label })),
+    ],
+    [tasksMenuMatterTypeOptions],
+  )
+
+  const taskLayoutOptions = useMemo(
+    () => [
+      { value: 'list', label: 'List' },
+      { value: 'kanban', label: 'Kanban' },
+    ],
+    [],
+  )
+
   useEffect(() => {
     if (!token) return
     let cancelled = false
@@ -974,7 +998,11 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
   }, [token, view, refreshTaskMenu])
 
   useEffect(() => {
-    if (view !== 'tasks') setTasksMenuFilterOpen(false)
+    if (view !== 'tasks') {
+      setTasksMenuFilterOpen(false)
+      setTasksLayoutOpen(false)
+      setTasksFilterMatterTypeOpen(false)
+    }
   }, [view])
 
   useEffect(() => {
@@ -1135,13 +1163,17 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
     async (created?: CaseOut) => {
       setShowNewMatter(false)
       await refreshCases()
-      if (newMatterFromQuotes && created?.id) {
+      if (!created?.id) return
+      if (newMatterFromQuotes) {
         setQuoteWizardPendingCaseId(created.id)
         setQuoteWizardOpen(true)
         setNewMatterFromQuotes(false)
+      } else {
+        setCaseListFocusId(created.id)
+        openCaseView(created.id)
       }
     },
-    [token, newMatterFromQuotes],
+    [newMatterFromQuotes, openCaseView],
   )
 
   const mainMenuFiltersLoadedForUser = useRef<string | null>(null)
@@ -1220,15 +1252,15 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
                 </button>
                 <div className="tasksToolbarLayoutGroup">
                   <span className="tasksToolbarLayoutLabel">View</span>
-                  <select
-                    className="tasksToolbarLayoutSelect"
+                  <SingleSelectDropdown
+                    hideLabel
+                    label="Task layout"
+                    options={taskLayoutOptions}
                     value={uiPrefs.tasks_menu_layout}
-                    onChange={(e) => setUiPreference('tasks_menu_layout', e.target.value as 'list' | 'kanban')}
-                    aria-label="Task layout"
-                  >
-                    <option value="list">List</option>
-                    <option value="kanban">Kanban</option>
-                  </select>
+                    onChange={(v) => setUiPreference('tasks_menu_layout', v as 'list' | 'kanban')}
+                    open={tasksLayoutOpen}
+                    onOpenChange={setTasksLayoutOpen}
+                  />
                 </div>
                 <button
                   type="button"
@@ -1310,21 +1342,15 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
                       onMouseDown={(e) => e.stopPropagation()}
                     >
                       <div className="stack mainMenuFilterDropdownBody">
-                        <label className="field">
-                          <span>Matter type</span>
-                          <select
-                            value={taskMenuFilterMatterType}
-                            onChange={(e) => setTaskMenuFilterMatterType(e.target.value)}
-                            aria-label="Filter tasks by matter type"
-                          >
-                            <option value="">All</option>
-                            {tasksMenuMatterTypeOptions.map((opt) => (
-                              <option key={opt} value={opt}>
-                                {opt}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
+                        <SingleSelectDropdown
+                          label="Matter type"
+                          options={tasksFilterMatterTypeOptions}
+                          value={taskMenuFilterMatterType}
+                          onChange={setTaskMenuFilterMatterType}
+                          open={tasksFilterMatterTypeOpen}
+                          onOpenChange={setTasksFilterMatterTypeOpen}
+                          placeholder="All"
+                        />
                       </div>
                     </div>
                   ) : null}
@@ -1513,6 +1539,31 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
     )
   }
 
+  if (auth.me && userIsMasterRecovery(auth.me) && auth.token) {
+    return (
+      <div className="appShell">
+        <header className="topbar">
+          <div className="topbarMain">
+            <nav className="topNav" aria-label="Recovery console">
+              <span className="muted" style={{ padding: '6px 10px' }}>
+                Master recovery
+              </span>
+            </nav>
+          </div>
+          <div className="topbarRight">
+            <div className="muted">{auth.me.display_name}</div>
+            <button type="button" className="btn" onClick={auth.logout}>
+              Sign out
+            </button>
+          </div>
+        </header>
+        <main className="main main--mainMenu">
+          <RecoveryConsole token={auth.token} />
+        </main>
+      </div>
+    )
+  }
+
   return (
     <div className="appShell">
       <AdminLoginUpdatePrompt token={auth.token} me={auth.me} canAdmin={canAdminConsole} />
@@ -1679,6 +1730,7 @@ function NewMatterModal({
   const { askConfirm } = useDialogs()
   const caseSources = useCaseSources(token)
   const [matterDescription, setMatterDescription] = useState('')
+  const [matterHeadTypeId, setMatterHeadTypeId] = useState('')
   const [practiceArea, setPracticeArea] = useState('')
   const [sourceId, setSourceId] = useState('')
   const [sourceCustomName, setSourceCustomName] = useState('')
@@ -1690,6 +1742,10 @@ function NewMatterModal({
   const [propertyDraft, setPropertyDraft] = useState<CasePropertyPayload | null>(null)
   const [users, setUsers] = useState<UserSummary[]>([])
   const [matterHeadTypes, setMatterHeadTypes] = useState<MatterHeadTypeOut[]>([])
+  const [matterHeadOpen, setMatterHeadOpen] = useState(false)
+  const [matterSubOpen, setMatterSubOpen] = useState(false)
+  const [sourceOpen, setSourceOpen] = useState(false)
+  const [feeEarnerOpen, setFeeEarnerOpen] = useState(false)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
 
@@ -1706,6 +1762,28 @@ function NewMatterModal({
     return matterHeadTypes.flatMap((h) => h.sub_types).find((s) => s.id === practiceArea) ?? null
   }, [practiceArea, matterHeadTypes])
 
+  const matterHeadOptions = useMemo(
+    () => matterHeadTypes.map((head) => ({ value: head.id, label: head.name })),
+    [matterHeadTypes],
+  )
+
+  const matterSubOptions = useMemo(() => {
+    const head = matterHeadTypes.find((h) => h.id === matterHeadTypeId)
+    return (head?.sub_types ?? []).map((sub) => ({ value: sub.id, label: sub.name }))
+  }, [matterHeadTypes, matterHeadTypeId])
+
+  const feeEarnerOptions = useMemo(
+    () => users.map((u) => ({ value: u.id, label: `${u.display_name} (${u.email})` })),
+    [users],
+  )
+
+  const closeDetailsDropdowns = useCallback((except?: 'head' | 'sub' | 'source' | 'feeEarner') => {
+    if (except !== 'head') setMatterHeadOpen(false)
+    if (except !== 'sub') setMatterSubOpen(false)
+    if (except !== 'source') setSourceOpen(false)
+    if (except !== 'feeEarner') setFeeEarnerOpen(false)
+  }, [])
+
   useEffect(() => {
     setNewMatterStatus(defaultStatus)
   }, [defaultStatus])
@@ -1713,6 +1791,11 @@ function NewMatterModal({
   useEffect(() => {
     setPropertyDraft(null)
   }, [practiceArea])
+
+  useEffect(() => {
+    setPracticeArea('')
+    setMatterSubOpen(false)
+  }, [matterHeadTypeId])
 
   useEffect(() => {
     let cancelled = false
@@ -1769,23 +1852,48 @@ function NewMatterModal({
         <div className="modalBodyScroll">
         {step === 'details' ? (
         <div className="stack" style={{ marginTop: 12 }}>
-          <label className="field">
-            <span>Matter type</span>
-            <select
+          <SingleSelectDropdown
+            label="Matter type"
+            options={matterHeadOptions}
+            value={matterHeadTypeId}
+            onChange={setMatterHeadTypeId}
+            open={matterHeadOpen}
+            onOpenChange={(next) => {
+              setMatterHeadOpen(next)
+              if (next) closeDetailsDropdowns('head')
+            }}
+            disabled={busy}
+            placeholder="— select —"
+            emptyMessage={
+              matterHeadOptions.length === 0
+                ? 'No matter types available — add them under Admin → Matters.'
+                : undefined
+            }
+          />
+          {matterHeadTypeId ? (
+            <SingleSelectDropdown
+              label="Sub-type"
+              options={matterSubOptions}
               value={practiceArea}
-              onChange={(e) => setPracticeArea(e.target.value)}
+              onChange={setPracticeArea}
+              open={matterSubOpen}
+              onOpenChange={(next) => {
+                setMatterSubOpen(next)
+                if (next) closeDetailsDropdowns('sub')
+              }}
               disabled={busy}
-            >
-              <option value="">— select —</option>
-              {matterHeadTypes.map((head) => (
-                <optgroup key={head.id} label={head.name}>
-                  {head.sub_types.map((sub) => (
-                    <option key={sub.id} value={sub.id}>{sub.name}</option>
-                  ))}
-                </optgroup>
-              ))}
-            </select>
-          </label>
+              placeholder="— select —"
+              emptyMessage={
+                matterSubOptions.length === 0
+                  ? 'No sub-types for this matter type — add them under Admin → Matters.'
+                  : undefined
+              }
+            />
+          ) : (
+            <p className="muted" style={{ margin: 0, fontSize: 13 }}>
+              Choose a matter type, then pick a sub-type.
+            </p>
+          )}
           <CaseSourceField
             sources={caseSources}
             sourceId={sourceId}
@@ -1793,25 +1901,26 @@ function NewMatterModal({
             onSourceIdChange={setSourceId}
             onCustomNameChange={setSourceCustomName}
             disabled={busy}
+            open={sourceOpen}
+            onOpenChange={(next) => {
+              setSourceOpen(next)
+              if (next) closeDetailsDropdowns('source')
+            }}
           />
-          <label className="field">
-            <span>Fee earner</span>
-            <select
-              value={feeEarner}
-              onChange={(e) => setFeeEarner(e.target.value)}
-              disabled={busy}
-              required
-            >
-              <option value="" disabled>
-                Select fee earner
-              </option>
-              {users.map((u) => (
-                <option key={u.id} value={u.id}>
-                  {u.display_name} ({u.email})
-                </option>
-              ))}
-            </select>
-          </label>
+          <SingleSelectDropdown
+            label="Fee earner"
+            options={feeEarnerOptions}
+            value={feeEarner}
+            onChange={setFeeEarner}
+            open={feeEarnerOpen}
+            onOpenChange={(next) => {
+              setFeeEarnerOpen(next)
+              if (next) closeDetailsDropdowns('feeEarner')
+            }}
+            disabled={busy}
+            placeholder="Select fee earner"
+            emptyMessage={feeEarnerOptions.length === 0 ? 'No fee earners available.' : undefined}
+          />
           <div className="field">
             <span>Status</span>
             <div className="row" style={{ gap: 20, marginTop: 6, flexWrap: 'wrap' }}>
@@ -1863,11 +1972,15 @@ function NewMatterModal({
               onClick={() => {
                 setErr(null)
                 setContactErr(null)
-                if (!practiceArea) {
+                if (!matterHeadTypeId) {
                   setErr('Select a matter type.')
                   return
                 }
-                const sub = matterHeadTypes.flatMap((h) => h.sub_types).find((s) => s.id === practiceArea)
+                if (!practiceArea) {
+                  setErr('Select a sub-type.')
+                  return
+                }
+                const sub = selectedSubType
                 if (subTypeHasPropertyMenu(sub)) {
                   setPropertyDraft((d) => d ?? blankPropertyPayload())
                   setStep('property')
@@ -3080,22 +3193,15 @@ function UserSettingsPage({
             device or browser when you sign in.
           </p>
           <div className="stack" style={{ maxWidth: 480, gap: 12 }}>
-            <label className="field">
-              <span>Font</span>
-              <select
-                value={appFont}
-                onChange={(e) => {
-                  setAppFont(e.target.value)
-                  setThemeSavedHint(false)
-                }}
-              >
-                {FONT_OPTIONS.map((o) => (
-                  <option key={o.label} value={o.value}>
-                    {o.label}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <SingleSelectDropdown
+              label="Font"
+              options={FONT_OPTIONS.map((o) => ({ value: o.value, label: o.label }))}
+              value={appFont}
+              onChange={(v) => {
+                setAppFont(v)
+                setThemeSavedHint(false)
+              }}
+            />
             <label className="field">
               <span>Accent colour</span>
               <div className="row" style={{ gap: 8, alignItems: 'center' }}>
@@ -3649,30 +3755,27 @@ function UserSettingsPage({
             the Canary Outlook or Thunderbird add-in after compose opens.
           </p>
           <div className="stack" style={{ maxWidth: 560, gap: 14, marginTop: 12 }}>
-            <label className="field">
-              <span>Compose with</span>
-              <select
-                value={emailPref}
-                onChange={(e) => {
-                  void (async () => {
-                    const v = e.target.value as 'desktop' | 'outlook_web'
-                    if (v === 'outlook_web') {
-                      const proceed = await confirmOutlookWebWithoutGraph()
-                      if (!proceed) return
-                      setEmailPref('outlook_web')
-                      setOutlookUrl((u) => u.trim() || DEFAULT_OUTLOOK_WEB_MAIL_URL)
-                      return
-                    }
-                    setEmailPref('desktop')
-                  })()
-                }}
-                disabled={emailBusy}
-                aria-label="How to open e-mail compose from a matter"
-              >
-                <option value="desktop">Desktop client (system default)</option>
-                <option value="outlook_web">Outlook web</option>
-              </select>
-            </label>
+            <SingleSelectDropdown
+              label="Compose with"
+              options={[
+                { value: 'desktop', label: 'Desktop client (system default)' },
+                { value: 'outlook_web', label: 'Outlook web' },
+              ]}
+              value={emailPref}
+              onChange={(v) => {
+                void (async () => {
+                  if (v === 'outlook_web') {
+                    const proceed = await confirmOutlookWebWithoutGraph()
+                    if (!proceed) return
+                    setEmailPref('outlook_web')
+                    setOutlookUrl((u) => u.trim() || DEFAULT_OUTLOOK_WEB_MAIL_URL)
+                    return
+                  }
+                  setEmailPref('desktop')
+                })()
+              }}
+              disabled={emailBusy}
+            />
             {emailPref === 'outlook_web' ? (
               <label className="field">
                 <span>Outlook web URL</span>
@@ -4074,42 +4177,39 @@ function Contacts({ token, me }: { token: string; me?: UserPublic | null }) {
                   onMouseDown={(e) => e.stopPropagation()}
                 >
                   <div className="stack mainMenuFilterDropdownBody">
-                    <label className="field">
-                      <span>Type</span>
-                      <select
-                        value={contactsFilterType}
-                        onChange={(e) => setContactsFilterType(e.target.value as '' | ContactOut['type'])}
-                        aria-label="Filter contacts by type"
-                      >
-                        <option value="">All</option>
-                        <option value="person">Person</option>
-                        <option value="organisation">Organisation</option>
-                      </select>
-                    </label>
-                    <label className="field">
-                      <span>Email</span>
-                      <select
-                        value={contactsFilterEmail}
-                        onChange={(e) => setContactsFilterEmail(e.target.value as '' | 'has' | 'missing')}
-                        aria-label="Filter contacts by email"
-                      >
-                        <option value="">Any</option>
-                        <option value="has">Has email</option>
-                        <option value="missing">Missing email</option>
-                      </select>
-                    </label>
-                    <label className="field">
-                      <span>Phone</span>
-                      <select
-                        value={contactsFilterPhone}
-                        onChange={(e) => setContactsFilterPhone(e.target.value as '' | 'has' | 'missing')}
-                        aria-label="Filter contacts by phone"
-                      >
-                        <option value="">Any</option>
-                        <option value="has">Has phone</option>
-                        <option value="missing">Missing phone</option>
-                      </select>
-                    </label>
+                    <SingleSelectDropdown
+                      label="Type"
+                      options={[
+                        { value: '', label: 'All' },
+                        { value: 'person', label: 'Person' },
+                        { value: 'organisation', label: 'Organisation' },
+                      ]}
+                      value={contactsFilterType}
+                      onChange={(v) => setContactsFilterType(v as '' | ContactOut['type'])}
+                      placeholder="All"
+                    />
+                    <SingleSelectDropdown
+                      label="Email"
+                      options={[
+                        { value: '', label: 'Any' },
+                        { value: 'has', label: 'Has email' },
+                        { value: 'missing', label: 'Missing email' },
+                      ]}
+                      value={contactsFilterEmail}
+                      onChange={(v) => setContactsFilterEmail(v as '' | 'has' | 'missing')}
+                      placeholder="Any"
+                    />
+                    <SingleSelectDropdown
+                      label="Phone"
+                      options={[
+                        { value: '', label: 'Any' },
+                        { value: 'has', label: 'Has phone' },
+                        { value: 'missing', label: 'Missing phone' },
+                      ]}
+                      value={contactsFilterPhone}
+                      onChange={(v) => setContactsFilterPhone(v as '' | 'has' | 'missing')}
+                      placeholder="Any"
+                    />
                   </div>
                 </div>
               ) : null}

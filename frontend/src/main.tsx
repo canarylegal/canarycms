@@ -3,12 +3,9 @@ import { createRoot } from 'react-dom/client'
 import './index.css'
 import { applyStoredTheme } from './theme'
 import { DialogProvider } from './DialogProvider'
-import App from './App.tsx'
 
 applyStoredTheme()
 import EditorPage from './EditorPage.tsx'
-import { FinanceStandalone } from './FinancePage.tsx'
-import { LedgerStandalone } from './LedgerPage.tsx'
 
 class AppErrorBoundary extends Component<{ children: ReactNode }, { err: Error | null }> {
   state = { err: null as Error | null }
@@ -19,6 +16,7 @@ class AppErrorBoundary extends Component<{ children: ReactNode }, { err: Error |
 
   render() {
     if (this.state.err) {
+      const err = this.state.err
       return (
         <div
           style={{
@@ -31,8 +29,24 @@ class AppErrorBoundary extends Component<{ children: ReactNode }, { err: Error |
           }}
         >
           <h1 style={{ color: '#b91c1c' }}>Canary hit a runtime error</h1>
-          <p style={{ color: '#64748b' }}>Check the browser console for details. Stack:</p>
-          {this.state.err.stack ?? String(this.state.err)}
+          <p style={{ color: '#64748b', marginBottom: 12 }}>
+            Check the browser console for details. Message:
+          </p>
+          <pre
+            style={{
+              margin: '0 0 16px',
+              padding: 12,
+              background: 'rgba(255,255,255,0.92)',
+              color: '#0f172a',
+              borderRadius: 8,
+              fontSize: 14,
+              lineHeight: 1.45,
+            }}
+          >
+            {err.message || String(err)}
+          </pre>
+          <p style={{ color: '#64748b', marginBottom: 8 }}>Stack:</p>
+          {err.stack ?? String(err)}
         </div>
       )
     }
@@ -62,7 +76,14 @@ if (!el) {
   } else if (window.location.pathname.startsWith('/editor/')) {
     // Reset the html { zoom: 1.2 } from index.css — OO DS needs unscaled coordinates
     document.documentElement.style.zoom = '1'
-    root.render(<EditorPage />)
+    // No StrictMode: ONLYOFFICE DocEditor is a third-party embed and breaks on double mount.
+    root.render(
+      <AppErrorBoundary>
+        <DialogProvider>
+          <EditorPage />
+        </DialogProvider>
+      </AppErrorBoundary>,
+    )
   } else if (ledgerCaseId || searchParams.get('finance')) {
     const financeCaseId = searchParams.get('finance')
     const storedToken = localStorage.getItem('token') ?? ''
@@ -73,35 +94,41 @@ if (!el) {
         </div>,
       )
     } else if (financeCaseId) {
-      root.render(
-        <StrictMode>
-          <AppErrorBoundary>
-            <DialogProvider>
-              <FinanceStandalone caseId={financeCaseId} token={storedToken} />
-            </DialogProvider>
-          </AppErrorBoundary>
-        </StrictMode>,
-      )
+      void import('./FinancePage.tsx').then(({ FinanceStandalone }) => {
+        root.render(
+          <StrictMode>
+            <AppErrorBoundary>
+              <DialogProvider>
+                <FinanceStandalone caseId={financeCaseId} token={storedToken} />
+              </DialogProvider>
+            </AppErrorBoundary>
+          </StrictMode>,
+        )
+      })
     } else {
-      root.render(
-        <StrictMode>
-          <AppErrorBoundary>
-            <DialogProvider>
-              <LedgerStandalone caseId={ledgerCaseId!} token={storedToken} />
-            </DialogProvider>
-          </AppErrorBoundary>
-        </StrictMode>,
-      )
+      void import('./LedgerPage.tsx').then(({ LedgerStandalone }) => {
+        root.render(
+          <StrictMode>
+            <AppErrorBoundary>
+              <DialogProvider>
+                <LedgerStandalone caseId={ledgerCaseId!} token={storedToken} />
+              </DialogProvider>
+            </AppErrorBoundary>
+          </StrictMode>,
+        )
+      })
     }
   } else {
-    root.render(
-      <StrictMode>
-        <AppErrorBoundary>
-          <DialogProvider>
-            <App />
-          </DialogProvider>
-        </AppErrorBoundary>
-      </StrictMode>,
-    )
+    void import('./App.tsx').then(({ default: App }) => {
+      root.render(
+        <StrictMode>
+          <AppErrorBoundary>
+            <DialogProvider>
+              <App />
+            </DialogProvider>
+          </AppErrorBoundary>
+        </StrictMode>,
+      )
+    })
   }
 }

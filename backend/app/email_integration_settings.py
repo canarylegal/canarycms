@@ -4,13 +4,15 @@ from __future__ import annotations
 
 import logging
 import os
+import uuid
 from typing import Any, Literal
 
 from sqlalchemy.orm import Session
 
 from app.admin_access import user_effective_admin
 from app.email_crypt import decrypt_password
-from app.models import EmailIntegrationSettings, User
+from app.master_admin import load_master_admin_config, master_recovery_public_email
+from app.models import EmailIntegrationSettings, User, UserRole
 from app.org_security import firm_mandates_second_factor, firm_password_rotation_policy, user_has_any_passkey
 from app.schemas import UserPublic
 from app.user_appearance import user_appearance_out
@@ -96,7 +98,32 @@ def build_user_public(user: User, db: Session) -> UserPublic:
     base["password_rotation_days"] = rotation_days
     base["has_passkeys"] = user_has_any_passkey(db, user.id)
     base["pending_authenticator_setup"] = bool(user.totp_secret and not user.is_2fa_enabled)
+    base["is_master_recovery"] = False
     base["appearance"] = user_appearance_out(user)
     base["ui_preferences"] = user_ui_preferences_out(user.ui_preferences)
     base.update(user_public_email_fields(db))
     return UserPublic(**base)
+
+
+def build_master_recovery_public(db: Session) -> UserPublic:
+    cfg = load_master_admin_config()
+
+    return UserPublic(
+        id=uuid.UUID("00000000-0000-0000-0000-000000000001"),
+        email=master_recovery_public_email(cfg.login),
+        display_name="Master recovery",
+        initials="MR",
+        role=UserRole.admin,
+        is_active=True,
+        is_2fa_enabled=False,
+        is_master_recovery=True,
+        admin_console_access=False,
+        organization_requires_second_factor=firm_mandates_second_factor(db),
+        organization_requires_password_rotation=False,
+        password_rotation_days=None,
+        has_passkeys=False,
+        pending_authenticator_setup=False,
+        session_second_factor_verified=True,
+        session_password_change_required=False,
+        **user_public_email_fields(db),
+    )

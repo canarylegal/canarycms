@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { apiFetch } from './api'
+import { SingleSelectDropdown } from './SingleSelectDropdown'
 import type { CaseSourceOut } from './types'
 
 export const CASE_SOURCE_CUSTOM = '__custom__'
@@ -44,6 +45,8 @@ type CaseSourceFieldProps = {
   onSourceIdChange: (sourceId: string) => void
   onCustomNameChange: (name: string) => void
   disabled?: boolean
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
 }
 
 export function CaseSourceField({
@@ -53,21 +56,37 @@ export function CaseSourceField({
   onSourceIdChange,
   onCustomNameChange,
   disabled,
+  open: openControlled,
+  onOpenChange,
 }: CaseSourceFieldProps) {
+  const [openInternal, setOpenInternal] = useState(false)
+  const open = openControlled ?? openInternal
+
+  const setOpen = (next: boolean) => {
+    if (openControlled === undefined) setOpenInternal(next)
+    onOpenChange?.(next)
+  }
+
+  const options = useMemo(
+    () => [
+      ...sources.map((s) => ({ value: s.id, label: s.name })),
+      { value: CASE_SOURCE_CUSTOM, label: 'Other (type below)…' },
+    ],
+    [sources],
+  )
+
   return (
     <>
-      <label className="field">
-        <span>Source</span>
-        <select value={sourceId} onChange={(e) => onSourceIdChange(e.target.value)} disabled={disabled}>
-          <option value="">— select —</option>
-          {sources.map((s) => (
-            <option key={s.id} value={s.id}>
-              {s.name}
-            </option>
-          ))}
-          <option value={CASE_SOURCE_CUSTOM}>Other (type below)…</option>
-        </select>
-      </label>
+      <SingleSelectDropdown
+        label="Source"
+        options={options}
+        value={sourceId}
+        onChange={onSourceIdChange}
+        open={open}
+        onOpenChange={setOpen}
+        disabled={disabled}
+        placeholder="— select —"
+      />
       {sourceId === CASE_SOURCE_CUSTOM ? (
         <label className="field">
           <span>Source name</span>

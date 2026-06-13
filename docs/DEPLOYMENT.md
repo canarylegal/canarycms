@@ -47,7 +47,8 @@ python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().
 # Other required secrets
 openssl rand -hex 32   # ONLYOFFICE_JWT_SECRET
 openssl rand -hex 32   # ONLYOFFICE_SECURE_LINK_SECRET
-openssl rand -hex 24   # BOOTSTRAP_ADMIN_TOKEN (save this — used once)
+openssl rand -hex 16   # MASTER_ADMIN_LOGIN (save securely — break-glass recovery login id)
+openssl rand -hex 32   # MASTER_ADMIN_PASSWORD (save securely)
 openssl rand -hex 16   # POSTGRES_PASSWORD
 ```
 
@@ -128,27 +129,18 @@ server {
 
 ---
 
-## 5. Create the first admin account
+## 5. Create the first firm admin account
 
-Bootstrap works **once**, while no admin user exists. Use the `BOOTSTRAP_ADMIN_TOKEN` from `.env`:
+Set `MASTER_ADMIN_LOGIN` and `MASTER_ADMIN_PASSWORD` in `.env` (long random hex strings are fine — the login id need not be a real e-mail address). The backend **will not start** without these values.
 
-```bash
-curl -sS -X POST "https://canary.yourfirm.co.uk/api/auth/bootstrap-admin" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "token": "YOUR_BOOTSTRAP_ADMIN_TOKEN",
-    "email": "admin@yourfirm.co.uk",
-    "password": "YourSecurePassword12+",
-    "display_name": "Firm Admin",
-    "initials": "FA"
-  }'
-```
+1. Sign in at `https://canary.yourfirm.co.uk` using the master recovery login id and password.
+2. You will see the **Recovery console** only (users and security policy — no case access).
+3. Create a firm administrator under **Users** (role `admin` or a permission category with **Admin**).
+4. Sign out and sign in as that firm admin for day-to-day use. Reserve the master login for recovery.
 
-Then sign in at `https://canary.yourfirm.co.uk`.
+Optional: set `MASTER_ADMIN_REQUIRE_2FA=true` and `MASTER_ADMIN_TOTP_SECRET` (base32) on the master account. To recover from lockout, set `MASTER_ADMIN_REQUIRE_2FA=false` in `.env` and restart the backend.
 
-**After bootstrap:** remove or rotate `BOOTSTRAP_ADMIN_TOKEN` in `.env` (it is only needed for this one call). Future admins are created in **Admin → Users**.
-
-**Post-login setup:**
+**Post-login setup (firm admin):**
 
 1. **Admin → Permission categories** — review “Standard fee earner” (created by migration) or add categories for your roles
 2. **Admin → Users** — new staff **must** have a permission category (role `user`)
@@ -192,7 +184,7 @@ WAF and in-app rate limits **complement** each other.
 ## 7. Go-live checklist
 
 - [ ] `DATA_ENCRYPTION_KEY` set; re-encrypt script run if migrating existing data
-- [ ] `BOOTSTRAP_ADMIN_TOKEN` rotated or removed after first admin
+- [ ] `MASTER_ADMIN_LOGIN` and `MASTER_ADMIN_PASSWORD` stored securely (not in git)
 - [ ] All staff users have permission categories
 - [ ] Mandatory 2FA enabled when ready
 - [ ] WAF / rate rules on login endpoints

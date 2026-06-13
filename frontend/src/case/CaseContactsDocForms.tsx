@@ -1,5 +1,5 @@
 import type { Dispatch, SetStateAction } from 'react'
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import {
   GlobalContactCreateForm,
   ContactPersonOrgAddressFields,
@@ -13,6 +13,7 @@ import { apiFetch } from '../api'
 import type { ApiError } from '../api'
 import { useDialogs } from '../DialogProvider'
 import { ContactSearchPicker } from '../ContactSearchPicker'
+import { SingleSelectDropdown } from '../SingleSelectDropdown'
 import type { CaseContactOut, ContactOut } from '../types'
 import { applyCaseContactFieldPatch } from './caseContactPatch'
 import { CaseContactPortalSection } from './CaseContactPortalSection'
@@ -67,6 +68,12 @@ export function CaseContactsAddDocForm({
   const [globalEditContact, setGlobalEditContact] = useState<ContactOut | null>(null)
   const [globalEditFields, setGlobalEditFields] = useState<ContactFormFieldsModel>(() => emptyContactFormFields())
   const [globalEditErr, setGlobalEditErr] = useState<string | null>(null)
+  const [matterTypeOpen, setMatterTypeOpen] = useState(false)
+
+  const matterTypeDropdownOptions = useMemo(
+    () => matterTypeOptions.map((o) => ({ value: o.value, label: o.label })),
+    [matterTypeOptions],
+  )
 
   function openGlobalEdit(c: ContactOut) {
     setGlobalEditContact(c)
@@ -81,33 +88,25 @@ export function CaseContactsAddDocForm({
         <div className="muted" style={{ marginBottom: 8 }}>
           Matter-specific
         </div>
-        <label className="field">
-          <span>Contact type (required)</span>
-          <select
-            required
-            value={matterContactType}
-            onChange={(e) => {
-              const v = e.target.value
-              setMatterContactType(v)
-              setContactAddErr(null)
-              if (v.trim().toLowerCase() !== LAWYERS_TYPE_SLUG) {
-                setLawyerLinkClientIds([])
-              } else if (selectedGlobalContactId) {
-                setSelectedGlobalContactId(null)
-              }
-            }}
-            disabled={busy}
-          >
-            <option value="" disabled>
-              Select contact type
-            </option>
-            {matterTypeOptions.map((o) => (
-              <option key={o.value} value={o.value}>
-                {o.label}
-              </option>
-            ))}
-          </select>
-        </label>
+        <SingleSelectDropdown
+          label="Contact type (required)"
+          options={matterTypeDropdownOptions}
+          value={matterContactType}
+          onChange={(v) => {
+            setMatterContactType(v)
+            setContactAddErr(null)
+            if (v.trim().toLowerCase() !== LAWYERS_TYPE_SLUG) {
+              setLawyerLinkClientIds([])
+            } else if (selectedGlobalContactId) {
+              setSelectedGlobalContactId(null)
+            }
+          }}
+          open={matterTypeOpen}
+          onOpenChange={setMatterTypeOpen}
+          disabled={busy}
+          placeholder="Select contact type"
+          emptyMessage={matterTypeDropdownOptions.length === 0 ? 'No contact types configured.' : undefined}
+        />
         <label className="field">
           <span>Contact reference</span>
           <input
@@ -388,42 +387,40 @@ export function CaseContactsEditDocForm({
   setActionErr: (v: string | null) => void
 }) {
   const { askConfirm } = useDialogs()
+  const [editMatterTypeOpen, setEditMatterTypeOpen] = useState(false)
+
+  const editMatterTypeOptions = useMemo(() => {
+    const base = matterTypeOptions.map((o) => ({ value: o.value, label: o.label }))
+    const current = editSnapshot.matter_contact_type
+    if (current && !matterTypeOptions.some((o) => o.value === current)) {
+      base.push({ value: current, label: current })
+    }
+    return base
+  }, [matterTypeOptions, editSnapshot.matter_contact_type])
 
   return (
     <div className="stack modalBodyScroll" style={{ marginTop: 12 }}>
-      <label className="field">
-        <span>Contact type (required)</span>
-        <select
-          required
-          value={editSnapshot.matter_contact_type ?? ''}
-          onChange={(e) => {
-            const v = e.target.value ? e.target.value : null
-            const isLawyers = (v || '').trim().toLowerCase() === LAWYERS_TYPE_SLUG
-            setEditSnapshot({
-              ...editSnapshot,
-              matter_contact_type: v,
-              ...(isLawyers ? { type: 'organisation' as const } : {}),
-            })
-            if (!isLawyers) {
-              setEditLawyerLinkClientIds([])
-            }
-          }}
-          disabled={busy}
-        >
-          <option value="" disabled>
-            Select contact type
-          </option>
-          {matterTypeOptions.map((o) => (
-            <option key={o.value} value={o.value}>
-              {o.label}
-            </option>
-          ))}
-          {editSnapshot.matter_contact_type &&
-          !matterTypeOptions.some((o) => o.value === editSnapshot.matter_contact_type) ? (
-            <option value={editSnapshot.matter_contact_type}>{editSnapshot.matter_contact_type}</option>
-          ) : null}
-        </select>
-      </label>
+      <SingleSelectDropdown
+        label="Contact type (required)"
+        options={editMatterTypeOptions}
+        value={editSnapshot.matter_contact_type ?? ''}
+        onChange={(v) => {
+          const val = v ? v : null
+          const isLawyers = (val || '').trim().toLowerCase() === LAWYERS_TYPE_SLUG
+          setEditSnapshot({
+            ...editSnapshot,
+            matter_contact_type: val,
+            ...(isLawyers ? { type: 'organisation' as const } : {}),
+          })
+          if (!isLawyers) {
+            setEditLawyerLinkClientIds([])
+          }
+        }}
+        open={editMatterTypeOpen}
+        onOpenChange={setEditMatterTypeOpen}
+        disabled={busy}
+        placeholder="Select contact type"
+      />
       <label className="field">
         <span>Contact reference</span>
         <input

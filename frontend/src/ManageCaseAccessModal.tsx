@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { apiFetch } from './api'
+import { SingleSelectDropdown } from './SingleSelectDropdown'
 import type { CaseAccessRuleOut, UserSummary } from './types'
 
 type CaseLockMode = 'none' | 'open_by_default' | 'allow_list'
@@ -42,6 +43,15 @@ export function ManageCaseAccessModal({
   const [rightSel, setRightSel] = useState<Set<string>>(new Set())
   const [anchorLeft, setAnchorLeft] = useState<string | null>(null)
   const [anchorRight, setAnchorRight] = useState<string | null>(null)
+  const [accessModeOpen, setAccessModeOpen] = useState(false)
+
+  const accessModeOptions = useMemo(
+    () => [
+      { value: 'open_by_default', label: 'Blacklist' },
+      { value: 'allow_list', label: 'Whitelist' },
+    ],
+    [],
+  )
 
   const allUsersSorted = useMemo(
     () => [...users].sort((a, b) => a.display_name.localeCompare(b.display_name)),
@@ -291,19 +301,16 @@ export function ManageCaseAccessModal({
         </div>
         <div className="modalBodyScroll">
           <div className="row" style={{ marginTop: 12, alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-            <label className="field" style={{ marginBottom: 0, minWidth: 200, flex: '1 1 220px' }}>
-              <span>Access mode</span>
-              <select
-                className="input"
-                value={selectValue}
-                disabled={busy || loading || !canSetLockMode}
-                onChange={(e) => void patchLockMode(e.target.value as 'allow_list' | 'open_by_default')}
-                aria-label="Case access mode"
-              >
-                <option value="open_by_default">Blacklist</option>
-                <option value="allow_list">Whitelist</option>
-              </select>
-            </label>
+            <SingleSelectDropdown
+              label="Access mode"
+              options={accessModeOptions}
+              value={selectValue}
+              onChange={(v) => void patchLockMode(v as 'allow_list' | 'open_by_default')}
+              open={accessModeOpen}
+              onOpenChange={setAccessModeOpen}
+              disabled={busy || loading || !canSetLockMode}
+              placeholder="— select —"
+            />
             {!canSetLockMode ? (
               <span className="muted" style={{ fontSize: 13 }}>
                 Only the fee earner or an administrator can change the mode.

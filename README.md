@@ -18,7 +18,7 @@ docker compose --profile prod up -d
 
 Production stack: nginx frontend, FastAPI backend, PostgreSQL, ONLYOFFICE Document Server, and optional Radicale (CalDAV). See `.env.example` and `docker-compose.yml` for configuration.
 
-First-time setup uses `BOOTSTRAP_ADMIN_TOKEN` from `.env` to create the initial administrator account.
+First-time firm administrators are created via the **master recovery** login (configured in `.env`) or by an existing admin under **Admin → Users**.
 
 ## Documentation
 

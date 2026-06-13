@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { actorLabel } from './auditDisplay'
 import { apiFetch } from './api'
 import { MatterSearchPicker } from './MatterSearchPicker'
+import { SingleSelectDropdown } from './SingleSelectDropdown'
 import type { AdminAuditEvent, AdminUserPublic } from './types'
 import { useColumnWidths } from './useColumnWidths'
 
@@ -32,6 +33,7 @@ export function AdminAudit({ token, embedded }: Props) {
   const [events, setEvents] = useState<AdminAuditEvent[]>([])
   const [users, setUsers] = useState<AdminUserPublic[]>([])
   const [action, setAction] = useState('')
+  const [accountsOnly, setAccountsOnly] = useState(false)
   const [actorUserId, setActorUserId] = useState('')
   const [caseId, setCaseId] = useState('')
   const [busy, setBusy] = useState(false)
@@ -46,6 +48,14 @@ export function AdminAudit({ token, embedded }: Props) {
 
   const usersById = useMemo(() => new Map(users.map((u) => [u.id, u])), [users])
 
+  const auditUserOptions = useMemo(
+    () => [
+      { value: '', label: 'All users' },
+      ...users.map((u) => ({ value: u.id, label: `${u.display_name} (${u.initials})` })),
+    ],
+    [users],
+  )
+
   const loadFilters = useCallback(async () => {
     try {
       const userRows = await apiFetch<AdminUserPublic[]>('/admin/users', { token })
@@ -56,15 +66,17 @@ export function AdminAudit({ token, embedded }: Props) {
   }, [token])
 
   const load = useCallback(
-    async (overrides?: { action?: string; actorUserId?: string; caseId?: string }) => {
+    async (overrides?: { action?: string; accountsOnly?: boolean; actorUserId?: string; caseId?: string }) => {
       setBusy(true)
       setErr(null)
       try {
         const qs = new URLSearchParams()
         const actionVal = overrides?.action ?? action
+        const accountsVal = overrides?.accountsOnly ?? accountsOnly
         const actorVal = overrides?.actorUserId ?? actorUserId
         const caseVal = overrides?.caseId ?? caseId
         if (actionVal.trim()) qs.set('action', actionVal.trim())
+        if (accountsVal) qs.set('accounts_only', 'true')
         if (actorVal) qs.set('actor_user_id', actorVal)
         if (caseVal) qs.set('case_id', caseVal)
         qs.set('limit', '100')
@@ -80,7 +92,7 @@ export function AdminAudit({ token, embedded }: Props) {
         setBusy(false)
       }
     },
-    [action, actorUserId, caseId, token],
+    [action, accountsOnly, actorUserId, caseId, token],
   )
 
   useEffect(() => {
@@ -90,7 +102,7 @@ export function AdminAudit({ token, embedded }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token])
 
-  function applyFilters(next?: { action?: string; actorUserId?: string; caseId?: string }) {
+  function applyFilters(next?: { action?: string; accountsOnly?: boolean; actorUserId?: string; caseId?: string }) {
     void load(next)
   }
 
@@ -105,24 +117,21 @@ export function AdminAudit({ token, embedded }: Props) {
 
       <div className="auditToolbar card">
         <div className="auditToolbarFields">
-          <label className="auditToolbarField">
+          <div className="auditToolbarField">
             <span className="auditToolbarLabel">User</span>
-            <select
+            <SingleSelectDropdown
+              hideLabel
+              label="User"
+              options={auditUserOptions}
               value={actorUserId}
-              onChange={(e) => {
-                const v = e.target.value
+              onChange={(v) => {
                 setActorUserId(v)
                 applyFilters({ actorUserId: v })
               }}
-            >
-              <option value="">All users</option>
-              {users.map((u) => (
-                <option key={u.id} value={u.id}>
-                  {u.display_name} ({u.initials})
-                </option>
-              ))}
-            </select>
-          </label>
+              disabled={busy}
+              placeholder="All users"
+            />
+          </div>
           <div className="auditToolbarField auditToolbarField--matter">
             <span className="auditToolbarLabel">Matter</span>
             <MatterSearchPicker
@@ -134,18 +143,40 @@ export function AdminAudit({ token, embedded }: Props) {
               }}
               disabled={busy}
               listMaxHeight={160}
-              idleHint="All matters — search to filter by one matter."
+              searchPlaceholder="Search matters…"
+              idleHint=""
+              selectedSummary="referenceAndDescription"
               changeLabel="Clear"
             />
           </div>
-          <label className="auditToolbarField auditToolbarField--action">
+          <label className="auditToolbarField">
             <span className="auditToolbarLabel">Action</span>
             <input
-              placeholder="e.g. case.file.rename"
+              placeholder="e.g. ledger.post"
               value={action}
               onChange={(e) => setAction(e.target.value)}
             />
           </label>
+          <div className="auditToolbarField">
+            <span className="auditToolbarLabel">Preset</span>
+            <SingleSelectDropdown
+              hideLabel
+              label="Preset"
+              options={[
+                { value: '', label: 'All activity' },
+                { value: 'accounts', label: 'Ledger & invoices' },
+              ]}
+              value={accountsOnly ? 'accounts' : ''}
+              onChange={(v) => {
+                const accounts = v === 'accounts'
+                setAccountsOnly(accounts)
+                if (accounts) setAction('')
+                applyFilters({ accountsOnly: accounts, action: accounts ? '' : action })
+              }}
+              disabled={busy}
+              placeholder="All activity"
+            />
+          </div>
         </div>
         <div className="auditToolbarActions">
           <button type="button" className="btn primary" disabled={busy} onClick={() => applyFilters()}>
@@ -157,9 +188,10 @@ export function AdminAudit({ token, embedded }: Props) {
             disabled={busy}
             onClick={() => {
               setAction('')
+              setAccountsOnly(false)
               setActorUserId('')
               setCaseId('')
-              applyFilters({ action: '', actorUserId: '', caseId: '' })
+              applyFilters({ action: '', accountsOnly: false, actorUserId: '', caseId: '' })
             }}
           >
             Clear

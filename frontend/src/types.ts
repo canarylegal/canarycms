@@ -10,6 +10,7 @@ export type UserPublic = {
   role: 'admin' | 'user'
   is_active: boolean
   is_2fa_enabled: boolean
+  is_master_recovery?: boolean
   /** TOTP setup was started but not confirmed — resume requires Canary password. */
   pending_authenticator_setup?: boolean
   /** Organisation policy: user must enable TOTP or register at least one passkey (non-admin enforcement). */
@@ -36,7 +37,12 @@ export type UserPublic = {
   ui_preferences?: UserUiPreferencesOut
 }
 
+export function userIsMasterRecovery(me: UserPublic | null | undefined): boolean {
+  return Boolean(me?.is_master_recovery)
+}
+
 export function userCanAccessAdminConsole(me: UserPublic | null | undefined): boolean {
+  if (userIsMasterRecovery(me)) return false
   return Boolean(me?.admin_console_access || me?.role === 'admin')
 }
 
@@ -136,6 +142,48 @@ export type FirmSettingsOut = {
   mandate_two_factor?: boolean
   mandate_password_rotation?: boolean
   password_rotation_days?: number | null
+  client_bank_account_name?: string | null
+  client_bank_sort_code?: string | null
+  client_bank_account_number_last4?: string | null
+}
+
+export type ClientAccountReconciliationOut = {
+  id: string
+  period_end_date: string
+  ledger_client_total_pence: number
+  ledger_office_total_pence: number
+  bank_statement_balance_pence: number
+  difference_pence: number
+  prepared_by_user_id: string
+  prepared_by_name?: string | null
+  prepared_at: string
+  approved_by_user_id?: string | null
+  approved_by_name?: string | null
+  approved_at?: string | null
+  notes?: string | null
+  status: 'draft' | 'approved'
+}
+
+export type ReconciliationPreviewOut = {
+  ledger_client_total_pence: number
+  ledger_office_total_pence: number
+}
+
+export type AccountantPackSectionOut = {
+  key: string
+  label: string
+  included: boolean
+  row_count?: number | null
+  note?: string | null
+}
+
+export type AccountantPackPreviewOut = {
+  period_end_date: string
+  activity_date_from: string
+  activity_date_to: string
+  fee_earner_count: number
+  reconcile_doc_available: boolean
+  sections: AccountantPackSectionOut[]
 }
 
 /** Registered passkey row from GET /auth/webauthn/credentials */
@@ -157,6 +205,7 @@ export type UserPermissionCategoryOut = {
   perm_admin: boolean
   created_at: string
   updated_at: string
+  is_builtin_template?: boolean
 }
 
 export type LedgerPermissionsOut = {

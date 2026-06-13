@@ -14,6 +14,17 @@ from app.deps import require_admin
 from app.models import AuditEvent, Case, CaseAccessRule, CaseContact, CaseNote, CaseTask, File, User
 
 
+ACCOUNTS_AUDIT_ACTIONS = (
+    "ledger.post",
+    "ledger.approve",
+    "invoice.create",
+    "invoice.approve",
+    "invoice.void",
+    "reconciliation.create",
+    "reconciliation.update",
+    "reconciliation.approve",
+)
+
 router = APIRouter(prefix="/admin/audit-events", tags=["admin-audit"])
 
 # Entity types that reference a matter by FK; used for legacy rows missing meta.case_id.
@@ -187,6 +198,8 @@ def _serialize_events(db: Session, events: list[AuditEvent]) -> list[AdminAuditE
 @router.get("", response_model=list[AdminAuditEventOut])
 def list_audit_events(
     action: str | None = None,
+    action_prefix: str | None = Query(default=None, description="Filter actions starting with this prefix"),
+    accounts_only: bool = Query(default=False, description="Ledger postings and invoice lifecycle only"),
     actor_user_id: uuid.UUID | None = None,
     case_id: uuid.UUID | None = None,
     entity_type: str | None = None,
@@ -204,8 +217,12 @@ def list_audit_events(
     until_dt = _parse_dt(until)
 
     clauses = []
-    if action:
+    if accounts_only:
+        clauses.append(AuditEvent.action.in_(ACCOUNTS_AUDIT_ACTIONS))
+    elif action:
         clauses.append(AuditEvent.action == action)
+    elif action_prefix:
+        clauses.append(AuditEvent.action.like(f"{action_prefix}%"))
     if actor_user_id:
         clauses.append(AuditEvent.actor_user_id == actor_user_id)
     if case_id:

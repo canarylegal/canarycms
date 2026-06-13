@@ -1,56 +1,149 @@
-import { useEffect, useId, useRef } from 'react'
+import { useCallback, useId, useLayoutEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
+import { useDismissOnOutsidePointer } from './useDismissOnOutsidePointer'
 
 export type SingleSelectOption = { value: string; label: string; hint?: string }
+
+type MenuPos = { top: number; left: number; width: number }
 
 export function SingleSelectDropdown({
   label,
   options,
   value,
   onChange,
-  open,
-  onOpenChange,
+  open: openControlled,
+  onOpenChange: onOpenChangeControlled,
   disabled,
   placeholder = '— select —',
   emptyMessage,
+  hideLabel,
 }: {
   label: string
   options: SingleSelectOption[]
   value: string
   onChange: (value: string) => void
-  open: boolean
-  onOpenChange: (open: boolean) => void
+  /** Omit for self-managed open state (typical for settings/forms). */
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
   disabled?: boolean
   placeholder?: string
   emptyMessage?: string
+  /** Omit visible label (e.g. compact time rows); label is still used for aria. */
+  hideLabel?: boolean
 }) {
+  const [openInternal, setOpenInternal] = useState(false)
+  const isControlled = openControlled !== undefined
+  const open = isControlled ? openControlled : openInternal
+
+  const setOpen = useCallback(
+    (next: boolean) => {
+      if (!isControlled) setOpenInternal(next)
+      onOpenChangeControlled?.(next)
+    },
+    [isControlled, onOpenChangeControlled],
+  )
+
   const wrapRef = useRef<HTMLDivElement | null>(null)
+  const menuRef = useRef<HTMLDivElement | null>(null)
   const listId = useId()
   const selected = options.find((o) => o.value === value)
+  const [menuPos, setMenuPos] = useState<MenuPos | null>(null)
 
-  useEffect(() => {
-    if (!open) return
-    function handleMouseDown(e: MouseEvent) {
-      if (wrapRef.current?.contains(e.target as Node)) return
-      onOpenChange(false)
+  const close = useCallback(() => setOpen(false), [setOpen])
+
+  const containsTarget = useCallback(
+    (target: Node) => Boolean(wrapRef.current?.contains(target) || menuRef.current?.contains(target)),
+    [],
+  )
+
+  useDismissOnOutsidePointer(open, containsTarget, close)
+
+  const updateMenuPos = useCallback(() => {
+    const el = wrapRef.current
+    if (!el) return
+    const rect = el.getBoundingClientRect()
+    setMenuPos({
+      top: rect.bottom + 4,
+      left: rect.left,
+      width: rect.width,
+    })
+  }, [])
+
+  useLayoutEffect(() => {
+    if (!open) {
+      setMenuPos(null)
+      return
     }
-    document.addEventListener('mousedown', handleMouseDown)
-    return () => document.removeEventListener('mousedown', handleMouseDown)
-  }, [open, onOpenChange])
+    updateMenuPos()
+    window.addEventListener('resize', updateMenuPos)
+    window.addEventListener('scroll', updateMenuPos, true)
+    return () => {
+      window.removeEventListener('resize', updateMenuPos)
+      window.removeEventListener('scroll', updateMenuPos, true)
+    }
+  }, [open, updateMenuPos, options.length])
+
+  const wrapClass = hideLabel ? 'singleSelectDropdownField' : 'field singleSelectDropdownField'
+
+  const menu =
+    open && menuPos ? (
+      <div
+        ref={menuRef}
+        id={listId}
+        className="singleSelectDropdownMenu singleSelectDropdownMenu--portal"
+        role="listbox"
+        aria-label={label}
+        style={{
+          position: 'fixed',
+          top: menuPos.top,
+          left: menuPos.left,
+          width: menuPos.width,
+        }}
+        onMouseDown={(e) => e.stopPropagation()}
+      >
+        {options.length === 0 && emptyMessage ? (
+          <div className="singleSelectDropdownEmpty muted">{emptyMessage}</div>
+        ) : (
+          options.map((opt) => {
+            const active = value === opt.value
+            return (
+              <button
+                key={opt.value || `__empty_${opt.label}`}
+                type="button"
+                role="option"
+                aria-selected={active}
+                className={`singleSelectDropdownOption ${active ? 'active' : ''}`}
+                onClick={() => {
+                  onChange(opt.value)
+                  setOpen(false)
+                }}
+              >
+                <span className="singleSelectDropdownOptionLabel">{opt.label}</span>
+                {opt.hint ? <span className="singleSelectDropdownOptionHint muted">{opt.hint}</span> : null}
+              </button>
+            )
+          })
+        )}
+      </div>
+    ) : null
 
   return (
-    <label className="field singleSelectDropdownField">
-      <span>{label}</span>
+    <div className={wrapClass}>
+      {hideLabel ? null : <span>{label}</span>}
       <div className="singleSelectDropdown" ref={wrapRef}>
         <button
           type="button"
-          className="singleSelectDropdownTrigger select"
+          className="singleSelectDropdownTrigger"
           disabled={disabled}
+          aria-label={hideLabel ? label : undefined}
           aria-expanded={open}
           aria-haspopup="listbox"
           aria-controls={listId}
-          onClick={() => {
+          onMouseDown={(e) => {
             if (disabled) return
-            onOpenChange(!open)
+            e.preventDefault()
+            e.stopPropagation()
+            setOpen(!open)
           }}
         >
           <span className="singleSelectDropdownTriggerMain">
@@ -61,40 +154,8 @@ export function SingleSelectDropdown({
             ▾
           </span>
         </button>
-        {open ? (
-          <div
-            id={listId}
-            className="singleSelectDropdownMenu"
-            role="listbox"
-            aria-label={label}
-            onMouseDown={(e) => e.stopPropagation()}
-          >
-            {options.length === 0 && emptyMessage ? (
-              <div className="singleSelectDropdownEmpty muted">{emptyMessage}</div>
-            ) : (
-              options.map((opt) => {
-                const active = value === opt.value
-                return (
-                  <button
-                    key={opt.value}
-                    type="button"
-                    role="option"
-                    aria-selected={active}
-                    className={`singleSelectDropdownOption ${active ? 'active' : ''}`}
-                    onClick={() => {
-                      onChange(opt.value)
-                      onOpenChange(false)
-                    }}
-                  >
-                    <span className="singleSelectDropdownOptionLabel">{opt.label}</span>
-                    {opt.hint ? <span className="singleSelectDropdownOptionHint muted">{opt.hint}</span> : null}
-                  </button>
-                )
-              })
-            )}
-          </div>
-        ) : null}
+        {menu ? createPortal(menu, document.body) : null}
       </div>
-    </label>
+    </div>
   )
 }

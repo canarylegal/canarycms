@@ -2,6 +2,7 @@
 backups/
 
 .env
+MASTER_ADMIN_CREDENTIALS.txt
 
 # Compiled Python
 __pycache__/

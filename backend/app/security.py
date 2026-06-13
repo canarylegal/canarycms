@@ -46,6 +46,17 @@ def create_access_token(*, user_id: str, role: str, mfa_verified: bool = True, p
     return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALG)
 
 
+def create_master_recovery_token() -> str:
+    from app.master_admin import MASTER_RECOVERY_ROLE, MASTER_RECOVERY_USER_ID
+
+    return create_access_token(
+        user_id=MASTER_RECOVERY_USER_ID,
+        role=MASTER_RECOVERY_ROLE,
+        mfa_verified=True,
+        password_ok=True,
+    )
+
+
 @dataclass(frozen=True)
 class TokenPayload:
     user_id: str

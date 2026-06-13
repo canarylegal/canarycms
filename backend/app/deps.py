@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import uuid
 
 from fastapi import Depends, HTTPException, Request, status
@@ -7,14 +8,17 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.admin_access import user_effective_admin
+from app.auth_principal import AuthPrincipal
 from app.db import get_db
+from app.master_admin import MASTER_RECOVERY_ROLE, MASTER_RECOVERY_USER_ID
 from app.models import Case, CaseAccessMode, CaseAccessRule, CaseLockMode, Contact, User
 from app.org_security import firm_mandates_second_factor, user_meets_second_factor_policy
 from app.org_security import user_password_change_required
 from app.security import decode_access_token
-from app.admin_access import user_effective_admin
 from app.permission_checks import user_may_be_fee_earner
 
+log = logging.getLogger(__name__)
 
 _bearer = HTTPBearer(auto_error=False)
 
@@ -62,11 +66,11 @@ def _jwt_raw_from_request(request: Request, creds: HTTPAuthorizationCredentials 
     return None
 
 
-def get_current_user(
+def get_auth_principal(
     request: Request,
     creds: HTTPAuthorizationCredentials | None = Depends(_bearer),
     db: Session = Depends(get_db),
-) -> User:
+) -> AuthPrincipal:
     raw = _jwt_raw_from_request(request, creds)
     if raw is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing bearer token")
@@ -76,7 +80,17 @@ def get_current_user(
     except ValueError:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
 
-    user = db.get(User, payload.user_id)
+    if payload.role == MASTER_RECOVERY_ROLE:
+        if payload.user_id != MASTER_RECOVERY_USER_ID:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
+        return AuthPrincipal(is_master_recovery=True, user=None)
+
+    try:
+        user_uuid = uuid.UUID(payload.user_id)
+    except ValueError:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
+
+    user = db.get(User, user_uuid)
     if not user or not user.is_active:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User inactive or not found")
 
@@ -90,41 +104,60 @@ def get_current_user(
                 ),
             )
 
-    # Mandate applies to non-admins only so firm admins can recover settings and manage users without locking
-    # themselves out when rolling out passkeys / authenticator 2FA org-wide.
-    if not user_effective_admin(user, db):
-        if firm_mandates_second_factor(db):
-            db_ok = user_meets_second_factor_policy(db, user.id, is_2fa_enabled=user.is_2fa_enabled)
-            if not db_ok:
-                if not _path_allows_second_factor_setup(request.url.path):
-                    raise HTTPException(
-                        status_code=status.HTTP_403_FORBIDDEN,
-                        detail=(
-                            "Your organisation requires two-factor authentication (authenticator app) or a registered passkey. "
-                            "Finish the security setup screen first — you cannot use the rest of Canary until enrolment is complete."
-                        ),
-                    )
-            elif payload.mfa_verified is not True:
-                # Password-only JWTs are issued with mfa_verified=False so users cannot bypass mandate by owning passkeys
-                # they never present at sign-in.
-                if not _path_allows_second_factor_setup(request.url.path):
-                    raise HTTPException(
-                        status_code=status.HTTP_403_FORBIDDEN,
-                        detail=(
-                            "Your organisation requires a verified second factor at sign-in. "
-                            "Use Sign in with passkey, or sign in with password and enter your authenticator code when prompted."
-                        ),
-                    )
-    return user
+    if firm_mandates_second_factor(db):
+        db_ok = user_meets_second_factor_policy(db, user.id, is_2fa_enabled=user.is_2fa_enabled)
+        if not db_ok:
+            if not _path_allows_second_factor_setup(request.url.path):
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail=(
+                        "Your organisation requires two-factor authentication (authenticator app) or a registered passkey. "
+                        "Finish the security setup screen first — you cannot use the rest of Canary until enrolment is complete."
+                    ),
+                )
+        elif payload.mfa_verified is not True:
+            if not _path_allows_second_factor_setup(request.url.path):
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail=(
+                        "Your organisation requires a verified second factor at sign-in. "
+                        "Use Sign in with passkey, or sign in with password and enter your authenticator code when prompted."
+                    ),
+                )
+    return AuthPrincipal(is_master_recovery=False, user=user)
 
 
-def require_admin(
+def get_current_user(principal: AuthPrincipal = Depends(get_auth_principal)) -> User:
+    if principal.is_master_recovery or principal.user is None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This action requires a firm staff account.",
+        )
+    return principal.user
+
+
+def require_firm_admin(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> User:
     if not user_effective_admin(user, db):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin required")
     return user
+
+
+# Historical name used across admin routers (firm DB admin only — not master recovery).
+require_admin = require_firm_admin
+
+
+def require_recovery_operator(
+    principal: AuthPrincipal = Depends(get_auth_principal),
+    db: Session = Depends(get_db),
+) -> AuthPrincipal:
+    if principal.is_master_recovery:
+        return principal
+    if principal.user and user_effective_admin(principal.user, db):
+        return principal
+    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin required")
 
 
 def require_case_access(case_id, user: User, db: Session) -> Case:
@@ -148,7 +181,6 @@ def require_case_access(case_id, user: User, db: Session) -> Case:
     )
     mode = case.lock_mode
 
-    # Allow-list mode: only fee earner, admins, and explicitly allowed users.
     if mode == CaseLockMode.allow_list:
         if any(r.mode == CaseAccessMode.allow for r in rules):
             return case
@@ -157,7 +189,6 @@ def require_case_access(case_id, user: User, db: Session) -> Case:
             detail="This matter uses restricted access; you are not on the allowed list.",
         )
 
-    # Open-by-default mode: everyone may access unless explicitly denied.
     if mode == CaseLockMode.open_by_default:
         if any(r.mode == CaseAccessMode.deny for r in rules):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access to this matter has been revoked for your user.")
@@ -198,7 +229,7 @@ def get_case_if_accessible(case_id: uuid.UUID, user: User, db: Session) -> Case 
             return None
         return case
 
-    return case
+    return None
 
 
 def get_portal_contact(
@@ -230,4 +261,3 @@ def get_portal_contact(
     if access is None or not portal_access_is_active(access):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Portal access is disabled")
     return contact
-

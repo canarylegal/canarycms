@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.ledger_audit import format_amount_pence, format_ledger_directions
+
 
 def parse_audit_meta(meta_json: str | None) -> dict[str, Any] | None:
     if not meta_json:
@@ -175,6 +177,57 @@ def format_audit_summary(
         return "Updated a case note"
     if action == "case.note.delete":
         return "Deleted a case note"
+
+    if action == "ledger.post":
+        amt = format_ledger_directions(m)
+        desc = _quote(m.get("description"))
+        inv = _s(m.get("invoice_number"))
+        pending = " (pending approval)" if m.get("is_approved") is False else ""
+        parts = [f"Posted {amt}{pending}"]
+        if inv:
+            parts.append(f"for {inv}")
+        if desc:
+            parts.append(f"— {desc.strip('\"')}")
+        return " ".join(parts)
+
+    if action == "ledger.approve":
+        amt = format_ledger_directions(m)
+        desc = _quote(m.get("description"))
+        if desc:
+            return f"Approved ledger posting {amt} — {desc.strip('\"')}"
+        return f"Approved ledger posting {amt}"
+
+    if action == "invoice.create":
+        inv = _s(m.get("invoice_number"))
+        amt = format_amount_pence(m.get("amount_pence"))
+        return f"Created invoice {inv} ({amt})" if inv else f"Created invoice ({amt})"
+
+    if action == "invoice.approve":
+        inv = _s(m.get("invoice_number"))
+        amt = format_amount_pence(m.get("amount_pence"))
+        return f"Approved invoice {inv} ({amt})" if inv else f"Approved invoice ({amt})"
+
+    if action == "invoice.void":
+        inv = _s(m.get("invoice_number"))
+        amt = format_amount_pence(m.get("amount_pence"))
+        if m.get("was_pending"):
+            return f"Voided pending invoice {inv} ({amt})" if inv else f"Voided pending invoice ({amt})"
+        return f"Voided invoice {inv} ({amt})" if inv else f"Voided invoice ({amt})"
+
+    if action == "reconciliation.create":
+        period = _s(m.get("period_end_date"))
+        diff = format_amount_pence(m.get("difference_pence"))
+        return f"Created client account reconciliation for {period} (difference {diff})"
+
+    if action == "reconciliation.update":
+        period = _s(m.get("period_end_date"))
+        diff = format_amount_pence(m.get("difference_pence"))
+        return f"Updated client account reconciliation for {period} (difference {diff})"
+
+    if action == "reconciliation.approve":
+        period = _s(m.get("period_end_date"))
+        diff = format_amount_pence(m.get("difference_pence"))
+        return f"Approved client account reconciliation for {period} (difference {diff})"
 
     if action == "portal.file.upload":
         fn = _quote(m.get("filename"))

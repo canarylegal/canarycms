@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { apiFetch } from './api'
-import { useDialogs } from './DialogProvider'
+import { useDialogsOptional, type ConfirmOptions } from './DialogProvider'
 import { isPortalSharedFolder, portalSharedFolderUploadNotifyMessage, portalContactsForFolder } from './case/portalFolderAccess'
 import type { CasePortalFolderAccessGrantOut } from './types'
 import { BusyIcon } from './BusyIcon'
@@ -280,7 +280,16 @@ function formatOoError(event: unknown): string {
 
 export default function EditorPage() {
   const params = parseEditorPath()
-  const { askConfirm } = useDialogs()
+  const dialogs = useDialogsOptional()
+  const askConfirm = useCallback(
+    async (opts: ConfirmOptions) => {
+      if (dialogs) return dialogs.askConfirm(opts)
+      const body = opts.message.trim()
+      const prompt = body ? `${opts.title}\n\n${body}` : opts.title
+      return window.confirm(prompt)
+    },
+    [dialogs],
+  )
   const [cfg, setCfg] = useState<OoConfig | null>(null)
   const [filename, setFilename] = useState('')
   const [err, setErr] = useState<string | null>(null)
@@ -408,6 +417,11 @@ export default function EditorPage() {
     loadOoScript(base)
       .then(() => {
         if (!active) return
+        const host = document.getElementById('oo-editor-page')
+        if (!host) {
+          if (active) setErr('Editor mount point missing — reload this tab.')
+          return
+        }
         const g = window as Window & {
           DocsAPI?: { DocEditor: new (id: string, c: Record<string, unknown>) => DocsApiEditor }
         }
@@ -462,7 +476,11 @@ export default function EditorPage() {
             onError: (event: unknown) => {
               const raw = JSON.stringify(event)
               console.error('[ONLYOFFICE onError] RAW:', raw)
-              if (active) setErr(`${formatOoError(event)} | raw: ${raw}`)
+              if (active) {
+                apiRef.current?.destroyEditor?.()
+                apiRef.current = null
+                setErr(`${formatOoError(event)} | raw: ${raw}`)
+              }
             },
             // Required for downloadAs(); Print + Save as PDF use conversion URLs under /cache/files/.
             onDownloadAs: (event: unknown) => {
@@ -1186,23 +1204,23 @@ export default function EditorPage() {
         )}
       </div>
 
-      {err ? (
-        <div
-          style={{
-            flex: 1,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            color: '#dc2626',
-            padding: 24,
-            textAlign: 'center',
-          }}
-        >
-          {err}
-        </div>
-      ) : (
-        <div style={{ flex: 1, minHeight: 0, position: 'relative', display: 'flex', flexDirection: 'column' }}>
-          {!cfg ? (
+      <div style={{ flex: 1, minHeight: 0, position: 'relative', display: 'flex', flexDirection: 'column' }}>
+        {!cfg ? (
+          err ? (
+            <div
+              style={{
+                flex: 1,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: '#dc2626',
+                padding: 24,
+                textAlign: 'center',
+              }}
+            >
+              {err}
+            </div>
+          ) : (
             <div
               style={{
                 flex: 1,
@@ -1213,21 +1231,38 @@ export default function EditorPage() {
             >
               <BusyIcon label="Loading editor" />
             </div>
-          ) : (
-            <div id="oo-editor-page" style={{ flex: 1, minHeight: 0 }} />
-          )}
-          {saving || unsavedSaveBusy ? (
-            <div
-              className="modalBusyOverlay"
-              style={{ position: 'absolute', inset: 0, borderRadius: 0 }}
-              role="status"
-              aria-live="polite"
-            >
-              <BusyIcon label="Saving document" />
+          )
+        ) : (
+          <div id="oo-editor-page" style={{ flex: 1, minHeight: 0 }} />
+        )}
+        {cfg && err ? (
+          <div
+            className="modalBusyOverlay"
+            style={{
+              position: 'absolute',
+              inset: 0,
+              borderRadius: 0,
+              background: 'rgba(248, 250, 252, 0.96)',
+              zIndex: 2,
+            }}
+            role="alert"
+          >
+            <div style={{ color: '#dc2626', padding: 24, textAlign: 'center', maxWidth: 560, lineHeight: 1.45 }}>
+              {err}
             </div>
-          ) : null}
-        </div>
-      )}
+          </div>
+        ) : null}
+        {saving || unsavedSaveBusy ? (
+          <div
+            className="modalBusyOverlay"
+            style={{ position: 'absolute', inset: 0, borderRadius: 0, zIndex: 3 }}
+            role="status"
+            aria-live="polite"
+          >
+            <BusyIcon label="Saving document" />
+          </div>
+        ) : null}
+      </div>
     </div>
   )
 }

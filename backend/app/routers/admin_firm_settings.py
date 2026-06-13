@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import mimetypes
 import uuid
 from datetime import datetime
@@ -11,14 +12,25 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from sqlalchemy.orm import Session
 
 from app.audit import log_event
+from app.auth_principal import AuthPrincipal
 from app.db import get_db
-from app.deps import require_admin
+from app.deps import require_firm_admin, require_recovery_operator
 from app.file_storage import FILES_ROOT, ensure_files_root, firm_letterhead_file_paths, firm_quote_letterhead_file_paths
 from app.models import File as DbFile
 from app.models import FileCategory, FirmSettings, LetterheadStyle, User
 from app.schemas import FirmSettingsOut, FirmSettingsUpdate
 
 router = APIRouter(prefix="/admin/firm-settings", tags=["admin-firm-settings"])
+
+log = logging.getLogger(__name__)
+
+_MASTER_PATCH_KEYS = frozenset(
+    {
+        "mandate_two_factor",
+        "mandate_password_rotation",
+        "password_rotation_days",
+    }
+)
 
 _ALLOWED_LETTERHEAD_SUFFIX = frozenset({".docx"})
 _ALLOWED_LETTERHEAD_MIME = frozenset(
@@ -65,6 +77,9 @@ def _to_out(db: Session, row: FirmSettings) -> FirmSettingsOut:
         mandate_two_factor=bool(row.mandate_two_factor),
         mandate_password_rotation=bool(row.mandate_password_rotation),
         password_rotation_days=row.password_rotation_days,
+        client_bank_account_name=row.client_bank_account_name,
+        client_bank_sort_code=row.client_bank_sort_code,
+        client_bank_account_number_last4=row.client_bank_account_number_last4,
     )
 
 
@@ -120,18 +135,28 @@ def _delete_quote_letterhead_file(db: Session, settings: FirmSettings) -> None:
 
 
 @router.get("", response_model=FirmSettingsOut)
-def get_firm_settings(admin: User = Depends(require_admin), db: Session = Depends(get_db)) -> FirmSettingsOut:
+def get_firm_settings(
+    _operator: AuthPrincipal = Depends(require_recovery_operator),
+    db: Session = Depends(get_db),
+) -> FirmSettingsOut:
     return _to_out(db, _settings_row(db))
 
 
 @router.patch("", response_model=FirmSettingsOut)
 def patch_firm_settings(
     payload: FirmSettingsUpdate,
-    admin: User = Depends(require_admin),
+    operator: AuthPrincipal = Depends(require_recovery_operator),
     db: Session = Depends(get_db),
 ) -> FirmSettingsOut:
     row = _settings_row(db)
     data = payload.model_dump(exclude_unset=True)
+    if operator.is_master_recovery:
+        extra = set(data.keys()) - _MASTER_PATCH_KEYS
+        if extra:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Master recovery may only change organisation security policy fields.",
+            )
     if data.get("mandate_password_rotation") and not data.get("password_rotation_days"):
         if row.password_rotation_days is None and payload.password_rotation_days is None:
             raise HTTPException(
@@ -146,9 +171,11 @@ def patch_firm_settings(
     db.add(row)
     db.commit()
     db.refresh(row)
+    if operator.is_master_recovery:
+        log.info("Master recovery updated firm security settings: %s", sorted(data.keys()))
     log_event(
         db,
-        actor_user_id=admin.id,
+        actor_user_id=operator.actor_user_id,
         action="firm_settings.update",
         entity_type="firm_settings",
         entity_id="1",
@@ -160,7 +187,7 @@ def patch_firm_settings(
 @router.post("/letterhead", response_model=FirmSettingsOut)
 async def upload_letterhead(
     upload: UploadFile = File(...),
-    admin: User = Depends(require_admin),
+    admin: User = Depends(require_firm_admin),
     db: Session = Depends(get_db),
 ) -> FirmSettingsOut:
     original = upload.filename or "letterhead.bin"
@@ -226,7 +253,7 @@ async def upload_letterhead(
 
 
 @router.delete("/letterhead", response_model=FirmSettingsOut)
-def delete_letterhead(admin: User = Depends(require_admin), db: Session = Depends(get_db)) -> FirmSettingsOut:
+def delete_letterhead(admin: User = Depends(require_firm_admin), db: Session = Depends(get_db)) -> FirmSettingsOut:
     row = _settings_row(db)
     _delete_letterhead_file(db, row)
     row.updated_at = datetime.utcnow()
@@ -247,7 +274,7 @@ def delete_letterhead(admin: User = Depends(require_admin), db: Session = Depend
 @router.post("/quote-letterhead", response_model=FirmSettingsOut)
 async def upload_quote_letterhead(
     upload: UploadFile = File(...),
-    admin: User = Depends(require_admin),
+    admin: User = Depends(require_firm_admin),
     db: Session = Depends(get_db),
 ) -> FirmSettingsOut:
     original = upload.filename or "quote_letterhead.bin"
@@ -313,7 +340,7 @@ async def upload_quote_letterhead(
 
 
 @router.delete("/quote-letterhead", response_model=FirmSettingsOut)
-def delete_quote_letterhead(admin: User = Depends(require_admin), db: Session = Depends(get_db)) -> FirmSettingsOut:
+def delete_quote_letterhead(admin: User = Depends(require_firm_admin), db: Session = Depends(get_db)) -> FirmSettingsOut:
     row = _settings_row(db)
     _delete_quote_letterhead_file(db, row)
     row.updated_at = datetime.utcnow()

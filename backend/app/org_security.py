@@ -8,7 +8,6 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.admin_access import user_effective_admin
 from app.models import FirmSettings, User, WebAuthnCredential
 
 
@@ -28,8 +27,6 @@ def firm_password_rotation_policy(db: Session) -> tuple[bool, int | None]:
 
 
 def user_password_change_required(db: Session, user: User) -> bool:
-    if user_effective_admin(user, db):
-        return False
     enabled, days = firm_password_rotation_policy(db)
     if not enabled or days is None:
         return False

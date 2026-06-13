@@ -1,4 +1,12 @@
+import { useMemo, useState } from 'react'
+import { SingleSelectDropdown } from '../SingleSelectDropdown'
 import type { CasePropertyPayload, CasePropertyTenure } from '../types'
+
+const TENURE_OPTIONS: { value: CasePropertyTenure; label: string }[] = [
+  { value: 'freehold', label: 'Freehold' },
+  { value: 'leasehold', label: 'Leasehold' },
+  { value: 'commonhold', label: 'Commonhold' },
+]
 
 type Props = {
   draft: CasePropertyPayload
@@ -8,6 +16,12 @@ type Props = {
 
 /** Same field layout as the Property sub-menu editor in CaseDetail. */
 export function PropertyDetailsForm({ draft, onChange, disabled }: Props) {
+  const [tenureOpen, setTenureOpen] = useState(false)
+  const tenureOptions = useMemo(
+    () => TENURE_OPTIONS.map((o) => ({ value: o.value, label: o.label })),
+    [],
+  )
+
   return (
     <div className="stack" style={{ marginTop: 12 }}>
       <div className="muted" style={{ fontWeight: 600 }}>
@@ -51,25 +65,21 @@ export function PropertyDetailsForm({ draft, onChange, disabled }: Props) {
       >
         Add title number
       </button>
-      <label className="field">
-        <span>Tenure</span>
-        <select
-          value={draft.tenure ?? ''}
-          disabled={disabled}
-          onChange={(e) => {
-            const v = e.target.value
-            onChange({
-              ...draft,
-              tenure: v === '' ? null : (v as CasePropertyTenure),
-            })
-          }}
-        >
-          <option value="">—</option>
-          <option value="freehold">Freehold</option>
-          <option value="leasehold">Leasehold</option>
-          <option value="commonhold">Commonhold</option>
-        </select>
-      </label>
+      <SingleSelectDropdown
+        label="Tenure"
+        options={tenureOptions}
+        value={draft.tenure ?? ''}
+        onChange={(v) =>
+          onChange({
+            ...draft,
+            tenure: v === '' ? null : (v as CasePropertyTenure),
+          })
+        }
+        open={tenureOpen}
+        onOpenChange={setTenureOpen}
+        disabled={disabled}
+        placeholder="—"
+      />
       <label className="row" style={{ alignItems: 'center', gap: 8 }}>
         <input
           type="checkbox"
