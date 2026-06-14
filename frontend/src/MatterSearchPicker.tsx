@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { fetchCaseById, fetchCaseSearch } from './apiSearch'
+import { scrollPanelClassName } from './dropdownSizing'
 import { SearchInput } from './SearchInput'
 import { matterPickerSummary } from './matterSearch'
 import { useDebouncedValue } from './useDebouncedValue'
@@ -42,7 +43,7 @@ export function MatterSearchPicker({
   onChange,
   disabled = false,
   autoFocus = false,
-  listMaxHeight = 220,
+  listMaxHeight,
   searchPlaceholder = 'Search matters (reference, client, description, status)…',
   idleHint = 'Type to search matters (reference, client, description, status).',
   changeLabel = 'Change',
@@ -156,10 +157,10 @@ export function MatterSearchPicker({
       ) : (
         <>
           <ul
-            className="calendarMatterPickerList"
+            className={scrollPanelClassName('calendarMatterPickerList', matches.length)}
             role="listbox"
             aria-label="Matching matters"
-            style={{ maxHeight: listMaxHeight }}
+            style={listMaxHeight != null ? { maxHeight: listMaxHeight } : undefined}
           >
             {matches.map((c) => {
               const lines = matterPickerSummary(c)

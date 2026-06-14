@@ -173,7 +173,6 @@ export function TaskCreateModal({
                 onChange={setPickedCaseId}
                 disabled={busy}
                 autoFocus
-                listMaxHeight={180}
               />
             </div>
           ) : null}

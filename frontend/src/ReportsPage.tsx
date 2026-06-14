@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { apiFetch, apiUrl, applyAuthHeaders } from './api'
+import { dropdownMenuClassName, scrollPanelClassName } from './dropdownSizing'
 import { useDismissOnOutsidePointer } from './useDismissOnOutsidePointer'
 import { SingleSelectDropdown } from './SingleSelectDropdown'
 import type { ApiError } from './api'
@@ -142,6 +143,7 @@ function FilterDropdown({
   setOpenId,
   children,
   footer,
+  fitContentItemCount,
 }: {
   id: string
   label: string
@@ -151,6 +153,8 @@ function FilterDropdown({
   setOpenId: (v: string | null) => void
   children: ReactNode
   footer?: ReactNode
+  /** When the panel body is a simple list, pass its length for smart no-scroll sizing. */
+  fitContentItemCount?: number
 }) {
   const open = openId === id
   const wrapRef = useRef<HTMLDivElement>(null)
@@ -205,7 +209,14 @@ function FilterDropdown({
         }}
         onMouseDown={(e) => e.stopPropagation()}
       >
-        <div className="reportsDdPanelBody">{children}</div>
+        <div
+          className={dropdownMenuClassName(
+            'reportsDdPanelBody',
+            fitContentItemCount ?? Number.POSITIVE_INFINITY,
+          )}
+        >
+          {children}
+        </div>
         {footer ? <div className="reportsDdPanelFooter">{footer}</div> : null}
       </div>
     ) : null
@@ -1119,6 +1130,7 @@ export function ReportsPage({
               summary={feSummary}
               openId={openFilterId}
               setOpenId={setOpenFilterId}
+              fitContentItemCount={feeEarners.length}
               footer={
                 isAdmin ? (
                   <div className="row" style={{ gap: 8 }}>
@@ -1132,7 +1144,7 @@ export function ReportsPage({
                 ) : undefined
               }
             >
-              <div className="reportsDdCheckList">
+              <div className={scrollPanelClassName('reportsDdCheckList', feeEarners.length)}>
                 {feeEarners.map((u) => (
                   <label key={u.id} className="reportsCheckbox">
                     <input
@@ -1324,7 +1336,7 @@ export function ReportsPage({
                   openId={openFilterId}
                   setOpenId={setOpenFilterId}
                 >
-                  <div className="reportsDdCheckList">
+                  <div className={scrollPanelClassName('reportsDdCheckList', 1)}>
                     <label className="reportsCheckbox">
                       <input
                         type="checkbox"
@@ -1415,7 +1427,7 @@ export function ReportsPage({
                 <p className="muted" style={{ margin: '0 0 8px', fontSize: 12 }}>
                   Leave none ticked to include every status.
                 </p>
-                <div className="reportsDdCheckList">
+                <div className={scrollPanelClassName('reportsDdCheckList', CASE_STATUS_OPTIONS.length)}>
                   {CASE_STATUS_OPTIONS.map(({ value, label }) => (
                     <label key={value} className="reportsCheckbox">
                       <input type="checkbox" checked={caseStatusSel.has(value)} onChange={() => toggleCaseStatus(value)} />
@@ -1453,7 +1465,7 @@ export function ReportsPage({
                   openId={openFilterId}
                   setOpenId={setOpenFilterId}
                 >
-                  <div className="reportsDdCheckList">
+                  <div className={scrollPanelClassName('reportsDdCheckList', 2)}>
                     <label className="reportsCheckbox">
                       <input type="checkbox" checked={openedQuote} onChange={(e) => setOpenedQuote(e.target.checked)} />
                       <span>Quote</span>
@@ -1505,7 +1517,7 @@ export function ReportsPage({
                   <p className="muted" style={{ margin: '0 0 8px', fontSize: 12 }}>
                     Admin → Sub-menus → Events. Leave none ticked for all templates.
                   </p>
-                  <div className="reportsDdCheckList reportsDdCheckList--tall">
+                  <div className={scrollPanelClassName('reportsDdCheckList reportsDdCheckList--tall', evTemplates.length)}>
                     {evTemplates.map((t) => (
                       <label key={t.id} className="reportsCheckbox">
                         <input type="checkbox" checked={evTemplateSel.has(t.id)} onChange={() => toggleEvTemplate(t.id)} />

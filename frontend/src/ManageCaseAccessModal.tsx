@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { apiFetch } from './api'
+import { scrollPanelClassName } from './dropdownSizing'
 import { SingleSelectDropdown } from './SingleSelectDropdown'
 import type { CaseAccessRuleOut, UserSummary } from './types'
 
@@ -334,10 +335,8 @@ export function ManageCaseAccessModal({
                     Can access
                   </div>
                   <div
-                    className="list"
+                    className={scrollPanelClassName('list scrollPanel', granted.length)}
                     style={{
-                      maxHeight: 280,
-                      overflow: 'auto',
                       border: '1px solid var(--border, #ddd)',
                       borderRadius: 6,
                     }}
@@ -403,10 +402,8 @@ export function ManageCaseAccessModal({
                     No access
                   </div>
                   <div
-                    className="list"
+                    className={scrollPanelClassName('list scrollPanel', revoked.length)}
                     style={{
-                      maxHeight: 280,
-                      overflow: 'auto',
                       border: '1px solid var(--border, #ddd)',
                       borderRadius: 6,
                     }}

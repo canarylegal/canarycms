@@ -1,6 +1,7 @@
 import { useCallback, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { SearchInput } from '../SearchInput'
+import { dropdownMenuClassName } from '../dropdownSizing'
 import { useDismissOnOutsidePointer } from '../useDismissOnOutsidePointer'
 import type { FileSummary } from '../types'
 import { DocMimeIcon } from './DocCells'
@@ -95,7 +96,10 @@ export function CaseFileSelectDropdown({
       <div
         ref={menuRef}
         id={listId}
-        className="caseFileSelectMenu singleSelectDropdownMenu singleSelectDropdownMenu--portal"
+        className={dropdownMenuClassName(
+          'caseFileSelectMenu singleSelectDropdownMenu singleSelectDropdownMenu--portal',
+          filtered.length,
+        )}
         role="listbox"
         aria-label={label}
         style={{
