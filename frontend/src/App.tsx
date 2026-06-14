@@ -116,7 +116,7 @@ type View =
 function canaryViewTitleSegment(view: View, caseDetail: CaseOut | null): string {
   switch (view) {
     case 'main-menu':
-      return 'Case Menu'
+      return 'Cases'
     case 'quotes':
       return 'Quotes'
     case 'case-menu': {

@@ -6,24 +6,30 @@ export const CANARY_ICON_128_SRC = '/icons/icon128.png'
 
 type MarkProps = {
   className?: string
-  size?: 'toolbar' | 'login'
+  size?: 'toolbar' | 'sidebar' | 'login'
 }
 
 /** Circular Canary app icon from ``public/icons/``. */
 export function CanaryMark({ className, size = 'toolbar' }: MarkProps) {
+  const px = size === 'login' ? 48 : size === 'sidebar' ? 44 : 28
+  const src =
+    size === 'login' ? CANARY_ICON_128_SRC : size === 'sidebar' ? CANARY_ICON_64_SRC : CANARY_ICON_32_SRC
+  const srcSet =
+    size === 'login'
+      ? `${CANARY_ICON_128_SRC} 1x, /icons/icon256.png 2x`
+      : size === 'sidebar'
+        ? `${CANARY_ICON_64_SRC} 1x, ${CANARY_ICON_128_SRC} 2x`
+        : `${CANARY_ICON_32_SRC} 1x, ${CANARY_ICON_64_SRC} 2x`
+
   return (
     <img
-      src={size === 'login' ? CANARY_ICON_128_SRC : CANARY_ICON_32_SRC}
-      srcSet={
-        size === 'login'
-          ? `${CANARY_ICON_128_SRC} 1x, /icons/icon256.png 2x`
-          : `${CANARY_ICON_32_SRC} 1x, ${CANARY_ICON_64_SRC} 2x`
-      }
+      src={src}
+      srcSet={srcSet}
       alt=""
       className={className}
       aria-hidden
-      width={size === 'login' ? 48 : 28}
-      height={size === 'login' ? 48 : 28}
+      width={px}
+      height={px}
       decoding="async"
     />
   )

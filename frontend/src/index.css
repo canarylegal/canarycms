@@ -219,7 +219,7 @@ a {
   flex-grow: 0;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: var(--app-main-menu-section-gap);
   padding: var(--app-main-padding-y) 8px 12px;
   background: var(--panel);
   color: var(--text);
@@ -323,8 +323,8 @@ a {
 }
 
 .appSidebar .appBrandMark {
-  width: 36px;
-  height: 36px;
+  width: var(--app-main-menu-toolbar-height);
+  height: var(--app-main-menu-toolbar-height);
   flex-shrink: 0;
 }
 
