@@ -114,9 +114,9 @@ export function saveThemePreferences(p: ThemePreferences): void {
 }
 
 export const FONT_OPTIONS: { value: string; label: string }[] = [
-  { value: '', label: 'System default' },
-  { value: 'system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif', label: 'Sans (system UI)' },
-  { value: 'Inter, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif', label: 'Inter (if installed)' },
+  { value: '', label: 'App default (DM Sans)' },
+  { value: '"DM Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif', label: 'DM Sans' },
+  { value: 'system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif', label: 'System UI' },
   { value: '"Open Sans", "Helvetica Neue", Helvetica, Arial, sans-serif', label: 'Open Sans (if installed)' },
   { value: '"Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif', label: 'Segoe / Roboto' },
   { value: 'Verdana, Geneva, sans-serif', label: 'Verdana' },
