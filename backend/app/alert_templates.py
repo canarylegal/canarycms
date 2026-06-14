@@ -204,6 +204,78 @@ def portal_contact_files_added(
     return subject, body, html
 
 
+def portal_quote_sent(
+    *,
+    firm_name: str,
+    contact_name: str,
+    quote_filename: str,
+    portal_url: str,
+) -> tuple[str, str, str]:
+    subject = f"Quote from {_firm_line(firm_name)}"
+    body = "\n".join(
+        [
+            f"Dear {contact_name},",
+            "",
+            f"Please review your quote: {quote_filename}",
+            "",
+            f"View and respond at: {portal_url}",
+            "",
+            f"— {_firm_line(firm_name)}",
+        ]
+    )
+    html = _html_email(
+        firm_name=firm_name,
+        paragraphs=[
+            f"Dear {contact_name},",
+            f"Please review your quote: {quote_filename}",
+            f"View and respond at: {portal_url}",
+        ],
+    )
+    return subject, body, html
+
+
+def portal_quote_accepted(
+    *,
+    firm_name: str,
+    contact_name: str,
+    quote_filename: str,
+) -> tuple[str, str, str]:
+    subject = f"Quote accepted: {quote_filename}"
+    body = "\n".join(
+        [
+            f"{contact_name} accepted the quote via Canary Portal.",
+            "",
+            f"File: {quote_filename}",
+            "",
+            f"— {_firm_line(firm_name)}",
+        ]
+    )
+    html = _html_email(
+        firm_name=firm_name,
+        paragraphs=[f"{contact_name} accepted the quote via Canary Portal.", f"File: {quote_filename}"],
+    )
+    return subject, body, html
+
+
+def portal_quote_declined(
+    *,
+    firm_name: str,
+    contact_name: str,
+    quote_filename: str,
+    decline_reason: str,
+) -> tuple[str, str, str]:
+    subject = f"Quote declined: {quote_filename}"
+    lines = [f"{contact_name} declined the quote via Canary Portal.", "", f"File: {quote_filename}"]
+    if decline_reason.strip():
+        lines.extend(["", f"Reason: {decline_reason.strip()}"])
+    body = "\n".join(lines + ["", f"— {_firm_line(firm_name)}"])
+    html_parts = [f"{contact_name} declined the quote via Canary Portal.", f"File: {quote_filename}"]
+    if decline_reason.strip():
+        html_parts.append(f"Reason: {decline_reason.strip()}")
+    html = _html_email(firm_name=firm_name, paragraphs=html_parts)
+    return subject, body, html
+
+
 def portal_login_otp(
     *,
     firm_name: str,

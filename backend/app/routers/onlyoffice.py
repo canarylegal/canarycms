@@ -408,7 +408,7 @@ async def create_case_file_from_onlyoffice_pdf_export(
         category=FileCategory.case_document,
         storage_path=paths.rel_path,
         folder_path=paths.folder_path,
-        parent_file_id=None,
+        parent_file_id=source.id if source.is_portal_quote else None,
         source_imap_mbox=None,
         source_imap_uid=None,
         source_mail_from_name=None,
@@ -426,9 +426,14 @@ async def create_case_file_from_onlyoffice_pdf_export(
         size_bytes=len(data),
         version=1,
         checksum=None,
+        is_portal_quote=bool(source.is_portal_quote),
         created_at=now,
         updated_at=now,
     )
+    if source.is_portal_quote:
+        source.is_portal_quote = False
+        source.updated_at = now
+        db.add(source)
     db.add(row)
     db.commit()
     db.refresh(row)
@@ -504,6 +509,10 @@ async def persist_onlyoffice_browser_url_to_file(
     row.size_bytes = len(data)
     row.updated_at = datetime.now(timezone.utc)
     row.oo_force_save_pending = False
+    if case_id is not None:
+        from app.quote_portal_service import supersede_pending_quote_deliveries
+
+        supersede_pending_quote_deliveries(db, row.id)
     db.add(row)
     db.commit()
 
@@ -693,6 +702,10 @@ def _oo_ack_unchanged_force_save(
     row.version = (row.version or 1) + 1
     row.updated_at = datetime.now(timezone.utc)
     row.oo_force_save_pending = False
+    if case_id is not None:
+        from app.quote_portal_service import supersede_pending_quote_deliveries
+
+        supersede_pending_quote_deliveries(db, row.id)
     db.add(row)
     db.commit()
     log.info(
@@ -838,6 +851,10 @@ async def onlyoffice_callback(
         row.size_bytes = len(data)
         row.updated_at = datetime.now(timezone.utc)
         row.oo_force_save_pending = False
+        if case_id is not None:
+            from app.quote_portal_service import supersede_pending_quote_deliveries
+
+            supersede_pending_quote_deliveries(db, row.id)
         db.add(row)
         db.commit()
 

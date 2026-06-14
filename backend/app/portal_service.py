@@ -163,6 +163,32 @@ def get_grant_file(db: Session, grant: ContactPortalGrant, file_id: uuid.UUID) -
     return row
 
 
+def get_portal_grant_file(
+    db: Session,
+    grant: ContactPortalGrant,
+    contact_id: uuid.UUID,
+    file_id: uuid.UUID,
+) -> File:
+    """Folder grant access, or delivery-scoped access for sent portal quotes."""
+    row = db.get(File, file_id)
+    if not row or row.case_id != grant.case_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+    if row.category == FileCategory.system or row.oo_compose_pending:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+    if file_folder_in_grant(file_folder=row.folder_path or "", grant_folder=grant.folder_path):
+        return row
+    from app.quote_portal_service import quote_delivery_grants_file_access
+
+    if quote_delivery_grants_file_access(
+        db,
+        contact_id=contact_id,
+        case_id=grant.case_id,
+        file_id=file_id,
+    ):
+        return row
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+
+
 def default_grant_label(db: Session, grant: ContactPortalGrant) -> str:
     if grant.label and grant.label.strip():
         return grant.label.strip()

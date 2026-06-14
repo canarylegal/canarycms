@@ -159,15 +159,29 @@ def _validate_preview_contact(db: Session, case_id: uuid.UUID, contact_id: uuid.
     return contact
 
 
+def _any_active_grant_on_case(
+    grants: list[ContactPortalGrant],
+    *,
+    contact_id: uuid.UUID,
+) -> ContactPortalGrant | None:
+    active = [g for g in grants if g.contact_id == contact_id and grant_is_active(g)]
+    if not active:
+        return None
+    downloadable = [g for g in active if g.can_download]
+    return downloadable[0] if downloadable else active[0]
+
+
 @router.get("/folder-share", response_model=list[CasePortalFolderShareContactOut])
 def list_case_portal_folder_share_contacts(
     case_id: uuid.UUID,
     folder_path: str = Query(default=""),
+    grant_scope: str = Query(default="folder"),
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> list[CasePortalFolderShareContactOut]:
     _require_portal(case_id, user, db)
     folder = sanitize_folder_path(folder_path)
+    matter_scope = grant_scope.strip().lower() == "matter"
     case_contacts = (
         db.execute(select(CaseContact).where(CaseContact.case_id == case_id).order_by(CaseContact.name.asc()))
         .scalars()
@@ -186,7 +200,10 @@ def list_case_portal_folder_share_contacts(
         if access is None or not portal_access_is_active(access):
             continue
         seen.add(cc.contact_id)
-        grant = _grant_for_exact_folder(grants, contact_id=cc.contact_id, folder_path=folder)
+        if matter_scope:
+            grant = _any_active_grant_on_case(grants, contact_id=cc.contact_id)
+        else:
+            grant = _grant_for_exact_folder(grants, contact_id=cc.contact_id, folder_path=folder)
         out.append(
             CasePortalFolderShareContactOut(
                 case_contact_id=cc.id,

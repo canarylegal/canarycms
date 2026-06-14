@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { apiFetch } from '../api'
+import { CopyButton } from '../CopyButton'
 import { useDialogs } from '../DialogProvider'
 import type { ContactPortalAccessCreateOut, ContactPortalAccessOut } from '../types'
 
@@ -106,9 +107,7 @@ export function CaseContactPortalSection({ token, globalContactId, contactName, 
             <div className="row" style={{ gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
               <span className="muted">Access code</span>
               <code style={{ letterSpacing: '0.06em' }}>{code}</code>
-              <button type="button" className="btn" disabled={busy} onClick={() => void navigator.clipboard.writeText(code)}>
-                Copy
-              </button>
+              <CopyButton text={code} label="Copy" copiedLabel="Copied" disabled={busy} />
             </div>
           ) : (
             <div className="muted">Access is enabled. Rotate the code from the global contact card to view it here.</div>

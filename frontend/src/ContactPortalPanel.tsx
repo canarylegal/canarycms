@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { apiFetch } from './api'
+import { CopyButton } from './CopyButton'
 import { useDialogs } from './DialogProvider'
 import type {
   ContactPortalAccessCreateOut,
@@ -249,9 +250,7 @@ export function ContactPortalPanel({ token, contactId, contactName, contactEmail
               <div className="muted">Access code</div>
               <div className="row" style={{ gap: 8, alignItems: 'center', flexWrap: 'wrap', marginTop: 8 }}>
                 <code style={{ fontSize: '1.1rem', letterSpacing: '0.06em' }}>{displayCode}</code>
-                <button type="button" className="btn primary" onClick={() => void navigator.clipboard.writeText(displayCode)}>
-                  Copy code
-                </button>
+                <CopyButton text={displayCode} label="Copy code" copiedLabel="Copied" primary disabled={busy} />
                 <button type="button" className="btn" onClick={copyInvite}>
                   Copy invite text
                 </button>

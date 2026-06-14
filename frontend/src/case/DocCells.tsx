@@ -1,4 +1,4 @@
-import type { FileSummary } from '../types'
+import type { FileSummary, QuotePortalDeliverySummary } from '../types'
 
 /** Vimix-doder (regular / non-dark theme) icons in `public/icons/vimix/`. */
 export function DocMimeIcon({ mime, filename }: { mime: string; filename?: string }) {
@@ -127,14 +127,34 @@ function docsListDisplayFilename(f: FileSummary): string {
   return raw
 }
 
+function quotePortalStatusLabel(d: QuotePortalDeliverySummary): string {
+  switch (d.status) {
+    case 'pending':
+      return `Awaiting ${d.contact_name}`
+    case 'accepted':
+      return `Accepted — ${d.contact_name}`
+    case 'declined':
+      return d.decline_reason ? `Declined — ${d.contact_name}` : `Declined — ${d.contact_name}`
+    case 'superseded':
+      return 'Superseded — re-send if needed'
+    default:
+      return d.status
+  }
+}
+
 export function DocsFileDescCell({ f, showPin }: { f: FileSummary; showPin: boolean }) {
   const sub = fileMailFromSubline(f)
+  const quoteSub = f.quote_portal_delivery
+    ? quotePortalStatusLabel(f.quote_portal_delivery)
+    : f.is_portal_quote
+      ? 'Portal quote'
+      : null
   const mailRoot = isCaseMailRootFile(f)
   const displayName = f.parent_file_id ? `↳ ${docsListDisplayFilename(f)}` : docsListDisplayFilename(f)
   return (
-    <div className={sub ? 'docsDescWrapper docsDescWrapper--hasSub' : 'docsDescWrapper'}>
+    <div className={sub || quoteSub ? 'docsDescWrapper docsDescWrapper--hasSub' : 'docsDescWrapper'}>
       <div className="docsDescCell">
-        <div className={sub ? 'docsDescRow docsDescRow--hasSub' : 'docsDescRow'}>
+        <div className={sub || quoteSub ? 'docsDescRow docsDescRow--hasSub' : 'docsDescRow'}>
           {showPin ? (
             <span className="docsPinIcon">
               <DocPinIcon />
@@ -150,6 +170,7 @@ export function DocsFileDescCell({ f, showPin }: { f: FileSummary; showPin: bool
           <div className="docsDescTextBlock">
             <span className="docsDescName">{displayName}</span>
             {sub ? <div className="docsDescSub muted">{sub}</div> : null}
+            {quoteSub ? <div className="docsDescSub muted portalQuoteFileStatus">{quoteSub}</div> : null}
           </div>
         </div>
       </div>

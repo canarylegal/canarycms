@@ -194,6 +194,7 @@ def decode_eml_open_token(token: str) -> EmlOpenTokenPayload:
 
 PORTAL_SESSION_TTL_SECONDS = int(os.getenv("PORTAL_SESSION_TTL_SECONDS", "28800"))  # 8h
 PORTAL_PREVIEW_EXCHANGE_TTL_SECONDS = int(os.getenv("PORTAL_PREVIEW_EXCHANGE_TTL_SECONDS", "300"))  # 5m
+PORTAL_QUOTE_EXCHANGE_TTL_SECONDS = int(os.getenv("PORTAL_QUOTE_EXCHANGE_TTL_SECONDS", "1209600"))  # 14d
 
 
 @dataclass(frozen=True)
@@ -206,6 +207,14 @@ class PortalPreviewExchangePayload:
     contact_id: str
     case_id: str
     staff_user_id: str
+
+
+@dataclass(frozen=True)
+class PortalQuoteExchangePayload:
+    contact_id: str
+    case_id: str
+    file_id: str
+    delivery_id: str
 
 
 def create_portal_session_token(*, contact_id: str) -> str:
@@ -261,6 +270,47 @@ def decode_portal_preview_exchange_token(token: str) -> PortalPreviewExchangePay
         contact_id=contact_id.strip(),
         case_id=case_id.strip(),
         staff_user_id=staff_user_id.strip(),
+    )
+
+
+def create_portal_quote_exchange_token(
+    *,
+    contact_id: str,
+    case_id: str,
+    file_id: str,
+    delivery_id: str,
+) -> str:
+    now = int(time.time())
+    payload = {
+        "contact_id": contact_id,
+        "case_id": case_id,
+        "file_id": file_id,
+        "delivery_id": delivery_id,
+        "purpose": "portal_quote_exchange",
+        "iat": now,
+        "exp": now + PORTAL_QUOTE_EXCHANGE_TTL_SECONDS,
+    }
+    return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALG)
+
+
+def decode_portal_quote_exchange_token(token: str) -> PortalQuoteExchangePayload:
+    try:
+        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALG])
+    except JWTError as e:
+        raise ValueError("Invalid or expired quote link") from e
+    if payload.get("purpose") != "portal_quote_exchange":
+        raise ValueError("Invalid quote link")
+    contact_id = payload.get("contact_id")
+    case_id = payload.get("case_id")
+    file_id = payload.get("file_id")
+    delivery_id = payload.get("delivery_id")
+    if not all(isinstance(v, str) and v.strip() for v in (contact_id, case_id, file_id, delivery_id)):
+        raise ValueError("Invalid quote link")
+    return PortalQuoteExchangePayload(
+        contact_id=contact_id.strip(),
+        case_id=case_id.strip(),
+        file_id=file_id.strip(),
+        delivery_id=delivery_id.strip(),
     )
 
 

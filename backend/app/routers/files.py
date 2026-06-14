@@ -84,8 +84,10 @@ from app.schemas import (
     OoExportPdfOut,
     OoPersistDownloadIn,
     OutlookOpenHintsOut,
+    PortalQuoteTagUpdate,
     PublishComposeIn,
 )
+from app.quote_portal_service import set_portal_quote_tag
 from app.routers.onlyoffice import (
     create_case_file_from_onlyoffice_pdf_export,
     persist_onlyoffice_browser_url_to_file,
@@ -664,6 +666,7 @@ def compose_quote_spreadsheet(
         version=1,
         checksum=None,
         oo_compose_pending=True,
+        is_portal_quote=True,
         created_at=now,
         updated_at=now,
     )
@@ -1025,6 +1028,9 @@ def list_case_files(
     db: Session = Depends(get_db),
 ):
     require_case_access(case_id, user, db)
+    from app.models import QuotePortalDelivery
+    from sqlalchemy import func
+
     rows = (
         db.execute(
             select(DbFile, User.display_name, User.email, User.initials)
@@ -1033,8 +1039,36 @@ def list_case_files(
             .order_by(DbFile.created_at.desc())
         ).all()
     )
-    return [
-        {
+    file_ids = [f.id for (f, _, _, _) in rows]
+    delivery_by_file: dict[uuid.UUID, QuotePortalDelivery] = {}
+    if file_ids:
+        latest_sent = (
+            select(
+                QuotePortalDelivery.file_id,
+                func.max(QuotePortalDelivery.sent_at).label("max_sent"),
+            )
+            .where(QuotePortalDelivery.file_id.in_(file_ids))
+            .group_by(QuotePortalDelivery.file_id)
+            .subquery()
+        )
+        deliveries = (
+            db.execute(
+                select(QuotePortalDelivery)
+                .join(
+                    latest_sent,
+                    (QuotePortalDelivery.file_id == latest_sent.c.file_id)
+                    & (QuotePortalDelivery.sent_at == latest_sent.c.max_sent),
+                )
+            )
+            .scalars()
+            .all()
+        )
+        for d in deliveries:
+            delivery_by_file[d.file_id] = d
+
+    out = []
+    for (f, owner_display_name, owner_email, owner_initials) in rows:
+        item = {
             "id": str(f.id),
             "original_filename": f.original_filename,
             "mime_type": f.mime_type,
@@ -1056,12 +1090,27 @@ def list_case_files(
             "outlook_graph_message_id": f.outlook_graph_message_id,
             "outlook_web_link": f.outlook_web_link,
             "uploaded_via_portal": f.uploaded_via_portal,
+            "is_portal_quote": f.is_portal_quote,
             "owner_display_name": "Portal" if f.uploaded_via_portal else owner_display_name,
             "owner_email": None if f.uploaded_via_portal else owner_email,
             "owner_initials": "Portal" if f.uploaded_via_portal else owner_initials,
         }
-        for (f, owner_display_name, owner_email, owner_initials) in rows
-    ]
+        delivery = delivery_by_file.get(f.id)
+        if delivery is not None:
+            from app.models import Contact
+            from app.portal_service import contact_display_name
+
+            contact = db.get(Contact, delivery.contact_id)
+            item["quote_portal_delivery"] = {
+                "id": str(delivery.id),
+                "status": delivery.status.value,
+                "contact_name": contact_display_name(contact) if contact else "Contact",
+                "sent_at": delivery.sent_at.isoformat(),
+                "responded_at": delivery.responded_at.isoformat() if delivery.responded_at else None,
+                "decline_reason": delivery.decline_reason,
+            }
+        out.append(item)
+    return out
 
 
 @router.get("/portal-folder-access", response_model=list[CasePortalFolderAccessGrantOut])
@@ -1631,6 +1680,25 @@ def set_file_pin(
     )
 
     return {"id": str(row.id), "is_pinned": row.is_pinned}
+
+
+@router.patch("/{file_id}/portal-quote-tag", status_code=status.HTTP_200_OK)
+def set_file_portal_quote_tag(
+    case_id: uuid.UUID,
+    file_id: uuid.UUID,
+    payload: PortalQuoteTagUpdate,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    require_case_access(case_id, user, db)
+    row = set_portal_quote_tag(
+        db,
+        case_id=case_id,
+        file_id=file_id,
+        is_portal_quote=payload.is_portal_quote,
+        actor_user_id=user.id,
+    )
+    return {"id": str(row.id), "is_portal_quote": row.is_portal_quote}
 
 
 @router.patch("/{file_id}/rename", status_code=status.HTTP_200_OK)

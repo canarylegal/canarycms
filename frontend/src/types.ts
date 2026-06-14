@@ -709,6 +709,52 @@ export type FileSummary = {
   owner_email?: string | null
   owner_initials?: string | null
   uploaded_via_portal?: boolean
+  is_portal_quote?: boolean
+  quote_portal_delivery?: QuotePortalDeliverySummary | null
+}
+
+export type QuotePortalDeliverySummary = {
+  id: string
+  status: 'pending' | 'accepted' | 'declined' | 'superseded'
+  contact_name: string
+  sent_at: string
+  responded_at: string | null
+  decline_reason: string | null
+}
+
+export type QuotePortalDeliveryOut = {
+  id: string
+  file_id: string
+  contact_id: string
+  contact_name: string
+  status: string
+  sent_at: string
+  responded_at: string | null
+  decline_reason: string | null
+  file_version_at_send: number
+  email_sent: boolean
+  email_skip_reason: string | null
+}
+
+export type PortalQuoteDeliveryViewOut = {
+  id: string
+  file_id: string
+  grant_id: string | null
+  original_filename: string
+  mime_type?: string
+  size_bytes?: number
+  folder_display?: string
+  status: string
+  can_respond: boolean
+  decline_reason: string | null
+  responded_at: string | null
+}
+
+export type PortalQuoteExchangeOut = {
+  session_token: string
+  contact_name: string
+  grants: PortalGrantSummaryOut[]
+  quote: PortalQuoteDeliveryViewOut
 }
 
 /** Response from ``POST /cases/{id}/files/email-drafts/m365`` (Microsoft Graph draft). */
@@ -1135,6 +1181,7 @@ export type PortalBrowseOut = {
   breadcrumb: string[]
   subfolders: string[]
   files: PortalFileOut[]
+  pending_approvals?: PortalQuoteDeliveryViewOut[]
 }
 
 export type CasePortalActivityOut = {
