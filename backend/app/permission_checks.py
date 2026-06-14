@@ -66,3 +66,11 @@ def user_may_approve_invoice(user: User, db: Session) -> bool:
         return True
     cat = _category(user, db)
     return bool(cat and cat.perm_approve_invoices)
+
+
+def user_may_access_accounts_workspace(user: User, db: Session) -> bool:
+    """Firm-wide accounts desk: admins and cashiers (ledger/invoice approvers)."""
+    if user_effective_admin(user, db):
+        return True
+    cat = _category(user, db)
+    return bool(cat and (cat.perm_approve_payments or cat.perm_approve_invoices))

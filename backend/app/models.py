@@ -83,6 +83,9 @@ class User(Base):
 
     ui_preferences: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
 
+    # Billing: charge-out rate for time / WIP (pence per hour); set in Admin → Users.
+    charge_rate_pence_per_hour: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
     # Next Outlook send (add-in OnMessageSend): matter chosen from Canary web before composing.
     outlook_pending_send_case_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("case.id", ondelete="SET NULL"), nullable=True
@@ -380,6 +383,9 @@ class FirmSettings(Base):
         default=LetterheadStyle.preprinted,
     )
     quote_letterhead_file_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("file.id", ondelete="SET NULL"), nullable=True
+    )
+    invoice_template_file_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("file.id", ondelete="SET NULL"), nullable=True
     )
     mandate_two_factor: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
@@ -1034,6 +1040,43 @@ class CaseTask(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
 
 
+class CaseTimeEntryStatus(str, enum.Enum):
+    unbilled = "unbilled"
+    billed = "billed"
+    written_off = "written_off"
+
+
+class CaseTimeEntry(Base):
+    """Fee-earner time logged against a matter (6-minute units); Phase 1: unbilled only."""
+
+    __tablename__ = "case_time_entry"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    case_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("case.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("user.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    created_by_user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("user.id", ondelete="RESTRICT"), nullable=False
+    )
+    work_date: Mapped[date] = mapped_column(Date, nullable=False)
+    duration_minutes: Mapped[int] = mapped_column(Integer, nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[CaseTimeEntryStatus] = mapped_column(
+        Enum(CaseTimeEntryStatus, name="case_time_entry_status"),
+        nullable=False,
+        default=CaseTimeEntryStatus.unbilled,
+    )
+    invoice_line_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("case_invoice_line.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    non_billable: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+
+
 # ---------------------------------------------------------------------------
 # Ledger (SAR 2019)
 # ---------------------------------------------------------------------------
@@ -1165,6 +1208,10 @@ class FinanceItem(Base):
     direction: Mapped[str] = mapped_column(String(10), nullable=False)  # "debit" | "credit"
     amount_pence: Mapped[int | None] = mapped_column(Integer, nullable=True)
     vat_pence: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    vat_treatment: Mapped[FeeScaleVatTreatment | None] = mapped_column(
+        Enum(FeeScaleVatTreatment, name="fee_scale_vat_treatment"),
+        nullable=True,
+    )
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
@@ -1348,6 +1395,9 @@ class CaseInvoice(Base):
     )
     approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     voided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    document_file_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("file.id", ondelete="SET NULL"), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
 
 

@@ -36,6 +36,7 @@ from app.routers import (
     case_portal,
     case_property,
     case_tasks,
+    case_time,
     cases,
     contact_portal,
     fee_scales,
@@ -73,7 +74,7 @@ async def lifespan(app: FastAPI):
     from app.matter_type_bootstrap import sync_matter_types_from_seed
     from app.merge_code_catalog_sync import sync_merge_code_catalog
     from app.permission_category_bootstrap import ensure_builtin_permission_categories
-    from app.precedent_bootstrap import apply_precedent_seed_if_empty
+    from app.precedent_bootstrap import apply_precedent_seed_if_empty, sync_missing_global_precedents_from_seed
 
     _log = logging.getLogger("uvicorn.error")
     db = SessionLocal()
@@ -92,6 +93,11 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         db.rollback()
         _log.warning("Precedent seed skipped: %s", e)
+    try:
+        sync_missing_global_precedents_from_seed(db)
+    except Exception as e:
+        db.rollback()
+        _log.warning("Global precedent sync skipped: %s", e)
     finally:
         db.close()
 
@@ -218,6 +224,7 @@ app.include_router(case_contacts.router)
 app.include_router(case_portal.router)
 app.include_router(case_notes.router)
 app.include_router(case_tasks.router)
+app.include_router(case_time.router)
 app.include_router(task_menu.router)
 app.include_router(case_ledger.router)
 app.include_router(case_invoices.router)

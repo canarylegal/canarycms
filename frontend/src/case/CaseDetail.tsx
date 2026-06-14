@@ -38,6 +38,7 @@ import { QuoteWizard } from '../QuoteWizard'
 import { CANARY_FOLLOW_UP_STANDARD_TASK_ID } from '../standardTasks'
 import { TextPromptModal } from '../TextPromptModal'
 import { LedgerPage } from '../LedgerPage'
+import { CaseTimePanel } from '../CaseTimePanel'
 import { openOnlyOfficeCaseEditor } from '../onlyofficeEditorWindow'
 import { caseHasRevokedUserAccess, formatCaseStatusLabel, type CaseWorkflowStatus } from '../types'
 import type {
@@ -520,6 +521,7 @@ export function CaseDetail({
   const [caseDocPanel, setCaseDocPanel] = useState<CaseDocPanel>(() =>
     openDocPanel === 'accounts' ? 'accounts' : 'documents',
   )
+  const [accountsSubTab, setAccountsSubTab] = useState<'ledger' | 'time'>('ledger')
   const [portalShareFolderPath, setPortalShareFolderPath] = useState<string | null>(null)
   const [portalQuoteSend, setPortalQuoteSend] = useState<{ fileId: string; fileName: string; folderPath: string } | null>(
     null,
@@ -2788,8 +2790,7 @@ export function CaseDetail({
                       caseId={caseId}
                       token={token}
                       embedded
-                      onClose={() => {
-                        setCaseDocPanel('documents')
+                      onSaved={() => {
                         void apiFetch<FinanceOut>(`/cases/${caseId}/finance`, { token })
                           .then(setFinancePreview)
                           .catch(() => {})
@@ -3014,14 +3015,39 @@ export function CaseDetail({
                   className="caseDocPanelInset caseDocPanelHost stack"
                   style={{ gap: 12, padding: '8px 12px 16px', minHeight: 0 }}
                 >
-                  <div className="row caseDocPanelBar" style={{ alignItems: 'center', gap: 8 }}>
+                  <div className="row caseDocPanelBar" style={{ alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                     <button type="button" className="btn" onClick={backToDocuments}>
                       ← Documents
                     </button>
+                    <div className="row" style={{ gap: 6 }}>
+                      <button
+                        type="button"
+                        className={`btn${accountsSubTab === 'ledger' ? ' primary' : ''}`}
+                        onClick={() => setAccountsSubTab('ledger')}
+                      >
+                        Ledger
+                      </button>
+                      <button
+                        type="button"
+                        className={`btn${accountsSubTab === 'time' ? ' primary' : ''}`}
+                        onClick={() => setAccountsSubTab('time')}
+                      >
+                        Time
+                      </button>
+                    </div>
                   </div>
                   <div className="caseDocLedgerEmbed">
                     <CaseDocPanelZoomFit>
-                      <LedgerPage caseId={caseId} token={token} />
+                      {accountsSubTab === 'ledger' ? (
+                        <LedgerPage caseId={caseId} token={token} />
+                      ) : (
+                        <CaseTimePanel
+                          caseId={caseId}
+                          token={token}
+                          isAdmin={Boolean(currentUser?.admin_console_access)}
+                          currentUserId={currentUser?.id ?? ''}
+                        />
+                      )}
                     </CaseDocPanelZoomFit>
                   </div>
                 </div>

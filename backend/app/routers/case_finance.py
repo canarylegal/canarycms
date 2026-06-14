@@ -1,19 +1,16 @@
 """Case finance endpoints."""
 from __future__ import annotations
 
-import os
-import tempfile
 import uuid
 from datetime import datetime, timezone
-from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
+from app.completion_statement_service import build_completion_statement_docx_bytes
 from app.db import get_db
 from app.deps import get_current_user, require_case_access
-from app.docx_util import write_completion_statement_docx
-from app.file_storage import FILES_ROOT, case_file_paths, ensure_files_root
+from app.file_storage import case_file_paths, ensure_files_root
 from app.finance_service import (
     apply_quote_to_finance,
     create_finance_category,
@@ -21,6 +18,7 @@ from app.finance_service import (
     delete_finance_category,
     delete_finance_item,
     get_finance,
+    sync_finance_from_quote,
     update_finance_category,
     update_finance_item,
 )
@@ -153,8 +151,9 @@ def generate_completion_statement(
     if case is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Case not found")
 
+    sync_finance_from_quote(case_id, db, overwrite_existing=False)
     finance = get_finance(case_id, db)
-    db.commit()  # commit any auto-initialisation
+    db.commit()  # commit sync + auto-initialisation
 
     ensure_files_root()
 
@@ -162,19 +161,7 @@ def generate_completion_statement(
     orig = f"Completion Statement — {today_str}.docx"
 
     file_id = uuid.uuid4()
-    fd, tmp_name = tempfile.mkstemp(suffix=".docx")
-    tmp = Path(tmp_name)
-    try:
-        os.close(fd)
-        write_completion_statement_docx(
-            tmp,
-            case_number=case.case_number,
-            client_name=case.client_name,
-            finance=finance,
-        )
-        src_bytes = tmp.read_bytes()
-    finally:
-        tmp.unlink(missing_ok=True)
+    src_bytes = build_completion_statement_docx_bytes(case, db)
 
     paths = case_file_paths(case_id=case_id, file_id=file_id, original_filename=orig)
     paths.abs_path.write_bytes(src_bytes)

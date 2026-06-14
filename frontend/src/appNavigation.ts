@@ -5,6 +5,7 @@ export type AppView =
   | 'case-menu'
   | 'contacts'
   | 'calendar'
+  | 'accounts'
   | 'reports'
   | 'user-settings'
   | 'admin-console'
@@ -26,6 +27,7 @@ const STATIC_ROUTES: Record<string, AppView> = {
   '/calendar': 'calendar',
   '/tasks': 'tasks',
   '/contacts': 'contacts',
+  '/accounts': 'accounts',
   '/reports': 'reports',
   '/settings': 'user-settings',
   '/admin': 'admin-console',
@@ -114,6 +116,9 @@ export function buildAppNavigationUrl(state: AppNavState): string {
     case 'contacts':
       pathname = '/contacts'
       break
+    case 'accounts':
+      pathname = '/accounts'
+      break
     case 'reports':
       pathname = '/reports'
       break
@@ -153,8 +158,17 @@ export function readBootNavigation(initialTasksCaseFilter?: string | null): AppN
   return nav
 }
 
-/** Strip admin navigation when the signed-in user lacks admin console access. */
-export function sanitizeAppNavigation(nav: AppNavState, canAccessAdmin: boolean): AppNavState {
-  if (canAccessAdmin || nav.view !== 'admin-console') return nav
-  return { ...DEFAULT_NAV }
+/** Strip admin / accounts navigation when the signed-in user lacks access. */
+export function sanitizeAppNavigation(
+  nav: AppNavState,
+  canAccessAdmin: boolean,
+  canAccessAccounts: boolean = false,
+): AppNavState {
+  if (!canAccessAdmin && nav.view === 'admin-console') {
+    return { ...DEFAULT_NAV }
+  }
+  if (!canAccessAccounts && nav.view === 'accounts') {
+    return { ...DEFAULT_NAV }
+  }
+  return nav
 }

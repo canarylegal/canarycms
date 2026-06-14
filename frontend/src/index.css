@@ -422,6 +422,172 @@ html.dark .topbar .btn:not(.primary):not(.danger) {
   align-self: flex-start;
 }
 
+.accountsPageShell {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.accountsSummaryGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.accountsSummaryCard {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px 14px;
+  background: var(--surface-elevated, rgba(255, 255, 255, 0.04));
+}
+
+.accountsSummaryLabel {
+  font-size: 13px;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+
+.accountsSummaryValue {
+  font-size: 22px;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.accountsSummaryValue--money {
+  font-size: 20px;
+}
+
+.accountsMatterLookup {
+  margin-bottom: 16px;
+}
+
+.accountsMatterLookupLabel {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: min(100%, 520px);
+}
+
+.accountsMatterLookupLabel input {
+  width: 100%;
+}
+
+.accountsMatterLookupHint {
+  font-size: 13px;
+  margin-top: 6px;
+  display: block;
+}
+
+.accountsMatterResults {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  max-width: min(100%, 720px);
+}
+
+.accountsMatterResults li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 12px;
+  border-top: 1px solid var(--border);
+}
+
+.accountsMatterResults li:first-child {
+  border-top: none;
+}
+
+.accountsMatterResultBtn {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  text-align: left;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  color: inherit;
+  min-width: 0;
+}
+
+.accountsMatterResultBtn span {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.accountsToolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.accountsTabSelect {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.accountsTabBtn {
+  border: 1px solid var(--border);
+  background: transparent;
+  color: inherit;
+  border-radius: 999px;
+  padding: 6px 14px;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.accountsTabBtn--active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-contrast, #fff);
+}
+
+.accountsPageBody {
+  padding-top: 8px;
+}
+
+.accountsSectionTitle {
+  margin: 20px 0 10px;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.accountsSectionTitle:first-child {
+  margin-top: 0;
+}
+
+.accountsRowActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.accountsExceptionBlock + .accountsExceptionBlock {
+  margin-top: 8px;
+}
+
+.accountsReconcileTotals {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 24px;
+}
+
+.accountsReconcileTotals div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
 .reportsToolbar {
   display: flex;
   flex-direction: column;
@@ -3853,6 +4019,18 @@ html.dark .ledgerBalanceBand--client {
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
   width: 110px;
+}
+
+.finVatCheckCell {
+  text-align: center;
+  white-space: nowrap;
+  width: 52px;
+}
+
+.finVatCheckCell input[type='checkbox'] {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
 }
 
 .finActCell {

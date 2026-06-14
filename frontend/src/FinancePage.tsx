@@ -6,6 +6,7 @@ import { useDialogs } from './DialogProvider'
 import { SingleSelectDropdown } from './SingleSelectDropdown'
 import type { CaseOut, FinanceCategoryOut, FinanceItemOut, FinanceOut } from './types'
 import { openOnlyOfficeCaseEditor } from './onlyofficeEditorWindow'
+import { vatPenceForItem } from './feeScaleVat'
 
 const FIN_DIRECTION_OPTIONS = [
   { value: 'debit', label: 'Debit' },
@@ -15,19 +16,33 @@ const FIN_DIRECTION_OPTIONS = [
 interface Props {
   caseId: string
   token: string
-  /** When provided (modal mode): renders Save and Close / Discard buttons in a header. */
-  onClose?: () => void
+  /** After a successful Save (embedded case panel). */
+  onSaved?: () => void
   /** In the case documents panel: show full-page totals and no duplicate modal title bar. */
   embedded?: boolean
 }
 
-type ItemDraft = { name: string; direction: 'debit' | 'credit'; amountStr: string; vatStr: string }
+type ItemDraft = {
+  name: string
+  direction: 'debit' | 'credit'
+  amountStr: string
+  vatStr: string
+  plusVat: boolean
+}
+
+function vatStrFromAmount(amountStr: string, plusVat: boolean, vatRateBps: number): string {
+  if (!plusVat || !amountStr.trim()) return ''
+  const amountPence = Math.round(parseFloat(amountStr) * 100)
+  if (Number.isNaN(amountPence)) return ''
+  const vat = vatPenceForItem(amountPence, 'plus_vat', vatRateBps)
+  return vat != null ? (vat / 100).toFixed(2) : ''
+}
 
 function pence(p: number): string {
   return `£${(p / 100).toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 }
 
-export function FinancePage({ caseId, token, onClose, embedded = false }: Props) {
+export function FinancePage({ caseId, token, onSaved, embedded = false }: Props) {
   const { askConfirm, alert } = useDialogs()
   const [finance, setFinance] = useState<FinanceOut | null>(null)
   const [drafts, setDrafts] = useState<Record<string, ItemDraft>>({})
@@ -47,16 +62,24 @@ export function FinancePage({ caseId, token, onClose, embedded = false }: Props)
   const addCatRef = useRef<HTMLInputElement>(null)
 
   function initDrafts(data: FinanceOut) {
+    const rate = data.vat_rate_bps ?? 2000
     const d: Record<string, ItemDraft> = {}
     const c: Record<string, string> = {}
     for (const cat of data.categories) {
       c[cat.id] = cat.name
       for (const item of cat.items) {
+        const plusVat = item.vat_treatment === 'plus_vat'
+        const amountStr = item.amount_pence != null ? (item.amount_pence / 100).toFixed(2) : ''
         d[item.id] = {
           name: item.name,
           direction: cat.credit_only ? 'credit' : item.direction,
-          amountStr: item.amount_pence != null ? (item.amount_pence / 100).toFixed(2) : '',
-          vatStr: item.vat_pence != null ? (item.vat_pence / 100).toFixed(2) : '',
+          amountStr,
+          plusVat,
+          vatStr: plusVat
+            ? vatStrFromAmount(amountStr, true, rate) || (item.vat_pence != null ? (item.vat_pence / 100).toFixed(2) : '')
+            : item.vat_pence != null
+              ? (item.vat_pence / 100).toFixed(2)
+              : '',
         }
       }
     }
@@ -72,6 +95,51 @@ export function FinancePage({ caseId, token, onClose, embedded = false }: Props)
     [finance],
   )
   const showApplyQuote = Boolean(finance?.has_quote_snapshot && financeUsesPreset)
+
+  const sortedCategories = useMemo(() => {
+    if (!finance) return []
+    return [...finance.categories].sort(
+      (a, b) => a.sort_order - b.sort_order || a.name.localeCompare(b.name),
+    )
+  }, [finance?.categories])
+
+  async function moveCategory(catId: string, delta: -1 | 1) {
+    if (!finance) return
+    const sorted = [...finance.categories].sort(
+      (a, b) => a.sort_order - b.sort_order || a.name.localeCompare(b.name),
+    )
+    const idx = sorted.findIndex((c) => c.id === catId)
+    const swapIdx = idx + delta
+    if (idx < 0 || swapIdx < 0 || swapIdx >= sorted.length) return
+
+    const reordered = [...sorted]
+    const [moved] = reordered.splice(idx, 1)
+    reordered.splice(swapIdx, 0, moved)
+    const updated = reordered.map((c, i) => ({ ...c, sort_order: i }))
+    const prevOrder = new Map(sorted.map((c) => [c.id, c.sort_order]))
+
+    setFinance((prev) => (prev ? { ...prev, categories: updated } : prev))
+    setBusy(true)
+    setError(null)
+    try {
+      await Promise.all(
+        updated
+          .filter((c) => prevOrder.get(c.id) !== c.sort_order)
+          .map((c) =>
+            apiFetch(`/cases/${caseId}/finance/categories/${c.id}`, {
+              token,
+              method: 'PATCH',
+              json: { sort_order: c.sort_order },
+            }),
+          ),
+      )
+    } catch (e) {
+      setError((e as ApiError).message ?? 'Failed to reorder categories')
+      await load()
+    } finally {
+      setBusy(false)
+    }
+  }
 
   async function load() {
     setBusy(true); setError(null)
@@ -116,7 +184,19 @@ export function FinancePage({ caseId, token, onClose, embedded = false }: Props)
   // ── Draft helpers ─────────────────────────────────────────────────────────
 
   function setDraft(itemId: string, patch: Partial<ItemDraft>) {
-    setDrafts((prev) => ({ ...prev, [itemId]: { ...prev[itemId], ...patch } }))
+    setDrafts((prev) => {
+      const current = prev[itemId]
+      if (!current) return prev
+      const next = { ...current, ...patch }
+      const rate = finance?.vat_rate_bps ?? 2000
+      if (next.plusVat && ('amountStr' in patch || 'plusVat' in patch)) {
+        next.vatStr = vatStrFromAmount(next.amountStr, true, rate)
+      }
+      if ('plusVat' in patch && !patch.plusVat && current.plusVat) {
+        next.vatStr = current.vatStr
+      }
+      return { ...prev, [itemId]: next }
+    })
   }
 
   function setCatDraft(catId: string, name: string) {
@@ -166,20 +246,34 @@ export function FinancePage({ caseId, token, onClose, embedded = false }: Props)
       for (const item of cat.items) {
         const d = drafts[item.id]
         if (!d) continue
-        const amtPence = d.amountStr.trim() ? Math.round(parseFloat(d.amountStr) * 100) : null
-        const vatPence = d.vatStr.trim() ? Math.round(parseFloat(d.vatStr) * 100) : null
+        const plusVat = !cat.credit_only && d.plusVat
+        const rate = finance.vat_rate_bps ?? 2000
+        const amtPence = d.amountStr.trim()
+          ? Math.round(parseFloat(d.amountStr) * 100)
+          : item.amount_pence
+        let vatPence: number | null
+        if (plusVat && amtPence != null && !Number.isNaN(amtPence)) {
+          vatPence = vatPenceForItem(amtPence, 'plus_vat', rate)
+        } else {
+          vatPence = d.vatStr.trim()
+            ? Math.round(parseFloat(d.vatStr) * 100)
+            : (item.vat_pence ?? null)
+        }
+        const treatment = plusVat ? 'plus_vat' : null
         const nameChanged = d.name !== item.name
         const dirChanged = !cat.credit_only && d.direction !== item.direction
         const amtChanged = amtPence !== item.amount_pence
         const vatChanged = vatPence !== (item.vat_pence ?? null)
-        if (nameChanged || dirChanged || amtChanged || vatChanged) {
+        const treatmentChanged = treatment !== (item.vat_treatment ?? null)
+        if (nameChanged || dirChanged || amtChanged || vatChanged || treatmentChanged) {
           await apiFetch(`/cases/${caseId}/finance/items/${item.id}`, {
             token, method: 'PATCH',
             json: {
               name: d.name || item.name,
               direction: cat.credit_only ? 'credit' : d.direction,
               amount_pence: amtPence,
-              vat_pence: vatPence,
+              vat_pence: plusVat ? null : vatPence,
+              vat_treatment: treatment,
             },
           })
         }
@@ -189,21 +283,25 @@ export function FinancePage({ caseId, token, onClose, embedded = false }: Props)
 
   // ── Save all ──────────────────────────────────────────────────────────────
 
-  async function saveAll() {
-    if (!finance) { onClose?.(); return }
-    setBusy(true); setError(null)
+  async function save() {
+    if (!finance) return
+    setBusy(true)
+    setError(null)
     try {
       await savePendingChanges()
-      onClose?.()
+      const data = await apiFetch<FinanceOut>(`/cases/${caseId}/finance`, { token })
+      setFinance(data)
+      initDrafts(data)
+      onSaved?.()
     } catch (e) {
       setError((e as ApiError).message ?? 'Failed to save')
+    } finally {
       setBusy(false)
     }
   }
 
   function discardChanges() {
     if (finance) initDrafts(finance)
-    onClose?.()
   }
 
   async function generateCompletionStatement() {
@@ -211,6 +309,7 @@ export function FinancePage({ caseId, token, onClose, embedded = false }: Props)
     setGenBusy(true); setError(null)
     try {
       await savePendingChanges()
+      await load()
       const res = await apiFetch<{ id: string }>(`/cases/${caseId}/finance/completion-statement`, {
         token, method: 'POST',
       })
@@ -293,16 +392,23 @@ export function FinancePage({ caseId, token, onClose, embedded = false }: Props)
   const allItems = finance?.categories.flatMap((c) => c.items) ?? []
   function itemLineTotal(i: FinanceItemOut): number {
     const d = drafts[i.id]
+    const rate = finance?.vat_rate_bps ?? 2000
+    const plusVat = d?.plusVat ?? i.vat_treatment === 'plus_vat'
     const amt = d
       ? d.amountStr.trim()
         ? Math.round(parseFloat(d.amountStr) * 100)
-        : null
+        : (i.amount_pence ?? null)
       : i.amount_pence
-    const vat = d
-      ? d.vatStr.trim()
-        ? Math.round(parseFloat(d.vatStr) * 100)
-        : null
-      : i.vat_pence ?? null
+    let vat: number | null
+    if (plusVat && amt != null && !Number.isNaN(amt)) {
+      vat = vatPenceForItem(amt, 'plus_vat', rate)
+    } else {
+      vat = d
+        ? d.vatStr.trim()
+          ? Math.round(parseFloat(d.vatStr) * 100)
+          : (i.vat_pence ?? null)
+        : i.vat_pence ?? null
+    }
     if (amt == null || isNaN(amt)) return 0
     const v = vat != null && !isNaN(vat) ? vat : 0
     return amt + v
@@ -318,8 +424,8 @@ export function FinancePage({ caseId, token, onClose, embedded = false }: Props)
   }, 0)
   const balance = grandCr - grandDr
 
-  const showModalTitleBar = Boolean(onClose && !embedded)
-  const showTotals = !onClose || embedded
+  const showModalTitleBar = Boolean(onSaved && !embedded)
+  const showTotals = !onSaved || embedded
 
   return (
     <div className="finShell">
@@ -335,15 +441,15 @@ export function FinancePage({ caseId, token, onClose, embedded = false }: Props)
               className="btn"
               style={{ background: 'var(--primary)', color: '#fff', borderColor: 'var(--primary)' }}
               disabled={busy}
-              onClick={() => void saveAll()}
+              onClick={() => void save()}
             >
-              Save and close
+              Save
             </button>
           </div>
         </div>
       ) : null}
 
-      {embedded && onClose ? (
+      {embedded && onSaved ? (
         <div className="row" style={{ justifyContent: 'flex-end', flexWrap: 'wrap', gap: 8, marginBottom: 4 }}>
           <button type="button" className="btn" disabled={busy} onClick={discardChanges}>
             Discard changes
@@ -353,9 +459,9 @@ export function FinancePage({ caseId, token, onClose, embedded = false }: Props)
             className="btn"
             style={{ background: 'var(--primary)', color: '#fff', borderColor: 'var(--primary)' }}
             disabled={busy}
-            onClick={() => void saveAll()}
+            onClick={() => void save()}
           >
-            Save and close
+            Save
           </button>
         </div>
       ) : null}
@@ -426,7 +532,7 @@ export function FinancePage({ caseId, token, onClose, embedded = false }: Props)
         <div className="empty">No finance items yet. Add a category to get started.</div>
       )}
 
-      {finance && finance.categories.map((cat: FinanceCategoryOut) => (
+      {finance && sortedCategories.map((cat: FinanceCategoryOut, catIndex) => (
           <div key={cat.id} className="finCategoryBlock">
             <div className="finCategoryHead">
               <input
@@ -437,15 +543,35 @@ export function FinancePage({ caseId, token, onClose, embedded = false }: Props)
                 disabled={busy}
                 aria-label="Category name"
               />
-              <button
-                type="button"
-                className="btn finCatDeleteBtn"
-                disabled={busy}
-                onClick={() => void deleteCategory(cat.id)}
-                title="Delete category"
-              >
-                ✕
-              </button>
+              <div className="row" style={{ gap: 4 }}>
+                <button
+                  type="button"
+                  className="btn finRowBtn"
+                  title="Move category up"
+                  disabled={busy || catIndex === 0}
+                  onClick={() => void moveCategory(cat.id, -1)}
+                >
+                  ↑
+                </button>
+                <button
+                  type="button"
+                  className="btn finRowBtn"
+                  title="Move category down"
+                  disabled={busy || catIndex === sortedCategories.length - 1}
+                  onClick={() => void moveCategory(cat.id, 1)}
+                >
+                  ↓
+                </button>
+                <button
+                  type="button"
+                  className="btn finCatDeleteBtn"
+                  disabled={busy}
+                  onClick={() => void deleteCategory(cat.id)}
+                  title="Delete category"
+                >
+                  ✕
+                </button>
+              </div>
             </div>
 
             <table className="finTable">
@@ -454,6 +580,7 @@ export function FinancePage({ caseId, token, onClose, embedded = false }: Props)
                   <th style={{ width: 100 }}>Type</th>
                   <th>Description</th>
                   <th className="finAmtCell">Amount</th>
+                  <th className="finVatCheckCell">+VAT</th>
                   <th className="finAmtCell">VAT</th>
                   <th className="finActCell" />
                 </tr>
@@ -465,7 +592,9 @@ export function FinancePage({ caseId, token, onClose, embedded = false }: Props)
                     direction: item.direction,
                     amountStr: '',
                     vatStr: '',
+                    plusVat: item.vat_treatment === 'plus_vat',
                   }
+                  const plusVat = d.plusVat
                   return (
                     <tr key={item.id} className="finRow">
                       <td>
@@ -506,6 +635,18 @@ export function FinancePage({ caseId, token, onClose, embedded = false }: Props)
                           disabled={busy}
                         />
                       </td>
+                      <td className="finVatCheckCell">
+                        {!cat.credit_only && item.direction !== 'credit' && (
+                          <input
+                            type="checkbox"
+                            checked={plusVat}
+                            onChange={(e) => setDraft(item.id, { plusVat: e.target.checked })}
+                            disabled={busy}
+                            title="Plus VAT — calculate VAT from amount using Admin → Billing default rate"
+                            aria-label={`Plus VAT for ${item.name}`}
+                          />
+                        )}
+                      </td>
                       <td className="finAmtCell">
                         <input
                           className="input"
@@ -516,7 +657,8 @@ export function FinancePage({ caseId, token, onClose, embedded = false }: Props)
                           style={{ width: 110, textAlign: 'right' }}
                           value={d.vatStr}
                           onChange={(e) => setDraft(item.id, { vatStr: e.target.value })}
-                          disabled={busy || cat.credit_only}
+                          disabled={busy || cat.credit_only || plusVat}
+                          readOnly={plusVat}
                         />
                       </td>
                       <td className="finActCell">
@@ -534,7 +676,7 @@ export function FinancePage({ caseId, token, onClose, embedded = false }: Props)
                   )
                 })}
                 {cat.items.length === 0 && (
-                  <tr><td colSpan={5} className="muted" style={{ padding: '8px 10px', fontStyle: 'italic' }}>No items.</td></tr>
+                  <tr><td colSpan={6} className="muted" style={{ padding: '8px 10px', fontStyle: 'italic' }}>No items.</td></tr>
                 )}
               </tbody>
             </table>

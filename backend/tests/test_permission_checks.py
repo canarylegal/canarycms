@@ -12,6 +12,7 @@ from app.models import User, UserPermissionCategory, UserRole
 from app.permission_checks import (
     assert_may_be_fee_earner,
     assert_may_post_ledger,
+    user_may_access_accounts_workspace,
     user_may_be_fee_earner,
 )
 from app.schemas import LedgerPostCreate
@@ -80,3 +81,27 @@ def test_built_in_admin_may_be_fee_earner_without_category() -> None:
     user = User(id=uuid.uuid4(), role=UserRole.admin, permission_category_id=None)
     db = MagicMock()
     assert user_may_be_fee_earner(user, db) is True
+
+
+def test_cashier_may_access_accounts_workspace() -> None:
+    cat_id = uuid.uuid4()
+    user = User(id=uuid.uuid4(), role=UserRole.user, permission_category_id=cat_id)
+    cat = UserPermissionCategory(
+        id=cat_id,
+        name="Cashier",
+        perm_fee_earner=False,
+        perm_approve_payments=True,
+        perm_approve_invoices=True,
+    )
+    db = MagicMock()
+    db.get.return_value = cat
+    assert user_may_access_accounts_workspace(user, db) is True
+
+
+def test_fee_earner_without_approve_cannot_access_accounts_workspace() -> None:
+    cat_id = uuid.uuid4()
+    user = User(id=uuid.uuid4(), role=UserRole.user, permission_category_id=cat_id)
+    cat = UserPermissionCategory(id=cat_id, name="Fee earner", perm_fee_earner=True, perm_approve_payments=False)
+    db = MagicMock()
+    db.get.return_value = cat
+    assert user_may_access_accounts_workspace(user, db) is False

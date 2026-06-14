@@ -87,6 +87,16 @@ def firm_quote_letterhead_file_paths(*, file_id: uuid.UUID, original_filename: s
     return StoredFilePaths(abs_path=abs_path, rel_path=str(rel), folder_path="")
 
 
+def firm_invoice_template_file_paths(*, file_id: uuid.UUID, original_filename: str) -> StoredFilePaths:
+    safe_name = Path(original_filename).name
+    rel = Path("firm") / "invoice_template" / f"{file_id}__{safe_name}"
+    abs_path = (FILES_ROOT / rel).resolve()
+    if not str(abs_path).startswith(str(FILES_ROOT)):
+        raise RuntimeError("Resolved path escaped FILES_ROOT")
+    abs_path.parent.mkdir(parents=True, exist_ok=True)
+    return StoredFilePaths(abs_path=abs_path, rel_path=str(rel), folder_path="")
+
+
 def case_file_paths(*, case_id: uuid.UUID, file_id: uuid.UUID, original_filename: str, folder_path: str = "") -> StoredFilePaths:
     # Keep user-provided filename only as a suffix; never trust it as a path.
     safe_name = Path(original_filename).name

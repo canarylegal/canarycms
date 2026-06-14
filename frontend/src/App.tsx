@@ -15,6 +15,7 @@ import { QuoteSourcesPanel } from './QuoteSourcesPanel'
 import { QuoteConvertModal } from './QuoteConvertModal'
 import { QuoteWizard } from './QuoteWizard'
 import { ReportsPage } from './ReportsPage'
+import { AccountsPage } from './AccountsPage'
 import { TaskCreateModal } from './TaskCreateModal'
 import { TasksTable } from './TasksTable'
 import {
@@ -78,7 +79,7 @@ import { SearchInput } from './SearchInput'
 import { CaseSourceField, resolveCaseSourcePayload, useCaseSources } from './CaseSourceField'
 import { copyTextToClipboard } from './copyToClipboard'
 import { canaryDocumentTitle } from './tabTitle'
-import { caseHasRevokedUserAccess, formatCaseStatusLabel, userCanAccessAdminConsole, userIsMasterRecovery } from './types'
+import { caseHasRevokedUserAccess, formatCaseStatusLabel, userCanAccessAccountsWorkspace, userCanAccessAdminConsole, userIsCashierAccountsHome, userIsMasterRecovery } from './types'
 import type {
   CaseOut,
   CasePropertyPayload,
@@ -103,6 +104,7 @@ type View =
   | 'case-menu'
   | 'contacts'
   | 'calendar'
+  | 'accounts'
   | 'reports'
   | 'user-settings'
   | 'admin-console'
@@ -125,6 +127,8 @@ function canaryViewTitleSegment(view: View, caseDetail: CaseOut | null): string 
       return 'Contacts'
     case 'calendar':
       return 'Calendar'
+    case 'accounts':
+      return 'Accounts'
     case 'reports':
       return 'Reports'
     case 'user-settings':
@@ -803,6 +807,15 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
   const canAdminConsole = userCanAccessAdminConsole(auth.me)
   const canAdminConsoleRef = useRef(canAdminConsole)
   canAdminConsoleRef.current = canAdminConsole
+  const canAccessAccounts = userCanAccessAccountsWorkspace(auth.me)
+  const canAccessAccountsRef = useRef(canAccessAccounts)
+  canAccessAccountsRef.current = canAccessAccounts
+  const [reportsInitialTab, setReportsInitialTab] = useState<
+    'client_account_reconcile' | null
+  >(null)
+  const [cashierMainMenuExplicit, setCashierMainMenuExplicit] = useState(false)
+  const cashierMainMenuExplicitRef = useRef(cashierMainMenuExplicit)
+  cashierMainMenuExplicitRef.current = cashierMainMenuExplicit
 
   const token = auth.token ?? undefined
   const [taskMenuSearch, setTaskMenuSearch] = useState('')
@@ -844,11 +857,21 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
       if (next === 'admin-console' && !canAdminConsoleRef.current) {
         next = 'main-menu'
       }
+      if (next === 'accounts' && !canAccessAccountsRef.current) {
+        next = 'main-menu'
+      }
       setViewState(next)
       syncNavFromState({ view: next, caseId: next === 'case-menu' ? selectedCaseIdRef.current : null })
     },
     [syncNavFromState],
   )
+
+  const goMainMenu = useCallback(() => {
+    if (userIsCashierAccountsHome(auth.me)) {
+      setCashierMainMenuExplicit(true)
+    }
+    setView('main-menu')
+  }, [auth.me, setView])
 
   const { prefs: uiPrefs, setPreference: setUiPreference, setPreferenceDebounced: setUiPreferenceDebounced } =
     useUserUiPreferences(auth.me, auth.token)
@@ -1030,6 +1053,21 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
   }, [refreshTaskMenu])
 
   useEffect(() => {
+    if (!auth.token) setCashierMainMenuExplicit(false)
+  }, [auth.token])
+
+  useEffect(() => {
+    if (auth.loading || !auth.me) return
+    if (!userIsCashierAccountsHome(auth.me)) return
+    if (cashierMainMenuExplicitRef.current) return
+    if (viewRef.current !== 'main-menu') return
+    const path = window.location.pathname.replace(/\/+$/, '') || '/'
+    if (path !== '/' && path !== '/main') return
+    setViewState('accounts')
+    syncNavFromState({ view: 'accounts', caseId: null })
+  }, [auth.loading, auth.me, syncNavFromState])
+
+  useEffect(() => {
     if (!auth.me || canAdminConsole) return
     if (viewRef.current !== 'admin-console') return
     setViewState('main-menu')
@@ -1037,9 +1075,16 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
   }, [auth.me, canAdminConsole, syncNavFromState])
 
   useEffect(() => {
+    if (!auth.me || canAccessAccounts) return
+    if (viewRef.current !== 'accounts') return
+    setViewState('main-menu')
+    syncNavFromState({ view: 'main-menu', caseId: null })
+  }, [auth.me, canAccessAccounts, syncNavFromState])
+
+  useEffect(() => {
     function onPopState() {
       const parsed = parseAppNavigation(window.location)
-      const nav = sanitizeAppNavigation(parsed, canAdminConsoleRef.current)
+      const nav = sanitizeAppNavigation(parsed, canAdminConsoleRef.current, canAccessAccountsRef.current)
       if (nav.view !== parsed.view) {
         syncAppNavigationUrl(nav, 'replace')
       }
@@ -1213,8 +1258,30 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
       return <CalendarPage token={token} me={auth.me} onOpenSettings={() => setView('user-settings')} />
     if (view === 'contacts') return <Contacts token={token} me={auth.me} />
 
+    if (view === 'accounts') {
+      if (!canAccessAccounts) return null
+      return (
+        <AccountsPage
+          token={token}
+          me={auth.me}
+          onOpenCase={openCaseView}
+          onOpenReportsReconcile={() => {
+            setReportsInitialTab('client_account_reconcile')
+            setView('reports')
+          }}
+        />
+      )
+    }
+
     if (view === 'reports') {
-      return <ReportsPage token={token} me={auth.me} />
+      return (
+        <ReportsPage
+          token={token}
+          me={auth.me}
+          initialTab={reportsInitialTab ?? undefined}
+          onInitialTabConsumed={() => setReportsInitialTab(null)}
+        />
+      )
     }
 
     if (view === 'case-menu' && selectedCaseId) {
@@ -1573,7 +1640,7 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
             <button
               type="button"
               className={`navBtn ${view === 'main-menu' || view === 'case-menu' ? 'active' : ''}`}
-              onClick={() => setView('main-menu')}
+              onClick={goMainMenu}
             >
               Main Menu
             </button>
@@ -1600,6 +1667,15 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
             <button type="button" className={`navBtn ${view === 'contacts' ? 'active' : ''}`} onClick={() => setView('contacts')}>
               Contacts
             </button>
+            {canAccessAccounts ? (
+              <button
+                type="button"
+                className={`navBtn ${view === 'accounts' ? 'active' : ''}`}
+                onClick={() => setView('accounts')}
+              >
+                Accounts
+              </button>
+            ) : null}
             <button type="button" className={`navBtn ${view === 'reports' ? 'active' : ''}`} onClick={() => setView('reports')}>
               Reports
             </button>
@@ -1632,7 +1708,7 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
         className={
           view === 'case-menu'
             ? 'main main--caseView'
-            : view === 'main-menu' || view === 'quotes' || view === 'contacts' || view === 'tasks' || view === 'reports'
+            : view === 'main-menu' || view === 'quotes' || view === 'contacts' || view === 'tasks' || view === 'accounts' || view === 'reports'
               ? 'main main--mainMenu'
               : 'main'
         }

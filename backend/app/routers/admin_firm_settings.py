@@ -15,7 +15,12 @@ from app.audit import log_event
 from app.auth_principal import AuthPrincipal
 from app.db import get_db
 from app.deps import require_firm_admin, require_recovery_operator
-from app.file_storage import FILES_ROOT, ensure_files_root, firm_letterhead_file_paths, firm_quote_letterhead_file_paths
+from app.file_storage import (
+    FILES_ROOT,
+    ensure_files_root,
+    firm_letterhead_file_paths,
+    firm_quote_letterhead_file_paths,
+)
 from app.models import File as DbFile
 from app.models import FileCategory, FirmSettings, LetterheadStyle, User
 from app.schemas import FirmSettingsOut, FirmSettingsUpdate

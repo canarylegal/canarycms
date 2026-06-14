@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "exported_at": "2026-05-10T19:40:04.791160+00:00",
+  "exported_at": "2026-06-14T14:47:00+00:00",
   "categories": [],
   "precedents": [
     {
@@ -12,6 +12,26 @@
       "mime_type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
       "size_bytes": 24053,
       "bundle_file": "bundle/g0_blank_letter.docx"
+    },
+    {
+      "name": "Invoice template",
+      "reference": "INVOICE_TEMPLATE",
+      "kind": "document",
+      "global": true,
+      "original_filename": "Universal-invoice-template.docx",
+      "mime_type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "size_bytes": 37251,
+      "bundle_file": "bundle/g1_invoice_template.docx"
+    },
+    {
+      "name": "Completion statement template",
+      "reference": "COMPLETION_STATEMENT",
+      "kind": "document",
+      "global": true,
+      "original_filename": "Universal-completion-statement.docx",
+      "mime_type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "size_bytes": 37237,
+      "bundle_file": "bundle/g2_completion_statement.docx"
     }
   ]
 }

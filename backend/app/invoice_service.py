@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.ledger_audit import log_invoice_approve, log_invoice_create, log_invoice_void, log_ledger_post
 from app.ledger_service import approve_ledger_pair, delete_ledger_pair_unapproved, get_ledger, post_transaction
+from app.case_time_service import mark_time_entries_billed, release_billed_time_entries_for_invoice, resolve_unbilled_time_entries_for_billing
 from app.models import Case, CaseInvoice, CaseInvoiceLine, InvoiceSeq, LedgerEntry, User
 from app.permission_checks import user_may_approve_invoice
 from app.schemas import CaseInvoiceCreate, CaseInvoiceLineOut, CaseInvoiceOut, CaseInvoicesOut, LedgerPostCreate
@@ -69,6 +70,7 @@ def list_case_invoices(case_id: uuid.UUID, db: Session) -> CaseInvoicesOut:
                 approved_at=inv.approved_at,
                 voided_at=inv.voided_at,
                 created_at=inv.created_at,
+                document_file_id=inv.document_file_id,
                 lines=[
                     CaseInvoiceLineOut(
                         id=ln.id,
@@ -86,8 +88,8 @@ def list_case_invoices(case_id: uuid.UUID, db: Session) -> CaseInvoicesOut:
 
 
 def create_case_invoice(case_id: uuid.UUID, payload: CaseInvoiceCreate, user: User, db: Session) -> CaseInvoiceOut:
-    if not payload.lines:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="At least one invoice line is required.")
+    if not payload.lines and not payload.time_entry_ids:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="At least one invoice line or time entry is required.")
     case = db.get(Case, case_id)
     if not case:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Case not found")
@@ -97,8 +99,11 @@ def create_case_invoice(case_id: uuid.UUID, payload: CaseInvoiceCreate, user: Us
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Credit user not found.")
     payee_display = (credit_u.display_name or credit_u.email or "").strip()
 
+    time_pairs = resolve_unbilled_time_entries_for_billing(case_id, payload.time_entry_ids, db)
+
     total = 0
     line_rows: list[CaseInvoiceLine] = []
+    time_bill_pairs: list[tuple] = []
     now = datetime.utcnow()
     inv_id = uuid.uuid4()
     inv_num = _next_invoice_number(db)
@@ -115,6 +120,21 @@ def create_case_invoice(case_id: uuid.UUID, payload: CaseInvoiceCreate, user: Us
         )
         total += spec.amount_pence + spec.tax_pence
         line_rows.append(ln)
+
+    for tp in time_pairs:
+        spec = tp.spec
+        ln = CaseInvoiceLine(
+            id=uuid.uuid4(),
+            invoice_id=inv_id,
+            line_type=spec.line_type,
+            description=spec.description.strip(),
+            amount_pence=spec.amount_pence,
+            tax_pence=spec.tax_pence,
+            credit_user_id=spec.credit_user_id,
+        )
+        total += spec.amount_pence + spec.tax_pence
+        line_rows.append(ln)
+        time_bill_pairs.append((tp.entry, ln))
 
     if total <= 0:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Invoice total must be positive.")
@@ -155,6 +175,9 @@ def create_case_invoice(case_id: uuid.UUID, payload: CaseInvoiceCreate, user: Us
     for ln in line_rows:
         db.add(ln)
     db.flush()
+    if time_bill_pairs:
+        mark_time_entries_billed(db, time_bill_pairs)
+        db.flush()
     inv_out = list_case_invoices(case_id, db).invoices[0]
     post_payload = LedgerPostCreate(
         description=f"Invoice {inv_num} (pending approval)",
@@ -222,6 +245,11 @@ def approve_case_invoice(case_id: uuid.UUID, invoice_id: uuid.UUID, user: User, 
         total_pence=int(inv.total_pence),
         pair_id=inv.ledger_pair_id,
     )
+    case = db.get(Case, case_id)
+    if case is not None:
+        from app.invoice_document_service import save_invoice_document_to_case
+
+        save_invoice_document_to_case(inv=inv, case=case, actor_user_id=user.id, db=db)
 
 
 def void_case_invoice(case_id: uuid.UUID, invoice_id: uuid.UUID, user: User, db: Session) -> None:
@@ -240,6 +268,7 @@ def void_case_invoice(case_id: uuid.UUID, invoice_id: uuid.UUID, user: User, db:
     if inv.status == INV_PENDING:
         if inv.ledger_pair_id:
             delete_ledger_pair_unapproved(case_id, inv.ledger_pair_id, db)
+        release_billed_time_entries_for_invoice(invoice_id, db)
         inv.status = INV_VOIDED
         inv.voided_at = now
         db.add(inv)
@@ -287,6 +316,7 @@ def void_case_invoice(case_id: uuid.UUID, invoice_id: uuid.UUID, user: User, db:
     )
     approve_ledger_pair(case_id, rev_id, db)
 
+    release_billed_time_entries_for_invoice(invoice_id, db)
     inv.status = INV_VOIDED
     inv.voided_at = now
     inv.reversal_pair_id = rev_id
@@ -319,3 +349,44 @@ def void_case_invoice(case_id: uuid.UUID, invoice_id: uuid.UUID, user: User, db:
         was_pending=False,
         reversal_pair_id=rev_id,
     )
+
+
+def list_recent_approved_invoices(
+    fee_earner_ids: list[uuid.UUID],
+    db: Session,
+    *,
+    limit: int = 50,
+) -> list[dict]:
+    """Firm-wide recently approved invoices for the accounts desk."""
+    rows = (
+        db.execute(
+            select(CaseInvoice, Case)
+            .join(Case, Case.id == CaseInvoice.case_id)
+            .where(
+                Case.fee_earner_user_id.in_(fee_earner_ids),
+                CaseInvoice.status == INV_APPROVED,
+            )
+            .order_by(CaseInvoice.approved_at.desc().nullslast(), CaseInvoice.created_at.desc())
+            .limit(limit)
+        )
+        .all()
+    )
+    out: list[dict] = []
+    for inv, case in rows:
+        fe = db.get(User, case.fee_earner_user_id)
+        fe_name = (fe.display_name or fe.email or "").strip() if fe else ""
+        out.append(
+            {
+                "invoice_id": str(inv.id),
+                "case_id": str(case.id),
+                "case_number": case.case_number,
+                "client_name": case.client_name or "",
+                "matter_description": case.title,
+                "fee_earner_name": fe_name,
+                "invoice_number": inv.invoice_number,
+                "approved_at": inv.approved_at.isoformat() if inv.approved_at else None,
+                "total_pence": int(inv.total_pence),
+                "document_file_id": str(inv.document_file_id) if inv.document_file_id else None,
+            }
+        )
+    return out

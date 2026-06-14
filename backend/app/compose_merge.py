@@ -6,6 +6,7 @@ import logging
 import os
 import tempfile
 import uuid
+from datetime import date
 from pathlib import Path
 
 from fastapi import HTTPException, status
@@ -15,15 +16,23 @@ from sqlalchemy.orm import Session
 from app.docx_util import (
     apply_digital_letterhead_headers_footers,
     build_merge_fields,
+    completion_line_merge_fields,
     ensure_docx_proofing_language_en_gb_bytes,
+    invoice_line_merge_fields,
     is_invalid_ooxml_merge_exception,
     merge_precedent_codes,
     splice_precedent_into_blank_letter,
+    strip_empty_completion_table_rows,
     strip_precedent_body_marker,
     validate_docx_package_bytes,
     write_blank_docx,
 )
-from app.precedent_constants import BLANK_LETTER_PRECEDENT_REFERENCE
+from app.precedent_constants import (
+    BLANK_LETTER_PRECEDENT_REFERENCE,
+    COMPLETION_STATEMENT_PRECEDENT_REFERENCE,
+    INVOICE_TEMPLATE_PRECEDENT_REFERENCE,
+    SYSTEM_DOCUMENT_TEMPLATE_REFERENCES,
+)
 from app.file_storage import FILES_ROOT
 from app.matter_contact_constants import CLIENT_SLUG, LAWYERS_SLUG, normalize_matter_contact_type_slug
 from app.models import Case as CaseModel
@@ -276,13 +285,20 @@ def merge_compose_docx_bytes(
                 if idx0 is not None and idx0 < 4:
                     selected_slot = idx0 + 1
 
-        should_merge = merge_all or body.case_contact_id is not None or body.global_contact_id is not None
+        should_merge = (
+            merge_all
+            or body.case_contact_id is not None
+            or body.global_contact_id is not None
+            or prec.reference in SYSTEM_DOCUMENT_TEMPLATE_REFERENCES
+        )
         if should_merge:
+            statement_date = date.today()
             fields = build_merge_fields(
                 case_row,
                 fee_earner_name=fee_earner_name,
                 fee_earner_job_title=fee_earner_job_title,
                 fee_earner_initials=fee_earner_initials,
+                merge_date=statement_date if prec.reference == COMPLETION_STATEMENT_PRECEDENT_REFERENCE else None,
                 merge_all_clients=merge_all,
                 ordered_client_contacts=oc,
                 selected_contact=None if merge_all else contact,
@@ -291,6 +307,26 @@ def merge_compose_docx_bytes(
                 compose_selected_contact=contact,
                 firm=firm_row,
             )
+            if prec.reference == COMPLETION_STATEMENT_PRECEDENT_REFERENCE:
+                from app.finance_service import get_finance
+
+                fields.update(
+                    completion_line_merge_fields(
+                        statement_date=statement_date,
+                        finance=get_finance(case_id, db),
+                    )
+                )
+            elif prec.reference == INVOICE_TEMPLATE_PRECEDENT_REFERENCE:
+                bill_to = (case_row.client_name or "").strip() if case_row else ""
+                fields.update(
+                    invoice_line_merge_fields(
+                        invoice_number="",
+                        invoice_date=statement_date,
+                        bill_to_name=bill_to,
+                        lines=[],
+                        total_pence=0,
+                    )
+                )
             template_has_org_addr = b"[ORG_AND_ADDRESS_BLOCK]" in src_bytes
             try:
                 src_bytes = merge_precedent_codes(
@@ -315,6 +351,8 @@ def merge_compose_docx_bytes(
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                     detail=f"Precedent merge failed: {exc}",
                 ) from exc
+            if prec.reference == COMPLETION_STATEMENT_PRECEDENT_REFERENCE:
+                src_bytes = strip_empty_completion_table_rows(src_bytes)
             if template_has_org_addr and b"[ORG_AND_ADDRESS_BLOCK]" in src_bytes:
                 log.error(
                     "compose merge left literal [ORG_AND_ADDRESS_BLOCK] precedent_id=%s path=%s",

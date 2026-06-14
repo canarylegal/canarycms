@@ -14,6 +14,8 @@ from app.accountant_pack_service import build_accountant_pack, preview_accountan
 from app.db import get_db
 from app.deps import get_current_user
 from app.models import CaseStatus, User
+from app.invoice_service import list_recent_approved_invoices
+from app.case_time_service import report_time_recorded, report_wip
 from app.reports_service import (
     enforce_fee_earner_ids,
     list_fee_earner_pick_users,
@@ -40,6 +42,8 @@ from app.schemas import (
     FeeEarnerPickOut,
     LedgerActivityReportIn,
     ReportFeeEarnerIdsIn,
+    TimeRecordedReportIn,
+    WipReportIn,
 )
 
 router = APIRouter(prefix="/reports", tags=["reports"])
@@ -209,6 +213,223 @@ def post_billing_report(
         ]
     )
     return _wb_response(wb, "canary-report-billing.xlsx")
+
+
+@router.post("/wip")
+def post_wip_report(
+    body: WipReportIn,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    format: Annotated[ReportFormat, Query()] = "json",
+):
+    ids = enforce_fee_earner_ids(user, db, body.fee_earner_user_ids)
+    by_fee_earner, entries, totals = report_wip(ids, db, as_of=body.as_of)
+    if format == "json":
+        return {
+            "by_fee_earner": [
+                {
+                    "user_id": str(r.user_id),
+                    "display_name": r.display_name,
+                    "duration_minutes": r.duration_minutes,
+                    "duration_hours": round(r.duration_minutes / 60, 1),
+                    "value_pence": r.value_pence,
+                    "entry_count": r.entry_count,
+                }
+                for r in by_fee_earner
+            ],
+            "entries": [
+                {
+                    "entry_id": str(r.entry_id),
+                    "case_id": str(r.case_id),
+                    "case_number": r.case_number,
+                    "client_name": r.client_name,
+                    "user_id": str(r.user_id),
+                    "fee_earner_name": r.fee_earner_name,
+                    "work_date": r.work_date.isoformat(),
+                    "duration_minutes": r.duration_minutes,
+                    "description": r.description,
+                    "value_pence": r.value_pence,
+                    "age_days": r.age_days,
+                    "age_bucket": r.age_bucket,
+                }
+                for r in entries
+            ],
+            "totals": totals,
+        }
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "WIP summary"
+    ws.append(["Fee earner", "Hours", "Value (£)", "Entries"])
+    for r in by_fee_earner:
+        ws.append(
+            [
+                r.display_name,
+                round(r.duration_minutes / 60, 1),
+                float(pence_to_pounds_str(r.value_pence)),
+                r.entry_count,
+            ]
+        )
+    ws.append(
+        [
+            "TOTAL",
+            round(totals["duration_minutes"] / 60, 1),
+            float(pence_to_pounds_str(totals["value_pence"])),
+            totals["entry_count"],
+        ]
+    )
+    ws2 = wb.create_sheet("WIP detail")
+    ws2.append(
+        [
+            "Reference",
+            "Client",
+            "Fee earner",
+            "Work date",
+            "Hours",
+            "Description",
+            "Value (£)",
+            "Age (days)",
+            "Age bucket",
+        ]
+    )
+    for r in entries:
+        ws2.append(
+            [
+                r.case_number,
+                r.client_name or "",
+                r.fee_earner_name,
+                r.work_date.isoformat(),
+                round(r.duration_minutes / 60, 1),
+                r.description,
+                float(pence_to_pounds_str(r.value_pence or 0)) if r.value_pence is not None else "",
+                r.age_days,
+                r.age_bucket,
+            ]
+        )
+    return _wb_response(wb, "canary-report-wip.xlsx")
+
+
+@router.post("/time-recorded")
+def post_time_recorded_report(
+    body: TimeRecordedReportIn,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    format: Annotated[ReportFormat, Query()] = "json",
+):
+    ids = enforce_fee_earner_ids(user, db, body.fee_earner_user_ids)
+    by_fee_earner, entries, totals = report_time_recorded(
+        ids, db, date_from=body.date_from, date_to=body.date_to
+    )
+    if format == "json":
+        return {
+            "by_fee_earner": [
+                {
+                    "user_id": str(r.user_id),
+                    "display_name": r.display_name,
+                    "duration_minutes": r.duration_minutes,
+                    "duration_hours": round(r.duration_minutes / 60, 1),
+                    "billable_minutes": r.billable_minutes,
+                    "billable_hours": round(r.billable_minutes / 60, 1),
+                    "nil_rate_minutes": r.nil_rate_minutes,
+                    "nil_rate_hours": round(r.nil_rate_minutes / 60, 1),
+                    "value_pence": r.value_pence,
+                    "entry_count": r.entry_count,
+                    "unbilled_minutes": r.unbilled_minutes,
+                    "billed_minutes": r.billed_minutes,
+                    "written_off_minutes": r.written_off_minutes,
+                }
+                for r in by_fee_earner
+            ],
+            "entries": [
+                {
+                    "entry_id": str(r.entry_id),
+                    "case_id": str(r.case_id),
+                    "case_number": r.case_number,
+                    "client_name": r.client_name,
+                    "user_id": str(r.user_id),
+                    "fee_earner_name": r.fee_earner_name,
+                    "work_date": r.work_date.isoformat(),
+                    "duration_minutes": r.duration_minutes,
+                    "description": r.description,
+                    "non_billable": r.non_billable,
+                    "status": r.status,
+                    "value_pence": r.value_pence,
+                }
+                for r in entries
+            ],
+            "totals": totals,
+        }
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Summary"
+    ws.append(
+        [
+            "Fee earner",
+            "Total hours",
+            "Billable hours",
+            "Nil-rate hours",
+            "Value (£)",
+            "Entries",
+            "Unbilled hrs",
+            "Billed hrs",
+            "Written-off hrs",
+        ]
+    )
+    for r in by_fee_earner:
+        ws.append(
+            [
+                r.display_name,
+                round(r.duration_minutes / 60, 1),
+                round(r.billable_minutes / 60, 1),
+                round(r.nil_rate_minutes / 60, 1),
+                float(pence_to_pounds_str(r.value_pence)),
+                r.entry_count,
+                round(r.unbilled_minutes / 60, 1),
+                round(r.billed_minutes / 60, 1),
+                round(r.written_off_minutes / 60, 1),
+            ]
+        )
+    ws.append(
+        [
+            "TOTAL",
+            round(totals["duration_minutes"] / 60, 1),
+            round(totals["billable_minutes"] / 60, 1),
+            round(totals["nil_rate_minutes"] / 60, 1),
+            float(pence_to_pounds_str(totals["value_pence"])),
+            totals["entry_count"],
+            round(totals["unbilled_minutes"] / 60, 1),
+            round(totals["billed_minutes"] / 60, 1),
+            round(totals["written_off_minutes"] / 60, 1),
+        ]
+    )
+    ws2 = wb.create_sheet("Detail")
+    ws2.append(
+        [
+            "Reference",
+            "Client",
+            "Fee earner",
+            "Work date",
+            "Hours",
+            "Description",
+            "Nil rate",
+            "Status",
+            "Value (£)",
+        ]
+    )
+    for r in entries:
+        ws2.append(
+            [
+                r.case_number,
+                r.client_name or "",
+                r.fee_earner_name,
+                r.work_date.isoformat(),
+                round(r.duration_minutes / 60, 1),
+                r.description,
+                "Yes" if r.non_billable else "No",
+                r.status,
+                float(pence_to_pounds_str(r.value_pence or 0)) if r.value_pence is not None else "",
+            ]
+        )
+    return _wb_response(wb, "canary-report-time-recorded.xlsx")
 
 
 def _parse_case_statuses(raw: list[str] | None) -> list[CaseStatus] | None:
@@ -803,3 +1024,13 @@ def post_accountant_pack(
         media_type="application/zip",
         headers={"Content-Disposition": f'attachment; filename="{result.filename}"'},
     )
+
+
+@router.post("/recent-approved-invoices")
+def post_recent_approved_invoices(
+    body: ReportFeeEarnerIdsIn,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    ids = enforce_fee_earner_ids(user, db, body.fee_earner_user_ids)
+    return {"rows": list_recent_approved_invoices(ids, db)}
