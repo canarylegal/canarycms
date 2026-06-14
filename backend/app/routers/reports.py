@@ -693,7 +693,7 @@ def _serialize_exceptions(report) -> dict:
             "office_balance_pence": r.office_balance_pence,
         }
 
-    def ledger_row(r):
+    def pending_ledger_row(r):
         return {
             "pair_id": str(r.pair_id),
             "case_id": str(r.case_id),
@@ -707,11 +707,29 @@ def _serialize_exceptions(report) -> dict:
             "amount_pence": r.amount_pence,
             "client_direction": r.client_direction,
             "office_direction": r.office_direction,
-            "is_approved": getattr(r, "is_approved", False),
+            "is_anticipated": r.is_anticipated,
+            "anticipated_for_date": r.anticipated_for_date.isoformat() if r.anticipated_for_date else None,
+        }
+
+    def large_posting_row(r):
+        return {
+            "pair_id": str(r.pair_id),
+            "case_id": str(r.case_id),
+            "case_number": r.case_number,
+            "client_name": r.client_name or "",
+            "matter_description": r.matter_description,
+            "fee_earner_name": r.fee_earner_name,
+            "posted_at": r.posted_at.isoformat(),
+            "posted_by_name": r.posted_by_name,
+            "description": r.description,
+            "amount_pence": r.amount_pence,
+            "client_direction": r.client_direction,
+            "office_direction": r.office_direction,
+            "is_approved": r.is_approved,
         }
 
     return {
-        "pending_ledger_approvals": [ledger_row(r) for r in report.pending_ledger_approvals],
+        "pending_ledger_approvals": [pending_ledger_row(r) for r in report.pending_ledger_approvals],
         "pending_invoices": [
             {
                 "invoice_id": str(r.invoice_id),
@@ -728,7 +746,7 @@ def _serialize_exceptions(report) -> dict:
         ],
         "client_balance_closed_archived": [bal_row(r) for r in report.client_balance_closed_archived],
         "negative_client_balance": [bal_row(r) for r in report.negative_client_balance],
-        "large_postings": [ledger_row(r) for r in report.large_postings],
+        "large_postings": [large_posting_row(r) for r in report.large_postings],
     }
 
 

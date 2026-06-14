@@ -2,17 +2,28 @@
 from __future__ import annotations
 
 import uuid
+from dataclasses import dataclass
 from datetime import datetime
 
 from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.admin_access import user_effective_admin
 from app.ledger_party import resolve_ledger_party
 from app.models import LedgerAccount, LedgerAccountType, LedgerDirection, LedgerEntry, User
-from app.permission_checks import assert_may_post_ledger
+from app.permission_checks import (
+    assert_may_approve_anticipated_ledger,
+    assert_may_post_ledger,
+    user_may_approve_ledger,
+)
 from app.schemas import LedgerAccountSummary, LedgerEntryOut, LedgerOut, LedgerPostCreate
+
+
+@dataclass(frozen=True)
+class LedgerPostResult:
+    pair_id: uuid.UUID
+    is_approved: bool
+    is_anticipated: bool
 
 
 def _get_or_create_accounts(case_id: uuid.UUID, db: Session) -> dict[str, LedgerAccount]:
@@ -64,16 +75,15 @@ def post_transaction(
     db: Session,
     *,
     force_unapproved: bool = False,
-) -> uuid.UUID:
+) -> LedgerPostResult:
     """
     Create a double-entry posting.
 
-    At least one of client_direction / office_direction must be supplied.
-    For a single-account entry (rare but allowed for office-only disbursements),
-    only the relevant direction need be set.
+    Anticipated postings may be created by any user with matter access; they stay
+    unapproved and off balances until a user with post rights on each leg approves.
 
-    SAR no-deficit rule: client account balance must never go below zero after
-    any posting. (Office account may go into overdraft to represent unpaid bills.)
+    Actual postings require client/office post permission on each affected leg and
+    take effect immediately (approved).
     """
     if not payload.client_direction and not payload.office_direction:
         raise HTTPException(
@@ -81,14 +91,24 @@ def post_transaction(
             detail="At least one of client_direction or office_direction is required.",
         )
 
-    assert_may_post_ledger(user, payload, db)
+    if force_unapproved:
+        is_anticipated = False
+        is_approved = False
+    elif payload.anticipated:
+        is_anticipated = True
+        is_approved = False
+    else:
+        assert_may_post_ledger(user, payload, db)
+        is_anticipated = False
+        is_approved = True
+
     party = resolve_ledger_party(case_id, payload, db)
 
     accounts = _get_or_create_accounts(case_id, db)
     pair_id = uuid.uuid4()
     now = datetime.utcnow()
+    anticipated_for_date = payload.anticipated_for_date if is_anticipated else None
     legs: list[LedgerEntry] = []
-    is_approved = False if force_unapproved else user_effective_admin(user, db)
 
     if payload.client_direction:
         legs.append(
@@ -106,6 +126,8 @@ def post_transaction(
                 posted_by_user_id=user.id,
                 posted_at=now,
                 is_approved=is_approved,
+                is_anticipated=is_anticipated,
+                anticipated_for_date=anticipated_for_date,
             )
         )
 
@@ -125,6 +147,8 @@ def post_transaction(
                 posted_by_user_id=user.id,
                 posted_at=now,
                 is_approved=is_approved,
+                is_anticipated=is_anticipated,
+                anticipated_for_date=anticipated_for_date,
             )
         )
 
@@ -145,7 +169,7 @@ def post_transaction(
             ),
         )
 
-    return pair_id
+    return LedgerPostResult(pair_id=pair_id, is_approved=is_approved, is_anticipated=is_anticipated)
 
 
 def delete_ledger_pair_unapproved(case_id: uuid.UUID, pair_id: uuid.UUID, db: Session) -> None:
@@ -213,6 +237,8 @@ def get_ledger(case_id: uuid.UUID, db: Session) -> LedgerOut:
                 posted_by_user_id=e.posted_by_user_id,
                 posted_at=e.posted_at,
                 is_approved=e.is_approved,
+                is_anticipated=e.is_anticipated,
+                anticipated_for_date=e.anticipated_for_date,
             )
         )
 
@@ -226,8 +252,8 @@ def get_ledger(case_id: uuid.UUID, db: Session) -> LedgerOut:
     )
 
 
-def approve_ledger_pair(case_id: uuid.UUID, pair_id: uuid.UUID, db: Session) -> None:
-    """Mark both legs of a posting approved; re-validates SAR client balance."""
+def approve_ledger_pair(case_id: uuid.UUID, pair_id: uuid.UUID, user: User, db: Session) -> None:
+    """Approve a pending posting; anticipated rows become actual and affect balances."""
     accounts = _get_or_create_accounts(case_id, db)
     aid = {accounts["client"].id, accounts["office"].id}
     legs = (
@@ -244,8 +270,34 @@ def approve_ledger_pair(case_id: uuid.UUID, pair_id: uuid.UUID, db: Session) -> 
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Posting not found")
     if any(e.account_id not in aid for e in legs):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid posting")
+    if any(e.is_approved for e in legs):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Posting is already approved")
+
+    client_direction = None
+    office_direction = None
+    for e in legs:
+        if e.account_id == accounts["client"].id:
+            client_direction = e.direction.value
+        elif e.account_id == accounts["office"].id:
+            office_direction = e.direction.value
+
+    if any(e.is_anticipated for e in legs):
+        assert_may_approve_anticipated_ledger(
+            user,
+            client_direction=client_direction,
+            office_direction=office_direction,
+            db=db,
+        )
+    elif not user_may_approve_ledger(user, db):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have permission to approve ledger postings.",
+        )
+
     for e in legs:
         e.is_approved = True
+        e.is_anticipated = False
+        e.anticipated_for_date = None
     db.flush()
 
     # Invoice drafts (and similar) store this suffix until approved; strip when approving from the ledger.

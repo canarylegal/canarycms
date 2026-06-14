@@ -5,9 +5,9 @@ from __future__ import annotations
 import uuid
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
-CalendarView = Literal["dayGridMonth", "timeGridWeek", "timeGridDay", "listWeek"]
+CalendarView = Literal["dayGridMonth", "timeGridWeek", "timeGridDay", "listYear"]
 TaskLayout = Literal["list", "kanban"]
 TaskSortKey = Literal["reference", "client", "matter", "task", "date", "assigned", "priority"]
 MainMenuSortKey = Literal["reference", "client", "matter", "feeEarner", "status", "created"]
@@ -15,7 +15,7 @@ ContactsSortKey = Literal["name", "type", "email", "phone"]
 CaseStatusFilter = Literal["", "open", "closed", "archived", "quote", "post_completion"]
 SortDir = Literal["asc", "desc"]
 
-_CALENDAR_VIEWS = frozenset({"dayGridMonth", "timeGridWeek", "timeGridDay", "listWeek"})
+_CALENDAR_VIEWS = frozenset({"dayGridMonth", "timeGridWeek", "timeGridDay", "listYear", "listWeek"})
 _TASK_LAYOUTS = frozenset({"list", "kanban"})
 _TASK_SORT_KEYS = frozenset({"reference", "client", "matter", "task", "date", "assigned", "priority"})
 _MAIN_MENU_SORT_KEYS = frozenset({"reference", "client", "matter", "feeEarner", "status", "created"})
@@ -68,6 +68,13 @@ class UserUiPreferencesOut(BaseModel):
     tasks_menu_column_widths: list[int] = Field(default_factory=list)
     contacts_column_widths: list[int] = Field(default_factory=list)
 
+    @field_validator("calendar_view", "case_calendar_view", mode="before")
+    @classmethod
+    def _migrate_list_week(cls, v: Any) -> Any:
+        if v == "listWeek":
+            return "listYear"
+        return v
+
 
 class UserUiPreferencesPatch(BaseModel):
     calendar_view: CalendarView | None = None
@@ -102,6 +109,13 @@ def _pick_str(raw: Any, allowed: frozenset[str], default: str) -> str:
     if isinstance(raw, str) and raw in allowed:
         return raw
     return default
+
+
+def _pick_calendar_view(raw: Any, default: CalendarView) -> CalendarView:
+    picked = _pick_str(raw, _CALENDAR_VIEWS, default)
+    if picked == "listWeek":
+        return "listYear"
+    return picked  # type: ignore[return-value]
 
 
 def _pick_search(raw: Any) -> str:
@@ -224,8 +238,8 @@ def _legacy_main_menu_case_statuses(data: dict[str, Any]) -> list[str]:
 def user_ui_preferences_out(stored: dict[str, Any] | None) -> UserUiPreferencesOut:
     data = stored if isinstance(stored, dict) else {}
     return UserUiPreferencesOut(
-        calendar_view=_pick_str(data.get("calendar_view"), _CALENDAR_VIEWS, "dayGridMonth"),  # type: ignore[arg-type]
-        case_calendar_view=_pick_str(data.get("case_calendar_view"), _CALENDAR_VIEWS, "dayGridMonth"),  # type: ignore[arg-type]
+        calendar_view=_pick_calendar_view(data.get("calendar_view"), "dayGridMonth"),
+        case_calendar_view=_pick_calendar_view(data.get("case_calendar_view"), "dayGridMonth"),
         tasks_menu_layout=_pick_str(data.get("tasks_menu_layout"), _TASK_LAYOUTS, "list"),  # type: ignore[arg-type]
         case_tasks_layout=_pick_str(data.get("case_tasks_layout"), _TASK_LAYOUTS, "list"),  # type: ignore[arg-type]
         tasks_menu_sort_key=_pick_str(data.get("tasks_menu_sort_key"), _TASK_SORT_KEYS, "priority"),  # type: ignore[arg-type]

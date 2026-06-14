@@ -20,6 +20,7 @@ import { MatterSearchPicker } from './MatterSearchPicker'
 import { SearchInput } from './SearchInput'
 import { SingleSelectDropdown } from './SingleSelectDropdown'
 import { useExclusiveDropdownOpen } from './useExclusiveDropdownOpen'
+import { CALENDAR_LIST_YEAR_VIEW, calendarListEventContent, calendarNoEventsContent } from './calendarListView'
 import { useUserUiPreferences, type CalendarView } from './useUserUiPreferences'
 import type {
   CalendarCategoryOut,
@@ -443,6 +444,7 @@ export function CalendarPage({
   const { prefs, setPreference } = useUserUiPreferences(me, token)
   const [calendarPixelHeight, setCalendarPixelHeight] = useState(480)
   const [needCaldav, setNeedCaldav] = useState(false)
+  const [eventsLoading, setEventsLoading] = useState(true)
   const [banner, setBanner] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [confirmDeleteEventOpen, setConfirmDeleteEventOpen] = useState(false)
@@ -655,40 +657,35 @@ export function CalendarPage({
 
   const onEventDidMount = useCallback((info: EventMountArg) => {
     const apiAll = info.event.extendedProps?.api_all_day === true
+    const row = info.el.closest('tr.fc-list-event') as HTMLElement | null
+
     if (apiAll) {
       info.el.setAttribute('data-canary-allday', '1')
       info.el.querySelectorAll('.fc-event-time').forEach((node) => {
         ;(node as HTMLElement).style.setProperty('display', 'none', 'important')
       })
-      const listRow = info.el.closest('tr.fc-list-event')
-      if (listRow) {
-        listRow.setAttribute('data-canary-allday', '1')
-        listRow.querySelectorAll('td.fc-list-event-time').forEach((td) => {
+      if (row) {
+        row.setAttribute('data-canary-allday', '1')
+        row.querySelectorAll('td.fc-list-event-time').forEach((td) => {
           ;(td as HTMLElement).style.setProperty('display', 'none', 'important')
         })
       }
-    } else if (!info.event.allDay) {
-      const listRow = info.el.closest('tr.fc-list-event')
-      const td = listRow?.querySelector('td.fc-list-event-time')
-      if (td) {
-        const t = td.textContent?.trim() ?? ''
-        if (t && !t.startsWith('(') && /\d/.test(t) && !/^all-?day$/i.test(t)) {
-          td.textContent = `(${t})`
-        }
-      }
     }
-    const row = info.el.closest('tr.fc-list-event')
+
     if (!row) return
     const bg = info.event.backgroundColor
     if (!bg) return
     const fg = info.event.textColor
-    const el = row as HTMLElement
-    el.style.backgroundColor = bg
-    if (fg) el.style.color = fg
-    row.querySelectorAll('td').forEach((td) => {
-      ;(td as HTMLElement).style.backgroundColor = 'transparent'
-    })
+    const chip = row.querySelector(
+      'td.fc-list-event-title a, td.fc-list-event-title .canary-list-event-title',
+    ) as HTMLElement | null
+    if (chip) {
+      chip.style.backgroundColor = bg
+      if (fg) chip.style.color = fg
+    }
   }, [])
+
+  const noEventsContent = useMemo(() => calendarNoEventsContent(eventsLoading), [eventsLoading])
 
   const fetchEvents = useCallback(
     async (
@@ -1190,10 +1187,13 @@ export function CalendarPage({
           ref={calRef}
           plugins={[dayGridPlugin, timeGridPlugin, listPlugin, interactionPlugin]}
           initialView={prefs.calendar_view}
+          views={{
+            listYear: CALENDAR_LIST_YEAR_VIEW,
+          }}
           headerToolbar={{
             left: 'prev,next today',
             center: 'title',
-            right: 'dayGridMonth,timeGridWeek,timeGridDay,listWeek',
+            right: 'dayGridMonth,timeGridWeek,timeGridDay,listYear',
           }}
           datesSet={(arg) => {
             const viewType = arg.view.type as CalendarView
@@ -1206,7 +1206,11 @@ export function CalendarPage({
           dayMaxEvents
           weekends
           events={fetchEvents}
+          loading={setEventsLoading}
+          noEventsText="No events in this range"
+          noEventsContent={noEventsContent}
           eventDataTransform={needCaldav ? undefined : transformEventFromApi}
+          eventContent={needCaldav ? undefined : calendarListEventContent}
           eventDidMount={needCaldav ? undefined : onEventDidMount}
           select={needCaldav ? undefined : onSelect}
           eventClick={needCaldav ? undefined : onEventClick}

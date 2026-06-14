@@ -20,6 +20,13 @@ import type {
   LedgerOut,
   LedgerPostCreate,
 } from './types'
+import {
+  canApproveLedgerPair,
+  canPostActualLedger,
+  hasLedgerPostPrivilege,
+  isLedgerEntryAnticipated,
+  isLedgerEntryPending,
+} from './ledgerApproval'
 
 interface Props {
   caseId: string
@@ -44,14 +51,22 @@ function formatDate(iso: string): string {
   })
 }
 
-type AccountFilter = 'all' | 'client' | 'office'
-
-/** Pending if API says so, or legacy rows missing the flag but still carrying the invoice draft suffix. */
-function isLedgerEntryPending(e: LedgerEntryOut): boolean {
-  if (e.is_approved === true) return false
-  if (e.is_approved === false) return true
-  return (e.description ?? '').toLowerCase().includes('pending approval')
+function formatIsoDate(isoDate: string): string {
+  const [y, m, d] = isoDate.split('-').map(Number)
+  return new Date(y, m - 1, d).toLocaleDateString('en-GB', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+  })
 }
+
+function formatLedgerEntryDate(e: LedgerEntryOut): string {
+  if (e.is_anticipated && e.anticipated_for_date) return formatIsoDate(e.anticipated_for_date)
+  return formatDate(e.posted_at)
+}
+
+type AccountFilter = 'all' | 'client' | 'office'
+type PostKind = 'actual' | 'anticipated'
 
 /** After approval, strip draft suffix for display if the server still returned an older description once. */
 function ledgerDescriptionDisplay(e: LedgerEntryOut): string {
@@ -112,6 +127,8 @@ export function LedgerPage({ caseId, token }: Props) {
   const [amountStr, setAmountStr] = useState('')
   const [postError, setPostError] = useState<string | null>(null)
   const [postBusy, setPostBusy] = useState(false)
+  const [postKind, setPostKind] = useState<PostKind>('anticipated')
+  const [anticipatedForDate, setAnticipatedForDate] = useState('')
   const [ledgerPerm, setLedgerPerm] = useState<LedgerPermissionsOut | null>(null)
   const [invoicesData, setInvoicesData] = useState<CaseInvoicesOut | null>(null)
   const [invoiceModalOpen, setInvoiceModalOpen] = useState(false)
@@ -207,9 +224,21 @@ export function LedgerPage({ caseId, token }: Props) {
       .catch(() => {})
   }, [caseId, token])
 
+  const hasPostPrivilege = useMemo(() => hasLedgerPostPrivilege(ledgerPerm), [ledgerPerm])
+
+  const canPostActual = useMemo(
+    () => canPostActualLedger(form, ledgerPerm),
+    [form.client_direction, form.office_direction, ledgerPerm],
+  )
+
+  const postingAnticipated = !hasPostPrivilege || postKind === 'anticipated'
+
   useEffect(() => {
-    if (postOpen) setTimeout(() => descRef.current?.focus(), 50)
-  }, [postOpen])
+    if (!postOpen) return
+    setPostKind(hasPostPrivilege ? 'actual' : 'anticipated')
+    setAnticipatedForDate('')
+    setTimeout(() => descRef.current?.focus(), 50)
+  }, [postOpen, hasPostPrivilege])
 
   useEffect(() => {
     if (!invoiceModalOpen) return
@@ -247,6 +276,8 @@ export function LedgerPage({ caseId, token }: Props) {
     setForm(EMPTY_POST)
     setAmountStr('')
     setPostError(null)
+    setPostKind('anticipated')
+    setAnticipatedForDate('')
     setContactMode('')
     setContactPickId('')
     setContactOther('')
@@ -324,6 +355,14 @@ export function LedgerPage({ caseId, token }: Props) {
       setPostError('Description is required.')
       return
     }
+    if (postingAnticipated && !anticipatedForDate) {
+      setPostError('Select the anticipated payment date.')
+      return
+    }
+    if (!postingAnticipated && !canPostActual) {
+      setPostError('You cannot post actual payments for the selected account directions.')
+      return
+    }
 
     const payload: LedgerPostCreate = {
       ...form,
@@ -333,6 +372,8 @@ export function LedgerPage({ caseId, token }: Props) {
       contact_label: resolveContactLabel(),
       case_contact_id: contactMode === 'matter' ? contactPickId : null,
       contact_id: contactMode === 'global' ? contactPickId : null,
+      anticipated: postingAnticipated,
+      anticipated_for_date: postingAnticipated ? anticipatedForDate : null,
     }
     setPostBusy(true)
     try {
@@ -382,7 +423,7 @@ export function LedgerPage({ caseId, token }: Props) {
     }
   }
 
-  const canApprove = ledgerPerm?.can_approve_ledger ?? false
+  const canApprove = ledgerPerm != null
   const canApproveInvoices = ledgerPerm?.can_approve_invoices ?? false
 
   async function approvePair(pairId: string) {
@@ -764,16 +805,27 @@ export function LedgerPage({ caseId, token }: Props) {
                 const cc =
                   e.account_type === 'client' && e.direction === 'credit' ? pence(e.amount_pence) : ''
                 const pending = isLedgerEntryPending(e)
-                const showApprove = canApprove && pending && approveRep.get(e.pair_id) === e.id
+                const anticipated = isLedgerEntryAnticipated(e)
+                const rowClass = anticipated
+                  ? 'ledgerRow--anticipated'
+                  : pending
+                    ? 'ledgerRow--pending'
+                    : undefined
+                const showApprove =
+                  canApprove &&
+                  pending &&
+                  approveRep.get(e.pair_id) === e.id &&
+                  canApproveLedgerPair(e.pair_id, entries, ledgerPerm)
                 const rc = runningById.get(e.id)
                 return (
-                  <tr key={e.id} className={pending ? 'ledgerRow--pending' : undefined}>
-                    <td className="ledgerDateCell ledgerColDate">{formatDate(e.posted_at)}</td>
+                  <tr key={e.id} className={rowClass}>
+                    <td className="ledgerDateCell ledgerColDate">{formatLedgerEntryDate(e)}</td>
                     <td className="ledgerPartyCell ledgerColParty">{e.contact_label ?? <span className="muted">N/A</span>}</td>
                     <td className="ledgerColDesc">
                       <span className={pending ? 'ledgerPendingDesc' : undefined}>
                         {ledgerDescriptionDisplay(e)}
-                        {pending ? <span className="muted"> (pending)</span> : null}
+                        {anticipated ? <span className="muted"> (anticipated)</span> : null}
+                        {pending && !anticipated ? <span className="muted"> (pending)</span> : null}
                       </span>
                       {showApprove ? (
                         <button
@@ -1092,6 +1144,54 @@ export function LedgerPage({ caseId, token }: Props) {
                 Not affected
               </label>
             </fieldset>
+
+            {hasPostPrivilege ? (
+              <fieldset className="ledgerPostFieldset">
+                <legend>Posting type</legend>
+                <label className="ledgerRadioLabel">
+                  <input
+                    type="radio"
+                    name="postKind"
+                    value="actual"
+                    checked={postKind === 'actual'}
+                    disabled={!canPostActual}
+                    onChange={() => setPostKind('actual')}
+                  />
+                  Actual payment
+                </label>
+                <label className="ledgerRadioLabel">
+                  <input
+                    type="radio"
+                    name="postKind"
+                    value="anticipated"
+                    checked={postKind === 'anticipated'}
+                    onChange={() => setPostKind('anticipated')}
+                  />
+                  Anticipated payment
+                </label>
+                <p className="muted" style={{ margin: '6px 0 0', fontSize: '0.92em' }}>
+                  Anticipated items stay off balances until someone with client/office post rights approves them.
+                </p>
+              </fieldset>
+            ) : (
+              <p className="muted" style={{ margin: '0 0 8px', fontSize: '0.92em' }}>
+                This will be recorded as an anticipated payment pending approval.
+              </p>
+            )}
+
+            {postingAnticipated ? (
+              <label className="ledgerPostLabel">
+                <span>
+                  Anticipated payment date <span aria-hidden>*</span>
+                </span>
+                <input
+                  type="date"
+                  value={anticipatedForDate}
+                  onChange={(e) => setAnticipatedForDate(e.target.value)}
+                  required
+                />
+              </label>
+            ) : null}
 
             {postError && <div className="error">{postError}</div>}
 

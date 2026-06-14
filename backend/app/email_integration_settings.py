@@ -91,7 +91,13 @@ def user_public_email_fields(db: Session) -> dict[str, Any]:
 
 
 def build_user_public(user: User, db: Session) -> UserPublic:
-    base = UserPublic.model_validate(user, from_attributes=True).model_dump()
+    prefs = user_ui_preferences_out(user.ui_preferences)
+    saved_prefs = user.ui_preferences
+    user.ui_preferences = prefs.model_dump()
+    try:
+        base = UserPublic.model_validate(user, from_attributes=True).model_dump()
+    finally:
+        user.ui_preferences = saved_prefs
     base["admin_console_access"] = user_effective_admin(user, db)
     base["accounts_workspace_access"] = user_may_access_accounts_workspace(user, db)
     base["organization_requires_second_factor"] = firm_mandates_second_factor(db)

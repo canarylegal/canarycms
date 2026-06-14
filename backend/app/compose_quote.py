@@ -266,11 +266,7 @@ def _build_merge_fields_for_quote(
             except (ValueError, TypeError):
                 continue
             row_cc = db.get(CaseContact, uid)
-            if (
-                row_cc
-                and row_cc.case_id == case_id
-                and normalize_matter_contact_type_slug(row_cc.matter_contact_type) == CLIENT_SLUG
-            ):
+            if row_cc and row_cc.case_id == case_id and row_cc.id != lr.id:
                 loaded.append(row_cc)
         lawyer_slot_list.append((lr, loaded))
     while len(lawyer_slot_list) < 4:

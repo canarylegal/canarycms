@@ -1366,57 +1366,58 @@ function AdminPrecedents({ token }: { token: string }) {
         </div>
         {mergePanelOpen ? (
           <div className="stack" style={{ gap: 10 }}>
-            <div className="row" style={{ gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-              <label className="field" style={{ flex: '1 1 220px', marginBottom: 0 }}>
-                <span className="muted" style={{ fontSize: 12 }}>
-                  Filter
-                </span>
+            <div className="mergeCatalogToolbar">
+              <span className="mergeCatalogToolbarLabel muted">Filter</span>
+              <div className="mergeCatalogToolbarControls">
                 <input
+                  className="mergeCatalogToolbarInput"
                   value={mergeFilter}
                   onChange={(e) => setMergeFilter(e.target.value)}
                   placeholder="Code or description…"
                   disabled={mergeLoading || mergeSaving}
                 />
-              </label>
-              <button
-                type="button"
-                className="btn primary"
-                disabled={mergeLoading || mergeSaving || mergeRows.length === 0}
-                onClick={() => void saveMergeCatalog()}
-              >
-                Save descriptions
-              </button>
-              <button
-                type="button"
-                className="btn"
-                disabled={mergeLoading || mergeSaving}
-                onClick={() => void exportMergeCatalog()}
-              >
-                Export Excel
-              </button>
-              <label className="btn" style={{ cursor: mergeSaving ? 'not-allowed' : 'pointer' }}>
-                Import Excel…
-                <input
-                  key={mergeImportKey}
-                  type="file"
-                  accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                  disabled={mergeSaving}
-                  style={{ display: 'none' }}
-                  onChange={(ev) => {
-                    const f = ev.target.files?.[0]
-                    ev.target.value = ''
-                    if (f) void importMergeCatalogFile(f)
-                  }}
-                />
-              </label>
-              <button
-                type="button"
-                className="btn"
-                disabled={mergeLoading}
-                onClick={() => void loadMergeCatalog()}
-              >
-                Reload
-              </button>
+                <div className="mergeCatalogToolbarActions">
+                  <button
+                    type="button"
+                    className="btn primary"
+                    disabled={mergeLoading || mergeSaving || mergeRows.length === 0}
+                    onClick={() => void saveMergeCatalog()}
+                  >
+                    Save descriptions
+                  </button>
+                  <button
+                    type="button"
+                    className="btn"
+                    disabled={mergeLoading || mergeSaving}
+                    onClick={() => void exportMergeCatalog()}
+                  >
+                    Export Excel
+                  </button>
+                  <label className="btn" style={{ cursor: mergeSaving ? 'not-allowed' : 'pointer' }}>
+                    Import Excel…
+                    <input
+                      key={mergeImportKey}
+                      type="file"
+                      accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                      disabled={mergeSaving}
+                      style={{ display: 'none' }}
+                      onChange={(ev) => {
+                        const f = ev.target.files?.[0]
+                        ev.target.value = ''
+                        if (f) void importMergeCatalogFile(f)
+                      }}
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    className="btn"
+                    disabled={mergeLoading}
+                    onClick={() => void loadMergeCatalog()}
+                  >
+                    Reload
+                  </button>
+                </div>
+              </div>
             </div>
             {mergeMsg ? <div className="muted" style={{ fontSize: 13 }}>{mergeMsg}</div> : null}
             {mergeLoading ? (

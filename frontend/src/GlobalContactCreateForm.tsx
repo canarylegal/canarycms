@@ -128,8 +128,11 @@ export function contactOutToFormFields(c: ContactOut): ContactFormFieldsModel {
   }
 }
 
-export function contactFieldsModelToPayload(s: ContactFormFieldsModel): GlobalContactCreatePayload | null {
-  const name = resolveContactNameFromParts(
+export function contactFieldsModelToPayload(
+  s: ContactFormFieldsModel,
+  options?: { fallbackName?: string },
+): GlobalContactCreatePayload | null {
+  const name = resolveContactNameWithFallback(
     s.type,
     {
       title: s.title,
@@ -138,6 +141,7 @@ export function contactFieldsModelToPayload(s: ContactFormFieldsModel): GlobalCo
       last_name: s.lastName,
     },
     { company_name: s.companyName, trading_name: s.tradingName },
+    options?.fallbackName ?? '',
   )
   if (!name) return null
   const isPerson = s.type === 'person'

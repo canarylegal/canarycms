@@ -139,7 +139,7 @@ def create_case_invoice(case_id: uuid.UUID, payload: CaseInvoiceCreate, user: Us
     if total <= 0:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Invoice total must be positive.")
 
-    pair_id = post_transaction(
+    post_result = post_transaction(
         case_id,
         LedgerPostCreate(
             description=f"Invoice {inv_num} (pending approval)",
@@ -153,6 +153,7 @@ def create_case_invoice(case_id: uuid.UUID, payload: CaseInvoiceCreate, user: Us
         db,
         force_unapproved=True,
     )
+    pair_id = post_result.pair_id
 
     inv = CaseInvoice(
         id=inv_id,
@@ -222,7 +223,7 @@ def approve_case_invoice(case_id: uuid.UUID, invoice_id: uuid.UUID, user: User, 
     if not inv.ledger_pair_id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invoice has no ledger posting.")
 
-    approve_ledger_pair(case_id, inv.ledger_pair_id, db)
+    approve_ledger_pair(case_id, inv.ledger_pair_id, user, db)
     new_desc = f"Invoice {inv.invoice_number}"
     # Core UPDATE so description / approval are persisted even if ORM instances in the session were stale.
     db.execute(
@@ -301,7 +302,7 @@ def void_case_invoice(case_id: uuid.UUID, invoice_id: uuid.UUID, user: User, db:
             ),
         )
 
-    rev_id = post_transaction(
+    rev_result = post_transaction(
         case_id,
         LedgerPostCreate(
             description=f"Reversal of invoice {inv.invoice_number}",
@@ -314,7 +315,8 @@ def void_case_invoice(case_id: uuid.UUID, invoice_id: uuid.UUID, user: User, db:
         user,
         db,
     )
-    approve_ledger_pair(case_id, rev_id, db)
+    rev_id = rev_result.pair_id
+    approve_ledger_pair(case_id, rev_id, user, db)
 
     release_billed_time_entries_for_invoice(invoice_id, db)
     inv.status = INV_VOIDED

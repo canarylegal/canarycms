@@ -7,7 +7,7 @@ import uuid
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
-from app.matter_contact_constants import CLIENT_SLUG, LAWYERS_SLUG, normalize_matter_contact_type_slug
+from app.matter_contact_constants import LAWYERS_SLUG, normalize_matter_contact_type_slug
 from app.models import CaseContact, ContactType
 
 
@@ -33,9 +33,9 @@ def normalize_and_validate_lawyer_client_ids(
     *,
     existing: CaseContact | None = None,
 ) -> list[str]:
-    """Return JSON-safe list of client CaseContact id strings (max 4, unique).
+    """Return JSON-safe list of linked CaseContact id strings (max 4, unique).
 
-    For non-lawyer types, returns [] and clears links. For lawyers, enforces at least one client.
+    For non-lawyer types, returns [] and clears links. For lawyers, enforces at least one link.
     """
     sl = normalize_matter_contact_type_slug(matter_contact_type)
     if sl != LAWYERS_SLUG:
@@ -47,7 +47,7 @@ def normalize_and_validate_lawyer_client_ids(
     if not raw:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Lawyer contacts must be linked to at least one Client on this matter.",
+            detail="Lawyer contacts must be linked to at least one other matter contact.",
         )
 
     seen: set[uuid.UUID] = set()
@@ -60,7 +60,7 @@ def normalize_and_validate_lawyer_client_ids(
         if len(ordered) > 4:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="A lawyer contact can link to at most four clients on this matter.",
+                detail="A lawyer contact can link to at most four matter contacts.",
             )
 
     for cid in ordered:
@@ -68,12 +68,12 @@ def normalize_and_validate_lawyer_client_ids(
         if not cc or cc.case_id != case_id:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid client contact for this matter.",
+                detail="Invalid linked contact for this matter.",
             )
-        if normalize_matter_contact_type_slug(cc.matter_contact_type) != CLIENT_SLUG:
+        if existing is not None and cc.id == existing.id:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Lawyer contacts can only be linked to matter contacts of type Client.",
+                detail="A lawyer contact cannot be linked to itself.",
             )
 
     return [str(x) for x in ordered]

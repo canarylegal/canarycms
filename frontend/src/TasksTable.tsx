@@ -3,7 +3,7 @@ import { TASKS_MENU_TABLE_GRID } from './columnGridDefaults'
 import { useDialogs } from './DialogProvider'
 import { apiFetch } from './api'
 import { SingleSelectDropdown } from './SingleSelectDropdown'
-import type { CaseTaskOut, TaskMenuRow, UserSummary } from './types'
+import type { CaseTaskOut, MatterSubTypeStandardTaskOut, TaskMenuRow, UserSummary } from './types'
 import { useExclusiveDropdownOpen } from './useExclusiveDropdownOpen'
 
 export { TASKS_MENU_TABLE_GRID }
@@ -69,6 +69,8 @@ export function TasksTable({
   const resizeCol = startColumnResize
   const taskCtxRef = useRef<HTMLDivElement | null>(null)
   const [editRow, setEditRow] = useState<TaskMenuRow | null>(null)
+  const [editStandardId, setEditStandardId] = useState('__custom__')
+  const [editStandardTasks, setEditStandardTasks] = useState<MatterSubTypeStandardTaskOut[]>([])
   const [editTitle, setEditTitle] = useState('')
   const [editDue, setEditDue] = useState('')
   const [editAssign, setEditAssign] = useState('')
@@ -83,10 +85,11 @@ export function TasksTable({
     priority: 'low' | 'normal' | 'high'
     completed: boolean
     isPrivate: boolean
+    standardId: string
   } | null>(null)
   const [editBusy, setEditBusy] = useState(false)
   const [editErr, setEditErr] = useState<string | null>(null)
-  const editDropdown = useExclusiveDropdownOpen<'priority' | 'assign'>()
+  const editDropdown = useExclusiveDropdownOpen<'category' | 'priority' | 'assign'>()
   const [taskRowFocusId, setTaskRowFocusId] = useState<string | null>(null)
   const [kanbanTitles, setKanbanTitles] = useState<string[]>([])
 
@@ -122,6 +125,14 @@ export function TasksTable({
       { value: 'high', label: 'High' },
     ],
     [],
+  )
+
+  const editCategoryOptions = useMemo(
+    () => [
+      ...editStandardTasks.map((t) => ({ value: t.id, label: t.title })),
+      { value: '__custom__', label: 'Custom (no category)' },
+    ],
+    [editStandardTasks],
   )
 
   const visible = useMemo(() => {
@@ -228,7 +239,12 @@ export function TasksTable({
     setEditRow(r)
     setEditBusy(true)
     try {
-      const list = await apiFetch<CaseTaskOut[]>(`/cases/${r.case_id}/tasks`, { token })
+      const [list, standardTasks] = await Promise.all([
+        apiFetch<CaseTaskOut[]>(`/cases/${r.case_id}/tasks`, { token }),
+        apiFetch<MatterSubTypeStandardTaskOut[]>(`/cases/${r.case_id}/standard-tasks`, { token }),
+      ])
+      const templates = Array.isArray(standardTasks) ? standardTasks : []
+      setEditStandardTasks(templates)
       const t = list.find((x) => x.id === r.id)
       const title = (t?.title ?? r.task_title).trim()
       const dueRaw = t?.due_at ?? r.date
@@ -238,6 +254,9 @@ export function TasksTable({
       const completed = (t?.status ?? r.status) === 'done'
       const priv = Boolean(t?.is_private)
       const createdBy = t?.created_by_user_id ?? ''
+      const stdIdRaw = t?.standard_task_id ?? r.standard_task_id ?? null
+      const stdId =
+        stdIdRaw && templates.some((x) => x.id === stdIdRaw) ? stdIdRaw : '__custom__'
       setEditTitle(title)
       setEditDue(due)
       setEditAssign(assign)
@@ -245,12 +264,15 @@ export function TasksTable({
       setEditCompleted(completed)
       setEditPrivate(priv)
       setEditCreatedBy(createdBy)
-      setEditBaseline({ title, due, assign, priority: pri, completed, isPrivate: priv })
+      setEditStandardId(stdId)
+      setEditBaseline({ title, due, assign, priority: pri, completed, isPrivate: priv, standardId: stdId })
     } catch {
       const due = r.date.slice(0, 10)
       const pri = (r.priority ?? 'normal') as 'low' | 'normal' | 'high'
       const completed = r.status === 'done'
       const priv = Boolean(r.is_private)
+      const stdId = r.standard_task_id ?? '__custom__'
+      setEditStandardTasks([])
       setEditTitle(r.task_title)
       setEditDue(due)
       setEditAssign('')
@@ -258,6 +280,7 @@ export function TasksTable({
       setEditCompleted(completed)
       setEditPrivate(priv)
       setEditCreatedBy('')
+      setEditStandardId(stdId)
       setEditBaseline({
         title: r.task_title,
         due,
@@ -265,6 +288,7 @@ export function TasksTable({
         priority: pri,
         completed,
         isPrivate: priv,
+        standardId: stdId,
       })
     } finally {
       setEditBusy(false)
@@ -279,6 +303,7 @@ export function TasksTable({
       setEditPriority(editBaseline.priority)
       setEditCompleted(editBaseline.completed)
       setEditPrivate(editBaseline.isPrivate)
+      setEditStandardId(editBaseline.standardId)
     }
     setEditRow(null)
     setEditErr(null)
@@ -296,6 +321,7 @@ export function TasksTable({
         priority: editPriority,
         assigned_to_user_id: editAssign || null,
         status: editCompleted ? 'done' : 'open',
+        standard_task_id: editStandardId === '__custom__' ? null : editStandardId,
       }
       if (currentUserId && editCreatedBy === currentUserId) {
         patch.is_private = editPrivate
@@ -604,6 +630,16 @@ export function TasksTable({
             </div>
             <div className="stack" style={{ marginTop: 12, gap: 12 }}>
               {editErr ? <div className="error">{editErr}</div> : null}
+              <SingleSelectDropdown
+                label="Category"
+                options={editCategoryOptions}
+                value={editStandardId}
+                onChange={setEditStandardId}
+                open={editDropdown.isOpen('category')}
+                onOpenChange={(next) => editDropdown.setOpen('category', next)}
+                disabled={editBusy}
+                placeholder="— select —"
+              />
               <label className="field">
                 <span>Title</span>
                 <input value={editTitle} onChange={(e) => setEditTitle(e.target.value)} disabled={editBusy} />
