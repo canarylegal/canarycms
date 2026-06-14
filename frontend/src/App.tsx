@@ -2178,7 +2178,7 @@ function NewMatterModal({
 
             <div className="stack">
               <div className="muted">Clients for this matter (you can add more than one):</div>
-              <div className="list" style={{ maxHeight: 140, overflow: 'auto' }}>
+              <div className="list scrollPanel--compact" style={{ marginTop: 12 }}>
                 {pendingClientLinks.map((cc) => (
                   <div key={cc.contact_id} className="listCard row" style={{ justifyContent: 'space-between' }}>
                     <div>

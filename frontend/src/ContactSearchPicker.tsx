@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { fetchContactSearch } from './apiSearch'
+import { scrollPanelClassName } from './dropdownSizing'
 import { SearchInput } from './SearchInput'
 import { useDebouncedValue } from './useDebouncedValue'
 import type { ContactOut } from './types'
@@ -28,7 +29,7 @@ export function ContactSearchPicker({
   organisationOnly = false,
   searchPlaceholder = 'Search global contacts…',
   idleHint = 'Type in the search box to find global contacts.',
-  listMaxHeight = 140,
+  listMaxHeight,
   filterContact,
   renderActions,
 }: Props) {
@@ -86,7 +87,13 @@ export function ContactSearchPicker({
         }}
         aria-label="Search global contacts"
       />
-      <div className="list" style={{ maxHeight: listMaxHeight, overflow: 'auto' }}>
+      <div
+        className={scrollPanelClassName(
+          'list scrollPanel',
+          search.trim() && !busy && matches.length > 0 ? matches.length : 0,
+        )}
+        style={listMaxHeight != null ? { maxHeight: listMaxHeight } : undefined}
+      >
         {!search.trim() ? (
           <div className="muted">{idleHint}</div>
         ) : busy ? (

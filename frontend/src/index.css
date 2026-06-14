@@ -26,8 +26,34 @@
   --canary-table-row-min-height: calc(4rem * 0.85);
   --canary-table-font-size: 1rem;
   --canary-table-line-height: 1.4;
+  /*
+   * Viewport-aware surface sizing — modals, dropdowns, and nested scroll panels grow with
+   * content until these caps, then scroll (avoids arbitrary px cliffs + tiny scrollbars).
+   */
+  --viewport-inset-top: max(16px, env(safe-area-inset-top, 0px));
+  --viewport-inset-bottom: max(24px, env(safe-area-inset-bottom, 0px));
+  --overlay-modal-gap: max(2vh, 8px);
+  --overlay-modal-margin: 8px;
+  --overlay-chrome: calc(
+    var(--viewport-inset-top) + var(--viewport-inset-bottom) + var(--overlay-modal-gap) +
+      var(--overlay-modal-margin)
+  );
+  --surface-max-height: calc(100vh - var(--overlay-chrome));
+  --modal-max-height: var(--surface-max-height);
+  --dropdown-max-height: min(480px, 70vh);
+  --dropdown-max-height-compact: min(360px, 55vh);
+  --dropdown-fit-content-max-items: 12;
+  --panel-scroll-max-height: min(640px, calc(var(--surface-max-height) - 120px));
   color-scheme: light;
   font-family: var(--app-font-stack);
+}
+
+@supports (height: 100dvh) {
+  :root {
+    --surface-max-height: calc(100dvh - var(--overlay-chrome));
+    --modal-max-height: var(--surface-max-height);
+    --panel-scroll-max-height: min(640px, calc(var(--surface-max-height) - 120px));
+  }
 }
 
 html.dark {
@@ -331,6 +357,16 @@ html.dark .topbar .btn:not(.primary):not(.danger) {
 /* Main menu: full-width white panels, small side padding, cases list fills viewport height */
 .main.main--mainMenu {
   padding: 12px 16px;
+  overflow: hidden;
+}
+
+.mainMenuCasesHost {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  overflow: hidden;
 }
 
 .split {
@@ -674,7 +710,7 @@ html.dark .topbar .btn:not(.primary):not(.danger) {
 
 .reportsDdPanelBody {
   padding: 10px 12px;
-  max-height: min(50vh, 320px);
+  max-height: var(--dropdown-max-height);
   overflow-y: auto;
 }
 
@@ -692,7 +728,7 @@ html.dark .topbar .btn:not(.primary):not(.danger) {
 }
 
 .reportsDdCheckList--tall {
-  max-height: min(44vh, 280px);
+  max-height: var(--dropdown-max-height-compact);
   overflow-y: auto;
 }
 
@@ -741,7 +777,7 @@ html.dark .topbar .btn:not(.primary):not(.danger) {
 
 .reportsPreviewScroll {
   margin-top: 14px;
-  max-height: min(52vh, 560px);
+  max-height: var(--panel-scroll-max-height);
   overflow: auto;
   border: 1px solid var(--border);
   border-radius: 10px;
@@ -1103,7 +1139,7 @@ html.dark .mainMenuFilterSelectTrigger {
   left: 0;
   right: 0;
   z-index: 300;
-  max-height: min(220px, 40vh);
+  max-height: var(--dropdown-max-height);
   overflow-y: auto;
   background: var(--panel);
   border: 1px solid var(--border);
@@ -1114,6 +1150,33 @@ html.dark .mainMenuFilterSelectTrigger {
 
 .mainMenuFilterSelectMenu--portal {
   z-index: 5000;
+}
+
+/* Short lists expand fully; longer lists cap at --dropdown-max-height (see dropdownSizing.ts). */
+.dropdownMenu--fitContent {
+  max-height: none;
+  overflow-y: visible;
+}
+
+.scrollPanel--fitContent {
+  max-height: none;
+  overflow-y: visible;
+}
+
+.reportsDdPanelBody.dropdownMenu--fitContent,
+.reportsDdCheckList.scrollPanel--fitContent {
+  max-height: none;
+  overflow-y: visible;
+}
+
+.caseFileSelectMenu.dropdownMenu--fitContent {
+  max-height: none;
+  overflow: visible;
+}
+
+.caseFileSelectMenu.dropdownMenu--fitContent .caseFileSelectList {
+  max-height: none;
+  overflow-y: visible;
 }
 
 .singleSelectDropdownField {
@@ -1192,7 +1255,7 @@ html.dark .singleSelectDropdownTrigger {
   left: 0;
   right: 0;
   z-index: 350;
-  max-height: min(220px, 40vh);
+  max-height: var(--dropdown-max-height);
   overflow-y: auto;
   background: var(--panel);
   border: 1px solid var(--border);
@@ -1243,7 +1306,7 @@ html.dark .singleSelectDropdownTrigger {
   display: flex;
   flex-direction: column;
   gap: 0;
-  max-height: min(320px, 50vh);
+  max-height: var(--dropdown-max-height);
   overflow: hidden;
   padding: 0;
 }
@@ -2728,7 +2791,7 @@ select {
 }
 
 .caseLeftContactsList {
-  max-height: min(200px, 28vh);
+  max-height: var(--dropdown-max-height-compact);
   overflow-y: auto;
   overflow-x: hidden;
 }
@@ -2890,8 +2953,47 @@ select {
 
 .modalOverlay > .modal,
 .modalOverlay > .card.modal {
-  margin-top: max(2vh, 8px);
+  margin-top: var(--overlay-modal-gap);
   margin-bottom: auto;
+  max-height: var(--modal-max-height);
+  height: fit-content;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  box-sizing: border-box;
+}
+
+.modalOverlay > .modal.modal--scrollBody,
+.modalOverlay > .card.modal.modal--scrollBody {
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.modalOverlay > .modal.precedentPickerModal,
+.modalOverlay > .card.modal.precedentPickerModal {
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.modalOverlay > .modal.precedentPickerModal > .paneHead,
+.modalOverlay > .card.modal.precedentPickerModal > .paneHead {
+  flex-shrink: 0;
+}
+
+/* Reusable scroll region for search results, pickers, nested lists (override with inline maxHeight if needed). */
+.scrollPanel {
+  overflow-y: auto;
+  max-height: var(--dropdown-max-height);
+  overscroll-behavior: contain;
+}
+
+.scrollPanel--compact {
+  max-height: var(--dropdown-max-height-compact);
+}
+
+.scrollPanel--panel {
+  max-height: var(--panel-scroll-max-height);
 }
 
 .modalBodyScroll--relative {
@@ -2916,7 +3018,7 @@ select {
   min-width: min(100%, 320px);
   min-height: 180px;
   max-width: min(960px, 100%);
-  max-height: min(92vh, 900px);
+  max-height: var(--modal-max-height);
 }
 
 .modalDragHandle {
@@ -3050,9 +3152,10 @@ select {
   width: min(720px, 100%);
 }
 
-/* Tall modals: cap height and scroll the body (e.g. Add contact). */
+/* Tall modals: grow with content until viewport cap; header fixed, body scrolls. */
 .modal.modal--scrollBody {
-  max-height: min(88vh, 900px);
+  max-height: var(--modal-max-height);
+  height: fit-content;
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -3065,7 +3168,7 @@ select {
 
 .modal.modal--scrollBody .modalBodyScroll {
   overflow-y: auto;
-  flex: 1;
+  flex: 1 1 auto;
   min-height: 0;
   padding-right: 2px;
 }
@@ -3147,7 +3250,7 @@ select {
   list-style: none;
   margin: 0;
   padding: 4px;
-  max-height: 220px;
+  max-height: var(--dropdown-max-height);
   overflow-y: auto;
   overflow-x: hidden;
   border-radius: 10px;
@@ -3714,7 +3817,7 @@ html.dark .ledgerBalanceBand--client {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--panel2);
-  max-height: 220px;
+  max-height: var(--dropdown-max-height);
   overflow: auto;
 }
 
@@ -3857,17 +3960,11 @@ html.dark .ledgerBalanceBand--client {
   font-weight: 600;
 }
 
-.modal.modal--scrollBody .modalBodyScroll {
-  overflow-y: auto;
-  flex: 1 1 auto;
-  min-height: 0;
-}
-
 .modal.modal--quoteReview {
   width: min(980px, 96vw);
   max-width: min(980px, 96vw);
   min-height: min(720px, 88vh);
-  max-height: min(92vh, 900px);
+  max-height: var(--modal-max-height);
 }
 
 .modal.modal--quoteReview .modalBodyScroll {
@@ -4267,8 +4364,10 @@ html.dark .ledgerBalanceBand--client {
   display: flex;
   gap: 32px;
   margin-top: 20px;
-  min-height: 560px;
   align-items: stretch;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .precedentPickerCats {
@@ -4292,7 +4391,9 @@ html.dark .ledgerBalanceBand--client {
   flex-direction: column;
   gap: 8px;
   overflow-y: auto;
-  max-height: min(640px, 52vh);
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
 }
 
 .precedentPickerCatBtn {
@@ -4342,7 +4443,9 @@ html.dark .ledgerBalanceBand--client {
 
 .precedentPickerTableBody {
   overflow-y: auto;
-  max-height: min(480px, 48vh);
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
   border: 1px solid var(--border);
   border-radius: 10px;
   margin-top: 8px;
@@ -4880,7 +4983,7 @@ html.dark .portalShell {
 }
 
 .portalStaffSearchResults {
-  max-height: 220px;
+  max-height: var(--dropdown-max-height);
   overflow-y: auto;
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -4953,7 +5056,7 @@ html.dark .portalShell {
 }
 
 .emailAttachPickerList {
-  max-height: min(360px, 52vh);
+  max-height: var(--dropdown-max-height);
   overflow: auto;
   border: 1px solid var(--border);
   border-radius: 8px;

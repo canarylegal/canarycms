@@ -1,5 +1,6 @@
 import { useCallback, useId, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { dropdownMenuClassName } from './dropdownSizing'
 import { useDismissOnOutsidePointer } from './useDismissOnOutsidePointer'
 
 export type SingleSelectOption = { value: string; label: string; hint?: string }
@@ -90,7 +91,10 @@ export function SingleSelectDropdown({
       <div
         ref={menuRef}
         id={listId}
-        className="singleSelectDropdownMenu singleSelectDropdownMenu--portal"
+        className={dropdownMenuClassName(
+          'singleSelectDropdownMenu singleSelectDropdownMenu--portal',
+          options.length,
+        )}
         role="listbox"
         aria-label={label}
         style={{

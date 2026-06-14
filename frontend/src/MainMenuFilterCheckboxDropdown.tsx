@@ -1,5 +1,6 @@
 import { useCallback, useId, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { dropdownMenuClassName } from './dropdownSizing'
 import { useDismissOnOutsidePointer } from './useDismissOnOutsidePointer'
 
 export type MainMenuFilterOption = { value: string; label: string }
@@ -83,7 +84,10 @@ export function MainMenuFilterCheckboxDropdown({
       <div
         ref={menuRef}
         id={listId}
-        className="mainMenuFilterSelectMenu mainMenuFilterSelectMenu--portal"
+        className={dropdownMenuClassName(
+          'mainMenuFilterSelectMenu mainMenuFilterSelectMenu--portal',
+          options.length,
+        )}
         role="listbox"
         aria-label={label}
         aria-multiselectable="true"
