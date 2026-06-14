@@ -2800,7 +2800,7 @@ const MainMenuCasesPanel = memo(function MainMenuCasesPanel({
       <div className={`mainMenuFilterBar${filterOpen ? ' mainMenuFilterBar--dropdownOpen' : ''}`}>
         <div className="row mainMenuFilterRow mainMenuFilterRow--toolbar mainMenuFilterRow--searchRight">
           <div className="mainMenuFilterRowLeft">
-            <button type="button" className="btn" onClick={onCreateClick ?? onOpenNewMatter}>
+            <button type="button" className="btn primary" onClick={onCreateClick ?? onOpenNewMatter}>
               {createButtonLabel}
             </button>
             {toolbarMiddle}
@@ -4193,18 +4193,18 @@ function Contacts({ token, me }: { token: string; me?: UserPublic | null }) {
       <div className={`mainMenuFilterBar${contactsFilterOpen ? ' mainMenuFilterBar--dropdownOpen' : ''}`}>
         <div className="row mainMenuFilterRow mainMenuFilterRow--toolbar mainMenuFilterRow--searchRight">
           <div className="mainMenuFilterRowLeft">
-            <button type="button" className="btn" onClick={() => void load()} disabled={busy}>
-              Refresh
-            </button>
             <button
               type="button"
-              className="btn"
+              className="btn primary"
               onClick={() => {
                 setCreateErr(null)
                 setCreateOpen(true)
               }}
             >
               New contact…
+            </button>
+            <button type="button" className="btn" onClick={() => void load()} disabled={busy}>
+              Refresh
             </button>
           </div>
           <div className="mainMenuFilterRowRight">

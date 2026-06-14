@@ -81,9 +81,9 @@ html.dark .btn:not(.primary):not(.danger) {
 }
 
 html.dark .btn.primary {
-  background: rgba(var(--primary-rgb), 0.28);
-  color: #e8edff;
-  border-color: rgba(var(--primary-rgb), 0.55);
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #f8fafc;
 }
 
 html.dark .navBtn:not(.active) {
@@ -885,6 +885,17 @@ html.dark .topbar .btn:not(.primary):not(.danger) {
   position: sticky;
   top: 0;
   z-index: 1;
+  background: color-mix(in srgb, var(--panel2) 82%, var(--border));
+  border-bottom: 2px solid color-mix(in srgb, var(--border) 80%, var(--text));
+  box-shadow: 0 1px 0 rgba(15, 23, 42, 0.04);
+}
+
+.mainMenuShell--mainMenu .casesTableScroll .tr.th .thbtn {
+  color: var(--text);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
 
 /*
@@ -968,10 +979,13 @@ html.dark .topbar .btn:not(.primary):not(.danger) {
 .mainMenuFilterRowLeft {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
   flex-wrap: wrap;
   min-width: 0;
   flex: 1 1 auto;
+  padding-right: 12px;
+  margin-right: 4px;
+  border-right: 1px solid rgba(255, 255, 255, 0.14);
 }
 
 .mainMenuFilterRowRight {
@@ -1707,18 +1721,30 @@ html.dark .singleSelectDropdownTrigger {
 
 .btn {
   border: 1px solid var(--border);
-  background: #ffffff;
+  background: var(--panel2);
   color: var(--text);
   border-radius: 10px;
-  padding: 8px 10px;
+  padding: 8px 12px;
   cursor: pointer;
+  font-weight: 500;
+  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+}
+
+.btn:hover:not(:disabled) {
+  background: var(--hover);
+  border-color: color-mix(in srgb, var(--border) 70%, var(--text));
 }
 
 .btn.primary {
-  background: rgba(var(--primary-rgb), 0.12);
-  border-color: rgba(var(--primary-rgb), 0.45);
-  color: var(--primary);
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #f8fafc;
   font-weight: 600;
+}
+
+.btn.primary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--primary) 88%, #0f172a);
+  border-color: color-mix(in srgb, var(--primary) 88%, #0f172a);
 }
 
 /* Primary CTAs in main-menu toolbars sit on --page-bg (dark blue in light mode). */
@@ -1726,6 +1752,7 @@ html.dark .singleSelectDropdownTrigger {
   background: var(--primary);
   border-color: var(--primary);
   color: var(--text-on-page-bg);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.12);
 }
 
 .mainMenuFilterBar .btn.primary:hover:not(:disabled) {
@@ -1733,9 +1760,26 @@ html.dark .singleSelectDropdownTrigger {
   border-color: color-mix(in srgb, var(--primary) 88%, #0f172a);
 }
 
+.mainMenuFilterBar .btn:not(.primary):not(.mainMenuFilterBtn):not(.danger) {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.22);
+  color: var(--text-on-page-bg);
+}
+
+.mainMenuFilterBar .btn:not(.primary):not(.mainMenuFilterBtn):not(.danger):hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.16);
+  border-color: rgba(255, 255, 255, 0.32);
+}
+
 html.dark .mainMenuFilterBar .btn.primary {
   background: var(--primary);
   border-color: var(--primary);
+  color: var(--text-on-page-bg);
+}
+
+html.dark .mainMenuFilterBar .btn:not(.primary):not(.mainMenuFilterBtn):not(.danger) {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.16);
   color: var(--text-on-page-bg);
 }
 
