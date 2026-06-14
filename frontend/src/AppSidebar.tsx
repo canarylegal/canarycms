@@ -80,7 +80,7 @@ export function AppSidebar({
       aria-expanded={expanded}
     >
       <div className="appSidebarBrand" aria-label="Canary">
-        <CanaryMark className="appBrandMark" />
+        <CanaryMark className="appBrandMark" size="sidebar" />
         <span className="appSidebarBrandName" aria-hidden={!expanded}>
           Canary
         </span>
@@ -90,7 +90,7 @@ export function AppSidebar({
           layout="sidebar"
           collapsed={!expanded}
           name="main-menu"
-          label="Case Menu"
+          label="Cases"
           active={view === 'main-menu' || view === 'case-menu'}
           onClick={goMainMenu}
         />
