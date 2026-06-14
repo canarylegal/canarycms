@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { apiFetch } from './api'
+import { apiFetch, apiUrl, applyAuthHeaders } from './api'
+import { downloadInvoiceDocument, invoiceDownloadFilename } from './invoiceDownload'
 import { ContactSearchPicker } from './ContactSearchPicker'
 import { canaryDocumentTitle } from './tabTitle'
 import { SingleSelectDropdown } from './SingleSelectDropdown'
@@ -11,6 +12,7 @@ import type {
   CaseInvoiceCreate,
   CaseInvoicesOut,
   CaseOut,
+  CaseTimeEntryOut,
   ContactOut,
   InvoiceBillingDefaultsOut,
   LedgerEntryOut,
@@ -118,6 +120,9 @@ export function LedgerPage({ caseId, token }: Props) {
   const [invLines, setInvLines] = useState<InvLineDraft[]>(() => defaultInvLines('20'))
   const [invErr, setInvErr] = useState<string | null>(null)
   const [invBusy, setInvBusy] = useState(false)
+  const [exportBusy, setExportBusy] = useState(false)
+  const [wipEntries, setWipEntries] = useState<CaseTimeEntryOut[]>([])
+  const [selectedWipIds, setSelectedWipIds] = useState<Set<string>>(new Set())
   const [voidInvoiceId, setVoidInvoiceId] = useState<string | null>(null)
   const postModalDrag = useModalDrag(postOpen)
   const invoiceModalDrag = useModalDrag(invoiceModalOpen)
@@ -159,6 +164,37 @@ export function LedgerPage({ caseId, token }: Props) {
     await loadInvoices()
   }
 
+  async function exportLedger() {
+    setExportBusy(true)
+    setError(null)
+    try {
+      const headers = new Headers()
+      applyAuthHeaders(headers, token.trim())
+      const res = await fetch(apiUrl(`/cases/${caseId}/ledger/export`), { method: 'GET', headers })
+      if (!res.ok) {
+        const raw = await res.json().catch(() => ({}))
+        const msg =
+          typeof (raw as { detail?: unknown }).detail === 'string'
+            ? (raw as { detail: string }).detail
+            : `Export failed (${res.status})`
+        throw new Error(msg)
+      }
+      const blob = await res.blob()
+      const cd = res.headers.get('Content-Disposition') ?? ''
+      const match = /filename="([^"]+)"/.exec(cd)
+      const filename = match?.[1] ?? `canary-ledger-${caseId.slice(0, 8)}.xlsx`
+      const a = document.createElement('a')
+      a.href = URL.createObjectURL(blob)
+      a.download = filename
+      a.click()
+      URL.revokeObjectURL(a.href)
+    } catch (e) {
+      setError((e as Error).message ?? 'Could not export ledger')
+    } finally {
+      setExportBusy(false)
+    }
+  }
+
   useEffect(() => {
     void load()
     void loadInvoices()
@@ -178,6 +214,14 @@ export function LedgerPage({ caseId, token }: Props) {
   useEffect(() => {
     if (!invoiceModalOpen) return
     let cancelled = false
+    setSelectedWipIds(new Set())
+    apiFetch<CaseTimeEntryOut[]>(`/cases/${caseId}/time`, { token })
+      .then((rows) => {
+        if (!cancelled) setWipEntries(rows.filter((e) => e.status === 'unbilled' && !e.non_billable))
+      })
+      .catch(() => {
+        if (!cancelled) setWipEntries([])
+      })
     apiFetch<InvoiceBillingDefaultsOut>(`/cases/${caseId}/invoice-billing-defaults`, { token })
       .then((d) => {
         if (cancelled) return
@@ -354,11 +398,17 @@ export function LedgerPage({ caseId, token }: Props) {
     }
   }
 
+  const selectedWipEntries = useMemo(
+    () => wipEntries.filter((e) => selectedWipIds.has(e.id)),
+    [wipEntries, selectedWipIds],
+  )
+
   const invoicePreviewTotals = useMemo(() => {
     let fees = 0
     let disb = 0
     let tax = 0
     let vatOnly = 0
+    const vatPctDefault = invBillingDefaults?.default_vat_percent ?? 20
     for (const ln of invLines) {
       const amt = Math.round(parseFloat(ln.amountStr) * 100)
       if (!ln.amountStr.trim() || Number.isNaN(amt) || amt <= 0) continue
@@ -374,8 +424,15 @@ export function LedgerPage({ caseId, token }: Props) {
       if (ln.line_type === 'fee') fees += gross
       else disb += gross
     }
+    for (const e of selectedWipEntries) {
+      const amt = e.value_pence ?? 0
+      if (amt <= 0) continue
+      const tp = Math.round((amt * vatPctDefault) / 100)
+      tax += tp
+      fees += amt + tp
+    }
     return { fees, disb, tax, total: fees + disb + vatOnly }
-  }, [invLines])
+  }, [invLines, selectedWipEntries, invBillingDefaults])
 
   async function submitInvoice() {
     setInvErr(null)
@@ -383,14 +440,18 @@ export function LedgerPage({ caseId, token }: Props) {
       setInvErr('Select credit (user).')
       return
     }
+    const timeEntryIds = Array.from(selectedWipIds)
     const outLines: CaseInvoiceCreate['lines'] = []
     for (const ln of invLines) {
       const amt = Math.round(parseFloat(ln.amountStr) * 100)
+      if (!ln.description.trim() && !ln.amountStr.trim()) continue
       if (!ln.description.trim()) {
+        if (timeEntryIds.length > 0) continue
         setInvErr('Each line needs a description.')
         return
       }
       if (!ln.amountStr.trim() || Number.isNaN(amt) || amt <= 0) {
+        if (timeEntryIds.length > 0) continue
         setInvErr('Each line needs a valid amount greater than zero.')
         return
       }
@@ -410,13 +471,20 @@ export function LedgerPage({ caseId, token }: Props) {
         tax_pence: tax,
       })
     }
-    if (outLines.length === 0) {
-      setInvErr('Add at least one invoice line.')
+    if (outLines.length === 0 && timeEntryIds.length === 0) {
+      setInvErr('Add at least one invoice line or select unbilled time.')
       return
+    }
+    for (const e of selectedWipEntries) {
+      if (e.value_pence == null || e.value_pence <= 0) {
+        setInvErr(`Cannot bill time for ${e.user_display_name}: charge rate is not set.`)
+        return
+      }
     }
     const payload: CaseInvoiceCreate = {
       credit_user_id: invCreditUserId,
       lines: outLines,
+      ...(timeEntryIds.length ? { time_entry_ids: timeEntryIds } : {}),
     }
     setInvBusy(true)
     try {
@@ -425,6 +493,8 @@ export function LedgerPage({ caseId, token }: Props) {
       setInvCreditUserId('')
       setInvBillingDefaults(null)
       setInvLines(defaultInvLines('20'))
+      setSelectedWipIds(new Set())
+      setWipEntries([])
       await load()
       await loadInvoices()
     } catch (e) {
@@ -547,8 +617,16 @@ export function LedgerPage({ caseId, token }: Props) {
           ))}
         </div>
         <div className="ledgerActions">
-          <button type="button" className="btn" onClick={() => void refreshAll()} disabled={busy}>
+          <button type="button" className="btn" onClick={() => void refreshAll()} disabled={busy || exportBusy}>
             Refresh
+          </button>
+          <button
+            type="button"
+            className="btn"
+            disabled={busy || exportBusy || !ledger}
+            onClick={() => void exportLedger()}
+          >
+            {exportBusy ? 'Exporting…' : 'Export Excel'}
           </button>
           <button type="button" className="btn ledgerPostBtn" onClick={openPost} disabled={busy}>
             New posting
@@ -559,6 +637,7 @@ export function LedgerPage({ caseId, token }: Props) {
             onClick={() => {
               setInvErr(null)
               setInvLines(defaultInvLines('20'))
+              setSelectedWipIds(new Set())
               setInvoiceModalOpen(true)
             }}
             disabled={busy}
@@ -768,6 +847,7 @@ export function LedgerPage({ caseId, token }: Props) {
             <tbody>
               {invoicesData.invoices.map((inv) => {
                 const pending = inv.status === 'pending_approval'
+                const approved = inv.status === 'approved'
                 return (
                   <tr key={inv.id} className={pending ? 'ledgerInvoiceRow--pending' : undefined}>
                     <td>{inv.invoice_number}</td>
@@ -775,6 +855,23 @@ export function LedgerPage({ caseId, token }: Props) {
                     <td>{pence(inv.total_pence)}</td>
                     <td className="ledgerInvoiceActionsCell">
                       <div className="ledgerInvoiceActions">
+                        {approved ? (
+                          <button
+                            type="button"
+                            className="btn ledgerInvoiceActionBtn"
+                            disabled={busy}
+                            onClick={() =>
+                              void downloadInvoiceDocument(
+                                caseId,
+                                inv.id,
+                                token,
+                                invoiceDownloadFilename(inv.invoice_number),
+                              ).catch((e) => setError((e as Error).message ?? 'Could not download invoice'))
+                            }
+                          >
+                            Download
+                          </button>
+                        ) : null}
                         {canApproveInvoices && pending ? (
                           <button
                             type="button"
@@ -1041,6 +1138,55 @@ export function LedgerPage({ caseId, token }: Props) {
                 onChange={setInvCreditUserId}
               />
             </div>
+            {wipEntries.length > 0 ? (
+              <div className="card" style={{ padding: 10, background: 'var(--surface-2, rgba(0,0,0,0.04))' }}>
+                <div className="muted" style={{ fontSize: 13, marginBottom: 8 }}>
+                  Unbilled time (add to invoice)
+                </div>
+                {wipEntries.every((e) => e.value_pence == null || e.value_pence <= 0) ? (
+                  <div className="error" style={{ fontSize: 13, marginBottom: 8 }}>
+                    No charge rate is set for these fee earners. Set £/hour under Admin → Users, then reopen this
+                    dialog.
+                  </div>
+                ) : null}
+                <div className="stack" style={{ gap: 6, maxHeight: 180, overflow: 'auto' }}>
+                  {wipEntries.map((e) => {
+                    const billable = e.value_pence != null && e.value_pence > 0
+                    const checked = selectedWipIds.has(e.id)
+                    return (
+                      <label
+                        key={e.id}
+                        className="row"
+                        style={{ gap: 8, alignItems: 'flex-start', fontSize: 13, cursor: billable ? 'pointer' : 'not-allowed' }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          disabled={invBusy || !billable}
+                          onChange={(ev) => {
+                            setSelectedWipIds((prev) => {
+                              const next = new Set(prev)
+                              if (ev.target.checked) next.add(e.id)
+                              else next.delete(e.id)
+                              return next
+                            })
+                          }}
+                        />
+                        <span style={{ flex: 1 }}>
+                          <strong>{e.work_date}</strong> · {e.user_display_name} · {e.duration_tenths / 10} hr —{' '}
+                          {e.description}
+                          {!billable ? (
+                            <span className="muted"> (no charge rate)</span>
+                          ) : (
+                            <span className="muted"> ({pence(e.value_pence!)})</span>
+                          )}
+                        </span>
+                      </label>
+                    )
+                  })}
+                </div>
+              </div>
+            ) : null}
             <div className="stack" style={{ gap: 10 }}>
               <div className="muted" style={{ fontSize: 13 }}>
                 Lines <span aria-hidden>*</span>

@@ -29,7 +29,10 @@ from app.onlyoffice_force_save import (
     oo_force_save_issue_command,
     oo_force_save_wait,
 )
-from app.precedent_constants import BLANK_LETTER_PRECEDENT_REFERENCE
+from app.precedent_constants import (
+    BLANK_LETTER_PRECEDENT_REFERENCE,
+    is_reserved_precedent_reference,
+)
 
 from app.models import (
     File as DbFile,
@@ -72,10 +75,10 @@ def _ensure_precedent_reference_allowed(
     """Validate custom precedent reference: non-empty, not reserved, unique (case-insensitive)."""
 
     t = _normalize_precedent_reference(ref)
-    if t.casefold() == BLANK_LETTER_PRECEDENT_REFERENCE.casefold():
+    if is_reserved_precedent_reference(t):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f'Reference "{BLANK_LETTER_PRECEDENT_REFERENCE}" is reserved for system use.',
+            detail=f'Reference "{t}" is reserved for system use.',
         )
     q = select(Precedent.id).where(func.lower(Precedent.reference) == func.lower(t))
     if exclude_precedent_id is not None:
@@ -299,7 +302,7 @@ def list_precedents(
 
     if kind is not None:
         q = q.where(Precedent.kind == kind)
-        # Reserved for “Blank (no precedent)” letter slot — not shown as a duplicate row in pickers.
+        # BLANK_LETTER is the server-side default for letter compose; hide from pickers only.
         q = q.where(Precedent.reference != BLANK_LETTER_PRECEDENT_REFERENCE)
     q = q.order_by(Precedent.created_at.desc())
     rows = db.execute(q).scalars().all()
@@ -422,6 +425,18 @@ def update_precedent(
     if not f:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Precedent file missing")
     data = payload.model_dump(exclude_unset=True)
+    if is_reserved_precedent_reference(p.reference):
+        if "reference" in data:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Cannot change the reference of a reserved system precedent.",
+            )
+        scope_keys = ("matter_head_type_id", "matter_sub_type_id", "category_id")
+        if any(k in data for k in scope_keys):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Cannot change the scope of a reserved system precedent.",
+            )
     if "name" in data:
         p.name = data["name"].strip()
     if "reference" in data:
@@ -632,6 +647,11 @@ def delete_precedent(
     p = db.get(Precedent, precedent_id)
     if not p:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Precedent not found")
+    if is_reserved_precedent_reference(p.reference):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Reserved system precedents cannot be deleted.",
+        )
     f = db.get(DbFile, p.file_id)
     db.delete(p)
     if f:

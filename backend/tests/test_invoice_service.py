@@ -70,6 +70,21 @@ def test_approve_invoice_applies_office_debit() -> None:
     assert rows[0].status == INV_APPROVED
 
 
+def test_approve_invoice_saves_document_file() -> None:
+    db = ledger_test_session()
+    admin = add_user(db)
+    case = add_case(db, fee_earner_user_id=admin.id)
+    db.add(FirmSettings(id=1, trading_name="Test Firm"))
+    db.commit()
+
+    inv = create_case_invoice(case.id, _invoice_payload(credit_user_id=admin.id), admin, db)
+    approve_case_invoice(case.id, inv.id, admin, db)
+    db.commit()
+
+    row = list_case_invoices(case.id, db).invoices[0]
+    assert row.document_file_id is not None
+
+
 def test_void_pending_invoice_removes_ledger_posting() -> None:
     db = ledger_test_session()
     admin = add_user(db)

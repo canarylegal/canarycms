@@ -12,7 +12,7 @@ from sqlalchemy import case as sql_case, func, select
 from sqlalchemy.orm import Session
 
 from app.admin_access import user_effective_admin
-from app.permission_checks import user_may_be_fee_earner
+from app.permission_checks import user_may_access_accounts_workspace, user_may_be_fee_earner
 from app.invoice_service import INV_APPROVED, INV_PENDING
 from app.models import (
     Case,
@@ -42,7 +42,7 @@ def enforce_fee_earner_ids(user: User, db: Session, requested: list[uuid.UUID]) 
     if not requested:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Select at least one fee earner.")
     uniq = list(dict.fromkeys(requested))
-    if user_effective_admin(user, db):
+    if user_effective_admin(user, db) or user_may_access_accounts_workspace(user, db):
         for uid in uniq:
             u = db.get(User, uid)
             if not u or not u.is_active:
@@ -73,7 +73,7 @@ def enforce_fee_earner_ids(user: User, db: Session, requested: list[uuid.UUID]) 
 
 
 def list_fee_earner_pick_users(user: User, db: Session) -> list[User]:
-    if user_effective_admin(user, db):
+    if user_effective_admin(user, db) or user_may_access_accounts_workspace(user, db):
         rows = db.execute(select(User).where(User.is_active.is_(True)).order_by(User.display_name.asc())).scalars().all()
         return [u for u in rows if user_may_be_fee_earner(u, db)]
     if user_may_be_fee_earner(user, db):

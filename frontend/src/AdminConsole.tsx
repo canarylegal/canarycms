@@ -567,6 +567,8 @@ function PrecedentNamePencilIcon() {
 
 function AdminPrecedents({ token }: { token: string }) {
   const { askConfirm } = useDialogs()
+  /** Reserved references — edit in OnlyOffice; do not delete from Admin. */
+  const systemPrecedentReferences = new Set(['BLANK_LETTER', 'INVOICE_TEMPLATE', 'COMPLETION_STATEMENT'])
   const [items, setItems] = useState<PrecedentOut[]>([])
   const [matterHeads, setMatterHeads] = useState<MatterHeadTypeOut[]>([])
   const [uploadHeadTypeId, setUploadHeadTypeId] = useState('')
@@ -1086,6 +1088,11 @@ function AdminPrecedents({ token }: { token: string }) {
 
       <div className="card" style={{ padding: 12 }}>
         <div className="muted" style={{ marginBottom: 8 }}>
+          Universal templates (e.g. <strong>Blank (no precedent)</strong>, <strong>Invoice template</strong>,{' '}
+          <strong>Completion statement template</strong>) ship with Canary and appear in the precedent list below.
+          Edit them in OnlyOffice like any other precedent. Firm-specific letterheads are configured in the cards above.
+        </div>
+        <div className="muted" style={{ marginBottom: 8 }}>
           Upload a template. Choose <strong>Global</strong> at any level to widen availability: <strong>Matter type</strong>{' '}
           Global = all cases; <strong>Sub-type</strong> Global = all sub-types under the chosen matter type;{' '}
           <strong>Precedent category</strong> Global = all categories under the chosen sub-type. Otherwise pick a specific
@@ -1570,6 +1577,7 @@ function AdminPrecedents({ token }: { token: string }) {
               >
                 Edit in OnlyOffice
               </button>
+              {systemPrecedentReferences.has(p.reference) ? null : (
               <button
                 type="button"
                 className="btn"
@@ -1593,6 +1601,7 @@ function AdminPrecedents({ token }: { token: string }) {
               >
                 Remove
               </button>
+              )}
             </div>
           </div>
         ))}
@@ -1880,6 +1889,7 @@ export function AdminUsers({ token, embedded }: { token: string; embedded?: bool
   const [editDisplayName, setEditDisplayName] = useState('')
   const [editInitials, setEditInitials] = useState('')
   const [editJobTitle, setEditJobTitle] = useState('')
+  const [editChargeRateStr, setEditChargeRateStr] = useState('')
   const [editRole, setEditRole] = useState<'admin' | 'user'>('user')
   const [editActive, setEditActive] = useState(true)
   const [editCategoryId, setEditCategoryId] = useState('')
@@ -1968,6 +1978,9 @@ export function AdminUsers({ token, embedded }: { token: string; embedded?: bool
     setEditDisplayName(u.display_name)
     setEditInitials(u.initials ?? '')
     setEditJobTitle(u.job_title ?? '')
+    setEditChargeRateStr(
+      u.charge_rate_pence_per_hour != null ? (u.charge_rate_pence_per_hour / 100).toFixed(2) : '',
+    )
     setEditRole(u.role)
     setEditActive(u.is_active)
     setEditCategoryId(u.permission_category_id ?? '')
@@ -2472,6 +2485,17 @@ export function AdminUsers({ token, embedded }: { token: string; embedded?: bool
                 <span>Job title (optional)</span>
                 <input value={editJobTitle} onChange={(e) => setEditJobTitle(e.target.value)} disabled={busy} placeholder="Optional" />
               </label>
+              <label className="field" style={{ marginBottom: 0 }}>
+                <span>Charge rate (£/hour, optional — for time / WIP)</span>
+                <input
+                  className="input inputNoSpinner"
+                  inputMode="decimal"
+                  value={editChargeRateStr}
+                  onChange={(e) => setEditChargeRateStr(e.target.value.replace(/[^\d.]/g, ''))}
+                  disabled={busy}
+                  placeholder="e.g. 250.00"
+                />
+              </label>
               <SingleSelectDropdown
                 label="Role"
                 options={[
@@ -2612,6 +2636,17 @@ export function AdminUsers({ token, embedded }: { token: string; embedded?: bool
                     setBusy(true)
                     setErr(null)
                     try {
+                      let chargeRatePence: number | null = null
+                      const rateTrim = editChargeRateStr.trim()
+                      if (rateTrim) {
+                        const parsed = Math.round(parseFloat(rateTrim) * 100)
+                        if (Number.isNaN(parsed) || parsed < 0) {
+                          setErr('Charge rate must be a valid amount.')
+                          setBusy(false)
+                          return
+                        }
+                        chargeRatePence = parsed
+                      }
                       const updatedUser = await apiFetch<AdminUserPublic>(`/admin/users/${editingUser.id}`, {
                         token,
                         method: 'PATCH',
@@ -2623,6 +2658,7 @@ export function AdminUsers({ token, embedded }: { token: string; embedded?: bool
                           role: editRole,
                           is_active: editActive,
                           permission_category_id: editCategoryId || null,
+                          charge_rate_pence_per_hour: chargeRatePence,
                         },
                       })
                       if (editPw.length >= 12) {

@@ -10,12 +10,18 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.calendar_service import ensure_default_calendar
+from app.case_time_service import user_has_charge_rate
 from app.db import get_db
 from app.deps import get_current_user
 from app.email_crypt import encrypt_password
 from app.email_integration_settings import build_user_public
 from app.models import User
-from app.permission_checks import user_may_approve_invoice, user_may_approve_ledger, user_may_be_fee_earner
+from app.permission_checks import (
+    user_may_access_accounts_workspace,
+    user_may_approve_invoice,
+    user_may_approve_ledger,
+    user_may_be_fee_earner,
+)
 from app.radicale_htpasswd import remove_user, upsert_user
 from app.schemas import (
     LedgerPermissionsOut,
@@ -67,6 +73,7 @@ class UserSummary(BaseModel):
     role: str
     is_active: bool
     can_be_fee_earner: bool = False
+    has_charge_rate: bool = False
 
 
 @router.get("", response_model=list[UserSummary])
@@ -81,6 +88,7 @@ def list_users(user: User = Depends(get_current_user), db: Session = Depends(get
             role=u.role.value if hasattr(u.role, "value") else str(u.role),
             is_active=u.is_active,
             can_be_fee_earner=user_may_be_fee_earner(u, db),
+            has_charge_rate=user_has_charge_rate(u),
         )
         for u in users
     ]
@@ -123,6 +131,7 @@ def search_users(
             role=u.role.value if hasattr(u.role, "value") else str(u.role),
             is_active=u.is_active,
             can_be_fee_earner=user_may_be_fee_earner(u, db),
+            has_charge_rate=user_has_charge_rate(u),
         )
         for u in users
     ]
@@ -133,6 +142,7 @@ def my_ledger_permissions(user: User = Depends(get_current_user), db: Session = 
     return LedgerPermissionsOut(
         can_approve_ledger=user_may_approve_ledger(user, db),
         can_approve_invoices=user_may_approve_invoice(user, db),
+        accounts_workspace_access=user_may_access_accounts_workspace(user, db),
     )
 
 

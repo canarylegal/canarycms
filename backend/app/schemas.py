@@ -66,6 +66,10 @@ class UserPublic(BaseModel):
         default=False,
         description="User may open the admin console (built-in admin or category Admin permission).",
     )
+    accounts_workspace_access: bool = Field(
+        default=False,
+        description="User may open the firm-wide Accounts desk (admin or cashier approve permissions).",
+    )
     session_second_factor_verified: bool = Field(
         default=True,
         description=(
@@ -135,6 +139,7 @@ class UserEmailHandlingUpdate(BaseModel):
 class LedgerPermissionsOut(BaseModel):
     can_approve_ledger: bool
     can_approve_invoices: bool = False
+    accounts_workspace_access: bool = False
 
 
 class UserCalDAVStatusOut(BaseModel):
@@ -350,6 +355,7 @@ class AdminUserUpdate(BaseModel):
     role: UserRole | None = None
     is_active: bool | None = None
     permission_category_id: uuid.UUID | None = None
+    charge_rate_pence_per_hour: int | None = Field(default=None, ge=0)
 
     @field_validator("initials", mode="after")
     @classmethod
@@ -361,6 +367,7 @@ class AdminUserUpdate(BaseModel):
 
 class AdminUserPublic(UserPublic):
     permission_category_id: uuid.UUID | None = None
+    charge_rate_pence_per_hour: int | None = None
 
 
 class UserPermissionCategoryOut(BaseModel):
@@ -1395,6 +1402,45 @@ class CaseTaskOut(BaseModel):
     updated_at: datetime
 
 
+class CaseTimeEntryCreate(BaseModel):
+    work_date: date
+    duration_minutes: int = Field(ge=6)
+    description: str = Field(min_length=1, max_length=4000)
+    user_id: uuid.UUID | None = None
+    non_billable: bool = False
+
+    model_config = {"extra": "forbid"}
+
+
+class CaseTimeEntryUpdate(BaseModel):
+    work_date: date | None = None
+    duration_minutes: int | None = Field(default=None, ge=6)
+    description: str | None = Field(default=None, min_length=1, max_length=4000)
+    user_id: uuid.UUID | None = None
+    non_billable: bool | None = None
+
+    model_config = {"extra": "forbid"}
+
+
+class CaseTimeEntryOut(BaseModel):
+    id: uuid.UUID
+    case_id: uuid.UUID
+    user_id: uuid.UUID
+    user_display_name: str
+    created_by_user_id: uuid.UUID
+    work_date: date
+    duration_minutes: int
+    duration_tenths: int
+    description: str
+    status: Literal["unbilled", "billed", "written_off"]
+    invoice_line_id: uuid.UUID | None = None
+    non_billable: bool = False
+    charge_rate_pence_per_hour: int | None = None
+    value_pence: int | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
 class TaskMenuRowOut(BaseModel):
     """Case tasks for the global Tasks menu (one row per task)."""
 
@@ -1691,7 +1737,16 @@ class CaseInvoiceCreate(BaseModel):
     credit_user_id: uuid.UUID
     payee_name: str | None = Field(default=None, max_length=500)
     contact_id: uuid.UUID | None = None
-    lines: list[CaseInvoiceLineCreate] = Field(min_length=1)
+    lines: list[CaseInvoiceLineCreate] = Field(default_factory=list)
+    time_entry_ids: list[uuid.UUID] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _has_lines_or_time(self) -> CaseInvoiceCreate:
+        if not self.lines and not self.time_entry_ids:
+            raise ValueError("At least one invoice line or time entry is required.")
+        return self
+
+    model_config = {"extra": "forbid"}
 
 
 class CaseInvoiceLineOut(BaseModel):
@@ -1719,6 +1774,7 @@ class CaseInvoiceOut(BaseModel):
     approved_at: datetime | None
     voided_at: datetime | None
     created_at: datetime
+    document_file_id: uuid.UUID | None = None
     lines: list[CaseInvoiceLineOut]
 
 
@@ -1845,6 +1901,7 @@ class FinanceItemCreate(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     direction: Literal["debit", "credit"]
     sort_order: int = Field(default=0, ge=0)
+    vat_treatment: Literal["included", "plus_vat"] | None = None
 
     model_config = {"extra": "forbid"}
 
@@ -1854,6 +1911,7 @@ class FinanceItemUpdate(BaseModel):
     direction: Literal["debit", "credit"] | None = None
     amount_pence: int | None = Field(default=None, ge=0)
     vat_pence: int | None = Field(default=None, ge=0)
+    vat_treatment: Literal["included", "plus_vat"] | None = None
     sort_order: int | None = Field(default=None, ge=0)
 
     model_config = {"extra": "forbid"}
@@ -1867,6 +1925,7 @@ class FinanceItemOut(BaseModel):
     direction: Literal["debit", "credit"]
     amount_pence: int | None
     vat_pence: int | None = None
+    vat_treatment: Literal["included", "plus_vat"] | None = None
     sort_order: int
 
 
@@ -1899,6 +1958,7 @@ class FinanceOut(BaseModel):
     categories: list[FinanceCategoryOut]
     has_finance_preset: bool = False
     has_quote_snapshot: bool = False
+    vat_rate_bps: int = 2000
 
 
 # Sub-menu Events (admin templates + case rows)
@@ -2019,6 +2079,21 @@ class BillingReportIn(ReportFeeEarnerIdsIn):
 
     @model_validator(mode="after")
     def _dates(self) -> BillingReportIn:
+        if self.date_from is not None and self.date_to is not None and self.date_from > self.date_to:
+            raise ValueError("date_from must be on or before date_to")
+        return self
+
+
+class WipReportIn(ReportFeeEarnerIdsIn):
+    as_of: date | None = None
+
+
+class TimeRecordedReportIn(ReportFeeEarnerIdsIn):
+    date_from: date | None = None
+    date_to: date | None = None
+
+    @model_validator(mode="after")
+    def _dates(self) -> TimeRecordedReportIn:
         if self.date_from is not None and self.date_to is not None and self.date_from > self.date_to:
             raise ValueError("date_from must be on or before date_to")
         return self

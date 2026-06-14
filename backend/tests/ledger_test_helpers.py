@@ -16,6 +16,8 @@ from app.models import (
     CaseInvoice,
     CaseInvoiceLine,
     CaseStatus,
+    File,
+    FirmSettings,
     InvoiceSeq,
     LedgerAccount,
     LedgerEntry,
@@ -45,6 +47,8 @@ def ledger_test_session() -> Session:
         InvoiceSeq.__table__,
         CaseInvoice.__table__,
         CaseInvoiceLine.__table__,
+        File.__table__,
+        FirmSettings.__table__,
         AuditEvent.__table__,
     )
     try:

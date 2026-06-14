@@ -2,16 +2,19 @@
 from __future__ import annotations
 
 import uuid
+from io import BytesIO
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.admin_access import user_effective_admin
 from app.db import get_db
 from app.deps import get_current_user, require_case_access
 from app.ledger_audit import log_ledger_approve, log_ledger_post
+from app.ledger_export import build_case_ledger_workbook
 from app.ledger_service import approve_ledger_pair, get_ledger, post_transaction
-from app.models import User
+from app.models import Case, User
 from app.permission_checks import user_may_approve_ledger
 from app.schemas import LedgerOut, LedgerPostCreate
 
@@ -26,6 +29,30 @@ def read_ledger(
 ) -> LedgerOut:
     require_case_access(case_id, user, db)
     return get_ledger(case_id, db)
+
+
+@router.get("/{case_id}/ledger/export")
+def export_ledger(
+    case_id: uuid.UUID,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> StreamingResponse:
+    require_case_access(case_id, user, db)
+    case = db.get(Case, case_id)
+    if not case:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Case not found")
+    ledger = get_ledger(case_id, db)
+    wb = build_case_ledger_workbook(case, ledger)
+    bio = BytesIO()
+    wb.save(bio)
+    bio.seek(0)
+    safe_ref = "".join(ch if ch.isalnum() or ch in "-_" else "-" for ch in case.case_number).strip("-") or "matter"
+    filename = f"canary-ledger-{safe_ref}.xlsx"
+    return StreamingResponse(
+        bio,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.post("/{case_id}/ledger/post", status_code=status.HTTP_204_NO_CONTENT)

@@ -26,6 +26,7 @@ from app.db import get_db
 from app.deps import get_current_user, require_case_access
 from app.compose_merge import merge_compose_docx_bytes
 from app.compose_quote import merge_compose_quote_docx_bytes, quote_lines_snapshot_payload, resolve_compose_quote_lines
+from app.finance_service import sync_finance_from_quote
 from app.docx_util import extract_plain_text_from_docx_bytes, write_blank_docx
 from app.graph_mail import create_outlook_draft, graph_mail_configured
 from app.file_storage import FILES_ROOT, StoredFilePaths, case_file_paths, ensure_files_root, sanitize_folder_path
@@ -684,6 +685,7 @@ def compose_quote_spreadsheet(
                     created_at=now,
                 )
             )
+            sync_finance_from_quote(case_id, db, overwrite_existing=True)
     except ValueError:
         pass
     db.commit()

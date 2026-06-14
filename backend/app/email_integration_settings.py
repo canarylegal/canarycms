@@ -10,6 +10,7 @@ from typing import Any, Literal
 from sqlalchemy.orm import Session
 
 from app.admin_access import user_effective_admin
+from app.permission_checks import user_may_access_accounts_workspace
 from app.email_crypt import decrypt_password
 from app.master_admin import load_master_admin_config, master_recovery_public_email
 from app.models import EmailIntegrationSettings, User, UserRole
@@ -92,6 +93,7 @@ def user_public_email_fields(db: Session) -> dict[str, Any]:
 def build_user_public(user: User, db: Session) -> UserPublic:
     base = UserPublic.model_validate(user, from_attributes=True).model_dump()
     base["admin_console_access"] = user_effective_admin(user, db)
+    base["accounts_workspace_access"] = user_may_access_accounts_workspace(user, db)
     base["organization_requires_second_factor"] = firm_mandates_second_factor(db)
     rotation_enabled, rotation_days = firm_password_rotation_policy(db)
     base["organization_requires_password_rotation"] = rotation_enabled

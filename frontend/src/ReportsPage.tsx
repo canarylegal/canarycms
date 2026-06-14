@@ -17,6 +17,8 @@ import {
 type ReportTab =
   | 'client_office_balances'
   | 'billing'
+  | 'time_recorded'
+  | 'wip'
   | 'aged_debt'
   | 'exceptions'
   | 'client_account_reconcile'
@@ -31,6 +33,8 @@ type FeeEarnerPick = { id: string; display_name: string; email: string }
 const REPORT_OPTIONS: { value: ReportTab; label: string }[] = [
   { value: 'client_office_balances', label: 'Client & office balances' },
   { value: 'billing', label: 'Billing' },
+  { value: 'time_recorded', label: 'Time recorded' },
+  { value: 'wip', label: 'WIP (unbilled time)' },
   { value: 'aged_debt', label: 'Aged debt' },
   { value: 'exceptions', label: 'Exceptions' },
   { value: 'client_account_reconcile', label: 'Client account reconcile' },
@@ -229,8 +233,24 @@ function FilterDropdown({
   )
 }
 
-export function ReportsPage({ token, me }: { token: string; me: UserPublic | null }) {
-  const [tab, setTab] = useState<ReportTab>('client_office_balances')
+export function ReportsPage({
+  token,
+  me,
+  initialTab,
+  onInitialTabConsumed,
+}: {
+  token: string
+  me: UserPublic | null
+  initialTab?: ReportTab
+  onInitialTabConsumed?: () => void
+}) {
+  const [tab, setTab] = useState<ReportTab>(initialTab ?? 'client_office_balances')
+  useEffect(() => {
+    if (!initialTab) return
+    setTab(initialTab)
+    onInitialTabConsumed?.()
+  }, [initialTab, onInitialTabConsumed])
+
   const [openFilterId, setOpenFilterId] = useState<string | null>(null)
   const [err, setErr] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -243,6 +263,9 @@ export function ReportsPage({ token, me }: { token: string; me: UserPublic | nul
 
   const [billingFrom, setBillingFrom] = useState('')
   const [billingTo, setBillingTo] = useState('')
+  const [timeRecordedFrom, setTimeRecordedFrom] = useState('')
+  const [timeRecordedTo, setTimeRecordedTo] = useState('')
+  const [wipAsOf, setWipAsOf] = useState('')
 
   const [caseStatusSel, setCaseStatusSel] = useState<Set<CaseWorkflowStatus>>(new Set())
 
@@ -554,6 +577,19 @@ export function ReportsPage({ token, me }: { token: string; me: UserPublic | nul
     return o
   }, [feeEarnerPayload, billingFrom, billingTo])
 
+  const timeRecordedBody = useMemo(() => {
+    const o: Record<string, unknown> = { ...feeEarnerPayload }
+    if (timeRecordedFrom.trim()) o.date_from = timeRecordedFrom.trim()
+    if (timeRecordedTo.trim()) o.date_to = timeRecordedTo.trim()
+    return o
+  }, [feeEarnerPayload, timeRecordedFrom, timeRecordedTo])
+
+  const wipBody = useMemo(() => {
+    const o: Record<string, unknown> = { ...feeEarnerPayload }
+    if (wipAsOf.trim()) o.as_of = wipAsOf.trim()
+    return o
+  }, [feeEarnerPayload, wipAsOf])
+
   const casesBody = useMemo(() => {
     const o: Record<string, unknown> = { ...feeEarnerPayload }
     if (caseStatusSel.size > 0) o.statuses = Array.from(caseStatusSel)
@@ -749,6 +785,15 @@ export function ReportsPage({ token, me }: { token: string; me: UserPublic | nul
     return `${a} → ${b}`
   }, [billingFrom, billingTo])
 
+  const timeRecordedDateSummary = useMemo(() => {
+    if (!timeRecordedFrom.trim() && !timeRecordedTo.trim()) return 'All dates'
+    const a = timeRecordedFrom.trim() || '…'
+    const b = timeRecordedTo.trim() || '…'
+    return `${a} → ${b}`
+  }, [timeRecordedFrom, timeRecordedTo])
+
+  const wipAsOfSummary = useMemo(() => (wipAsOf.trim() ? wipAsOf.trim() : 'Today'), [wipAsOf])
+
   const caseStatusSummary = useMemo(() => {
     if (caseStatusSel.size === 0) return 'All statuses'
     const labels = CASE_STATUS_OPTIONS.filter((o) => caseStatusSel.has(o.value)).map((o) => o.label)
@@ -839,6 +884,78 @@ export function ReportsPage({ token, me }: { token: string; me: UserPublic | nul
     }[]
     totals?: { fees_ex_vat_pence: number; vat_pence: number; disbursements_ex_vat_pence: number }
   } | null
+
+  const previewWip = previewJson as {
+    by_fee_earner?: {
+      user_id: string
+      display_name: string
+      duration_minutes: number
+      duration_hours: number
+      value_pence: number
+      entry_count: number
+    }[]
+    entries?: {
+      entry_id: string
+      case_id: string
+      case_number: string
+      client_name?: string | null
+      fee_earner_name: string
+      work_date: string
+      duration_minutes: number
+      description: string
+      value_pence: number | null
+      age_days: number
+      age_bucket: string
+    }[]
+    totals?: { duration_minutes: number; value_pence: number; entry_count: number }
+  } | null
+
+  const previewTimeRecorded = previewJson as {
+    by_fee_earner?: {
+      user_id: string
+      display_name: string
+      duration_hours: number
+      billable_hours: number
+      nil_rate_hours: number
+      value_pence: number
+      entry_count: number
+      unbilled_minutes: number
+      billed_minutes: number
+      written_off_minutes: number
+    }[]
+    entries?: {
+      entry_id: string
+      case_number: string
+      client_name?: string | null
+      fee_earner_name: string
+      work_date: string
+      duration_minutes: number
+      description: string
+      non_billable: boolean
+      status: string
+      value_pence: number | null
+    }[]
+    totals?: {
+      duration_minutes: number
+      billable_minutes: number
+      nil_rate_minutes: number
+      value_pence: number
+      entry_count: number
+      unbilled_minutes: number
+      billed_minutes: number
+      written_off_minutes: number
+    }
+  } | null
+
+  function formatHoursFromMinutes(m: number): string {
+    return (m / 60).toFixed(1)
+  }
+
+  function timeStatusLabel(status: string): string {
+    if (status === 'written_off') return 'Written off'
+    if (status === 'billed') return 'Billed'
+    return 'Unbilled'
+  }
 
   const previewCases = previewJson as {
     rows?: {
@@ -1064,6 +1181,50 @@ export function ReportsPage({ token, me }: { token: string; me: UserPublic | nul
                   </label>
                   <p className="muted" style={{ margin: '4px 0 0', fontSize: 12 }}>
                     Leave both empty for all time.
+                  </p>
+                </div>
+              </FilterDropdown>
+            ) : null}
+
+            {tab === 'time_recorded' ? (
+              <FilterDropdown
+                id="timeRecordedDates"
+                label="Work date range"
+                summary={timeRecordedDateSummary}
+                openId={openFilterId}
+                setOpenId={setOpenFilterId}
+              >
+                <div className="reportsDdDateFields">
+                  <label className="field">
+                    <span>From</span>
+                    <input type="date" value={timeRecordedFrom} onChange={(e) => setTimeRecordedFrom(e.target.value)} />
+                  </label>
+                  <label className="field">
+                    <span>To</span>
+                    <input type="date" value={timeRecordedTo} onChange={(e) => setTimeRecordedTo(e.target.value)} />
+                  </label>
+                  <p className="muted" style={{ margin: '4px 0 0', fontSize: 12 }}>
+                    Filter by work date on each time entry. Leave both empty for all time.
+                  </p>
+                </div>
+              </FilterDropdown>
+            ) : null}
+
+            {tab === 'wip' ? (
+              <FilterDropdown
+                id="wipAsOf"
+                label="Age as of"
+                summary={wipAsOfSummary}
+                openId={openFilterId}
+                setOpenId={setOpenFilterId}
+              >
+                <div className="reportsDdDateFields">
+                  <label className="field">
+                    <span>As of date</span>
+                    <input type="date" value={wipAsOf} onChange={(e) => setWipAsOf(e.target.value)} />
+                  </label>
+                  <p className="muted" style={{ margin: '4px 0 0', fontSize: 12 }}>
+                    Leave empty to use today. Age buckets: 0–30, 31–90, and 90+ days from work date.
                   </p>
                 </div>
               </FilterDropdown>
@@ -1503,6 +1664,232 @@ export function ReportsPage({ token, me }: { token: string; me: UserPublic | nul
                     ) : null}
                   </tbody>
                 </table>
+              </div>
+            ) : null}
+          </section>
+        ) : null}
+
+        {tab === 'time_recorded' ? (
+          <section className="reportsSection">
+            <p className="muted" style={{ marginTop: 0 }}>
+              Time logged on matters by work date — all statuses (unbilled, billed, written off) and nil-rate entries
+              included. Value is at each fee earner&apos;s charge rate for billable entries only.
+            </p>
+            <div className="row" style={{ gap: 8, marginTop: 10 }}>
+              <button
+                type="button"
+                className="btn primary"
+                disabled={busy}
+                onClick={() => void runJson('/reports/time-recorded', timeRecordedBody)}
+              >
+                Run report
+              </button>
+              <button
+                type="button"
+                className="btn"
+                disabled={busy}
+                onClick={() => void runXlsx('/reports/time-recorded', timeRecordedBody, 'canary-report-time-recorded.xlsx')}
+              >
+                Export Excel
+              </button>
+            </div>
+            {previewTimeRecorded?.by_fee_earner ? (
+              <div className="stack" style={{ gap: 16, marginTop: 12 }}>
+                <div className="reportsPreviewScroll">
+                  <table className="reportsTable">
+                    <thead>
+                      <tr>
+                        <th>Fee earner</th>
+                        <th>Total hrs</th>
+                        <th>Billable hrs</th>
+                        <th>Nil-rate hrs</th>
+                        <th>Value</th>
+                        <th>Entries</th>
+                        <th>Unbilled hrs</th>
+                        <th>Billed hrs</th>
+                        <th>Written-off hrs</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {previewTimeRecorded.by_fee_earner.map((r) => (
+                        <tr key={r.user_id}>
+                          <td>{r.display_name}</td>
+                          <td>{r.duration_hours}</td>
+                          <td>{r.billable_hours}</td>
+                          <td>{r.nil_rate_hours}</td>
+                          <td>{formatMoneyPence(r.value_pence)}</td>
+                          <td>{r.entry_count}</td>
+                          <td>{formatHoursFromMinutes(r.unbilled_minutes)}</td>
+                          <td>{formatHoursFromMinutes(r.billed_minutes)}</td>
+                          <td>{formatHoursFromMinutes(r.written_off_minutes)}</td>
+                        </tr>
+                      ))}
+                      {previewTimeRecorded.totals ? (
+                        <tr className="reportsTableTotalRow">
+                          <td>
+                            <strong>Total</strong>
+                          </td>
+                          <td>
+                            <strong>{formatHoursFromMinutes(previewTimeRecorded.totals.duration_minutes)}</strong>
+                          </td>
+                          <td>
+                            <strong>{formatHoursFromMinutes(previewTimeRecorded.totals.billable_minutes)}</strong>
+                          </td>
+                          <td>
+                            <strong>{formatHoursFromMinutes(previewTimeRecorded.totals.nil_rate_minutes)}</strong>
+                          </td>
+                          <td>
+                            <strong>{formatMoneyPence(previewTimeRecorded.totals.value_pence)}</strong>
+                          </td>
+                          <td>
+                            <strong>{previewTimeRecorded.totals.entry_count}</strong>
+                          </td>
+                          <td>
+                            <strong>{formatHoursFromMinutes(previewTimeRecorded.totals.unbilled_minutes)}</strong>
+                          </td>
+                          <td>
+                            <strong>{formatHoursFromMinutes(previewTimeRecorded.totals.billed_minutes)}</strong>
+                          </td>
+                          <td>
+                            <strong>{formatHoursFromMinutes(previewTimeRecorded.totals.written_off_minutes)}</strong>
+                          </td>
+                        </tr>
+                      ) : null}
+                    </tbody>
+                  </table>
+                </div>
+                {previewTimeRecorded.entries?.length ? (
+                  <div className="reportsPreviewScroll">
+                    <table className="reportsTable">
+                      <thead>
+                        <tr>
+                          <th>Reference</th>
+                          <th>Client</th>
+                          <th>Fee earner</th>
+                          <th>Work date</th>
+                          <th>Hours</th>
+                          <th>Description</th>
+                          <th>Nil rate</th>
+                          <th>Status</th>
+                          <th>Value</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {previewTimeRecorded.entries.map((r) => (
+                          <tr key={r.entry_id}>
+                            <td>{r.case_number}</td>
+                            <td>{r.client_name ?? ''}</td>
+                            <td>{r.fee_earner_name}</td>
+                            <td>{r.work_date}</td>
+                            <td>{formatHoursFromMinutes(r.duration_minutes)}</td>
+                            <td>{r.description}</td>
+                            <td>{r.non_billable ? 'Yes' : 'No'}</td>
+                            <td>{timeStatusLabel(r.status)}</td>
+                            <td>{r.non_billable ? '—' : r.value_pence != null ? formatMoneyPence(r.value_pence) : '—'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+          </section>
+        ) : null}
+
+        {tab === 'wip' ? (
+          <section className="reportsSection">
+            <p className="muted" style={{ marginTop: 0 }}>
+              Unbilled time entries across matters, valued at each fee earner&apos;s charge rate. Written-off and billed
+              time is excluded.
+            </p>
+            <div className="row" style={{ gap: 8, marginTop: 10 }}>
+              <button type="button" className="btn primary" disabled={busy} onClick={() => void runJson('/reports/wip', wipBody)}>
+                Run report
+              </button>
+              <button
+                type="button"
+                className="btn"
+                disabled={busy}
+                onClick={() => void runXlsx('/reports/wip', wipBody, 'canary-report-wip.xlsx')}
+              >
+                Export Excel
+              </button>
+            </div>
+            {previewWip?.by_fee_earner ? (
+              <div className="stack" style={{ gap: 16, marginTop: 12 }}>
+                <div className="reportsPreviewScroll">
+                  <table className="reportsTable">
+                    <thead>
+                      <tr>
+                        <th>Fee earner</th>
+                        <th>Hours</th>
+                        <th>Value</th>
+                        <th>Entries</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {previewWip.by_fee_earner.map((r) => (
+                        <tr key={r.user_id}>
+                          <td>{r.display_name}</td>
+                          <td>{r.duration_hours}</td>
+                          <td>{formatMoneyPence(r.value_pence)}</td>
+                          <td>{r.entry_count}</td>
+                        </tr>
+                      ))}
+                      {previewWip.totals ? (
+                        <tr className="reportsTableTotalRow">
+                          <td>
+                            <strong>Total</strong>
+                          </td>
+                          <td>
+                            <strong>{(previewWip.totals.duration_minutes / 60).toFixed(1)}</strong>
+                          </td>
+                          <td>
+                            <strong>{formatMoneyPence(previewWip.totals.value_pence)}</strong>
+                          </td>
+                          <td>
+                            <strong>{previewWip.totals.entry_count}</strong>
+                          </td>
+                        </tr>
+                      ) : null}
+                    </tbody>
+                  </table>
+                </div>
+                {previewWip.entries?.length ? (
+                  <div className="reportsPreviewScroll">
+                    <table className="reportsTable">
+                      <thead>
+                        <tr>
+                          <th>Reference</th>
+                          <th>Client</th>
+                          <th>Fee earner</th>
+                          <th>Work date</th>
+                          <th>Hours</th>
+                          <th>Description</th>
+                          <th>Value</th>
+                          <th>Age</th>
+                          <th>Bucket</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {previewWip.entries.map((r) => (
+                          <tr key={r.entry_id}>
+                            <td>{r.case_number}</td>
+                            <td>{r.client_name ?? ''}</td>
+                            <td>{r.fee_earner_name}</td>
+                            <td>{r.work_date}</td>
+                            <td>{(r.duration_minutes / 60).toFixed(1)}</td>
+                            <td>{r.description}</td>
+                            <td>{r.value_pence != null ? formatMoneyPence(r.value_pence) : '—'}</td>
+                            <td>{r.age_days}d</td>
+                            <td>{r.age_bucket}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : null}
               </div>
             ) : null}
           </section>

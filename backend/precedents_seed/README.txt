@@ -5,27 +5,28 @@ When the `precedent` table is empty and `manifest.json` contains at least one en
 in `precedents`, the backend imports categories + files under `bundle/` on startup
 (`app/precedent_bootstrap.py`). An empty `precedents` array does nothing (safe default).
 
-**Important:** seeding runs only when the precedent table has **no rows**. Existing deployments
-that already have precedents are **not** updated from `precedents_seed` on upgrade; use Admin or
-scripts (e.g. `set_blank_letter_precedent.py`) for those environments.
+On every startup, missing **global** precedents from the manifest are added by reference
+(`sync_missing_global_precedents_from_seed`) so upgrades pick up new universal templates
+without overwriting admin edits to existing rows.
+
+**Important:** the full seed runs only when the precedent table has **no rows**. Existing
+deployments that already have precedents are updated only for **missing** global references
+(`BLANK_LETTER`, `INVOICE_TEMPLATE`, `COMPLETION_STATEMENT`).
 
 Export from a running stack (inherits DATABASE_URL and FILES_ROOT from the container):
 
   docker compose exec backend python scripts/export_precedent_seed.py
 
 Commit `manifest.json` and `bundle/*` so the next `docker build` includes them.
-Categories are matched on the new machine by **matter head type name** and **sub-type name**
-(must match Admin matter types).
+
+Regenerate universal templates:
+
+  backend/.venv/bin/python backend/scripts/write_universal_invoice_precedent.py \\
+    backend/precedents_seed/bundle/g1_invoice_template.docx
+
+  backend/.venv/bin/python backend/scripts/write_universal_completion_statement_precedent.py \\
+    backend/precedents_seed/bundle/g2_completion_statement.docx
 
 Precedent entries with `"global": true` are firm-wide (no category / matter sub-type): for example
-the reserved blank letter (`reference`: `BLANK_LETTER`, `kind`: `letter`). Export includes these;
-scoped precedents still list `category_name`, `matter_sub_type_name`, and `matter_head_type_name`.
-
----
-
-Wiping users (except admins), cases, case files, and contacts (destructive)
-
-  docker compose exec -e I_CONFIRM_CANARY_WIPE=yes backend python scripts/wipe_except_admin.py
-
-Precedent library rows and files are kept; precedent `file.owner_id` is reassigned to
-the first admin user.
+the reserved blank letter (`reference`: `BLANK_LETTER`, `kind`: `letter`), invoice template
+(`INVOICE_TEMPLATE`), and completion statement template (`COMPLETION_STATEMENT`).

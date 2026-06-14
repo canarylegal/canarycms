@@ -25,6 +25,8 @@ export type UserPublic = {
   m365_graph_drafts_configured?: boolean
   /** From GET /auth/me — category Admin or built-in admin role. */
   admin_console_access?: boolean
+  /** From GET /auth/me — firm-wide Accounts desk (admin or cashier approve permissions). */
+  accounts_workspace_access?: boolean
   /**
    * From GET /auth/me — false when org mandates a second factor but this JWT did not verify one at sign-in
    * (e.g. password-only session). Omitted on older APIs (treat as unrestricted).
@@ -111,6 +113,7 @@ export type Verify2FASessionResponse = TokenResponse & {
 /** Admin-only user row (includes permission category). */
 export type AdminUserPublic = UserPublic & {
   permission_category_id?: string | null
+  charge_rate_pence_per_hour?: number | null
 }
 
 export type LetterheadStyle = 'preprinted' | 'digital'
@@ -211,6 +214,18 @@ export type UserPermissionCategoryOut = {
 export type LedgerPermissionsOut = {
   can_approve_ledger: boolean
   can_approve_invoices?: boolean
+  accounts_workspace_access?: boolean
+}
+
+export function userCanAccessAccountsWorkspace(me: UserPublic | null | undefined): boolean {
+  if (userCanAccessAdminConsole(me)) return true
+  return Boolean(me?.accounts_workspace_access)
+}
+
+/** Cashiers (accounts desk, not admin) land on Accounts instead of the main menu by default. */
+export function userIsCashierAccountsHome(me: UserPublic | null | undefined): boolean {
+  if (!me || userCanAccessAdminConsole(me)) return false
+  return Boolean(me.accounts_workspace_access)
 }
 
 export type CaseInvoiceLineOut = {
@@ -238,6 +253,7 @@ export type CaseInvoiceOut = {
   approved_at?: string | null
   voided_at?: string | null
   created_at: string
+  document_file_id?: string | null
   lines: CaseInvoiceLineOut[]
 }
 
@@ -259,6 +275,7 @@ export type CaseInvoiceCreate = {
   payee_name?: string | null
   contact_id?: string | null
   lines: CaseInvoiceLineCreate[]
+  time_entry_ids?: string[]
 }
 
 export type BillingLineTemplateOut = {
@@ -615,6 +632,7 @@ export type UserSummary = {
   role: string
   is_active: boolean
   can_be_fee_earner?: boolean
+  has_charge_rate?: boolean
 }
 
 export type CaseNoteOut = {
@@ -642,6 +660,25 @@ export type CaseTaskOut = {
   priority?: CaseTaskPriority
   case_event_id?: string | null
   is_private?: boolean
+  created_at: string
+  updated_at: string
+}
+
+export type CaseTimeEntryOut = {
+  id: string
+  case_id: string
+  user_id: string
+  user_display_name: string
+  created_by_user_id: string
+  work_date: string
+  duration_minutes: number
+  duration_tenths: number
+  description: string
+  status: 'unbilled' | 'billed' | 'written_off'
+  invoice_line_id?: string | null
+  non_billable?: boolean
+  charge_rate_pence_per_hour?: number | null
+  value_pence?: number | null
   created_at: string
   updated_at: string
 }
@@ -973,6 +1010,7 @@ export type FinanceItemOut = {
   direction: 'debit' | 'credit'
   amount_pence?: number | null
   vat_pence?: number | null
+  vat_treatment?: 'included' | 'plus_vat' | null
   sort_order: number
 }
 
@@ -991,6 +1029,7 @@ export type FinanceOut = {
   categories: FinanceCategoryOut[]
   has_finance_preset?: boolean
   has_quote_snapshot?: boolean
+  vat_rate_bps?: number
 }
 
 export type CaseSourceOut = {
