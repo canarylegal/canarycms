@@ -71,7 +71,7 @@ import { useUserUiPreferences } from '../useUserUiPreferences'
 import { useColumnWidths } from '../useColumnWidths'
 import { LEGACY_AUTO_TASKS_MENU_COLUMN_WIDTHS, effectiveColumnWidths } from '../columnGridDefaults'
 import { TASKS_MENU_COLUMN_COUNT, TASKS_MENU_COLUMN_WIDTHS_DEFAULT } from '../userUiPreferences'
-import { CaseContactsAddDocForm, CaseContactsEditDocForm } from './CaseContactsDocForms'
+import { CaseContactsAddDocForm, CaseContactsEditDocForm, LAWYER_CLIENTS_REQUIRED_MSG } from './CaseContactsDocForms'
 import { computeDocContextMenuStyle } from './docContextMenu'
 import { dndEventHasFiles, docListPrimaryDate, formatDocFileSize, formatDocModified, matterTypeDisplayLine } from './docFormat'
 import { DocsFileDescCell, DocsFolderDescCell } from './DocCells'
@@ -411,11 +411,12 @@ export function CaseDetail({
     return [...clients, ...others]
   }, [caseContacts])
 
-  const clientMatterContacts = useMemo(
-    () =>
-      caseContacts.filter(isClientMatterContact).sort((a, b) => a.created_at.localeCompare(b.created_at)),
-    [caseContacts],
-  )
+  const lawyerLinkableMatterContacts = useMemo(() => {
+    const excludeId = editSnapshot?.id
+    return caseContacts
+      .filter((c) => c.id !== excludeId)
+      .sort((a, b) => a.created_at.localeCompare(b.created_at))
+  }, [caseContacts, editSnapshot?.id])
 
   useEffect(() => {
     if (!editSnapshot) {
@@ -567,6 +568,7 @@ export function CaseDetail({
   const [pickLinkGlobal, setPickLinkGlobal] = useState(false)
   const [pickLinkType, setPickLinkType] = useState('')
   const [pickLawyerClientIds, setPickLawyerClientIds] = useState<string[]>([])
+  const [contactPickErr, setContactPickErr] = useState<string | null>(null)
   const [contactPickMatterOpen, setContactPickMatterOpen] = useState(false)
   const [contactPickTypeOpen, setContactPickTypeOpen] = useState(false)
   const [manageAccessOpen, setManageAccessOpen] = useState(false)
@@ -1372,7 +1374,7 @@ export function CaseDetail({
   function createFolderAtCurrentPath() {
     setTextPrompt({
       title: 'New folder',
-      hint: 'Enter a folder name. Slashes are allowed (e.g. A/B is one folder, not nested).',
+      hint: 'Enter a folder name.',
       initial: '',
       confirmLabel: 'Create',
       onConfirm: (name) => {
@@ -1809,6 +1811,7 @@ export function CaseDetail({
     setPickLinkGlobal(false)
     setPickLinkType('')
     setPickLawyerClientIds([])
+    setContactPickErr(null)
     setContactPickMatterOpen(false)
     setContactPickTypeOpen(false)
   }
@@ -1839,15 +1842,16 @@ export function CaseDetail({
     if (!contactPickModal || !caseId) return
     setBusy(true)
     setActionErr(null)
+    setContactPickErr(null)
     try {
       if (pickSelectedContact) {
         if (pickLinkGlobal) {
           if (!pickLinkType.trim()) {
-            setActionErr('Contact type is required when linking to this matter.')
+            setContactPickErr('Contact type is required when linking to this matter.')
             return
           }
           if (pickLinkType.trim().toLowerCase() === LAWYERS_TYPE_SLUG && pickLawyerClientIds.length < 1) {
-            setActionErr('Select one or more clients for this lawyer contact.')
+            setContactPickErr(LAWYER_CLIENTS_REQUIRED_MSG)
             return
           }
           const linkJson: Record<string, unknown> = {
@@ -3276,7 +3280,7 @@ export function CaseDetail({
                           selectedGlobalContactId={selectedGlobalContactId}
                           setSelectedGlobalContactId={setSelectedGlobalContactId}
                           matterTypeOptions={matterTypeOptions}
-                          clientMatterContacts={clientMatterContacts}
+                          lawyerLinkableContacts={lawyerLinkableMatterContacts}
                           contactAddErr={contactAddErr}
                           setContactAddErr={setContactAddErr}
                           setActionErr={setActionErr}
@@ -3309,7 +3313,7 @@ export function CaseDetail({
                           setPushToGlobal={setPushToGlobal}
                           resolvedEditSnapshotName={resolvedEditSnapshotName}
                           matterTypeOptions={matterTypeOptions}
-                          clientMatterContacts={clientMatterContacts}
+                          lawyerLinkableContacts={lawyerLinkableMatterContacts}
                           onDone={finishContactsDoc}
                           setActionErr={setActionErr}
                         />
@@ -3707,6 +3711,7 @@ export function CaseDetail({
                 </button>
               </div>
               <div className="stack modalBodyScroll" style={{ marginTop: 12 }}>
+                {contactPickErr ? <div className="error">{contactPickErr}</div> : null}
                 <SingleSelectDropdown
                   label="Matter contact"
                   options={contactPickMatterOptions}
@@ -3754,6 +3759,7 @@ export function CaseDetail({
                     value={pickLinkType}
                     onChange={(v) => {
                       setPickLinkType(v)
+                      setContactPickErr(null)
                       if (v.trim().toLowerCase() !== LAWYERS_TYPE_SLUG) {
                         setPickLawyerClientIds([])
                       } else if (pickSelectedContact?.type === 'person') {
@@ -3770,27 +3776,37 @@ export function CaseDetail({
                 ) : null}
                 {pickLinkGlobal && pickLinkType.trim().toLowerCase() === LAWYERS_TYPE_SLUG ? (
                   <div className="field">
-                    <span>Linked clients (required)</span>
+                    <span>Linked contacts (required)</span>
                     <div className="stack" style={{ gap: 6, maxHeight: 120, overflow: 'auto' }}>
-                      {clientMatterContacts.length === 0 ? (
-                        <div className="muted">Add at least one Client matter contact on this case first.</div>
+                      {lawyerLinkableMatterContacts.length === 0 ? (
+                        <div className="muted">Add at least one other matter contact on this case first.</div>
                       ) : (
-                        clientMatterContacts.map((c) => (
-                          <label key={c.id} className="row" style={{ gap: 8, cursor: 'pointer' }}>
+                        lawyerLinkableMatterContacts.map((c) => (
+                          <label key={c.id} className="row" style={{ gap: 8, cursor: 'pointer', alignItems: 'flex-start' }}>
                             <input
                               type="checkbox"
                               checked={pickLawyerClientIds.includes(c.id)}
+                              style={{ marginTop: 3 }}
                               onChange={(e) => {
                                 setPickLawyerClientIds((prev) => {
+                                  let next: string[]
                                   if (e.target.checked) {
                                     if (prev.includes(c.id) || prev.length >= 4) return prev
-                                    return [...prev, c.id]
+                                    next = [...prev, c.id]
+                                  } else {
+                                    next = prev.filter((x) => x !== c.id)
                                   }
-                                  return prev.filter((x) => x !== c.id)
+                                  if (next.length > 0) setContactPickErr(null)
+                                  return next
                                 })
                               }}
                             />
-                            <span>{c.name}</span>
+                            <span>
+                              {c.name}
+                              <span className="muted" style={{ display: 'block', fontSize: 12 }}>
+                                {matterContactTypeLabel(c.matter_contact_type, matterTypeOptions)}
+                              </span>
+                            </span>
                           </label>
                         ))
                       )}

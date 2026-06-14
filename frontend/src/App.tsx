@@ -331,7 +331,9 @@ function useAuth() {
         if (!cancelled) setMe(user)
       } catch (e: any) {
         if (!cancelled) {
-          setError(e?.message ?? 'Auth error')
+          const msg = e?.message ?? 'Auth error'
+          setError(msg)
+          setLoginError(msg)
           setMe(null)
           setToken(null)
           localStorage.removeItem('token')
@@ -4679,8 +4681,15 @@ function ContactEditor({
             className="btn primary"
             disabled={busy || !resolvedName.trim()}
             onClick={async () => {
-              const payload = contactFieldsModelToPayload(fields)
-              if (!payload) return
+              if (fields.type === 'organisation' && !fields.tradingName.trim()) {
+                setErr('Trading name is required for organisations.')
+                return
+              }
+              const payload = contactFieldsModelToPayload(fields, { fallbackName: contact.name })
+              if (!payload) {
+                setErr('Name is required.')
+                return
+              }
               setBusy(true)
               setErr(null)
               try {

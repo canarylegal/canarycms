@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import uuid
+from datetime import date, datetime
 
 import pytest
 from fastapi import HTTPException
 
 from app.ledger_service import approve_ledger_pair, get_ledger, post_transaction
-from app.models import UserRole
+from app.models import UserPermissionCategory, UserRole
 from app.reports_service import balances_by_case_ids
 from app.schemas import LedgerPostCreate
 
@@ -24,7 +25,9 @@ def _post(
     client_direction: str | None = None,
     office_direction: str | None = None,
     force_unapproved: bool = False,
+    anticipated: bool = False,
 ) -> uuid.UUID:
+    anticipated_for_date = date(2026, 6, 15) if anticipated else None
     return post_transaction(
         case_id,
         LedgerPostCreate(
@@ -32,11 +35,13 @@ def _post(
             amount_pence=amount_pence,
             client_direction=client_direction,
             office_direction=office_direction,
+            anticipated=anticipated,
+            anticipated_for_date=anticipated_for_date,
         ),
         user,
         db,
         force_unapproved=force_unapproved,
-    )
+    ).pair_id
 
 
 def test_client_credit_increases_balance() -> None:
@@ -126,7 +131,7 @@ def test_pending_client_debit_does_not_affect_balance_until_approved() -> None:
     assert ledger.client.balance_pence == 5_000
 
     with pytest.raises(HTTPException) as exc:
-        approve_ledger_pair(case.id, pair_id, db)
+        approve_ledger_pair(case.id, pair_id, cashier, db)
     assert exc.value.status_code == 422
     assert "deficit" in str(exc.value.detail).lower()
 
@@ -151,7 +156,7 @@ def test_approve_valid_pending_posting_updates_balance() -> None:
     )
     db.commit()
 
-    approve_ledger_pair(case.id, pair_id, db)
+    approve_ledger_pair(case.id, pair_id, cashier, db)
     db.commit()
 
     ledger = get_ledger(case.id, db)
@@ -174,3 +179,78 @@ def test_integer_pence_balance_is_exact_after_many_postings() -> None:
 
     ledger = get_ledger(case.id, db)
     assert ledger.client.balance_pence == net
+
+
+def test_any_user_may_post_anticipated_without_post_permissions() -> None:
+    db = ledger_test_session()
+    admin = add_user(db)
+    readonly = UserPermissionCategory(
+        id=uuid.uuid4(),
+        name="Read only",
+        perm_fee_earner=True,
+        perm_post_client=False,
+        perm_post_office=False,
+        perm_approve_payments=False,
+        perm_approve_invoices=False,
+        perm_admin=False,
+        created_at=datetime.utcnow(),
+        updated_at=datetime.utcnow(),
+    )
+    db.add(readonly)
+    db.commit()
+    secretary = add_user(db, role=UserRole.user, permission_category_id=readonly.id)
+    case = add_case(db, fee_earner_user_id=admin.id)
+
+    pair_id = _post(
+        db,
+        case.id,
+        secretary,
+        amount_pence=4_000,
+        client_direction="credit",
+        anticipated=True,
+    )
+    db.commit()
+
+    ledger = get_ledger(case.id, db)
+    assert ledger.client.balance_pence == 0
+    assert any(e.pair_id == pair_id and e.is_anticipated for e in ledger.entries)
+
+
+def test_anticipated_posting_affects_balance_after_post_permission_approval() -> None:
+    db = ledger_test_session()
+    admin = add_user(db)
+    readonly = UserPermissionCategory(
+        id=uuid.uuid4(),
+        name="Read only",
+        perm_fee_earner=True,
+        perm_post_client=False,
+        perm_post_office=False,
+        perm_approve_payments=False,
+        perm_approve_invoices=False,
+        perm_admin=False,
+        created_at=datetime.utcnow(),
+        updated_at=datetime.utcnow(),
+    )
+    db.add(readonly)
+    db.commit()
+    cat = add_cashier_category(db)
+    poster = add_user(db, role=UserRole.user, permission_category_id=readonly.id)
+    approver = add_user(db, role=UserRole.user, permission_category_id=cat.id)
+    case = add_case(db, fee_earner_user_id=admin.id)
+
+    pair_id = _post(
+        db,
+        case.id,
+        poster,
+        amount_pence=6_500,
+        client_direction="credit",
+        anticipated=True,
+    )
+    db.commit()
+
+    approve_ledger_pair(case.id, pair_id, approver, db)
+    db.commit()
+
+    ledger = get_ledger(case.id, db)
+    assert ledger.client.balance_pence == 6_500
+    assert all(not e.is_anticipated for e in ledger.entries if e.pair_id == pair_id)

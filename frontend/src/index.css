@@ -884,6 +884,14 @@ html.dark .topbar--content .btn:not(.primary):not(.danger) {
   font-size: 20px;
 }
 
+.accountsLedgerTotal--positive {
+  color: #16a34a;
+}
+
+.accountsLedgerTotal--negative {
+  color: var(--danger);
+}
+
 .accountsMatterLookup {
   margin-bottom: 16px;
 }
@@ -972,13 +980,18 @@ html.dark .topbar--content .btn:not(.primary):not(.danger) {
 }
 
 .accountsTabBtn--active {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: var(--accent-contrast, #fff);
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #f8fafc;
 }
 
 .accountsPageBody {
   padding-top: 8px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  flex: 1 1 auto;
+  min-height: 0;
+  -webkit-overflow-scrolling: touch;
 }
 
 .accountsSectionTitle {
@@ -1966,6 +1979,41 @@ html.dark .singleSelectDropdownTrigger {
   align-self: start;
   /* Align buttons with input row (label + gap above). */
   padding-top: 19px;
+}
+
+/* Precedents merge-code catalog: filter + action buttons on one row. */
+.mergeCatalogToolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.mergeCatalogToolbarLabel {
+  font-size: 12px;
+  line-height: 1.2;
+}
+
+.mergeCatalogToolbarControls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.mergeCatalogToolbarInput {
+  flex: 1 1 220px;
+  min-width: 0;
+  box-sizing: border-box;
+  height: 38px;
+  padding: 0 10px;
+}
+
+.mergeCatalogToolbarActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  flex: 0 0 auto;
 }
 
 .auditTableCard {
@@ -3783,10 +3831,16 @@ select {
 .canaryCalendar .fc .fc-list-event-dot {
   display: none !important;
 }
+.canaryCalendar .fc .fc-list-table {
+  table-layout: fixed;
+  width: 100%;
+}
 .canaryCalendar .fc .fc-list-event-graphic {
-  width: 0;
-  min-width: 0;
+  display: none !important;
+  width: 0 !important;
+  min-width: 0 !important;
   padding: 0 !important;
+  border: 0 !important;
   overflow: hidden;
 }
 .canaryCalendar .fc a.fc-daygrid-event.fc-daygrid-dot-event {
@@ -3808,6 +3862,47 @@ select {
   display: none !important;
 }
 .canaryCalendar .fc tr.fc-list-event[data-canary-allday='1'] td.fc-list-event-time {
+  display: none !important;
+}
+
+/* List view: FC defaults time column to 1px — timed text then overlaps the title cell. */
+.canaryCalendar .fc .fc-list-event td.fc-list-event-title .fc-event-time {
+  display: none !important;
+}
+.canaryCalendar .fc .fc-list-event-time {
+  width: 8.5rem !important;
+  min-width: 8.5rem !important;
+  max-width: 8.5rem !important;
+  white-space: nowrap !important;
+  vertical-align: top;
+  padding-right: 0.75rem !important;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.canaryCalendar .fc tr.fc-list-event[data-canary-allday='1'] td.fc-list-event-time {
+  display: none !important;
+  width: 0 !important;
+  min-width: 0 !important;
+  max-width: 0 !important;
+  padding: 0 !important;
+}
+.canaryCalendar .fc .fc-list-event td.fc-list-event-title {
+  overflow-wrap: anywhere;
+}
+.canaryCalendar .fc .fc-list-event td.fc-list-event-title a,
+.canaryCalendar .fc .fc-list-event td.fc-list-event-title .canary-list-event-title {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  max-width: 100%;
+}
+.canaryCalendar .fc .fc-list-event td.fc-list-event-title .fc-event-title {
+  white-space: normal;
+}
+.canaryCalendar .fc .fc-list-day-cushion {
+  display: block;
+}
+.canaryCalendar .fc .fc-list-day-side-text {
   display: none !important;
 }
 
@@ -5027,6 +5122,40 @@ html.dark .ledgerBalanceBand--client {
   overflow: auto;
   min-width: 280px;
   min-height: 160px;
+}
+
+.accountsPendingFilters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 0 0 12px;
+}
+
+.accountsPendingFilter {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 140px;
+}
+
+.accountsPendingFilter select {
+  min-width: 140px;
+}
+
+.ledgerRow--anticipated td {
+  color: #64748b;
+  background: color-mix(in srgb, var(--panel2) 88%, var(--border));
+}
+
+.ledgerRow--anticipated td .btn {
+  color: var(--text);
+  background: #ffffff;
+  border-color: var(--border);
+}
+
+html.dark .ledgerRow--anticipated td .btn {
+  background: var(--card);
+  color: var(--text);
 }
 
 /* Ledger pending postings — whole row muted; inline Approve stays a normal button */

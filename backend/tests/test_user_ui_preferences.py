@@ -35,6 +35,12 @@ def test_merge_partial_patch() -> None:
     assert out.calendar_selected_calendar_ids == ["abc-123"]
 
 
+def test_list_week_calendar_view_migrated() -> None:
+    out = user_ui_preferences_out({"calendar_view": "listWeek", "case_calendar_view": "listWeek"})
+    assert out.calendar_view == "listYear"
+    assert out.case_calendar_view == "listYear"
+
+
 def test_invalid_values_fall_back_to_defaults() -> None:
     out = user_ui_preferences_out(
         {

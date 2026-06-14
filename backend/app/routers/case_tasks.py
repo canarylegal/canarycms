@@ -11,10 +11,31 @@ from app.case_task_visibility import case_task_list_visibility_clause, case_task
 from app.db_errors import raise_if_missing_case_task_is_private
 from app.db import get_db
 from app.deps import get_current_user, require_case_access
-from app.models import CaseTask, CaseTaskStatus, MatterSubTypeStandardTask, User
+from app.models import Case, CaseTask, CaseTaskStatus, MatterSubTypeStandardTask, User
 from app.schemas import CaseTaskCreate, CaseTaskOut, CaseTaskUpdate
 
 router = APIRouter(prefix="/cases/{case_id}/tasks", tags=["case-tasks"])
+
+
+def _validate_standard_task_for_case(
+    db: Session,
+    case: Case,
+    std_id: uuid.UUID,
+) -> MatterSubTypeStandardTask:
+    st = db.get(MatterSubTypeStandardTask, std_id)
+    if not st:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Standard task not found",
+        )
+    if st.is_system and st.matter_sub_type_id is None:
+        return st
+    if case.matter_sub_type_id is None or st.matter_sub_type_id != case.matter_sub_type_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Standard task does not apply to this matter type",
+        )
+    return st
 
 
 def _case_task_out(db: Session, task: CaseTask) -> CaseTaskOut:
@@ -36,20 +57,7 @@ def create_task(
     case = require_case_access(case_id, user, db)
     std_id = payload.standard_task_id
     if std_id:
-        st = db.get(MatterSubTypeStandardTask, std_id)
-        if not st:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Standard task not found",
-            )
-        if st.is_system and st.matter_sub_type_id is None:
-            # Global built-in (e.g. Follow up) — applies to every case.
-            pass
-        elif case.matter_sub_type_id is None or st.matter_sub_type_id != case.matter_sub_type_id:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Standard task does not apply to this matter type",
-            )
+        st = _validate_standard_task_for_case(db, case, std_id)
         override = (payload.title or "").strip()
         title_final = override if override else st.title
     else:
@@ -128,7 +136,7 @@ def update_task(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> CaseTaskOut:
-    require_case_access(case_id, user, db)
+    case = require_case_access(case_id, user, db)
     try:
         task = db.get(CaseTask, task_id)
     except DBAPIError as e:
@@ -140,6 +148,8 @@ def update_task(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
 
     data = payload.model_dump(exclude_unset=True)
+    if "standard_task_id" in data and data["standard_task_id"] is not None:
+        _validate_standard_task_for_case(db, case, data["standard_task_id"])
     if "is_private" in data and task.created_by_user_id != user.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,

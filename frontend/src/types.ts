@@ -48,7 +48,7 @@ export function userCanAccessAdminConsole(me: UserPublic | null | undefined): bo
   return Boolean(me?.admin_console_access || me?.role === 'admin')
 }
 
-export type CalendarView = 'dayGridMonth' | 'timeGridWeek' | 'timeGridDay' | 'listWeek'
+export type CalendarView = 'dayGridMonth' | 'timeGridWeek' | 'timeGridDay' | 'listYear'
 export type TaskLayout = 'list' | 'kanban'
 export type TaskSortKey = 'reference' | 'client' | 'matter' | 'task' | 'date' | 'assigned' | 'priority'
 export type MainMenuSortKey = 'reference' | 'client' | 'matter' | 'feeEarner' | 'status' | 'created'
@@ -215,6 +215,8 @@ export type LedgerPermissionsOut = {
   can_approve_ledger: boolean
   can_approve_invoices?: boolean
   accounts_workspace_access?: boolean
+  can_post_client?: boolean
+  can_post_office?: boolean
 }
 
 export function userCanAccessAccountsWorkspace(me: UserPublic | null | undefined): boolean {
@@ -916,7 +918,7 @@ export type CaseContactOut = {
   matter_contact_type?: string | null
   /** Matter-specific free text; not stored on the global contact card. */
   matter_contact_reference?: string | null
-  /** When matter contact type is Lawyers: linked Client matter contacts (max 4). */
+  /** When matter contact type is Lawyers: linked matter contacts (max 4). */
   lawyer_client_ids?: string[]
   created_at: string
   updated_at: string
@@ -948,6 +950,8 @@ export type LedgerEntryOut = {
   posted_by_user_id?: string | null
   posted_at: string
   is_approved?: boolean
+  is_anticipated?: boolean
+  anticipated_for_date?: string | null
 }
 
 export type LedgerAccountSummary = {
@@ -970,6 +974,8 @@ export type LedgerPostCreate = {
   amount_pence: number
   client_direction?: 'debit' | 'credit' | null
   office_direction?: 'debit' | 'credit' | null
+  anticipated?: boolean
+  anticipated_for_date?: string | null
 }
 
 // ---------------------------------------------------------------------------

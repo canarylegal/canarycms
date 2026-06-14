@@ -10,6 +10,12 @@ import type {
   ReconciliationPreviewOut,
   UserPublic,
 } from './types'
+import {
+  canApprovePendingLedgerRow,
+  matchesPendingLedgerFilters,
+  type PendingLedgerAccountFilter,
+  type PendingLedgerDirectionFilter,
+} from './ledgerApproval'
 
 type AccountsTab = 'queue' | 'exceptions' | 'activity' | 'reconcile'
 
@@ -28,7 +34,8 @@ type ExceptionLedgerRow = {
   amount_pence: number
   client_direction?: string | null
   office_direction?: string | null
-  is_approved?: boolean
+  is_anticipated?: boolean
+  anticipated_for_date?: string | null
 }
 
 type ExceptionBalRow = {
@@ -72,7 +79,6 @@ type ExceptionsPayload = {
   pending_invoices?: PendingInvoiceRow[]
   client_balance_closed_archived?: ExceptionBalRow[]
   negative_client_balance?: ExceptionBalRow[]
-  large_postings?: ExceptionLedgerRow[]
 }
 
 type LedgerActivityRow = {
@@ -102,11 +108,28 @@ const TAB_OPTIONS: { value: AccountsTab; label: string }[] = [
 function formatMoneyPence(p: number): string {
   const neg = p < 0
   const a = Math.abs(p)
-  return `${neg ? '-' : ''}£${(a / 100).toFixed(2)}`
+  const s = (a / 100).toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  return `${neg ? '-' : ''}£${s}`
+}
+
+function ledgerTotalToneClass(pence: number): string {
+  if (pence > 0) return 'accountsLedgerTotal--positive'
+  if (pence < 0) return 'accountsLedgerTotal--negative'
+  return ''
 }
 
 function formatPostedAt(iso: string): string {
   return iso.slice(0, 16).replace('T', ' ')
+}
+
+function formatExpectedDate(isoDate: string | null | undefined): string {
+  if (!isoDate) return '—'
+  const [y, m, d] = isoDate.split('-').map(Number)
+  return new Date(y, m - 1, d).toLocaleDateString('en-GB', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+  })
 }
 
 function ledgerLegSummary(row: Pick<ExceptionLedgerRow, 'client_direction' | 'office_direction'>): string {
@@ -153,6 +176,10 @@ export function AccountsPage({ token, me, onOpenCase, onOpenReportsReconcile }: 
   const [caseResults, setCaseResults] = useState<CaseOut[]>([])
   const [caseSearchBusy, setCaseSearchBusy] = useState(false)
   const [actionKey, setActionKey] = useState<string | null>(null)
+  const [pendingLedgerAccountFilter, setPendingLedgerAccountFilter] =
+    useState<PendingLedgerAccountFilter>('all')
+  const [pendingLedgerDirectionFilter, setPendingLedgerDirectionFilter] =
+    useState<PendingLedgerDirectionFilter>('all')
 
   const loadFeeEarners = useCallback(async () => {
     const rows = await apiFetch<FeeEarnerPick[]>('/reports/fee-earners', { token })
@@ -266,20 +293,29 @@ export function AccountsPage({ token, me, onOpenCase, onOpenReportsReconcile }: 
   }, [caseSearch, token])
 
   const pendingLedger = exceptions?.pending_ledger_approvals ?? []
+  const filteredPendingLedger = useMemo(
+    () =>
+      pendingLedger.filter((r) =>
+        matchesPendingLedgerFilters(r, pendingLedgerAccountFilter, pendingLedgerDirectionFilter),
+      ),
+    [pendingLedger, pendingLedgerAccountFilter, pendingLedgerDirectionFilter],
+  )
   const pendingInvoices = exceptions?.pending_invoices ?? []
   const exceptionCount = useMemo(() => {
     if (!exceptions) return 0
     return (
       (exceptions.negative_client_balance?.length ?? 0) +
-      (exceptions.client_balance_closed_archived?.length ?? 0) +
-      (exceptions.large_postings?.length ?? 0)
+      (exceptions.client_balance_closed_archived?.length ?? 0)
     )
   }, [exceptions])
 
   const latestReconcile = recRows[0] ?? null
 
-  const canApproveLedger = ledgerPerm?.can_approve_ledger ?? false
   const canApproveInvoices = ledgerPerm?.can_approve_invoices ?? false
+
+  function canApprovePendingRow(row: ExceptionLedgerRow): boolean {
+    return canApprovePendingLedgerRow(row, ledgerPerm)
+  }
 
   async function approveLedgerPosting(caseId: string, pairId: string) {
     const key = `ledger:${caseId}:${pairId}`
@@ -338,8 +374,30 @@ export function AccountsPage({ token, me, onOpenCase, onOpenReportsReconcile }: 
             </div>
             <div className="accountsSummaryCard">
               <div className="accountsSummaryLabel">Client ledger total</div>
-              <div className="accountsSummaryValue accountsSummaryValue--money">
+              <div
+                className={[
+                  'accountsSummaryValue',
+                  'accountsSummaryValue--money',
+                  recPreview ? ledgerTotalToneClass(recPreview.ledger_client_total_pence) : '',
+                ]
+                  .filter(Boolean)
+                  .join(' ')}
+              >
                 {recPreview ? formatMoneyPence(recPreview.ledger_client_total_pence) : '—'}
+              </div>
+            </div>
+            <div className="accountsSummaryCard">
+              <div className="accountsSummaryLabel">Office ledger total</div>
+              <div
+                className={[
+                  'accountsSummaryValue',
+                  'accountsSummaryValue--money',
+                  recPreview ? ledgerTotalToneClass(recPreview.ledger_office_total_pence) : '',
+                ]
+                  .filter(Boolean)
+                  .join(' ')}
+              >
+                {recPreview ? formatMoneyPence(recPreview.ledger_office_total_pence) : '—'}
               </div>
             </div>
           </div>
@@ -402,36 +460,70 @@ export function AccountsPage({ token, me, onOpenCase, onOpenReportsReconcile }: 
           {tab === 'queue' ? (
             <section className="reportsSection">
               <h2 className="accountsSectionTitle">Pending ledger approvals</h2>
-              {pendingLedger.length === 0 ? (
-                <p className="muted">No ledger postings awaiting approval.</p>
+              <p className="muted" style={{ marginTop: 0 }}>
+                Includes anticipated payments awaiting confirmation and other unapproved ledger postings (such as draft
+                invoices).
+              </p>
+              <div className="accountsPendingFilters">
+                <label className="accountsPendingFilter">
+                  <span className="muted">Account</span>
+                  <select
+                    value={pendingLedgerAccountFilter}
+                    onChange={(e) => setPendingLedgerAccountFilter(e.target.value as PendingLedgerAccountFilter)}
+                  >
+                    <option value="all">All</option>
+                    <option value="client">Client</option>
+                    <option value="office">Office</option>
+                  </select>
+                </label>
+                <label className="accountsPendingFilter">
+                  <span className="muted">Direction</span>
+                  <select
+                    value={pendingLedgerDirectionFilter}
+                    onChange={(e) =>
+                      setPendingLedgerDirectionFilter(e.target.value as PendingLedgerDirectionFilter)
+                    }
+                  >
+                    <option value="all">All</option>
+                    <option value="credit">Credits</option>
+                    <option value="debit">Debits</option>
+                  </select>
+                </label>
+              </div>
+              {filteredPendingLedger.length === 0 ? (
+                <p className="muted">No ledger postings awaiting approval for the selected filters.</p>
               ) : (
                 <table className="reportsTable">
                   <thead>
                     <tr>
                       <th>Posted</th>
+                      <th>Expected</th>
                       <th>Reference</th>
                       <th>Client</th>
                       <th>Matter</th>
                       <th>Description</th>
                       <th>Amount</th>
                       <th>Legs</th>
+                      <th>Type</th>
                       <th>Posted by</th>
                       <th aria-label="Actions" />
                     </tr>
                   </thead>
                   <tbody>
-                    {pendingLedger.map((r) => {
+                    {filteredPendingLedger.map((r) => {
                       const caseId = r.case_id ?? ''
                       const actionBusy = actionKey === `ledger:${caseId}:${r.pair_id}`
                       return (
-                        <tr key={r.pair_id}>
+                        <tr key={r.pair_id} className={r.is_anticipated ? 'ledgerRow--anticipated' : undefined}>
                           <td>{formatPostedAt(r.posted_at)}</td>
+                          <td>{r.is_anticipated ? formatExpectedDate(r.anticipated_for_date) : '—'}</td>
                           <td>{r.case_number}</td>
                           <td>{r.client_name ?? ''}</td>
                           <td>{r.matter_description}</td>
                           <td>{r.description}</td>
                           <td>{formatMoneyPence(r.amount_pence)}</td>
                           <td>{ledgerLegSummary(r)}</td>
+                          <td>{r.is_anticipated ? 'Anticipated' : 'Pending'}</td>
                           <td>{r.posted_by_name}</td>
                           <td>
                             <div className="accountsRowActions">
@@ -440,7 +532,7 @@ export function AccountsPage({ token, me, onOpenCase, onOpenReportsReconcile }: 
                                   <button type="button" className="btn btn--small" onClick={() => openLedgerWindow(caseId)}>
                                     Ledger
                                   </button>
-                                  {canApproveLedger ? (
+                                  {canApprovePendingRow(r) ? (
                                     <button
                                       type="button"
                                       className="btn btn--small primary"
@@ -581,7 +673,6 @@ export function AccountsPage({ token, me, onOpenCase, onOpenReportsReconcile }: 
                 rows={exceptions?.client_balance_closed_archived ?? []}
                 onOpenCase={onOpenCase}
               />
-              <LargePostingBlock rows={exceptions?.large_postings ?? []} onOpenLedger={openLedgerWindow} />
             </section>
           ) : null}
 
@@ -639,11 +730,15 @@ export function AccountsPage({ token, me, onOpenCase, onOpenReportsReconcile }: 
                 <div className="accountsReconcileTotals">
                   <div>
                     <span className="muted">Client ledger total</span>
-                    <strong>{formatMoneyPence(recPreview.ledger_client_total_pence)}</strong>
+                    <strong className={ledgerTotalToneClass(recPreview.ledger_client_total_pence) || undefined}>
+                      {formatMoneyPence(recPreview.ledger_client_total_pence)}
+                    </strong>
                   </div>
                   <div>
                     <span className="muted">Office ledger total</span>
-                    <strong>{formatMoneyPence(recPreview.ledger_office_total_pence)}</strong>
+                    <strong className={ledgerTotalToneClass(recPreview.ledger_office_total_pence) || undefined}>
+                      {formatMoneyPence(recPreview.ledger_office_total_pence)}
+                    </strong>
                   </div>
                 </div>
               ) : null}
@@ -746,54 +841,6 @@ function ExceptionBlock({
                         Ledger
                       </button>
                     </div>
-                  ) : null}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-    </div>
-  )
-}
-
-function LargePostingBlock({
-  rows,
-  onOpenLedger,
-}: {
-  rows: ExceptionLedgerRow[]
-  onOpenLedger: (caseId: string) => void
-}) {
-  return (
-    <div className="accountsExceptionBlock">
-      <h2 className="accountsSectionTitle">Large postings</h2>
-      {rows.length === 0 ? (
-        <p className="muted">None.</p>
-      ) : (
-        <table className="reportsTable">
-          <thead>
-            <tr>
-              <th>Posted</th>
-              <th>Reference</th>
-              <th>Description</th>
-              <th>Amount</th>
-              <th>Status</th>
-              <th aria-label="Actions" />
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((r) => (
-              <tr key={r.pair_id}>
-                <td>{formatPostedAt(r.posted_at)}</td>
-                <td>{r.case_number}</td>
-                <td>{r.description}</td>
-                <td>{formatMoneyPence(r.amount_pence)}</td>
-                <td>{r.is_approved ? 'Approved' : 'Pending'}</td>
-                <td>
-                  {r.case_id ? (
-                    <button type="button" className="btn btn--small" onClick={() => onOpenLedger(r.case_id!)}>
-                      Ledger
-                    </button>
                   ) : null}
                 </td>
               </tr>

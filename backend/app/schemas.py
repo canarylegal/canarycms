@@ -93,8 +93,8 @@ class UserPublic(BaseModel):
 class UserUiPreferencesUpdate(BaseModel):
     """Partial update for per-user UI preferences."""
 
-    calendar_view: Literal["dayGridMonth", "timeGridWeek", "timeGridDay", "listWeek"] | None = None
-    case_calendar_view: Literal["dayGridMonth", "timeGridWeek", "timeGridDay", "listWeek"] | None = None
+    calendar_view: Literal["dayGridMonth", "timeGridWeek", "timeGridDay", "listYear"] | None = None
+    case_calendar_view: Literal["dayGridMonth", "timeGridWeek", "timeGridDay", "listYear"] | None = None
     tasks_menu_layout: Literal["list", "kanban"] | None = None
     case_tasks_layout: Literal["list", "kanban"] | None = None
     tasks_menu_sort_key: Literal["reference", "client", "matter", "task", "date", "assigned", "priority"] | None = None
@@ -140,6 +140,8 @@ class LedgerPermissionsOut(BaseModel):
     can_approve_ledger: bool
     can_approve_invoices: bool = False
     accounts_workspace_access: bool = False
+    can_post_client: bool = False
+    can_post_office: bool = False
 
 
 class UserCalDAVStatusOut(BaseModel):
@@ -1382,6 +1384,7 @@ class CaseTaskUpdate(BaseModel):
     assigned_to_user_id: uuid.UUID | None = None
     priority: CaseTaskPriority | None = None
     is_private: bool | None = None
+    standard_task_id: uuid.UUID | None = None
 
 
 class CaseTaskOut(BaseModel):
@@ -1692,6 +1695,14 @@ class LedgerPostCreate(BaseModel):
     # At least one leg is required; both may be supplied.
     client_direction: Literal["debit", "credit"] | None = None
     office_direction: Literal["debit", "credit"] | None = None
+    anticipated: bool = False
+    anticipated_for_date: date | None = None
+
+    @model_validator(mode="after")
+    def anticipated_date_required(self) -> LedgerPostCreate:
+        if self.anticipated and self.anticipated_for_date is None:
+            raise ValueError("anticipated_for_date is required when anticipated is true")
+        return self
 
     model_config = {"extra": "forbid"}
 
@@ -1710,6 +1721,8 @@ class LedgerEntryOut(BaseModel):
     posted_by_user_id: uuid.UUID | None
     posted_at: datetime
     is_approved: bool
+    is_anticipated: bool = False
+    anticipated_for_date: date | None = None
 
     model_config = {"from_attributes": True}
 

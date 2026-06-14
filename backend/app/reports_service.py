@@ -646,6 +646,8 @@ class PendingLedgerApprovalRow:
     amount_pence: int
     client_direction: str | None
     office_direction: str | None
+    is_anticipated: bool
+    anticipated_for_date: date | None
 
 
 @dataclass
@@ -739,6 +741,8 @@ def _pending_ledger_approvals(
                 "amount_pence": int(entry.amount_pence),
                 "client_direction": None,
                 "office_direction": None,
+                "is_anticipated": bool(entry.is_anticipated),
+                "anticipated_for_date": entry.anticipated_for_date,
             }
             by_pair[pid] = bucket
         if account.account_type == LedgerAccountType.client:

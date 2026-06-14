@@ -17,9 +17,21 @@ import { SingleSelectDropdown } from '../SingleSelectDropdown'
 import type { CaseContactOut, ContactOut } from '../types'
 import { applyCaseContactFieldPatch } from './caseContactPatch'
 import { CaseContactPortalSection } from './CaseContactPortalSection'
+import { matterContactTypeLabel } from './matterLabels'
 
 const CONTACT_TYPE_REQUIRED_MSG = 'Please select a contact type for this matter.'
 const LAWYERS_TYPE_SLUG = 'lawyers'
+
+/** Shown when Lawyers contact type is chosen but no client matter contacts are linked. */
+export const LAWYER_CLIENTS_REQUIRED_MSG =
+  'Lawyer contacts must be linked to at least one other matter contact. Select one or more contacts below.'
+
+function lawyerClientsValidationError(matterContactType: string, lawyerClientIds: string[]): string | null {
+  if (matterContactType.trim().toLowerCase() === LAWYERS_TYPE_SLUG && lawyerClientIds.length < 1) {
+    return LAWYER_CLIENTS_REQUIRED_MSG
+  }
+  return null
+}
 
 type MatterOpt = { value: string; label: string }
 
@@ -38,7 +50,7 @@ export function CaseContactsAddDocForm({
   selectedGlobalContactId,
   setSelectedGlobalContactId,
   matterTypeOptions,
-  clientMatterContacts,
+  lawyerLinkableContacts,
   contactAddErr,
   setContactAddErr,
   setActionErr,
@@ -60,7 +72,7 @@ export function CaseContactsAddDocForm({
   selectedGlobalContactId: string | null
   setSelectedGlobalContactId: (v: string | null) => void
   matterTypeOptions: MatterOpt[]
-  clientMatterContacts: CaseContactOut[]
+  lawyerLinkableContacts: CaseContactOut[]
   contactAddErr: string | null
   setContactAddErr: (v: string | null) => void
   setActionErr: (v: string | null) => void
@@ -68,6 +80,7 @@ export function CaseContactsAddDocForm({
   const [globalEditContact, setGlobalEditContact] = useState<ContactOut | null>(null)
   const [globalEditFields, setGlobalEditFields] = useState<ContactFormFieldsModel>(() => emptyContactFormFields())
   const [globalEditErr, setGlobalEditErr] = useState<string | null>(null)
+  const [lawyerClientsErr, setLawyerClientsErr] = useState<string | null>(null)
   const [matterTypeOpen, setMatterTypeOpen] = useState(false)
 
   const matterTypeDropdownOptions = useMemo(
@@ -95,6 +108,7 @@ export function CaseContactsAddDocForm({
           onChange={(v) => {
             setMatterContactType(v)
             setContactAddErr(null)
+            setLawyerClientsErr(null)
             if (v.trim().toLowerCase() !== LAWYERS_TYPE_SLUG) {
               setLawyerLinkClientIds([])
             } else if (selectedGlobalContactId) {
@@ -118,32 +132,43 @@ export function CaseContactsAddDocForm({
         </label>
         {matterContactType.trim().toLowerCase() === LAWYERS_TYPE_SLUG ? (
           <div className="field">
-            <span>Linked clients (required)</span>
+            <span>Linked contacts (required)</span>
             <div className="stack" style={{ gap: 6, maxHeight: 160, overflow: 'auto' }}>
-              {clientMatterContacts.length === 0 ? (
-                <div className="muted">Add at least one Client matter contact on this case first.</div>
+              {lawyerLinkableContacts.length === 0 ? (
+                <div className="muted">Add at least one other matter contact on this case first.</div>
               ) : (
-                clientMatterContacts.map((c) => (
-                  <label key={c.id} className="row" style={{ gap: 8, cursor: 'pointer' }}>
+                lawyerLinkableContacts.map((c) => (
+                  <label key={c.id} className="row" style={{ gap: 8, cursor: 'pointer', alignItems: 'flex-start' }}>
                     <input
                       type="checkbox"
                       checked={lawyerLinkClientIds.includes(c.id)}
                       disabled={busy}
+                      style={{ marginTop: 3 }}
                       onChange={(e) => {
                         setLawyerLinkClientIds((prev) => {
+                          let next: string[]
                           if (e.target.checked) {
                             if (prev.includes(c.id) || prev.length >= 4) return prev
-                            return [...prev, c.id]
+                            next = [...prev, c.id]
+                          } else {
+                            next = prev.filter((x) => x !== c.id)
                           }
-                          return prev.filter((x) => x !== c.id)
+                          if (next.length > 0) setLawyerClientsErr(null)
+                          return next
                         })
                       }}
                     />
-                    <span>{c.name}</span>
+                    <span>
+                      {c.name}
+                      <span className="muted" style={{ display: 'block', fontSize: 12 }}>
+                        {matterContactTypeLabel(c.matter_contact_type, matterTypeOptions)}
+                      </span>
+                    </span>
                   </label>
                 ))
               )}
             </div>
+            {lawyerClientsErr ? <div className="error" style={{ marginTop: 8 }}>{lawyerClientsErr}</div> : null}
           </div>
         ) : null}
       </div>
@@ -229,7 +254,9 @@ export function CaseContactsAddDocForm({
                   setGlobalEditErr('Trading name is required for organisations.')
                   return
                 }
-                const payload = contactFieldsModelToPayload(globalEditFields)
+                const payload = contactFieldsModelToPayload(globalEditFields, {
+                  fallbackName: globalEditContact.name,
+                })
                 if (!payload) {
                   setGlobalEditErr('Name is required.')
                   return
@@ -268,8 +295,10 @@ export function CaseContactsAddDocForm({
             setContactAddErr(CONTACT_TYPE_REQUIRED_MSG)
             return
           }
-          if (matterContactType.trim().toLowerCase() === LAWYERS_TYPE_SLUG && lawyerLinkClientIds.length < 1) {
-            setContactAddErr('Select one or more clients that this lawyer represents on this matter.')
+          const lawyerErr = lawyerClientsValidationError(matterContactType, lawyerLinkClientIds)
+          if (lawyerErr) {
+            setLawyerClientsErr(lawyerErr)
+            setContactAddErr(lawyerErr)
             return
           }
           if (!selectedGlobalContactId) return
@@ -313,10 +342,11 @@ export function CaseContactsAddDocForm({
               setContactAddErr(CONTACT_TYPE_REQUIRED_MSG)
               throw new Error(CONTACT_TYPE_REQUIRED_MSG)
             }
-            if (matterContactType.trim().toLowerCase() === LAWYERS_TYPE_SLUG && lawyerLinkClientIds.length < 1) {
-              const msg = 'Select one or more clients that this lawyer represents on this matter.'
-              setContactAddErr(msg)
-              throw new Error(msg)
+            const lawyerErr = lawyerClientsValidationError(matterContactType, lawyerLinkClientIds)
+            if (lawyerErr) {
+              setLawyerClientsErr(lawyerErr)
+              setContactAddErr(lawyerErr)
+              throw new Error(lawyerErr)
             }
             setBusy(true)
             try {
@@ -366,7 +396,7 @@ export function CaseContactsEditDocForm({
   setPushToGlobal,
   resolvedEditSnapshotName,
   matterTypeOptions,
-  clientMatterContacts,
+  lawyerLinkableContacts,
   onDone,
   setActionErr,
 }: {
@@ -382,12 +412,14 @@ export function CaseContactsEditDocForm({
   setPushToGlobal: (v: boolean) => void
   resolvedEditSnapshotName: string
   matterTypeOptions: MatterOpt[]
-  clientMatterContacts: CaseContactOut[]
+  lawyerLinkableContacts: CaseContactOut[]
   onDone: () => void
   setActionErr: (v: string | null) => void
 }) {
   const { askConfirm } = useDialogs()
   const [editMatterTypeOpen, setEditMatterTypeOpen] = useState(false)
+  const [saveErr, setSaveErr] = useState<string | null>(null)
+  const [lawyerClientsErr, setLawyerClientsErr] = useState<string | null>(null)
 
   const editMatterTypeOptions = useMemo(() => {
     const base = matterTypeOptions.map((o) => ({ value: o.value, label: o.label }))
@@ -414,6 +446,7 @@ export function CaseContactsEditDocForm({
           })
           if (!isLawyers) {
             setEditLawyerLinkClientIds([])
+            setLawyerClientsErr(null)
           }
         }}
         open={editMatterTypeOpen}
@@ -432,32 +465,43 @@ export function CaseContactsEditDocForm({
       </label>
       {(editSnapshot.matter_contact_type || '').trim().toLowerCase() === LAWYERS_TYPE_SLUG ? (
         <div className="field">
-          <span>Linked clients (required)</span>
+          <span>Linked contacts (required)</span>
           <div className="stack" style={{ gap: 6, maxHeight: 160, overflow: 'auto' }}>
-            {clientMatterContacts.length === 0 ? (
-              <div className="muted">Add at least one Client matter contact on this case first.</div>
+            {lawyerLinkableContacts.length === 0 ? (
+              <div className="muted">Add at least one other matter contact on this case first.</div>
             ) : (
-              clientMatterContacts.map((c) => (
-                <label key={c.id} className="row" style={{ gap: 8, cursor: 'pointer' }}>
+              lawyerLinkableContacts.map((c) => (
+                <label key={c.id} className="row" style={{ gap: 8, cursor: 'pointer', alignItems: 'flex-start' }}>
                   <input
                     type="checkbox"
                     checked={editLawyerLinkClientIds.includes(c.id)}
                     disabled={busy}
+                    style={{ marginTop: 3 }}
                     onChange={(e) => {
                       setEditLawyerLinkClientIds((prev) => {
+                        let next: string[]
                         if (e.target.checked) {
                           if (prev.includes(c.id) || prev.length >= 4) return prev
-                          return [...prev, c.id]
+                          next = [...prev, c.id]
+                        } else {
+                          next = prev.filter((x) => x !== c.id)
                         }
-                        return prev.filter((x) => x !== c.id)
+                        if (next.length > 0) setLawyerClientsErr(null)
+                        return next
                       })
                     }}
                   />
-                  <span>{c.name}</span>
+                  <span>
+                    {c.name}
+                    <span className="muted" style={{ display: 'block', fontSize: 12 }}>
+                      {matterContactTypeLabel(c.matter_contact_type, matterTypeOptions)}
+                    </span>
+                  </span>
                 </label>
               ))
             )}
           </div>
+          {lawyerClientsErr ? <div className="error" style={{ marginTop: 8 }}>{lawyerClientsErr}</div> : null}
         </div>
       ) : null}
       <div className="muted" style={{ fontSize: 12 }}>
@@ -481,6 +525,7 @@ export function CaseContactsEditDocForm({
         contactName={resolvedEditSnapshotName}
         contactEmail={editSnapshot.email}
       />
+      {saveErr ? <div className="error">{saveErr}</div> : null}
       <div className="row" style={{ justifyContent: 'space-between', marginTop: 8 }}>
         <button
           type="button"
@@ -519,21 +564,38 @@ export function CaseContactsEditDocForm({
             busy ||
             !resolvedEditSnapshotName.trim() ||
             (editSnapshot.type === 'organisation' && !(editSnapshot.trading_name ?? '').trim()) ||
-            !(editSnapshot.matter_contact_type && editSnapshot.matter_contact_type.trim()) ||
-            ((editSnapshot.matter_contact_type || '').trim().toLowerCase() === LAWYERS_TYPE_SLUG &&
-              editLawyerLinkClientIds.length < 1)
+            !(editSnapshot.matter_contact_type && editSnapshot.matter_contact_type.trim())
           }
           onClick={async () => {
             setBusy(true)
+            setSaveErr(null)
+            setLawyerClientsErr(null)
             setActionErr(null)
             try {
-              const payload = contactFieldsModelToPayload(contactOutToFormFields(editSnapshot as unknown as ContactOut))
+              const lawyerErr = lawyerClientsValidationError(
+                editSnapshot.matter_contact_type ?? '',
+                editLawyerLinkClientIds,
+              )
+              if (lawyerErr) {
+                setLawyerClientsErr(lawyerErr)
+                setSaveErr(lawyerErr)
+                setActionErr(lawyerErr)
+                return
+              }
+              const payload = contactFieldsModelToPayload(
+                contactOutToFormFields(editSnapshot as unknown as ContactOut),
+                { fallbackName: editSnapshot.name },
+              )
               if (!payload) {
-                setActionErr('Enter a name (person or organisation fields).')
+                const msg = 'Enter a name (person or organisation fields).'
+                setSaveErr(msg)
+                setActionErr(msg)
                 return
               }
               if (editSnapshot.type === 'organisation' && !(editSnapshot.trading_name ?? '').trim()) {
-                setActionErr('Trading name is required for organisations.')
+                const msg = 'Trading name is required for organisations.'
+                setSaveErr(msg)
+                setActionErr(msg)
                 return
               }
               const patchBody: Record<string, unknown> = {
@@ -567,7 +629,9 @@ export function CaseContactsEditDocForm({
               })
               onDone()
             } catch (e: unknown) {
-              setActionErr((e as { message?: string })?.message ?? 'Failed to update snapshot')
+              const msg = (e as { message?: string })?.message ?? 'Failed to update snapshot'
+              setSaveErr(msg)
+              setActionErr(msg)
             } finally {
               setBusy(false)
             }

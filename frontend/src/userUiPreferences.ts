@@ -1,6 +1,6 @@
 /** Per-user UI layout preferences synced with the server. */
 
-export type CalendarView = 'dayGridMonth' | 'timeGridWeek' | 'timeGridDay' | 'listWeek'
+export type CalendarView = 'dayGridMonth' | 'timeGridWeek' | 'timeGridDay' | 'listYear'
 export type TaskLayout = 'list' | 'kanban'
 export type TaskSortKey = 'reference' | 'client' | 'matter' | 'task' | 'date' | 'assigned' | 'priority'
 export type MainMenuSortKey = 'reference' | 'client' | 'matter' | 'feeEarner' | 'status' | 'source' | 'created'
@@ -86,7 +86,12 @@ export function notifyMenuColumnReset(): void {
 export const LEGACY_TASKS_MENU_LAYOUT_KEY = 'canary.tasks.menuLayout'
 const SEARCH_MAX = 500
 
-const CALENDAR_VIEWS = new Set<CalendarView>(['dayGridMonth', 'timeGridWeek', 'timeGridDay', 'listWeek'])
+const CALENDAR_VIEWS = new Set<CalendarView>(['dayGridMonth', 'timeGridWeek', 'timeGridDay', 'listYear'])
+
+function pickCalendarView(raw: unknown, fallback: CalendarView): CalendarView {
+  if (typeof raw === 'string' && raw === 'listWeek') return 'listYear'
+  return pick(raw, CALENDAR_VIEWS, fallback)
+}
 const TASK_LAYOUTS = new Set<TaskLayout>(['list', 'kanban'])
 const TASK_SORT_KEYS = new Set<TaskSortKey>([
   'reference',
@@ -212,8 +217,8 @@ function normalizeWidths(raw: unknown, expected: number): number[] {
 export function normalizeUiPreferences(raw: unknown): UserUiPreferences {
   const data = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {}
   return {
-    calendar_view: pick(data.calendar_view, CALENDAR_VIEWS, DEFAULT_UI_PREFERENCES.calendar_view),
-    case_calendar_view: pick(data.case_calendar_view, CALENDAR_VIEWS, DEFAULT_UI_PREFERENCES.case_calendar_view),
+    calendar_view: pickCalendarView(data.calendar_view, DEFAULT_UI_PREFERENCES.calendar_view),
+    case_calendar_view: pickCalendarView(data.case_calendar_view, DEFAULT_UI_PREFERENCES.case_calendar_view),
     tasks_menu_layout: pick(data.tasks_menu_layout, TASK_LAYOUTS, DEFAULT_UI_PREFERENCES.tasks_menu_layout),
     case_tasks_layout: pick(data.case_tasks_layout, TASK_LAYOUTS, DEFAULT_UI_PREFERENCES.case_tasks_layout),
     tasks_menu_sort_key: pick(data.tasks_menu_sort_key, TASK_SORT_KEYS, DEFAULT_UI_PREFERENCES.tasks_menu_sort_key),

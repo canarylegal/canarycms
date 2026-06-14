@@ -7,6 +7,7 @@ import timeGridPlugin from '@fullcalendar/timegrid'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { apiFetch } from './api'
 import type { ApiError } from './api'
+import { CALENDAR_LIST_YEAR_VIEW } from './calendarListView'
 import { useUserUiPreferences, type CalendarView } from './useUserUiPreferences'
 import type { CalendarEventOut, CaseEventOut, CaseEventsOut, UserPublic } from './types'
 
@@ -457,10 +458,13 @@ export function EventsPage({
                 ref={calRef}
                 plugins={[dayGridPlugin, timeGridPlugin, listPlugin, interactionPlugin]}
                 initialView={prefs.case_calendar_view}
+                views={{
+                  listYear: CALENDAR_LIST_YEAR_VIEW,
+                }}
                 headerToolbar={{
                   left: 'prev,next today',
                   center: 'title',
-                  right: 'dayGridMonth,timeGridWeek,timeGridDay,listWeek',
+                  right: 'dayGridMonth,timeGridWeek,timeGridDay,listYear',
                 }}
                 datesSet={(arg) => {
                   const viewType = arg.view.type as CalendarView
