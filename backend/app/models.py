@@ -762,6 +762,41 @@ class PortalActivityEvent(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
 
 
+class QuotePortalDeliveryStatus(str, enum.Enum):
+    pending = "pending"
+    accepted = "accepted"
+    declined = "declined"
+    superseded = "superseded"
+
+
+class QuotePortalDelivery(Base):
+    """Quote sent to a portal contact for accept/decline."""
+
+    __tablename__ = "quote_portal_delivery"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    case_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("case.id", ondelete="CASCADE"), nullable=False)
+    file_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("file.id", ondelete="CASCADE"), nullable=False)
+    contact_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("contact.id", ondelete="CASCADE"), nullable=False
+    )
+    grant_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("contact_portal_grant.id", ondelete="SET NULL"), nullable=True
+    )
+    sent_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("user.id", ondelete="SET NULL"), nullable=True
+    )
+    file_version_at_send: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[QuotePortalDeliveryStatus] = mapped_column(
+        Enum(QuotePortalDeliveryStatus, name="quote_portal_delivery_status"),
+        nullable=False,
+        default=QuotePortalDeliveryStatus.pending,
+    )
+    sent_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+    responded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    decline_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
 class PortalLoginOtp(Base):
     __tablename__ = "portal_login_otp"
 
@@ -879,6 +914,7 @@ class File(Base):
     # Set while /oo-force-save waits for DS callback; cleared when bytes are saved or unchanged save is ack'd.
     oo_force_save_pending: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     uploaded_via_portal: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    is_portal_quote: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)

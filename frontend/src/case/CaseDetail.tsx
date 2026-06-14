@@ -31,6 +31,7 @@ import {
   matterHeadIdForSubType,
   matterSubDropdownOptions,
 } from '../matterTypeOptions'
+import { SendQuoteViaPortalModal } from '../SendQuoteViaPortalModal'
 import { TaskCreateModal } from '../TaskCreateModal'
 import { useExclusiveDropdownOpen } from '../useExclusiveDropdownOpen'
 import { QuoteWizard } from '../QuoteWizard'
@@ -520,6 +521,9 @@ export function CaseDetail({
     openDocPanel === 'accounts' ? 'accounts' : 'documents',
   )
   const [portalShareFolderPath, setPortalShareFolderPath] = useState<string | null>(null)
+  const [portalQuoteSend, setPortalQuoteSend] = useState<{ fileId: string; fileName: string; folderPath: string } | null>(
+    null,
+  )
   const [caseTaskMenuRows, setCaseTaskMenuRows] = useState<TaskMenuRow[]>([])
   const [caseTasksSearch, setCaseTasksSearch] = useState('')
   const [caseTasksLayoutOpen, setCaseTasksLayoutOpen] = useState(false)
@@ -2976,7 +2980,7 @@ export function CaseDetail({
                     </button>
                   </div>
                   <CaseDocPanelZoomFit>
-                    <CasePortalPanel token={token} caseId={caseId} />
+                    <CasePortalPanel token={token} caseId={caseId} onFilesChanged={onRefresh} />
                   </CaseDocPanelZoomFit>
                 </div>
               ) : caseDocPanel === 'portal-share' && caseId && portalEnabled && portalShareFolderPath !== null ? (
@@ -3436,6 +3440,21 @@ export function CaseDetail({
             }
           }}
         />
+
+        {caseId && portalQuoteSend ? (
+          <SendQuoteViaPortalModal
+            token={token}
+            caseId={caseId}
+            fileId={portalQuoteSend.fileId}
+            fileName={portalQuoteSend.fileName}
+            folderPath={portalQuoteSend.folderPath}
+            open
+            onClose={() => setPortalQuoteSend(null)}
+            onSent={() => {
+              onRefresh()
+            }}
+          />
+        ) : null}
 
         {caseId ? (
           <CaseEventCreateModal
@@ -4052,6 +4071,21 @@ export function CaseDetail({
                       >
                         Download
                       </div>
+                      {f.is_portal_quote ? (
+                        <div
+                          className="docContextItem"
+                          onClick={() => {
+                            setDocMenu(null)
+                            setPortalQuoteSend({
+                              fileId: f.id,
+                              fileName: f.original_filename,
+                              folderPath: f.folder_path ?? '',
+                            })
+                          }}
+                        >
+                          Send quote via portal
+                        </div>
+                      ) : null}
                     </>
                   )
                 })()}

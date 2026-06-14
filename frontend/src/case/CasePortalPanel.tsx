@@ -1,19 +1,24 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { apiFetch } from '../api'
 import { SearchInput } from '../SearchInput'
+import { SendQuoteViaPortalModal } from '../SendQuoteViaPortalModal'
 import { SingleSelectDropdown } from '../SingleSelectDropdown'
+import { CaseFileSelectDropdown } from './CaseFileSelectDropdown'
+import { DocMimeIcon } from './DocCells'
 import type {
   CasePortalActivityOut,
   CasePortalNotificationSettingsOut,
   CasePortalPreviewContactOut,
   CasePortalPreviewOut,
   CasePortalStaffUserOut,
+  FileSummary,
   UserSummary,
 } from '../types'
 
 type Props = {
   token: string
   caseId: string
+  onFilesChanged?: () => void
 }
 
 function formatWhen(iso: string): string {
@@ -31,7 +36,7 @@ function staffUserLabel(u: Pick<CasePortalStaffUserOut, 'display_name' | 'email'
   return name || email || 'Unknown user'
 }
 
-export function CasePortalPanel({ token, caseId }: Props) {
+export function CasePortalPanel({ token, caseId, onFilesChanged }: Props) {
   const [activity, setActivity] = useState<CasePortalActivityOut[]>([])
   const [previewContacts, setPreviewContacts] = useState<CasePortalPreviewContactOut[]>([])
   const [previewContactId, setPreviewContactId] = useState('')
@@ -40,11 +45,20 @@ export function CasePortalPanel({ token, caseId }: Props) {
   const [staffSearch, setStaffSearch] = useState('')
   const [staffSearchResults, setStaffSearchResults] = useState<UserSummary[]>([])
   const [staffSearchBusy, setStaffSearchBusy] = useState(false)
+  const [caseFiles, setCaseFiles] = useState<FileSummary[]>([])
+  const [filesBusy, setFilesBusy] = useState(false)
+  const [tagBusyFileId, setTagBusyFileId] = useState<string | null>(null)
+  const [portalQuoteSend, setPortalQuoteSend] = useState<{
+    fileId: string
+    fileName: string
+    folderPath: string
+  } | null>(null)
   const [busy, setBusy] = useState(false)
   const [saving, setSaving] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const [previewContactOpen, setPreviewContactOpen] = useState(false)
+  const [quoteFileId, setQuoteFileId] = useState('')
 
   const previewContactOptions = useMemo(
     () =>
@@ -67,6 +81,33 @@ export function CasePortalPanel({ token, caseId }: Props) {
   const staffUserIds = useMemo(() => selectedStaff.map((u) => u.id), [selectedStaff])
   const selectedIdSet = useMemo(() => new Set(staffUserIds), [staffUserIds])
 
+  const quotableFiles = useMemo(
+    () => caseFiles.filter((f) => f.mime_type !== 'application/x-directory' && f.category !== 'system'),
+    [caseFiles],
+  )
+
+  const taggedQuoteFiles = useMemo(
+    () => quotableFiles.filter((f) => f.is_portal_quote),
+    [quotableFiles],
+  )
+
+  const selectedQuoteFile = useMemo(
+    () => quotableFiles.find((f) => f.id === quoteFileId) ?? null,
+    [quotableFiles, quoteFileId],
+  )
+
+  const loadFiles = useCallback(async () => {
+    setFilesBusy(true)
+    try {
+      const rows = await apiFetch<FileSummary[]>(`/cases/${caseId}/files`, { token })
+      setCaseFiles(Array.isArray(rows) ? rows : [])
+    } catch {
+      setCaseFiles([])
+    } finally {
+      setFilesBusy(false)
+    }
+  }, [caseId, token])
+
   const load = useCallback(async () => {
     setErr(null)
     const [activityRows, settings, previewRows] = await Promise.all([
@@ -81,7 +122,8 @@ export function CasePortalPanel({ token, caseId }: Props) {
       if (current && previewRows.some((row) => row.contact_id === current)) return current
       return previewRows[0]?.contact_id ?? ''
     })
-  }, [caseId, token])
+    await loadFiles()
+  }, [caseId, token, loadFiles])
 
   useEffect(() => {
     void (async () => {
@@ -155,6 +197,29 @@ export function CasePortalPanel({ token, caseId }: Props) {
     }
   }
 
+  async function setPortalQuoteTag(file: FileSummary, isPortalQuote: boolean) {
+    setTagBusyFileId(file.id)
+    setErr(null)
+    setNotice(null)
+    try {
+      await apiFetch(`/cases/${caseId}/files/${file.id}/portal-quote-tag`, {
+        token,
+        method: 'PATCH',
+        json: { is_portal_quote: isPortalQuote },
+      })
+      await loadFiles()
+      onFilesChanged?.()
+      setNotice(isPortalQuote ? 'Document marked as portal quote.' : 'Portal quote mark removed.')
+      if (!isPortalQuote && quoteFileId === file.id) {
+        setQuoteFileId('')
+      }
+    } catch (e: unknown) {
+      setErr((e as { message?: string }).message ?? 'Could not update portal quote mark')
+    } finally {
+      setTagBusyFileId(null)
+    }
+  }
+
   async function saveStaffRecipients() {
     setSaving(true)
     setErr(null)
@@ -177,6 +242,7 @@ export function CasePortalPanel({ token, caseId }: Props) {
   const visibleSearchResults = staffSearchResults.filter((u) => u.is_active && !selectedIdSet.has(u.id))
 
   return (
+    <>
     <div className="card caseDocEditEmbed stack" style={{ gap: 16 }}>
       <div>
         <h3 style={{ margin: 0, marginBottom: 6 }}>Client portal</h3>
@@ -223,6 +289,109 @@ export function CasePortalPanel({ token, caseId }: Props) {
             >
               {previewBusy ? 'Opening…' : 'Preview as contact'}
             </button>
+          </div>
+        ) : null}
+      </section>
+
+      <section className="stack" style={{ gap: 8 }}>
+        <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+          <h4 style={{ margin: 0 }}>Portal quotes</h4>
+          <button type="button" className="btn" disabled={filesBusy} onClick={() => void loadFiles()}>
+            Refresh
+          </button>
+        </div>
+        <p className="muted" style={{ margin: 0 }}>
+          Mark documents clients can accept or decline on the portal. New quotes from the quote wizard are marked
+          automatically; saving as PDF moves the mark to the PDF and clears it from the source document.
+        </p>
+        {filesBusy && quotableFiles.length === 0 ? <div className="muted">Loading documents…</div> : null}
+        {!filesBusy && quotableFiles.length === 0 ? (
+          <div className="muted">No documents on this matter yet.</div>
+        ) : null}
+        {quotableFiles.length > 0 ? (
+          <div className="stack" style={{ gap: 10 }}>
+            <CaseFileSelectDropdown
+              label="Document"
+              files={quotableFiles}
+              value={quoteFileId}
+              onChange={setQuoteFileId}
+              disabled={filesBusy}
+              placeholder="Select document…"
+            />
+            {selectedQuoteFile ? (
+              <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
+                {selectedQuoteFile.is_portal_quote ? (
+                  <>
+                    <button
+                      type="button"
+                      className="btn primary"
+                      disabled={tagBusyFileId === selectedQuoteFile.id || filesBusy}
+                      onClick={() =>
+                        setPortalQuoteSend({
+                          fileId: selectedQuoteFile.id,
+                          fileName: selectedQuoteFile.original_filename,
+                          folderPath: selectedQuoteFile.folder_path ?? '',
+                        })
+                      }
+                    >
+                      Send quote via portal
+                    </button>
+                    <button
+                      type="button"
+                      className="btn"
+                      disabled={tagBusyFileId === selectedQuoteFile.id || filesBusy}
+                      onClick={() => void setPortalQuoteTag(selectedQuoteFile, false)}
+                    >
+                      {tagBusyFileId === selectedQuoteFile.id ? 'Updating…' : 'Remove quotable mark'}
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    type="button"
+                    className="btn"
+                    disabled={tagBusyFileId === selectedQuoteFile.id || filesBusy}
+                    onClick={() => void setPortalQuoteTag(selectedQuoteFile, true)}
+                  >
+                    {tagBusyFileId === selectedQuoteFile.id ? 'Updating…' : 'Mark as quotable'}
+                  </button>
+                )}
+              </div>
+            ) : (
+              <div className="muted">Select a document to mark it or send it via the portal.</div>
+            )}
+            {taggedQuoteFiles.length > 0 ? (
+              <div className="stack" style={{ gap: 6 }}>
+                <div className="muted" style={{ fontSize: 13 }}>
+                  Marked portal quotes ({taggedQuoteFiles.length})
+                </div>
+                {taggedQuoteFiles.map((f) => (
+                  <div
+                    key={f.id}
+                    className="row"
+                    style={{ gap: 8, flexWrap: 'wrap', alignItems: 'center', fontSize: 14 }}
+                  >
+                    <button
+                      type="button"
+                      className="portalStaffSearchHit rowbtn caseFileSelectQuickPick"
+                      disabled={filesBusy}
+                      onClick={() => setQuoteFileId(f.id)}
+                    >
+                      <span className="caseFileSelectOptionIcon" aria-hidden>
+                        <DocMimeIcon mime={f.mime_type} filename={f.original_filename} />
+                      </span>
+                      <span>{f.original_filename}</span>
+                    </button>
+                    {f.quote_portal_delivery ? (
+                      <span className="muted" style={{ fontSize: 13 }}>
+                        {f.quote_portal_delivery.status === 'pending'
+                          ? `Awaiting ${f.quote_portal_delivery.contact_name}`
+                          : f.quote_portal_delivery.status}
+                      </span>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+            ) : null}
           </div>
         ) : null}
       </section>
@@ -321,5 +490,22 @@ export function CasePortalPanel({ token, caseId }: Props) {
         ) : null}
       </section>
     </div>
+
+    {portalQuoteSend ? (
+      <SendQuoteViaPortalModal
+        token={token}
+        caseId={caseId}
+        fileId={portalQuoteSend.fileId}
+        fileName={portalQuoteSend.fileName}
+        folderPath={portalQuoteSend.folderPath}
+        open
+        onClose={() => setPortalQuoteSend(null)}
+        onSent={() => {
+          void loadFiles()
+          onFilesChanged?.()
+        }}
+      />
+    ) : null}
+    </>
   )
 }

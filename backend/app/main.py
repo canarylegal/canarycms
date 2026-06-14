@@ -53,6 +53,7 @@ from app.routers import (
     precedents,
     reports,
     reconciliations,
+    quote_portal,
     users,
     webauthn,
     webdav,
@@ -238,6 +239,7 @@ app.include_router(me_calendar_events.router)
 app.include_router(me_calendars.router)
 app.include_router(reports.router)
 app.include_router(reconciliations.router)
+app.include_router(quote_portal.router)
 app.include_router(portal.router)
 
 @app.get("/health")

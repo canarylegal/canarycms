@@ -1073,6 +1073,72 @@ html.dark .singleSelectDropdownTrigger {
   font-size: 13px;
 }
 
+.caseFileSelectMenu {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  max-height: min(320px, 50vh);
+  overflow: hidden;
+  padding: 0;
+}
+
+.caseFileSelectSearch {
+  flex-shrink: 0;
+  padding: 6px;
+  border-bottom: 1px solid var(--border);
+}
+
+.caseFileSelectSearch .searchInputWrap {
+  width: 100%;
+}
+
+.caseFileSelectList {
+  overflow-y: auto;
+  padding: 4px;
+  min-height: 0;
+}
+
+.caseFileSelectTrigger {
+  align-items: center;
+}
+
+.caseFileSelectTriggerIcon,
+.caseFileSelectOptionIcon {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+}
+
+.caseFileSelectOption {
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+}
+
+.caseFileSelectOptionBody {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.caseFileSelectOptionBody .singleSelectDropdownOptionLabel {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
+.caseFileSelectQuickPick {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .mainMenuFilterCheckRow {
   display: flex;
   align-items: center;
@@ -4555,6 +4621,14 @@ html.dark .emlPreviewBodyWrap {
 
 .portalFilesTable .tr {
   align-items: center;
+}
+
+.portalPendingApprovalRow {
+  background: rgba(var(--primary-rgb), 0.05);
+}
+
+.portalPendingApprovalDecline {
+  border-left: 3px solid rgba(var(--primary-rgb), 0.35);
 }
 
 .portalFilesTableIconCol {

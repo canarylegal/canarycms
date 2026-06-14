@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { applyAuthHeaders, apiUrl, formatApiErrorDetail } from './api'
 import { DocMimeIcon } from './case/DocCells'
-import type { PortalAuthOut, PortalBrowseOut, PortalFileOut, PortalGrantSummaryOut, PortalSessionOut } from './types'
+import type { PortalAuthOut, PortalBrowseOut, PortalFileOut, PortalGrantSummaryOut, PortalQuoteDeliveryViewOut, PortalQuoteExchangeOut, PortalSessionOut } from './types'
 
 const PORTAL_FILES_GRID = '32px 1fr 120px 100px 180px'
 
@@ -103,6 +103,14 @@ export default function PortalPage() {
   const [info, setInfo] = useState<string | null>(null)
   const [uploadBusy, setUploadBusy] = useState(false)
   const [previewExchangeBusy, setPreviewExchangeBusy] = useState(false)
+  const [quoteExchangeBusy, setQuoteExchangeBusy] = useState(false)
+  const [quoteDelivery, setQuoteDelivery] = useState<PortalQuoteDeliveryViewOut | null>(null)
+  const [quoteDeclineOpen, setQuoteDeclineOpen] = useState(false)
+  const [quoteDeclineReason, setQuoteDeclineReason] = useState('')
+  const [quoteRespondBusy, setQuoteRespondBusy] = useState(false)
+  const [approvalDeclineOpenId, setApprovalDeclineOpenId] = useState<string | null>(null)
+  const [approvalDeclineReason, setApprovalDeclineReason] = useState('')
+  const [approvalRespondBusyId, setApprovalRespondBusyId] = useState<string | null>(null)
 
   const matterGroups = useMemo(() => groupGrantsByMatter(grants), [grants])
   const activeMatter = useMemo(
@@ -158,6 +166,43 @@ export default function PortalPage() {
     })()
   }, [])
 
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const quoteToken = params.get('quote')?.trim()
+    if (!quoteToken) return
+    void (async () => {
+      setQuoteExchangeBusy(true)
+      setErr(null)
+      try {
+        const out = await portalFetch<PortalQuoteExchangeOut>('/portal/quote-exchange', {
+          method: 'POST',
+          json: { exchange_token: quoteToken },
+        })
+        storePortalToken(out.session_token)
+        setSessionToken(out.session_token)
+        setContactName(out.contact_name)
+        setGrants(out.grants)
+        setQuoteDelivery(out.quote)
+        if (out.quote.grant_id) {
+          const grant = out.grants.find((g) => g.id === out.quote.grant_id)
+          if (grant) {
+            setActiveCaseId(grant.case_id)
+            setActiveGrantId(grant.id)
+          }
+        }
+        params.delete('quote')
+        const qs = params.toString()
+        window.history.replaceState(null, '', `${window.location.pathname}${qs ? `?${qs}` : ''}${window.location.hash}`)
+      } catch (e: unknown) {
+        storePortalToken('')
+        setSessionToken('')
+        setErr((e as { message?: string }).message ?? 'Quote link expired or invalid')
+      } finally {
+        setQuoteExchangeBusy(false)
+      }
+    })()
+  }, [])
+
   const refreshSession = useCallback(async (token: string) => {
     const sess = await portalFetch<PortalSessionOut>('/portal/session', { portalToken: token })
     setContactName(sess.contact_name)
@@ -178,7 +223,7 @@ export default function PortalPage() {
 
   useEffect(() => {
     const token = sessionToken.trim()
-    if (!token || previewExchangeBusy) return
+    if (!token || previewExchangeBusy || quoteExchangeBusy) return
     void (async () => {
       setBusy(true)
       setErr(null)
@@ -192,7 +237,7 @@ export default function PortalPage() {
         setBusy(false)
       }
     })()
-  }, [sessionToken, refreshSession, previewExchangeBusy])
+  }, [sessionToken, refreshSession, previewExchangeBusy, quoteExchangeBusy])
 
   useEffect(() => {
     const token = sessionToken.trim()
@@ -288,6 +333,134 @@ export default function PortalPage() {
     setActiveGrantId(null)
     setBrowse(null)
     setBrowseSubfolder('')
+    setQuoteDelivery(null)
+    setQuoteDeclineOpen(false)
+    setQuoteDeclineReason('')
+    setApprovalDeclineOpenId(null)
+    setApprovalDeclineReason('')
+  }
+
+  async function downloadQuoteFile() {
+    if (!quoteDelivery?.grant_id) return
+    const token = sessionToken.trim()
+    if (!token) return
+    setErr(null)
+    try {
+      const url = apiUrl(
+        `/portal/grants/${quoteDelivery.grant_id}/files/${quoteDelivery.file_id}?download=1`,
+      )
+      const headers = new Headers()
+      applyAuthHeaders(headers, token)
+      const res = await fetch(url, { headers })
+      if (!res.ok) throw new Error(formatApiErrorDetail(await res.text(), res.statusText))
+      const blob = await res.blob()
+      const obj = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = obj
+      a.download = quoteDelivery.original_filename
+      a.click()
+      URL.revokeObjectURL(obj)
+    } catch (e: unknown) {
+      setErr((e as { message?: string }).message ?? 'Download failed')
+    }
+  }
+
+  async function respondToQuote(accepted: boolean) {
+    if (!quoteDelivery) return
+    await respondToApproval(quoteDelivery.id, accepted, quoteDeclineReason.trim() || null)
+    setQuoteDeclineOpen(false)
+    setQuoteDeclineReason('')
+  }
+
+  async function respondToApproval(
+    deliveryId: string,
+    accepted: boolean,
+    declineReason: string | null = null,
+  ) {
+    const token = sessionToken.trim()
+    if (!token) return
+    setApprovalRespondBusyId(deliveryId)
+    setQuoteRespondBusy(true)
+    setErr(null)
+    try {
+      const out = await portalFetch<PortalQuoteDeliveryViewOut>(
+        `/portal/quote-deliveries/${deliveryId}/respond`,
+        {
+          method: 'POST',
+          portalToken: token,
+          json: {
+            accepted,
+            decline_reason: accepted ? null : declineReason,
+          },
+        },
+      )
+      if (quoteDelivery?.id === deliveryId) setQuoteDelivery(out)
+      setApprovalDeclineOpenId(null)
+      setApprovalDeclineReason('')
+      setInfo(accepted ? 'Thank you — your acceptance has been recorded.' : 'Your response has been recorded.')
+      if (activeGrantId) {
+        await loadBrowse(activeGrantId, browseSubfolder, token)
+      }
+    } catch (e: unknown) {
+      setErr((e as { message?: string }).message ?? 'Could not submit response')
+    } finally {
+      setApprovalRespondBusyId(null)
+      setQuoteRespondBusy(false)
+    }
+  }
+
+  async function downloadApprovalFile(delivery: PortalQuoteDeliveryViewOut) {
+    const grantId = delivery.grant_id ?? activeGrantId
+    const token = sessionToken.trim()
+    if (!grantId || !token) return
+    setErr(null)
+    try {
+      const url = apiUrl(`/portal/grants/${grantId}/files/${delivery.file_id}?download=1`)
+      const headers = new Headers()
+      applyAuthHeaders(headers, token)
+      const res = await fetch(url, { headers })
+      if (!res.ok) throw new Error(formatApiErrorDetail(await res.text(), res.statusText))
+      const blob = await res.blob()
+      const obj = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = obj
+      a.download = delivery.original_filename
+      a.click()
+      URL.revokeObjectURL(obj)
+    } catch (e: unknown) {
+      setErr((e as { message?: string }).message ?? 'Download failed')
+    }
+  }
+
+  async function openApprovalFile(delivery: PortalQuoteDeliveryViewOut) {
+    const grantId = delivery.grant_id ?? activeGrantId
+    const token = sessionToken.trim()
+    if (!grantId || !token) return
+    setErr(null)
+    try {
+      const url = apiUrl(`/portal/grants/${grantId}/files/${delivery.file_id}`)
+      const headers = new Headers()
+      applyAuthHeaders(headers, token)
+      const res = await fetch(url, { headers })
+      if (!res.ok) throw new Error(formatApiErrorDetail(await res.text(), res.statusText))
+      const blob = await res.blob()
+      const typed = delivery.mime_type ? new Blob([blob], { type: delivery.mime_type }) : blob
+      const obj = URL.createObjectURL(typed)
+      window.open(obj, '_blank', 'noopener,noreferrer')
+      window.setTimeout(() => URL.revokeObjectURL(obj), 60_000)
+    } catch (e: unknown) {
+      setErr((e as { message?: string }).message ?? 'Could not open file')
+    }
+  }
+
+  function quoteStatusMessage(q: PortalQuoteDeliveryViewOut): string {
+    if (q.status === 'accepted') return 'You accepted this quote.'
+    if (q.status === 'declined') {
+      return q.decline_reason ? `You declined this quote: ${q.decline_reason}` : 'You declined this quote.'
+    }
+    if (q.status === 'superseded') return 'This quote has been revised. Contact your firm for an updated copy.'
+    if (!q.can_respond) return 'This quote is no longer awaiting a response.'
+    return 'Please review the quote below, then accept or decline.'
   }
 
   async function uploadFiles(fileList: FileList | null) {
@@ -427,12 +600,14 @@ export default function PortalPage() {
     setBrowseSubfolder(crumbs.slice(0, index + 1).join('/'))
   }
 
-  if (previewExchangeBusy) {
+  if (previewExchangeBusy || quoteExchangeBusy) {
     return (
       <div className="portalShell">
         <div className="portalCard card">
           <h1>{PORTAL_TITLE}</h1>
-          <div className="muted" style={{ marginTop: 12 }}>Opening preview…</div>
+          <div className="muted" style={{ marginTop: 12 }}>
+            {quoteExchangeBusy ? 'Opening quote…' : 'Opening preview…'}
+          </div>
         </div>
       </div>
     )
@@ -556,6 +731,7 @@ export default function PortalPage() {
 
   const files = browse?.files ?? []
   const subfolders = browse?.subfolders ?? []
+  const pendingApprovals = (browse?.pending_approvals ?? []).filter((d) => d.can_respond)
 
   return (
     <div className="portalShell">
@@ -572,6 +748,77 @@ export default function PortalPage() {
         </div>
 
         {err ? <div className="error" style={{ marginTop: 12 }}>{err}</div> : null}
+        {info ? <div className="notice" style={{ marginTop: 12 }}>{info}</div> : null}
+
+        {quoteDelivery && !activeGrantId ? (
+          <div className="portalQuotePanel card" style={{ marginTop: 16, padding: 16 }}>
+            <h2 style={{ marginTop: 0, fontSize: 18 }}>Quote</h2>
+            <div className="listTitle">{quoteDelivery.original_filename}</div>
+            <p className="muted" style={{ marginBottom: 12 }}>{quoteStatusMessage(quoteDelivery)}</p>
+            <div className="row" style={{ gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
+              <button type="button" className="btn" onClick={() => void downloadQuoteFile()}>
+                Download
+              </button>
+            </div>
+            {quoteDelivery.can_respond ? (
+              <>
+                {!quoteDeclineOpen ? (
+                  <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
+                    <button
+                      type="button"
+                      className="btn primary"
+                      disabled={quoteRespondBusy}
+                      onClick={() => void respondToQuote(true)}
+                    >
+                      Accept quote
+                    </button>
+                    <button
+                      type="button"
+                      className="btn"
+                      disabled={quoteRespondBusy}
+                      onClick={() => setQuoteDeclineOpen(true)}
+                    >
+                      Decline
+                    </button>
+                  </div>
+                ) : (
+                  <div className="stack" style={{ gap: 8 }}>
+                    <label className="field">
+                      <span>Reason for declining (optional)</span>
+                      <textarea
+                        className="input"
+                        rows={3}
+                        value={quoteDeclineReason}
+                        onChange={(e) => setQuoteDeclineReason(e.target.value)}
+                      />
+                    </label>
+                    <div className="row" style={{ gap: 8 }}>
+                      <button
+                        type="button"
+                        className="btn primary"
+                        disabled={quoteRespondBusy}
+                        onClick={() => void respondToQuote(false)}
+                      >
+                        {quoteRespondBusy ? 'Submitting…' : 'Submit decline'}
+                      </button>
+                      <button
+                        type="button"
+                        className="btn"
+                        disabled={quoteRespondBusy}
+                        onClick={() => {
+                          setQuoteDeclineOpen(false)
+                          setQuoteDeclineReason('')
+                        }}
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </>
+            ) : null}
+          </div>
+        ) : null}
 
         {staffPreview ? (
           <div className="notice portalStaffPreviewBanner" style={{ marginTop: 12 }}>
@@ -680,6 +927,109 @@ export default function PortalPage() {
             </div>
 
             {busy && !browse ? <div className="muted">Loading…</div> : null}
+
+            {pendingApprovals.length > 0 ? (
+              <div className="portalPendingApprovals" style={{ marginBottom: 16 }}>
+                <h3 style={{ margin: '0 0 8px', fontSize: 16 }}>Documents awaiting your approval</h3>
+                <div className="table portalFilesTable">
+                  <div className="tr th" style={{ gridTemplateColumns: PORTAL_FILES_GRID }}>
+                    <div className="thCell portalFilesTableIconCol" aria-hidden />
+                    <div className="thCell">Name</div>
+                    <div className="thCell">Folder</div>
+                    <div className="thCell">Size</div>
+                    <div className="thCell">Actions</div>
+                  </div>
+                  {pendingApprovals.map((d) => {
+                    const declineOpen = approvalDeclineOpenId === d.id
+                    const respondBusy = approvalRespondBusyId === d.id
+                    return (
+                      <div key={d.id} className="stack" style={{ gap: 0 }}>
+                        <div className="tr portalPendingApprovalRow" style={{ gridTemplateColumns: PORTAL_FILES_GRID }}>
+                          <div className="td portalFilesTableIconCol">
+                            <span className="docsTypeIcon" aria-hidden>
+                              <DocMimeIcon mime={d.mime_type ?? ''} filename={d.original_filename} />
+                            </span>
+                          </div>
+                          <div className="td">{d.original_filename}</div>
+                          <div className="td muted">{d.folder_display?.trim() || '—'}</div>
+                          <div className="td muted">{formatBytes(d.size_bytes ?? 0)}</div>
+                          <div className="td row" style={{ gap: 6, flexWrap: 'wrap' }}>
+                            {activeGrant?.can_download ? (
+                              <>
+                                <button type="button" className="btn" disabled={respondBusy} onClick={() => void openApprovalFile(d)}>
+                                  Open
+                                </button>
+                                <button type="button" className="btn" disabled={respondBusy} onClick={() => void downloadApprovalFile(d)}>
+                                  Download
+                                </button>
+                              </>
+                            ) : null}
+                            {!declineOpen ? (
+                              <>
+                                <button
+                                  type="button"
+                                  className="btn primary"
+                                  disabled={respondBusy}
+                                  onClick={() => void respondToApproval(d.id, true)}
+                                >
+                                  Accept
+                                </button>
+                                <button
+                                  type="button"
+                                  className="btn"
+                                  disabled={respondBusy}
+                                  onClick={() => {
+                                    setApprovalDeclineOpenId(d.id)
+                                    setApprovalDeclineReason('')
+                                  }}
+                                >
+                                  Decline
+                                </button>
+                              </>
+                            ) : null}
+                          </div>
+                        </div>
+                        {declineOpen ? (
+                          <div className="portalPendingApprovalDecline card stack" style={{ margin: '0 0 8px', padding: 12, gap: 8 }}>
+                            <label className="field">
+                              <span>Reason for declining (optional)</span>
+                              <textarea
+                                className="input"
+                                rows={2}
+                                value={approvalDeclineReason}
+                                onChange={(e) => setApprovalDeclineReason(e.target.value)}
+                              />
+                            </label>
+                            <div className="row" style={{ gap: 8 }}>
+                              <button
+                                type="button"
+                                className="btn primary"
+                                disabled={respondBusy}
+                                onClick={() => void respondToApproval(d.id, false, approvalDeclineReason.trim() || null)}
+                              >
+                                {respondBusy ? 'Submitting…' : 'Submit decline'}
+                              </button>
+                              <button
+                                type="button"
+                                className="btn"
+                                disabled={respondBusy}
+                                onClick={() => {
+                                  setApprovalDeclineOpenId(null)
+                                  setApprovalDeclineReason('')
+                                }}
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          </div>
+                        ) : null}
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            ) : null}
+
             <div className="table portalFilesTable">
               <div className="tr th" style={{ gridTemplateColumns: PORTAL_FILES_GRID }}>
                 <div className="thCell portalFilesTableIconCol" aria-hidden />

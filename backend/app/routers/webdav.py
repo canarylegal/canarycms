@@ -546,6 +546,10 @@ async def webdav_put_file(
 
     frow.version = (frow.version or 1) + 1
     frow.updated_at = _now()
+    if frow.case_id is not None:
+        from app.quote_portal_service import supersede_pending_quote_deliveries
+
+        supersede_pending_quote_deliveries(db, frow.id)
     db.add(frow)
     log_event(
         db,

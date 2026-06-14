@@ -21,7 +21,17 @@ from app.audit import log_event
 from app.db import get_db
 from app.deps import get_portal_contact
 from app.file_storage import FILES_ROOT, case_file_paths, ensure_files_root
-from app.models import Case, Contact, ContactPortalAccess, ContactPortalGrant, File, FileCategory, FirmSettings, User
+from app.models import (
+    Case,
+    Contact,
+    ContactPortalAccess,
+    ContactPortalGrant,
+    File,
+    FileCategory,
+    FirmSettings,
+    QuotePortalDelivery,
+    User,
+)
 from app.permission_checks import user_may_be_fee_earner
 from app.portal_activity import log_portal_activity
 from app.portal_notifications import notify_portal_staff_client_upload
@@ -32,7 +42,7 @@ from app.portal_service import (
     default_grant_label,
     ensure_upload_folder_allowed,
     find_portal_contact_by_email,
-    get_grant_file,
+    get_portal_grant_file,
     get_grant_for_contact,
     get_portal_access_by_code,
     grant_folder_display_name,
@@ -47,6 +57,12 @@ from app.portal_service import (
     relative_folder_under_grant,
     verify_portal_login_otp,
 )
+from app.quote_portal_service import (
+    get_delivery_for_contact,
+    list_pending_approvals_for_grant,
+    portal_quote_delivery_view,
+    respond_to_quote_delivery,
+)
 from app.schemas import (
     PortalAuthIn,
     PortalAuthOut,
@@ -57,10 +73,18 @@ from app.schemas import (
     PortalOtpRequestIn,
     PortalOtpVerifyIn,
     PortalPreviewExchangeIn,
+    PortalQuoteDeliveryViewOut,
+    PortalQuoteExchangeIn,
+    PortalQuoteExchangeOut,
+    PortalQuoteRespondIn,
     PortalSessionOut,
 )
 from app.alert_dispatch import AlertKind, dispatch_alert, portal_public_url
-from app.security import create_portal_session_token, decode_portal_preview_exchange_token
+from app.security import (
+    create_portal_session_token,
+    decode_portal_preview_exchange_token,
+    decode_portal_quote_exchange_token,
+)
 
 log = logging.getLogger(__name__)
 
@@ -244,6 +268,97 @@ def portal_preview_exchange(payload: PortalPreviewExchangeIn, db: Session = Depe
     )
 
 
+def _quote_delivery_view(db: Session, delivery: QuotePortalDelivery) -> PortalQuoteDeliveryViewOut:
+    grant = db.get(ContactPortalGrant, delivery.grant_id) if delivery.grant_id else None
+    return PortalQuoteDeliveryViewOut(**portal_quote_delivery_view(db, delivery, grant=grant))
+
+
+@router.post("/quote-exchange", response_model=PortalQuoteExchangeOut)
+def portal_quote_exchange(payload: PortalQuoteExchangeIn, db: Session = Depends(get_db)) -> PortalQuoteExchangeOut:
+    """Exchange a quote e-mail link for a portal session and quote details."""
+    try:
+        exchange = decode_portal_quote_exchange_token(payload.exchange_token.strip())
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired quote link") from exc
+    try:
+        contact_id = uuid.UUID(exchange.contact_id)
+        case_id = uuid.UUID(exchange.case_id)
+        file_id = uuid.UUID(exchange.file_id)
+        delivery_id = uuid.UUID(exchange.delivery_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid quote link") from exc
+
+    contact = db.get(Contact, contact_id)
+    if contact is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid quote link")
+    access_row = db.execute(
+        select(ContactPortalAccess).where(ContactPortalAccess.contact_id == contact_id)
+    ).scalar_one_or_none()
+    if access_row is None or not portal_access_is_active(access_row):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Portal access is not active")
+    delivery = db.get(QuotePortalDelivery, delivery_id)
+    if (
+        delivery is None
+        or delivery.contact_id != contact_id
+        or delivery.case_id != case_id
+        or delivery.file_id != file_id
+    ):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Quote not found")
+
+    from app.portal_case import require_case_portal_enabled
+
+    require_case_portal_enabled(db, case_id)
+    grants = list_active_grants_for_contact(db, contact_id)
+    case_grants = [g for g in grants if g.case_id == case_id and grant_is_active(g)]
+    if not case_grants:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No shared folders on this matter")
+
+    token = create_portal_session_token(contact_id=str(contact.id))
+    log_event(
+        db,
+        actor_user_id=None,
+        action="portal.quote.exchange",
+        entity_type="quote_portal_delivery",
+        entity_id=str(delivery.id),
+        meta={"case_id": str(case_id), "file_id": str(file_id), "contact_id": str(contact_id)},
+    )
+    db.commit()
+    return PortalQuoteExchangeOut(
+        session_token=token,
+        contact_name=contact_display_name(contact),
+        grants=_grant_summaries(db, contact.id),
+        quote=_quote_delivery_view(db, delivery),
+    )
+
+
+@router.get("/quote-deliveries/{delivery_id}", response_model=PortalQuoteDeliveryViewOut)
+def portal_get_quote_delivery(
+    delivery_id: uuid.UUID,
+    contact: Contact = Depends(get_portal_contact),
+    db: Session = Depends(get_db),
+) -> PortalQuoteDeliveryViewOut:
+    delivery = get_delivery_for_contact(db, delivery_id, contact.id)
+    return _quote_delivery_view(db, delivery)
+
+
+@router.post("/quote-deliveries/{delivery_id}/respond", response_model=PortalQuoteDeliveryViewOut)
+def portal_respond_quote_delivery(
+    delivery_id: uuid.UUID,
+    payload: PortalQuoteRespondIn,
+    contact: Contact = Depends(get_portal_contact),
+    db: Session = Depends(get_db),
+) -> PortalQuoteDeliveryViewOut:
+    delivery = get_delivery_for_contact(db, delivery_id, contact.id)
+    updated = respond_to_quote_delivery(
+        db,
+        delivery=delivery,
+        contact=contact,
+        accepted=bool(payload.accepted),
+        decline_reason=payload.decline_reason,
+    )
+    return _quote_delivery_view(db, updated)
+
+
 def _file_out(grant: ContactPortalGrant, row: File) -> PortalFileOut:
     rel = relative_folder_under_grant(grant_folder=grant.folder_path or "", absolute_folder=row.folder_path or "")
     display = rel.split("/")[-1] if rel else (row.folder_path or "Documents")
@@ -284,6 +399,8 @@ def portal_browse_grant(
     if not grant.can_download:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Download is not allowed for this area")
     rel, child_names, files_here = browse_grant_folder(db, grant, subfolder=subfolder)
+    pending = list_pending_approvals_for_grant(db, contact_id=contact.id, grant=grant)
+    pending_ids = {d.file_id for d in pending}
     crumbs: list[str] = []
     if rel:
         crumbs = rel.split("/")
@@ -291,7 +408,8 @@ def portal_browse_grant(
         subfolder=rel,
         breadcrumb=crumbs,
         subfolders=child_names,
-        files=[_file_out(grant, f) for f in files_here],
+        files=[_file_out(grant, f) for f in files_here if f.id not in pending_ids],
+        pending_approvals=[PortalQuoteDeliveryViewOut(**portal_quote_delivery_view(db, d, grant=grant)) for d in pending],
     )
 
 
@@ -379,7 +497,7 @@ def portal_download_file(
     grant = get_grant_for_contact(db, contact_id=contact.id, grant_id=grant_id)
     if not grant.can_download:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Download is not allowed for this area")
-    row = get_grant_file(db, grant, file_id)
+    row = get_portal_grant_file(db, grant, contact.id, file_id)
     ensure_files_root()
     abs_path = (FILES_ROOT / row.storage_path).resolve()
     if not str(abs_path).startswith(str(FILES_ROOT)) or not abs_path.exists():

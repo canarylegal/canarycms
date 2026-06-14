@@ -15,6 +15,9 @@ from app.alert_templates import (
     portal_contact_files_added,
     portal_contact_folder_granted,
     portal_login_otp,
+    portal_quote_accepted,
+    portal_quote_declined,
+    portal_quote_sent,
     portal_staff_upload,
 )
 from app.audit import log_event
@@ -32,6 +35,9 @@ class AlertKind(str, enum.Enum):
     portal_contact_folder = "portal_contact_folder"
     portal_contact_files_added = "portal_contact_files_added"
     portal_login_otp = "portal_login_otp"
+    portal_quote_sent = "portal_quote_sent"
+    portal_quote_accepted = "portal_quote_accepted"
+    portal_quote_declined = "portal_quote_declined"
 
 
 def firm_alerts_configured(db: Session) -> bool:
@@ -108,6 +114,26 @@ def dispatch_alert(
             contact_name=str(context.get("contact_name") or "Client"),
             portal_url=str(context.get("portal_url") or portal_public_url()),
             otp_code=str(context.get("otp_code") or ""),
+        )
+    elif kind == AlertKind.portal_quote_sent:
+        subject, body, body_html = portal_quote_sent(
+            firm_name=firm,
+            contact_name=str(context.get("contact_name") or "Client"),
+            quote_filename=str(context.get("quote_filename") or "Quote"),
+            portal_url=str(context.get("portal_url") or portal_public_url()),
+        )
+    elif kind == AlertKind.portal_quote_accepted:
+        subject, body, body_html = portal_quote_accepted(
+            firm_name=firm,
+            contact_name=str(context.get("contact_name") or "Client"),
+            quote_filename=str(context.get("quote_filename") or "Quote"),
+        )
+    elif kind == AlertKind.portal_quote_declined:
+        subject, body, body_html = portal_quote_declined(
+            firm_name=firm,
+            contact_name=str(context.get("contact_name") or "Client"),
+            quote_filename=str(context.get("quote_filename") or "Quote"),
+            decline_reason=str(context.get("decline_reason") or ""),
         )
     else:
         log.warning("alert_dispatch: unknown kind %s", kind)

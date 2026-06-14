@@ -2209,6 +2209,7 @@ class PortalBrowseOut(BaseModel):
     breadcrumb: list[str]
     subfolders: list[str]
     files: list[PortalFileOut]
+    pending_approvals: list[PortalQuoteDeliveryViewOut] = []
 
 
 class PortalOtpRequestIn(BaseModel):
@@ -2277,6 +2278,58 @@ class CasePortalPreviewOut(BaseModel):
 
 class PortalPreviewExchangeIn(BaseModel):
     exchange_token: str = Field(min_length=10, max_length=4096)
+
+
+class PortalQuoteExchangeIn(BaseModel):
+    exchange_token: str = Field(min_length=10, max_length=4096)
+
+
+class PortalQuoteDeliveryViewOut(BaseModel):
+    id: uuid.UUID
+    file_id: uuid.UUID
+    grant_id: uuid.UUID | None
+    original_filename: str
+    mime_type: str = "application/octet-stream"
+    size_bytes: int = 0
+    folder_display: str = ""
+    status: str
+    can_respond: bool
+    decline_reason: str | None = None
+    responded_at: datetime | None = None
+
+
+class PortalQuoteRespondIn(BaseModel):
+    accepted: bool
+    decline_reason: str | None = Field(default=None, max_length=2000)
+
+
+class PortalQuoteExchangeOut(BaseModel):
+    session_token: str
+    contact_name: str
+    grants: list[PortalGrantSummaryOut]
+    quote: PortalQuoteDeliveryViewOut
+
+
+class SendQuoteViaPortalIn(BaseModel):
+    contact_id: uuid.UUID
+
+
+class PortalQuoteTagUpdate(BaseModel):
+    is_portal_quote: bool
+
+
+class QuotePortalDeliveryOut(BaseModel):
+    id: uuid.UUID
+    file_id: uuid.UUID
+    contact_id: uuid.UUID
+    contact_name: str
+    status: str
+    sent_at: datetime
+    responded_at: datetime | None = None
+    decline_reason: str | None = None
+    file_version_at_send: int
+    email_sent: bool = False
+    email_skip_reason: str | None = None
 
 
 class PublishComposeIn(BaseModel):

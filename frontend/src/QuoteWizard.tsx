@@ -6,9 +6,16 @@ import { poundsToPence } from './FeeScaleEditor'
 import { MatterSearchPicker } from './MatterSearchPicker'
 import { openOnlyOfficeCaseEditor } from './onlyofficeEditorWindow'
 import { QuoteReviewEditor } from './QuoteReviewEditor'
+import { SendQuoteViaPortalModal } from './SendQuoteViaPortalModal'
 import { SearchInput } from './SearchInput'
 import { SingleSelectDropdown } from './SingleSelectDropdown'
-import type { CaseContactOut, CaseOut, FeeScaleOut, QuoteDraftCategory, QuotePreviewOut } from './types'
+import type {
+  CaseContactOut,
+  CaseOut,
+  FeeScaleOut,
+  QuoteDraftCategory,
+  QuotePreviewOut,
+} from './types'
 
 type Props = {
   token: string
@@ -73,6 +80,8 @@ export function QuoteWizard({
   const [quotePreview, setQuotePreview] = useState<QuotePreviewOut | null>(null)
   const [composeDraft, setComposeDraft] = useState<QuoteDraftCategory[]>([])
   const [composeAmountOverrides, setComposeAmountOverrides] = useState<Record<string, string>>({})
+  const [createdQuoteFileId, setCreatedQuoteFileId] = useState<string | null>(null)
+  const [portalSendOpen, setPortalSendOpen] = useState(false)
 
   const presetCaseId = presetCase?.id ?? null
   const wasOpenRef = useRef(false)
@@ -115,6 +124,8 @@ export function QuoteWizard({
     setQuotePreview(null)
     setComposeDraft([])
     setComposeAmountOverrides({})
+    setCreatedQuoteFileId(null)
+    setPortalSendOpen(false)
     setErr(null)
     setBusy(false)
     if (presetCaseId) {
@@ -230,6 +241,7 @@ export function QuoteWizard({
         },
       })
       onQuoteCreated?.()
+      setCreatedQuoteFileId(res.id)
       setStep('send')
       setBusy(false)
       window.requestAnimationFrame(() => {
@@ -244,6 +256,7 @@ export function QuoteWizard({
   const modalTitle = step === 'send' ? 'Send quote' : 'New quote'
 
   return (
+    <>
     <div className="modalOverlay" role="dialog" aria-modal="true">
       <div
         className={`modal card modal--scrollBody modal--quoteWizard${step === 'review' ? ' modal--quoteReview' : ''}`}
@@ -456,10 +469,21 @@ export function QuoteWizard({
                 >
                   Send by letter
                 </button>
+                <button
+                  type="button"
+                  className="btn"
+                  disabled={!caseId || !createdQuoteFileId || busy}
+                  onClick={() => setPortalSendOpen(true)}
+                >
+                  Send via portal
+                </button>
                 <button type="button" className="btn" onClick={onClose}>
                   Not now
                 </button>
               </div>
+              <p className="muted" style={{ fontSize: 12, marginTop: 12 }}>
+                Save and close the quote in the editor before sending via portal.
+              </p>
             </>
           ) : null}
 
@@ -471,5 +495,19 @@ export function QuoteWizard({
         </div>
       </div>
     </div>
+    {caseId && createdQuoteFileId ? (
+      <SendQuoteViaPortalModal
+        token={token}
+        caseId={caseId}
+        fileId={createdQuoteFileId}
+        preferredContactId={
+          pickMatterCcId !== 'none' && pickMatterCcId !== 'all_clients' ? pickMatterCcId : null
+        }
+        open={portalSendOpen}
+        onClose={() => setPortalSendOpen(false)}
+        onSent={onQuoteCreated}
+      />
+    ) : null}
+    </>
   )
 }
