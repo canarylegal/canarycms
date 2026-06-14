@@ -1802,7 +1802,7 @@ export function AdminConsole({ token, refreshMe }: { token: string; refreshMe: (
     >
       <div className="paneHead">
         <div>
-          <h2 style={{ margin: 0 }}>Admin settings</h2>
+          <h2 style={{ margin: 0 }}>Admin Settings</h2>
           <div className="muted" style={{ marginTop: 4 }}>{adminSubtitle}</div>
         </div>
         <div className="row" style={{ alignItems: 'center', flexWrap: 'wrap', gap: 4 }}>

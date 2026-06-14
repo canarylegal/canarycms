@@ -67,6 +67,10 @@ import {
 import { useColumnWidths } from './useColumnWidths'
 import { normalizeUiPreferences, resetMenuColumnWidths } from './userUiPreferences'
 import { AppLogo } from './AppLogo'
+import { AppSidebar } from './AppSidebar'
+import { buildCaseContextMenuActions, scrollCaseRowIntoView, type CaseContextMenuActionKind } from './caseListKeyboard'
+import { isEditableKeyboardTarget, isModalBlockingKeyboard } from './keyboardUtils'
+import { usePrimaryNavKeyboard, type PrimaryNavId } from './usePrimaryNavKeyboard'
 import {
   DEFAULT_OUTLOOK_WEB_MAIL_URL,
   isOrgMicrosoftGraphConfigured,
@@ -112,7 +116,7 @@ type View =
 function canaryViewTitleSegment(view: View, caseDetail: CaseOut | null): string {
   switch (view) {
     case 'main-menu':
-      return 'Main menu'
+      return 'Case Menu'
     case 'quotes':
       return 'Quotes'
     case 'case-menu': {
@@ -134,7 +138,7 @@ function canaryViewTitleSegment(view: View, caseDetail: CaseOut | null): string 
     case 'user-settings':
       return 'User Settings'
     case 'admin-console':
-      return 'Admin settings'
+      return 'Admin Settings'
   }
 }
 
@@ -786,6 +790,7 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
   const viewRef = useRef(view)
   viewRef.current = view
   const caseTitleDetailRef = useRef<CaseOut | null>(null)
+  const [caseTitleDetail, setCaseTitleDetail] = useState<CaseOut | null>(null)
   const [selectedCaseId, setSelectedCaseId] = useState<string | null>(bootNav.caseId)
   const [showNewMatter, setShowNewMatter] = useState(false)
 
@@ -872,6 +877,42 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
     }
     setView('main-menu')
   }, [auth.me, setView])
+
+  const primaryNavHandlers = useMemo(
+    (): Record<PrimaryNavId, () => void> => ({
+      'main-menu': goMainMenu,
+      quotes: () => {
+        setView('quotes')
+        setQuotesSubPanel('list')
+      },
+      calendar: () => setView('calendar'),
+      tasks: () => setView('tasks'),
+      contacts: () => setView('contacts'),
+      accounts: () => setView('accounts'),
+      reports: () => setView('reports'),
+      'user-settings': () => setView('user-settings'),
+      'admin-console': () => setView('admin-console'),
+    }),
+    [goMainMenu, setView],
+  )
+
+  usePrimaryNavKeyboard({
+    enabled: Boolean(token),
+    view,
+    canAccessAccounts,
+    canAdminConsole,
+    onNavigate: primaryNavHandlers,
+  })
+
+  const confirmLogout = useCallback(async () => {
+    const ok = await askConfirm({
+      title: 'Sign out',
+      message: 'Are you sure you want to sign out of Canary?',
+      confirmLabel: 'Sign out',
+      cancelLabel: 'Cancel',
+    })
+    if (ok) auth.logout()
+  }, [askConfirm, auth.logout])
 
   const { prefs: uiPrefs, setPreference: setUiPreference, setPreferenceDebounced: setUiPreferenceDebounced } =
     useUserUiPreferences(auth.me, auth.token)
@@ -1032,8 +1073,13 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
     syncNavFromState({})
   }, [syncNavFromState])
 
+  useEffect(() => {
+    if (view !== 'case-menu') setCaseTitleDetail(null)
+  }, [view])
+
   const onCaseTitleDetailChange = useCallback((detail: CaseOut | null) => {
     caseTitleDetailRef.current = detail
+    setCaseTitleDetail(detail)
     if (viewRef.current === 'case-menu') {
       document.title = canaryDocumentTitle(canaryViewTitleSegment('case-menu', detail))
     }
@@ -1314,7 +1360,7 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
                     Show all tasks
                   </button>
                 ) : null}
-                <button type="button" className="btn primary" onClick={() => setGlobalTaskCreateOpen(true)}>
+                <button type="button" className="btn primary toolbarLeadBtn" onClick={() => setGlobalTaskCreateOpen(true)}>
                   New task
                 </button>
                 <div className="tasksToolbarLayoutGroup">
@@ -1497,6 +1543,7 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
       onSort={onMainMenuSort}
       onOpenNewMatter={onOpenNewMatter}
       onRefreshCases={onRefreshCases}
+      keyboardActive={view === 'main-menu'}
     />
   ) : null
 
@@ -1543,6 +1590,7 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
       contextMenuVariant="quotes"
       onQuoteConvert={onQuoteConvert}
       onQuoteClose={onQuoteClose}
+      keyboardActive={view === 'quotes' && quotesSubPanel === 'list'}
     />
   ) : null
 
@@ -1561,8 +1609,8 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
       )
       return
     }
-    document.title = canaryDocumentTitle(canaryViewTitleSegment(view, caseTitleDetailRef.current))
-  }, [auth.loading, auth.token, auth.me, view])
+    document.title = canaryDocumentTitle(canaryViewTitleSegment(view, caseTitleDetail))
+  }, [auth.loading, auth.token, auth.me, view, caseTitleDetail])
 
   if (auth.loading) return <div className="center muted">Loading…</div>
   if (!auth.token) {
@@ -1632,87 +1680,36 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
   }
 
   return (
-    <div className="appShell">
+    <div className="appShell appShell--sidebar">
       <AdminLoginUpdatePrompt token={auth.token} me={auth.me} canAdmin={canAdminConsole} />
-      <header className="topbar">
-        <div className="topbarMain">
-          <nav className="topNav" aria-label="Primary">
-            <button
-              type="button"
-              className={`navBtn ${view === 'main-menu' || view === 'case-menu' ? 'active' : ''}`}
-              onClick={goMainMenu}
-            >
-              Main Menu
-            </button>
-            <button
-              type="button"
-              className={`navBtn ${view === 'quotes' ? 'active' : ''}`}
-              onClick={() => {
-                setView('quotes')
-                setQuotesSubPanel('list')
-              }}
-            >
-              Quotes
-            </button>
-            <button type="button" className={`navBtn ${view === 'calendar' ? 'active' : ''}`} onClick={() => setView('calendar')}>
-              Calendar
-            </button>
-            <button
-              type="button"
-              className={`navBtn ${view === 'tasks' ? 'active' : ''}`}
-              onClick={() => setView('tasks')}
-            >
-              Tasks
-            </button>
-            <button type="button" className={`navBtn ${view === 'contacts' ? 'active' : ''}`} onClick={() => setView('contacts')}>
-              Contacts
-            </button>
-            {canAccessAccounts ? (
-              <button
-                type="button"
-                className={`navBtn ${view === 'accounts' ? 'active' : ''}`}
-                onClick={() => setView('accounts')}
-              >
-                Accounts
-              </button>
-            ) : null}
-            <button type="button" className={`navBtn ${view === 'reports' ? 'active' : ''}`} onClick={() => setView('reports')}>
-              Reports
-            </button>
-            <button
-              type="button"
-              className={`navBtn ${view === 'user-settings' ? 'active' : ''}`}
-              onClick={() => setView('user-settings')}
-            >
-              User Settings
-            </button>
-            {canAdminConsole ? (
-              <button
-                type="button"
-                className={`navBtn ${view === 'admin-console' ? 'active' : ''}`}
-                onClick={() => setView('admin-console')}
-              >
-                Admin settings
-              </button>
-            ) : null}
-          </nav>
-        </div>
-        <div className="topbarRight">
-          <div className="muted">{auth.me?.email}</div>
-          <button type="button" className="btn" onClick={auth.logout}>
-            Sign out
-          </button>
-        </div>
-      </header>
-      <main
-        className={
-          view === 'case-menu'
-            ? 'main main--caseView'
-            : view === 'main-menu' || view === 'quotes' || view === 'contacts' || view === 'tasks' || view === 'accounts' || view === 'reports'
-              ? 'main main--mainMenu'
-              : 'main'
-        }
-      >
+      <AppSidebar
+        view={view}
+        goMainMenu={goMainMenu}
+        onQuotes={() => {
+          setView('quotes')
+          setQuotesSubPanel('list')
+        }}
+        onCalendar={() => setView('calendar')}
+        onTasks={() => setView('tasks')}
+        onContacts={() => setView('contacts')}
+        onAccounts={() => setView('accounts')}
+        onReports={() => setView('reports')}
+        onUserSettings={() => setView('user-settings')}
+        onAdminConsole={() => setView('admin-console')}
+        canAccessAccounts={canAccessAccounts}
+        canAdminConsole={canAdminConsole}
+        onLogout={confirmLogout}
+      />
+      <div className="appMainColumn">
+        <main
+          className={
+            view === 'case-menu'
+              ? 'main main--caseView'
+              : view === 'main-menu' || view === 'quotes' || view === 'contacts' || view === 'tasks' || view === 'accounts' || view === 'reports'
+                ? 'main main--mainMenu'
+                : 'main'
+          }
+        >
         {mainMenuCasesPanel ? (
           <div className={view === 'main-menu' ? 'mainMenuCasesHost' : 'mainMenuCasesHost mainMenuCasesHost--hidden'}>
             {mainMenuCasesPanel}
@@ -1779,6 +1776,7 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
         ) : null}
         {renderMainContent()}
       </main>
+      </div>
     </div>
   )
 }
@@ -2478,6 +2476,7 @@ function CasesTable({
   contextMenuVariant = 'main',
   onQuoteConvert,
   onQuoteClose,
+  keyboardEnabled = true,
 }: {
   cases: CaseOut[]
   users: UserSummary[]
@@ -2497,8 +2496,9 @@ function CasesTable({
   contextMenuVariant?: 'main' | 'quotes'
   onQuoteConvert?: (caseId: string) => void
   onQuoteClose?: (caseId: string) => void
+  keyboardEnabled?: boolean
 }) {
-  const [caseCtx, setCaseCtx] = useState<null | { id: string; x: number; y: number }>(null)
+  const [caseCtx, setCaseCtx] = useState<null | { id: string; x: number; y: number; focusIndex: number }>(null)
   const caseCtxRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
@@ -2528,6 +2528,139 @@ function CasesTable({
       ),
     [cases, users, search, filterMatterTypes, filterFeeEarnerUserIds, filterCaseStatuses, sortKey, sortDir],
   )
+
+  const rowIds = useMemo(() => rows.map((r) => r.id), [rows])
+
+  const contextMenuLabel = (action: CaseContextMenuActionKind): string => {
+    switch (action) {
+      case 'open':
+        return 'Open'
+      case 'accounts':
+        return 'Accounts'
+      case 'convert':
+        return 'Convert'
+      case 'close':
+        return 'Close'
+    }
+  }
+
+  const activateContextAction = useCallback(
+    (action: CaseContextMenuActionKind, id: string) => {
+      switch (action) {
+        case 'open':
+          onSelect(id)
+          break
+        case 'accounts':
+          onSelect(id, { docPanel: 'accounts' })
+          break
+        case 'convert':
+          onQuoteConvert?.(id)
+          break
+        case 'close':
+          onQuoteClose?.(id)
+          break
+      }
+    },
+    [onQuoteClose, onQuoteConvert, onSelect],
+  )
+
+  const openContextMenuForCase = useCallback((id: string) => {
+    const el = document.querySelector(`[data-case-row-id="${CSS.escape(id)}"]`) as HTMLElement | null
+    const rect = el?.getBoundingClientRect()
+    setCaseCtx({
+      id,
+      x: rect ? rect.left + 16 : 200,
+      y: rect ? rect.top + Math.min(rect.height, 32) : 200,
+      focusIndex: 0,
+    })
+  }, [])
+
+  useEffect(() => {
+    if (!keyboardEnabled) return
+
+    function onKeyDown(e: KeyboardEvent) {
+      if (isEditableKeyboardTarget(e.target) || isModalBlockingKeyboard()) return
+
+      if (caseCtx) {
+        const ctxCase = cases.find((c) => c.id === caseCtx.id)
+        const actions = buildCaseContextMenuActions(contextMenuVariant, ctxCase?.status)
+        if (actions.length === 0) return
+
+        if (e.key === 'Escape') {
+          e.preventDefault()
+          setCaseCtx(null)
+          return
+        }
+        if (e.key === 'Enter' && !e.shiftKey) {
+          e.preventDefault()
+          const action = actions[caseCtx.focusIndex] ?? actions[0]
+          activateContextAction(action, caseCtx.id)
+          setCaseCtx(null)
+          return
+        }
+        if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+          e.preventDefault()
+          const delta = e.key === 'ArrowDown' ? 1 : -1
+          setCaseCtx((prev) => {
+            if (!prev) return prev
+            const nextIndex = (prev.focusIndex + delta + actions.length) % actions.length
+            return { ...prev, focusIndex: nextIndex }
+          })
+          return
+        }
+        return
+      }
+
+      if (e.shiftKey) {
+        if (e.key === 'Enter') {
+          if (rowIds.length === 0) return
+          e.preventDefault()
+          const id = caseListFocusId ?? rowIds[0]
+          if (!id) return
+          onCaseRowFocus(id)
+          openContextMenuForCase(id)
+        }
+        return
+      }
+
+      if (e.key === 'Enter') {
+        if (!caseListFocusId) return
+        e.preventDefault()
+        onSelect(caseListFocusId)
+        return
+      }
+
+      if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return
+      if (rowIds.length === 0) return
+
+      e.preventDefault()
+      const currentIndex = caseListFocusId ? rowIds.indexOf(caseListFocusId) : -1
+      let nextIndex: number
+      if (currentIndex < 0) {
+        nextIndex = e.key === 'ArrowDown' ? 0 : rowIds.length - 1
+      } else {
+        nextIndex = e.key === 'ArrowDown' ? Math.min(currentIndex + 1, rowIds.length - 1) : Math.max(currentIndex - 1, 0)
+      }
+      const nextId = rowIds[nextIndex]
+      if (!nextId) return
+      onCaseRowFocus(nextId)
+      scrollCaseRowIntoView(nextId)
+    }
+
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [
+    activateContextAction,
+    caseCtx,
+    caseListFocusId,
+    cases,
+    contextMenuVariant,
+    keyboardEnabled,
+    onCaseRowFocus,
+    onSelect,
+    openContextMenuForCase,
+    rowIds,
+  ])
 
   const columns = useMemo(() => {
     const base = [
@@ -2577,6 +2710,7 @@ function CasesTable({
             <button
               key={c.id}
               type="button"
+              data-case-row-id={c.id}
               className={['tr', 'rowbtn', rowActive ? 'active' : '', rowInactive ? 'casesRowInactive' : '']
                 .filter(Boolean)
                 .join(' ')}
@@ -2585,7 +2719,8 @@ function CasesTable({
               onDoubleClick={() => onSelect(c.id)}
               onContextMenu={(e) => {
                 e.preventDefault()
-                setCaseCtx({ id: c.id, x: e.clientX, y: e.clientY })
+                onCaseRowFocus(c.id)
+                setCaseCtx({ id: c.id, x: e.clientX, y: e.clientY, focusIndex: 0 })
               }}
             >
               <div className="td mono" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -2614,64 +2749,26 @@ function CasesTable({
         <div
           ref={caseCtxRef}
           className="docContextMenu"
+          role="menu"
           style={{ left: caseCtx.x, top: caseCtx.y, zIndex: 30 }}
           onMouseDown={(e) => e.stopPropagation()}
         >
-          <div
-            className="docContextItem"
-            role="menuitem"
-            tabIndex={0}
-            onClick={() => {
-              const id = caseCtx.id
-              setCaseCtx(null)
-              onSelect(id)
-            }}
-          >
-            Open
-          </div>
-          {contextMenuVariant === 'quotes' ? (
-            <>
-              {ctxCase?.status === 'quote' ? (
-                <div
-                  className="docContextItem"
-                  role="menuitem"
-                  tabIndex={0}
-                  onClick={() => {
-                    const id = caseCtx.id
-                    setCaseCtx(null)
-                    onQuoteConvert?.(id)
-                  }}
-                >
-                  Convert
-                </div>
-              ) : null}
-              <div
-                className="docContextItem"
-                role="menuitem"
-                tabIndex={0}
-                onClick={() => {
-                  const id = caseCtx.id
-                  setCaseCtx(null)
-                  onQuoteClose?.(id)
-                }}
-              >
-                Close
-              </div>
-            </>
-          ) : (
+          {buildCaseContextMenuActions(contextMenuVariant, ctxCase?.status).map((action, index) => (
             <div
-              className="docContextItem"
+              key={action}
+              className={`docContextItem${caseCtx.focusIndex === index ? ' docContextItem--focused' : ''}`}
               role="menuitem"
-              tabIndex={0}
+              tabIndex={-1}
+              onMouseEnter={() => setCaseCtx((prev) => (prev ? { ...prev, focusIndex: index } : prev))}
               onClick={() => {
                 const id = caseCtx.id
                 setCaseCtx(null)
-                onSelect(id, { docPanel: 'accounts' })
+                activateContextAction(action, id)
               }}
             >
-              Accounts
+              {contextMenuLabel(action)}
             </div>
-          )}
+          ))}
         </div>
       ) : null}
     </div>
@@ -2714,6 +2811,7 @@ const MainMenuCasesPanel = memo(function MainMenuCasesPanel({
   contextMenuVariant = 'main',
   onQuoteConvert,
   onQuoteClose,
+  keyboardActive = false,
 }: {
   cases: CaseOut[]
   casesErr: string | null
@@ -2746,6 +2844,7 @@ const MainMenuCasesPanel = memo(function MainMenuCasesPanel({
   contextMenuVariant?: 'main' | 'quotes'
   onQuoteConvert?: (caseId: string) => void
   onQuoteClose?: (caseId: string) => void
+  keyboardActive?: boolean
 }) {
   const [caseSearch, setCaseSearch] = useState('')
   const [filterOpen, setFilterOpen] = useState(false)
@@ -2800,7 +2899,7 @@ const MainMenuCasesPanel = memo(function MainMenuCasesPanel({
       <div className={`mainMenuFilterBar${filterOpen ? ' mainMenuFilterBar--dropdownOpen' : ''}`}>
         <div className="row mainMenuFilterRow mainMenuFilterRow--toolbar mainMenuFilterRow--searchRight">
           <div className="mainMenuFilterRowLeft">
-            <button type="button" className="btn primary" onClick={onCreateClick ?? onOpenNewMatter}>
+            <button type="button" className="btn primary toolbarLeadBtn" onClick={onCreateClick ?? onOpenNewMatter}>
               {createButtonLabel}
             </button>
             {toolbarMiddle}
@@ -2919,6 +3018,7 @@ const MainMenuCasesPanel = memo(function MainMenuCasesPanel({
         contextMenuVariant={contextMenuVariant}
         onQuoteConvert={onQuoteConvert}
         onQuoteClose={onQuoteClose}
+        keyboardEnabled={keyboardActive && !filterOpen && openFilterField === null}
       />
     </div>
   )
@@ -4195,13 +4295,13 @@ function Contacts({ token, me }: { token: string; me?: UserPublic | null }) {
           <div className="mainMenuFilterRowLeft">
             <button
               type="button"
-              className="btn primary"
+              className="btn primary toolbarLeadBtn"
               onClick={() => {
                 setCreateErr(null)
                 setCreateOpen(true)
               }}
             >
-              New contact…
+              New contact
             </button>
             <button type="button" className="btn" onClick={() => void load()} disabled={busy}>
               Refresh

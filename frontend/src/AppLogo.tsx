@@ -1,27 +1,26 @@
 import { useState } from 'react'
+import { CANARY_LOGO_SRC, CanaryMark } from './AppBrand'
 
-/** Served from `public/` — add `logo.svg` and/or `logo.png` (SVG first). */
-const LOGIN_SOURCES = ['/logo.svg', '/logo.png'] as const
-
+/** Full wordmark from ``public/logo.png``; falls back to icon + text if missing. */
 export function AppLogo() {
-  const [i, setI] = useState(0)
-  const failed = i >= LOGIN_SOURCES.length
-  const src = failed ? '' : LOGIN_SOURCES[i]
+  const [failed, setFailed] = useState(false)
 
   if (failed) {
     return (
-      <span className="brand" aria-label="Canary">
-        Canary
-      </span>
+      <div className="loginBrandLockup" aria-label="Canary">
+        <CanaryMark className="appBrandMark appBrandMark--login" size="login" />
+        <span className="brand loginBrandName">Canary</span>
+      </div>
     )
   }
 
   return (
     <img
-      src={src}
-      alt="Canary"
+      src={CANARY_LOGO_SRC}
+      alt="Canary Case Management"
       className="appLogo appLogo--login"
-      onError={() => setI((n) => n + 1)}
+      onError={() => setFailed(true)}
+      decoding="async"
     />
   )
 }
