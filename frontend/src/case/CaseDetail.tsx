@@ -1174,8 +1174,10 @@ export function CaseDetail({
   const childFolders = useMemo(() => {
     const set = new Set<string>()
     const basePrefix = docFolder ? `${docFolder}/` : ''
-    for (const f of filteredFiles) {
-      const fp = f.folder_path ?? ''
+    // Use full file list (not search-filtered) so empty folders with only a system marker stay visible.
+    for (const f of files) {
+      const fp = (f.folder_path ?? '').trim()
+      if (!fp) continue
       if (fp === docFolder) continue
       if (docFolder && !fp.startsWith(basePrefix)) continue
       const rest = docFolder ? fp.slice(basePrefix.length) : fp
@@ -1183,7 +1185,7 @@ export function CaseDetail({
       if (first) set.add(first)
     }
     return Array.from(set).sort((a, b) => a.localeCompare(b))
-  }, [filteredFiles, docFolder])
+  }, [files, docFolder])
 
   const allFolderPaths = useMemo(() => {
     const set = new Set<string>()
@@ -4283,15 +4285,13 @@ export function CaseDetail({
                                 setBusy(true)
                                 setActionErr(null)
                                 try {
-                                  await Promise.all(
-                                    idsToMove.map((id) =>
-                                      apiFetch(`/cases/${caseId}/files/${id}/move`, {
-                                        token,
-                                        method: 'POST',
-                                        json: { folder_path: opt.path },
-                                      }),
-                                    ),
-                                  )
+                                  for (const id of idsToMove) {
+                                    await apiFetch(`/cases/${caseId}/files/${id}/move`, {
+                                      token,
+                                      method: 'POST',
+                                      json: { folder_path: opt.path },
+                                    })
+                                  }
                                   setSelectedDocSet(new Set())
                                   onRefresh()
                                 } catch (e: any) {
