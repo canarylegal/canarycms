@@ -199,6 +199,58 @@ def _standard_tasks_for_sub(db, sub_id: uuid.UUID) -> list[MatterSubTypeStandard
     )
 
 
+def _folder_marker_exists(db, case_id: uuid.UUID, folder_path: str) -> bool:
+    row = db.execute(
+        select(DbFile.id)
+        .where(
+            DbFile.case_id == case_id,
+            DbFile.category == FileCategory.system,
+            DbFile.mime_type == "application/x-directory",
+            DbFile.folder_path == folder_path,
+        )
+        .limit(1)
+    ).scalar_one_or_none()
+    return row is not None
+
+
+def _insert_folder_marker(db, *, case_id: uuid.UUID, owner_id: uuid.UUID, folder_path: str) -> None:
+    folder_name = folder_path.split("/")[-1].strip() or "Folder"
+    file_id = uuid.uuid4()
+    paths = case_file_paths(
+        case_id=case_id,
+        file_id=file_id,
+        original_filename=folder_name,
+        folder_path=folder_path,
+    )
+    paths.abs_path.parent.mkdir(parents=True, exist_ok=True)
+    paths.abs_path.write_bytes(b"")
+    db.add(
+        DbFile(
+            id=file_id,
+            case_id=case_id,
+            owner_id=owner_id,
+            category=FileCategory.system,
+            storage_path=paths.rel_path,
+            folder_path=paths.folder_path,
+            original_filename=folder_name,
+            mime_type="application/x-directory",
+            size_bytes=0,
+            oo_compose_pending=False,
+        )
+    )
+
+
+def _seed_folder_markers(db, *, case: Case, owner: User) -> int:
+    folder_paths = sorted({folder for _, _, folder in DOCUMENTS if folder.strip()})
+    added = 0
+    for folder_path in folder_paths:
+        if _folder_marker_exists(db, case.id, folder_path):
+            continue
+        _insert_folder_marker(db, case_id=case.id, owner_id=owner.id, folder_path=folder_path)
+        added += 1
+    return added
+
+
 def _seed_files(db, *, case: Case, owner: User, target: int) -> int:
     existing = db.execute(
         select(func.count()).select_from(DbFile).where(DbFile.case_id == case.id)
@@ -454,6 +506,7 @@ def main() -> None:
 
         print(f"Seeding matter {case.case_number} — {client_name} — {case.title[:70]}")
 
+        marker_count = _seed_folder_markers(db, case=case, owner=owner)
         file_count = _seed_files(db, case=case, owner=owner, target=50)
         contact_count = _seed_contacts(db, case=case, target=3)
         task_count = _seed_tasks(db, case=case, creator=owner, users=users, target=10)
@@ -464,7 +517,7 @@ def main() -> None:
 
         db.commit()
         print(
-            f"Done: +{file_count} files, +{contact_count} contacts, +{task_count} tasks, "
+            f"Done: +{marker_count} folder markers, +{file_count} files, +{contact_count} contacts, +{task_count} tasks, "
             f"+{event_count} calendar events, +{ledger_count} ledger postings."
         )
     except Exception:

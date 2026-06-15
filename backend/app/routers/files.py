@@ -1147,37 +1147,51 @@ def list_case_portal_folder_access(
     return out
 
 
-@router.post("/folders", status_code=status.HTTP_201_CREATED)
-def create_case_folder(
-    case_id: uuid.UUID,
-    payload: CaseFolderCreate,
-    user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    require_case_access(case_id, user, db)
-    ensure_files_root()
-
-    # Store an empty "folder marker" as a system file so empty folders exist in the UI.
-    folder_name = payload.folder_path.split("/")[-1].strip() or "Folder"
-    file_id = uuid.uuid4()
-    try:
-        paths = case_file_paths(
-            case_id=case_id,
-            file_id=file_id,
-            original_filename=folder_name,
-            folder_path=payload.folder_path,
+def _folder_has_non_system_content(db: Session, case_id: uuid.UUID, folder_path: str) -> bool:
+    prefix = folder_path
+    like = f"{prefix}/%"
+    row = db.execute(
+        select(DbFile.id)
+        .where(
+            DbFile.case_id == case_id,
+            DbFile.category != FileCategory.system,
+            or_(DbFile.folder_path == prefix, DbFile.folder_path.like(like)),
         )
-    except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+        .limit(1)
+    ).scalar_one_or_none()
+    return row is not None
 
-    # Create 0-byte marker file on disk.
+
+def _folder_marker_exists(db: Session, case_id: uuid.UUID, folder_path: str) -> bool:
+    row = db.execute(
+        select(DbFile.id)
+        .where(
+            DbFile.case_id == case_id,
+            DbFile.category == FileCategory.system,
+            DbFile.mime_type == "application/x-directory",
+            DbFile.folder_path == folder_path,
+        )
+        .limit(1)
+    ).scalar_one_or_none()
+    return row is not None
+
+
+def _insert_folder_marker(db: Session, case_id: uuid.UUID, user_id: uuid.UUID, folder_path: str) -> DbFile:
+    """Persist a 0-byte system row so an otherwise-empty folder remains visible in the UI."""
+    folder_name = folder_path.split("/")[-1].strip() or "Folder"
+    file_id = uuid.uuid4()
+    paths = case_file_paths(
+        case_id=case_id,
+        file_id=file_id,
+        original_filename=folder_name,
+        folder_path=folder_path,
+    )
     with paths.abs_path.open("wb") as f:
         f.write(b"")
-
     row = DbFile(
         id=file_id,
         case_id=case_id,
-        owner_id=user.id,
+        owner_id=user_id,
         category=FileCategory.system,
         storage_path=paths.rel_path,
         folder_path=paths.folder_path,
@@ -1191,6 +1205,50 @@ def create_case_folder(
         updated_at=datetime.utcnow(),
     )
     db.add(row)
+    return row
+
+
+def _ensure_folder_marker_if_empty(
+    db: Session,
+    case_id: uuid.UUID,
+    user_id: uuid.UUID,
+    folder_path: str,
+) -> None:
+    """Folders created implicitly (files only, no marker) vanish when emptied unless we add a marker."""
+    try:
+        normalized = sanitize_folder_path(folder_path)
+    except ValueError:
+        return
+    if not normalized:
+        return
+    if _folder_has_non_system_content(db, case_id, normalized):
+        return
+    if _folder_marker_exists(db, case_id, normalized):
+        return
+    ensure_files_root()
+    _insert_folder_marker(db, case_id, user_id, normalized)
+    db.commit()
+
+
+@router.post("/folders", status_code=status.HTTP_201_CREATED)
+def create_case_folder(
+    case_id: uuid.UUID,
+    payload: CaseFolderCreate,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    require_case_access(case_id, user, db)
+    ensure_files_root()
+
+    try:
+        folder_path = sanitize_folder_path(payload.folder_path)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
+
+    if _folder_marker_exists(db, case_id, folder_path):
+        return {"folder_path": folder_path}
+
+    row = _insert_folder_marker(db, case_id, user.id, folder_path)
     db.commit()
     db.refresh(row)
 
@@ -1885,6 +1943,9 @@ def move_case_file(
     db.commit()
     db.refresh(row)
 
+    if old_folder:
+        _ensure_folder_marker_if_empty(db, case_id, user.id, old_folder)
+
     log_event(
         db,
         actor_user_id=user.id,
@@ -1941,6 +2002,10 @@ def delete_case_file(
     deleted = _erase_case_file_tree(db, case_id, file_id)
     if deleted is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+
+    old_folder = deleted.folder_path or ""
+    if old_folder:
+        _ensure_folder_marker_if_empty(db, case_id, user.id, old_folder)
 
     log_event(
         db,
