@@ -750,6 +750,7 @@ export type FileSummary = {
   uploaded_via_portal?: boolean
   is_portal_quote?: boolean
   quote_portal_delivery?: QuotePortalDeliverySummary | null
+  docusign_signing?: DocusignSigningRequestOut | null
 }
 
 export type QuotePortalDeliverySummary = {
@@ -759,6 +760,107 @@ export type QuotePortalDeliverySummary = {
   sent_at: string
   responded_at: string | null
   decline_reason: string | null
+}
+
+export type DocusignIntegrationSettingsOut = {
+  enabled: boolean
+  use_demo: boolean
+  allow_tier_a: boolean
+  allow_tier_b: boolean
+  allow_tier_c: boolean
+  allow_wes: boolean
+  allow_qes: boolean
+  account_id?: string | null
+  integration_key?: string | null
+  user_id?: string | null
+  rsa_private_key_configured: boolean
+  connect_hmac_secret_configured: boolean
+  api_base_uri?: string | null
+  configured: boolean
+  cost_standard_pence?: number | null
+  cost_wes_pence?: number | null
+  cost_qes_pence?: number | null
+}
+
+export type DocusignTemplateOut = {
+  template_id: string
+  name: string
+  description?: string | null
+  roles: string[]
+}
+
+export type DocusignStaffOptionsOut = {
+  enabled: boolean
+  allow_tier_a: boolean
+  allow_tier_b: boolean
+  allow_tier_c: boolean
+  allow_wes: boolean
+  allow_qes: boolean
+}
+
+export type DocusignMenuRowOut = {
+  id: string
+  case_id: string
+  case_number: string
+  client_name?: string | null
+  matter_description?: string
+  envelope_subject: string
+  source_filename?: string
+  status: string
+  status_detail?: string | null
+  sent_by_display_name?: string | null
+  recipients_summary?: string
+  created_at: string
+  completed_at?: string | null
+  voided_at?: string | null
+}
+
+export type DocusignSigningRecipientOut = {
+  id: string
+  name: string
+  email: string
+  routing_order: number
+  role_name?: string | null
+  status: string
+  completed_at?: string | null
+}
+
+export type DocusignSigningRequestOut = {
+  id: string
+  case_id: string
+  source_file_id?: string | null
+  source_filename?: string
+  docusign_envelope_id?: string | null
+  docusign_template_id?: string | null
+  envelope_subject: string
+  document_tier: string
+  signature_level: string
+  status: string
+  status_detail?: string | null
+  signed_file_id?: string | null
+  certificate_file_id?: string | null
+  completed_at?: string | null
+  voided_at?: string | null
+  created_at?: string | null
+  recipients: DocusignSigningRecipientOut[]
+}
+
+export type DocusignSendRecipientIn = {
+  name: string
+  email: string
+  routing_order?: number
+  role_name?: string | null
+  case_contact_id?: string | null
+  contact_id?: string | null
+}
+
+export type PortalDocusignSigningOut = {
+  id: string
+  envelope_subject: string
+  status: string
+  can_sign: boolean
+  recipient_id: string
+  sign_token: string
 }
 
 export type QuotePortalDeliveryOut = {
@@ -1227,6 +1329,83 @@ export type PortalBrowseOut = {
   subfolders: string[]
   files: PortalFileOut[]
   pending_approvals?: PortalQuoteDeliveryViewOut[]
+  pending_docusign_signings?: PortalDocusignSigningOut[]
+  pending_portal_forms?: PortalFormPendingOut[]
+}
+
+export type PortalFormFieldType = 'section' | 'text' | 'textarea' | 'date' | 'select' | 'file'
+
+export type PortalFormTemplateFieldIn = {
+  field_key: string
+  label: string
+  field_type: PortalFormFieldType
+  help_text?: string | null
+  required?: boolean
+  sort_order?: number
+  select_options?: string[]
+}
+
+export type PortalFormTemplateFieldOut = PortalFormTemplateFieldIn & {
+  id: string
+}
+
+export type PortalFormTemplateOut = {
+  id: string
+  name: string
+  reference: string
+  description?: string | null
+  matter_head_type_id?: string | null
+  matter_sub_type_id?: string | null
+  scope_summary: string
+  field_count: number
+  created_at: string
+  updated_at: string
+}
+
+export type PortalFormTemplateDetailOut = PortalFormTemplateOut & {
+  fields: PortalFormTemplateFieldOut[]
+}
+
+export type PortalFormSubmissionOut = {
+  id: string
+  case_id: string
+  template_id: string
+  template_name: string
+  template_reference: string
+  contact_id: string
+  contact_name: string
+  status: string
+  responses: Record<string, unknown>
+  snapshot_file_id?: string | null
+  snapshot_filename: string
+  sent_at: string
+  completed_at?: string | null
+  voided_at?: string | null
+}
+
+export type PortalFormFieldOut = {
+  field_key: string
+  label: string
+  field_type: PortalFormFieldType
+  help_text?: string | null
+  required: boolean
+  sort_order: number
+  select_options?: string[]
+}
+
+export type PortalFormPendingOut = {
+  id: string
+  template_name: string
+  template_reference: string
+  status: string
+  sent_at: string
+  case_id?: string | null
+  matter_label: string
+}
+
+export type PortalFormDetailOut = PortalFormSubmissionOut & {
+  description?: string | null
+  fields: PortalFormFieldOut[]
 }
 
 export type CasePortalActivityOut = {

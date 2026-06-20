@@ -648,6 +648,7 @@ class PendingLedgerApprovalRow:
     office_direction: str | None
     is_anticipated: bool
     anticipated_for_date: date | None
+    reference: str | None
 
 
 @dataclass
@@ -739,6 +740,7 @@ def _pending_ledger_approvals(
                 "posted_by_name": poster_name,
                 "description": entry.description or "",
                 "amount_pence": int(entry.amount_pence),
+                "reference": entry.reference,
                 "client_direction": None,
                 "office_direction": None,
                 "is_anticipated": bool(entry.is_anticipated),

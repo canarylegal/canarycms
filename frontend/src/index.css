@@ -781,6 +781,15 @@ html.dark .topbar--content .btn:not(.primary):not(.danger) {
   min-height: 0;
 }
 
+/* Full-page menu panels (fee scale editor, etc.) — scroll within the viewport */
+.mainMenuShell--mainMenu.mainMenuShell--pageScroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
 .mainMenuShell--mainMenu > .error,
 .mainMenuShell--mainMenu > .mainMenuFilterBar {
   flex-shrink: 0;
@@ -1371,6 +1380,21 @@ html.dark .topbar--content .btn:not(.primary):not(.danger) {
   grid-template-columns: minmax(0, 90fr) minmax(0, 70fr) minmax(0, 70fr) minmax(0, 70fr);
 }
 
+/*
+ * DocuSign envelope list: Sent · Status · Document · Recipients · Client · Reference · Sent by
+ * Matches DOCUSIGN_TABLE_GRID in columnGridDefaults.ts
+ */
+.mainMenuShell--mainMenu .docusignTableScroll .tr {
+  grid-template-columns:
+    minmax(0, 13fr)
+    minmax(0, 11fr)
+    minmax(0, 22fr)
+    minmax(0, 22fr)
+    minmax(0, 14fr)
+    minmax(0, 8fr)
+    minmax(0, 10fr);
+}
+
 .mainMenuFilterRow--toolbar {
   justify-content: space-between;
   align-items: center;
@@ -1682,7 +1706,8 @@ html.dark .singleSelectDropdownTrigger {
 .singleSelectDropdownMenu--portal {
   position: fixed;
   right: auto;
-  z-index: 5000;
+  /* Above .modalOverlay.emlPreviewOverlay (6000) so pickers work inside high z-index dialogs */
+  z-index: 6500;
 }
 
 .singleSelectDropdownOption {

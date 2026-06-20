@@ -15,6 +15,8 @@ from app.routers import (
     admin_deploy,
     admin_storage,
     admin_billing,
+    admin_docusign,
+    admin_portal_forms,
     admin_email_integration,
     admin_firm_settings,
     admin_finance,
@@ -34,6 +36,7 @@ from app.routers import (
     case_ledger,
     case_notes,
     case_portal,
+    case_portal_forms,
     case_property,
     case_tasks,
     case_time,
@@ -42,6 +45,7 @@ from app.routers import (
     fee_scales,
     task_menu,
     contacts,
+    docusign,
     files,
     matter_contact_types,
     matter_types,
@@ -222,6 +226,7 @@ app.include_router(contact_portal.router)
 app.include_router(case_access.router)
 app.include_router(case_contacts.router)
 app.include_router(case_portal.router)
+app.include_router(case_portal_forms.router)
 app.include_router(case_notes.router)
 app.include_router(case_tasks.router)
 app.include_router(case_time.router)
@@ -234,6 +239,8 @@ app.include_router(case_events.router)
 app.include_router(admin_finance.router)
 app.include_router(admin_billing.router)
 app.include_router(admin_email_integration.router)
+app.include_router(admin_docusign.router)
+app.include_router(admin_portal_forms.router)
 app.include_router(admin_standard_tasks.router)
 app.include_router(admin_sub_menu_events.router)
 app.include_router(files.router)
@@ -247,6 +254,8 @@ app.include_router(me_calendars.router)
 app.include_router(reports.router)
 app.include_router(reconciliations.router)
 app.include_router(quote_portal.router)
+app.include_router(docusign.router)
+app.include_router(docusign.case_router)
 app.include_router(portal.router)
 
 @app.get("/health")

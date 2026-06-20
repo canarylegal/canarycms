@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { applyAuthHeaders, apiUrl, formatApiErrorDetail } from './api'
 import { DocMimeIcon } from './case/DocCells'
-import type { PortalAuthOut, PortalBrowseOut, PortalFileOut, PortalGrantSummaryOut, PortalQuoteDeliveryViewOut, PortalQuoteExchangeOut, PortalSessionOut } from './types'
+import { PortalFormFillPanel } from './PortalFormFillPanel'
+import type { PortalAuthOut, PortalBrowseOut, PortalDocusignSigningOut, PortalFileOut, PortalFormPendingOut, PortalGrantSummaryOut, PortalQuoteDeliveryViewOut, PortalQuoteExchangeOut, PortalSessionOut } from './types'
 
 const PORTAL_FILES_GRID = '32px 1fr 120px 100px 180px'
 
@@ -84,6 +85,11 @@ function groupGrantsByMatter(grants: PortalGrantSummaryOut[]): MatterGroup[] {
   return Array.from(map.values()).sort((a, b) => a.caseTitle.localeCompare(b.caseTitle))
 }
 
+function quoteDeliveryFileUrl(deliveryId: string, download: boolean): string {
+  const q = download ? '?download=1' : ''
+  return apiUrl(`/portal/quote-deliveries/${encodeURIComponent(deliveryId)}/file${q}`)
+}
+
 export default function PortalPage() {
   const [firmDisplayName, setFirmDisplayName] = useState('')
   const [signInMode, setSignInMode] = useState<SignInMode>('code')
@@ -111,6 +117,9 @@ export default function PortalPage() {
   const [approvalDeclineOpenId, setApprovalDeclineOpenId] = useState<string | null>(null)
   const [approvalDeclineReason, setApprovalDeclineReason] = useState('')
   const [approvalRespondBusyId, setApprovalRespondBusyId] = useState<string | null>(null)
+  const [activeFormId, setActiveFormId] = useState<string | null>(null)
+  const [allPendingForms, setAllPendingForms] = useState<PortalFormPendingOut[]>([])
+  const [pendingQuoteDeliveries, setPendingQuoteDeliveries] = useState<PortalQuoteDeliveryViewOut[]>([])
 
   const matterGroups = useMemo(() => groupGrantsByMatter(grants), [grants])
   const activeMatter = useMemo(
@@ -123,6 +132,17 @@ export default function PortalPage() {
     if (typeof window === 'undefined') return false
     return new URLSearchParams(window.location.search).get('staff_preview') === '1'
   }, [])
+
+  const pendingPortalForms = useMemo(() => {
+    const fromBrowse = browse?.pending_portal_forms ?? []
+    if (fromBrowse.length > 0) {
+      return fromBrowse.filter((f) => f.status === 'pending')
+    }
+    if (activeCaseId) {
+      return allPendingForms.filter((f) => f.case_id === activeCaseId && f.status === 'pending')
+    }
+    return allPendingForms.filter((f) => f.status === 'pending')
+  }, [browse, allPendingForms, activeCaseId])
 
   const loadConfig = useCallback(async () => {
     try {
@@ -215,6 +235,49 @@ export default function PortalPage() {
     const data = await portalFetch<PortalBrowseOut>(`/portal/grants/${grantId}/browse${q}`, { portalToken: token })
     setBrowse(data)
     setBrowseSubfolder(data.subfolder)
+  }, [])
+
+  const loadPendingForms = useCallback(async (token: string) => {
+    try {
+      const rows = await portalFetch<PortalFormPendingOut[]>('/portal/forms', { portalToken: token })
+      setAllPendingForms(Array.isArray(rows) ? rows : [])
+    } catch {
+      setAllPendingForms([])
+    }
+  }, [])
+
+  const loadPendingQuotes = useCallback(async (token: string) => {
+    try {
+      const rows = await portalFetch<PortalQuoteDeliveryViewOut[]>('/portal/quote-deliveries', { portalToken: token })
+      setPendingQuoteDeliveries(Array.isArray(rows) ? rows : [])
+    } catch {
+      setPendingQuoteDeliveries([])
+    }
+  }, [])
+
+  useEffect(() => {
+    const token = sessionToken.trim()
+    if (!token || previewExchangeBusy || quoteExchangeBusy) return
+    void loadPendingForms(token)
+    void loadPendingQuotes(token)
+  }, [sessionToken, loadPendingForms, loadPendingQuotes, previewExchangeBusy, quoteExchangeBusy])
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const signToken = params.get('sign')?.trim()
+    if (!signToken) return
+    window.location.href = apiUrl(`/docusign/sign/${encodeURIComponent(signToken)}`)
+  }, [])
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    if (params.get('signing') === 'complete') {
+      setInfo('Thank you — your signature has been submitted.')
+      params.delete('signing')
+      params.delete('token')
+      const qs = params.toString()
+      window.history.replaceState(null, '', `${window.location.pathname}${qs ? `?${qs}` : ''}${window.location.hash}`)
+    }
   }, [])
 
   useEffect(() => {
@@ -338,17 +401,22 @@ export default function PortalPage() {
     setQuoteDeclineReason('')
     setApprovalDeclineOpenId(null)
     setApprovalDeclineReason('')
+    setActiveFormId(null)
+    setAllPendingForms([])
+    setPendingQuoteDeliveries([])
   }
 
   async function downloadQuoteFile() {
-    if (!quoteDelivery?.grant_id) return
+    if (!quoteDelivery) return
     const token = sessionToken.trim()
     if (!token) return
     setErr(null)
     try {
-      const url = apiUrl(
-        `/portal/grants/${quoteDelivery.grant_id}/files/${quoteDelivery.file_id}?download=1`,
-      )
+      const url = quoteDelivery.grant_id
+        ? apiUrl(
+            `/portal/grants/${quoteDelivery.grant_id}/files/${quoteDelivery.file_id}?download=1`,
+          )
+        : quoteDeliveryFileUrl(quoteDelivery.id, true)
       const headers = new Headers()
       applyAuthHeaders(headers, token)
       const res = await fetch(url, { headers })
@@ -398,6 +466,7 @@ export default function PortalPage() {
       setApprovalDeclineOpenId(null)
       setApprovalDeclineReason('')
       setInfo(accepted ? 'Thank you — your acceptance has been recorded.' : 'Your response has been recorded.')
+      void loadPendingQuotes(token)
       if (activeGrantId) {
         await loadBrowse(activeGrantId, browseSubfolder, token)
       }
@@ -410,12 +479,14 @@ export default function PortalPage() {
   }
 
   async function downloadApprovalFile(delivery: PortalQuoteDeliveryViewOut) {
-    const grantId = delivery.grant_id ?? activeGrantId
     const token = sessionToken.trim()
-    if (!grantId || !token) return
+    if (!token) return
+    const grantId = delivery.grant_id ?? activeGrantId
     setErr(null)
     try {
-      const url = apiUrl(`/portal/grants/${grantId}/files/${delivery.file_id}?download=1`)
+      const url = grantId
+        ? apiUrl(`/portal/grants/${grantId}/files/${delivery.file_id}?download=1`)
+        : quoteDeliveryFileUrl(delivery.id, true)
       const headers = new Headers()
       applyAuthHeaders(headers, token)
       const res = await fetch(url, { headers })
@@ -433,12 +504,14 @@ export default function PortalPage() {
   }
 
   async function openApprovalFile(delivery: PortalQuoteDeliveryViewOut) {
-    const grantId = delivery.grant_id ?? activeGrantId
     const token = sessionToken.trim()
-    if (!grantId || !token) return
+    if (!token) return
+    const grantId = delivery.grant_id ?? activeGrantId
     setErr(null)
     try {
-      const url = apiUrl(`/portal/grants/${grantId}/files/${delivery.file_id}`)
+      const url = grantId
+        ? apiUrl(`/portal/grants/${grantId}/files/${delivery.file_id}`)
+        : quoteDeliveryFileUrl(delivery.id, false)
       const headers = new Headers()
       applyAuthHeaders(headers, token)
       const res = await fetch(url, { headers })
@@ -732,6 +805,47 @@ export default function PortalPage() {
   const files = browse?.files ?? []
   const subfolders = browse?.subfolders ?? []
   const pendingApprovals = (browse?.pending_approvals ?? []).filter((d) => d.can_respond)
+  const pendingDocusign = browse?.pending_docusign_signings ?? []
+
+  function renderPendingPortalForms() {
+    if (pendingPortalForms.length === 0 || activeFormId) return null
+    return (
+      <div className="portalPendingApprovals" style={{ marginBottom: 16 }}>
+        <h3 style={{ margin: '0 0 8px', fontSize: 16 }}>Forms to complete</h3>
+        <ul className="stack" style={{ gap: 8, listStyle: 'none', padding: 0, margin: 0 }}>
+          {pendingPortalForms.map((f) => (
+            <li key={f.id} className="row" style={{ justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
+              <span>
+                {f.template_name}
+                {f.matter_label ? <span className="muted"> · {f.matter_label}</span> : null}
+              </span>
+              <button type="button" className="btn primary" disabled={busy} onClick={() => setActiveFormId(f.id)}>
+                Complete form
+              </button>
+            </li>
+          ))}
+        </ul>
+      </div>
+    )
+  }
+
+  async function startDocusignSigning(item: PortalDocusignSigningOut) {
+    const token = sessionToken.trim()
+    if (!token) return
+    setErr(null)
+    setBusy(true)
+    try {
+      const out = await portalFetch<{ url: string }>(`/portal/signing-requests/${item.id}/start`, {
+        method: 'POST',
+        portalToken: token,
+      })
+      window.location.href = out.url
+    } catch (e: unknown) {
+      setErr((e as { message?: string }).message ?? 'Could not open DocuSign')
+    } finally {
+      setBusy(false)
+    }
+  }
 
   return (
     <div className="portalShell">
@@ -826,10 +940,54 @@ export default function PortalPage() {
           </div>
         ) : null}
 
-        {!activeCaseId && !activeGrantId ? (
+        {activeFormId ? (
+          <PortalFormFillPanel
+            submissionId={activeFormId}
+            portalToken={sessionToken}
+            onBack={() => setActiveFormId(null)}
+            onSubmitted={() => {
+              setActiveFormId(null)
+              setInfo('Thank you — your form has been submitted.')
+              const token = sessionToken.trim()
+              if (token) {
+                void loadPendingForms(token)
+                if (activeGrantId) void loadBrowse(activeGrantId, browseSubfolder, token)
+              }
+            }}
+          />
+        ) : !activeCaseId && !activeGrantId ? (
           <div style={{ marginTop: 20 }}>
+            {renderPendingPortalForms()}
+            {pendingQuoteDeliveries.length > 0 ? (
+              <div style={{ marginBottom: 20 }}>
+                <h2 style={{ marginTop: 0 }}>Quotes awaiting your response</h2>
+                <div className="list">
+                  {pendingQuoteDeliveries.map((q) => (
+                    <button
+                      key={q.id}
+                      type="button"
+                      className="listCard rowbtn"
+                      style={{ width: '100%', textAlign: 'left' }}
+                      onClick={() => {
+                        setQuoteDelivery(q)
+                        setActiveCaseId(null)
+                        setActiveGrantId(null)
+                      }}
+                    >
+                      <div className="listTitle">{q.original_filename}</div>
+                      <div className="muted">{quoteStatusMessage(q)}</div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : null}
             <h2 style={{ marginTop: 0 }}>Your matters</h2>
-            {matterGroups.length === 0 ? <div className="muted">No matters are available.</div> : null}
+            {matterGroups.length === 0 && pendingQuoteDeliveries.length === 0 ? (
+              <div className="muted">No matters are available.</div>
+            ) : null}
+            {matterGroups.length === 0 && pendingQuoteDeliveries.length > 0 ? (
+              <div className="muted">No shared document folders yet.</div>
+            ) : null}
             <div className="list">
               {matterGroups.map((m) => (
                 <button
@@ -855,6 +1013,7 @@ export default function PortalPage() {
               </button>
               <h2 style={{ margin: 0, flex: 1 }}>{activeMatter?.caseTitle ?? 'Matter'}</h2>
             </div>
+            {renderPendingPortalForms()}
             {activeMatter && activeMatter.grants.length === 0 ? <div className="muted">No folders are shared for this matter.</div> : null}
             <div className="list">
               {activeMatter?.grants.map((g) => (
@@ -927,6 +1086,28 @@ export default function PortalPage() {
             </div>
 
             {busy && !browse ? <div className="muted">Loading…</div> : null}
+
+            {renderPendingPortalForms()}
+
+            {pendingDocusign.length > 0 ? (
+              <div className="portalPendingApprovals" style={{ marginBottom: 16 }}>
+                <h3 style={{ margin: '0 0 8px', fontSize: 16 }}>Documents awaiting your signature</h3>
+                <ul className="stack" style={{ gap: 8, listStyle: 'none', padding: 0, margin: 0 }}>
+                  {pendingDocusign.map((d) => (
+                    <li key={d.id} className="row" style={{ justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
+                      <span>{d.envelope_subject}</span>
+                      {d.can_sign ? (
+                        <button type="button" className="btn primary" disabled={busy} onClick={() => void startDocusignSigning(d)}>
+                          Sign
+                        </button>
+                      ) : (
+                        <span className="muted">Pending</span>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
 
             {pendingApprovals.length > 0 ? (
               <div className="portalPendingApprovals" style={{ marginBottom: 16 }}>

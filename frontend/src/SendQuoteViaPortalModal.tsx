@@ -51,16 +51,17 @@ export function SendQuoteViaPortalModal({
         )
         if (cancelled) return
         setRecipients(rows)
-        const eligible = rows.filter((r) => r.has_grant)
-        if (eligible.length === 0) {
-          setErr('No portal contacts have access to this matter. Share a folder under Portal first.')
+        if (rows.length === 0) {
+          setErr(
+            'No contacts on this matter have active portal access. Enable portal access for a contact under Contacts first.',
+          )
           return
         }
         const preferred =
-          preferredContactId && eligible.some((r) => r.contact_id === preferredContactId)
+          preferredContactId && rows.some((r) => r.contact_id === preferredContactId)
             ? preferredContactId
             : null
-        setContactId(preferred ?? eligible[0]?.contact_id ?? '')
+        setContactId(preferred ?? rows[0]?.contact_id ?? '')
       } catch (e: unknown) {
         if (!cancelled) setErr((e as { message?: string }).message ?? 'Could not load portal contacts')
       } finally {
@@ -73,10 +74,7 @@ export function SendQuoteViaPortalModal({
   }, [open, caseId, token, preferredContactId])
 
   const recipientOptions = useMemo(
-    () =>
-      recipients
-        .filter((r) => r.has_grant)
-        .map((r) => ({ value: r.contact_id, label: r.contact_name })),
+    () => recipients.map((r) => ({ value: r.contact_id, label: r.contact_name })),
     [recipients],
   )
 
@@ -123,7 +121,8 @@ export function SendQuoteViaPortalModal({
           ) : (
             <>
               <p className="muted" style={{ margin: 0 }}>
-                Choose the contact who will receive the quote and can accept or decline it on the portal.
+                Choose the contact who will receive the quote and can accept or decline it on the portal. They need
+                active portal access; sharing a document folder is not required.
               </p>
               <SingleSelectDropdown
                 label="Portal contact"

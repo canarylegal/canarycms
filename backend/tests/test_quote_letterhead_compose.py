@@ -1,4 +1,4 @@
-"""Quote letterhead on letter compose (including blank-letter path)."""
+"""Firm letterhead on letter compose (including blank-letter path)."""
 
 import io
 import zipfile
@@ -26,7 +26,7 @@ def db():
         session.close()
 
 
-def test_quote_letter_blank_compose_applies_letterhead(db) -> None:
+def test_letter_blank_compose_applies_firm_letterhead(db) -> None:
     case = db.execute(select(Case).limit(1)).scalar_one_or_none()
     blank = db.execute(
         select(Precedent).where(Precedent.kind == PrecedentKind.letter).limit(1)
@@ -38,7 +38,7 @@ def test_quote_letter_blank_compose_applies_letterhead(db) -> None:
         original_filename="Letter — Quote.docx",
         folder="",
         precedent_id=None,
-        compose_office_role="quote_letter",
+        compose_office_role="letter",
     )
     out, _mime = merge_compose_docx_bytes(db, case.id, body)
-    assert _has_header_media(out), "quote_letter blank compose should include letterhead media"
+    assert _has_header_media(out), "letter blank compose should include firm letterhead media when digital mode is configured"

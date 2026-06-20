@@ -27,6 +27,14 @@ export function canApprovePendingLedgerRow(
   row: PendingLedgerApprovalRow,
   perm: LedgerPermissionsOut | null | undefined,
 ): boolean {
+  return canEditPendingLedgerRow(row, perm)
+}
+
+/** Same permission as approve — edit before confirming anticipated or pending postings. */
+export function canEditPendingLedgerRow(
+  row: PendingLedgerApprovalRow,
+  perm: LedgerPermissionsOut | null | undefined,
+): boolean {
   if (!perm) return false
   if (row.is_anticipated) {
     if (row.client_direction && !perm.can_post_client) return false

@@ -6,7 +6,6 @@ import { poundsToPence } from './FeeScaleEditor'
 import { MatterSearchPicker } from './MatterSearchPicker'
 import { openOnlyOfficeCaseEditor } from './onlyofficeEditorWindow'
 import { QuoteReviewEditor } from './QuoteReviewEditor'
-import { SendQuoteViaPortalModal } from './SendQuoteViaPortalModal'
 import { SearchInput } from './SearchInput'
 import { SingleSelectDropdown } from './SingleSelectDropdown'
 import type {
@@ -16,6 +15,7 @@ import type {
   QuoteDraftCategory,
   QuotePreviewOut,
 } from './types'
+import type { QuoteAwaitingSaveContext } from './quoteAwaitingSave'
 
 type Props = {
   token: string
@@ -25,14 +25,14 @@ type Props = {
   onCaseCreatedRefresh: () => void | Promise<void>
   pendingNewCaseId: string | null
   onClearPendingNewCase: () => void
-  onSendLetter: (caseId: string) => void
-  onSendEmail: (caseId: string) => void
   /** When set, skip matter search — quote is for this matter (e.g. opened from case view). */
   presetCase?: CaseOut | null
   onQuoteCreated?: () => void
+  /** Quote file opened in OnlyOffice — parent listens for save/publish before offering send options. */
+  onAwaitingQuoteSave?: (ctx: QuoteAwaitingSaveContext) => void
 }
 
-type Step = 'matter' | 'fee-scale' | 'contact' | 'review' | 'send'
+type Step = 'matter' | 'fee-scale' | 'contact' | 'review'
 
 function feeScaleMatchesSearch(f: FeeScaleOut, search: string): boolean {
   const s = search.trim().toLowerCase()
@@ -60,10 +60,9 @@ export function QuoteWizard({
   onCaseCreatedRefresh,
   pendingNewCaseId,
   onClearPendingNewCase,
-  onSendLetter,
-  onSendEmail,
   presetCase = null,
   onQuoteCreated,
+  onAwaitingQuoteSave,
 }: Props) {
   const [step, setStep] = useState<Step>('matter')
   const [caseId, setCaseId] = useState<string | null>(null)
@@ -80,8 +79,6 @@ export function QuoteWizard({
   const [quotePreview, setQuotePreview] = useState<QuotePreviewOut | null>(null)
   const [composeDraft, setComposeDraft] = useState<QuoteDraftCategory[]>([])
   const [composeAmountOverrides, setComposeAmountOverrides] = useState<Record<string, string>>({})
-  const [createdQuoteFileId, setCreatedQuoteFileId] = useState<string | null>(null)
-  const [portalSendOpen, setPortalSendOpen] = useState(false)
 
   const presetCaseId = presetCase?.id ?? null
   const wasOpenRef = useRef(false)
@@ -124,8 +121,6 @@ export function QuoteWizard({
     setQuotePreview(null)
     setComposeDraft([])
     setComposeAmountOverrides({})
-    setCreatedQuoteFileId(null)
-    setPortalSendOpen(false)
     setErr(null)
     setBusy(false)
     if (presetCaseId) {
@@ -241,9 +236,16 @@ export function QuoteWizard({
         },
       })
       onQuoteCreated?.()
-      setCreatedQuoteFileId(res.id)
-      setStep('send')
+      const preferredContactId =
+        pickMatterCcId !== 'none' && pickMatterCcId !== 'all_clients' ? pickMatterCcId : null
+      onAwaitingQuoteSave?.({
+        caseId,
+        fileId: res.id,
+        preferredContactId,
+        portalEnabled: Boolean(selectedCase?.portal_enabled),
+      })
       setBusy(false)
+      onClose()
       window.requestAnimationFrame(() => {
         openOnlyOfficeCaseEditor(caseId, res.id)
       })
@@ -253,17 +255,14 @@ export function QuoteWizard({
     }
   }
 
-  const modalTitle = step === 'send' ? 'Send quote' : 'New quote'
-
   return (
-    <>
     <div className="modalOverlay" role="dialog" aria-modal="true">
       <div
         className={`modal card modal--scrollBody modal--quoteWizard${step === 'review' ? ' modal--quoteReview' : ''}`}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="paneHead">
-          <h2 style={{ margin: 0, fontSize: 18 }}>{modalTitle}</h2>
+          <h2 style={{ margin: 0, fontSize: 18 }}>New quote</h2>
           <button type="button" className="btn" disabled={busy} onClick={onClose}>
             Close
           </button>
@@ -441,52 +440,6 @@ export function QuoteWizard({
             </>
           ) : null}
 
-          {step === 'send' ? (
-            <>
-              <p className="muted" style={{ marginTop: 0 }}>
-                Your quote document is open in OnlyOffice. How would you like to send it?
-              </p>
-              <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
-                <button
-                  type="button"
-                  className="btn primary"
-                  disabled={!caseId}
-                  onClick={() => {
-                    if (caseId) onSendEmail(caseId)
-                    onClose()
-                  }}
-                >
-                  Send by e-mail
-                </button>
-                <button
-                  type="button"
-                  className="btn"
-                  disabled={!caseId}
-                  onClick={() => {
-                    if (caseId) onSendLetter(caseId)
-                    onClose()
-                  }}
-                >
-                  Send by letter
-                </button>
-                <button
-                  type="button"
-                  className="btn"
-                  disabled={!caseId || !createdQuoteFileId || busy}
-                  onClick={() => setPortalSendOpen(true)}
-                >
-                  Send via portal
-                </button>
-                <button type="button" className="btn" onClick={onClose}>
-                  Not now
-                </button>
-              </div>
-              <p className="muted" style={{ fontSize: 12, marginTop: 12 }}>
-                Save and close the quote in the editor before sending via portal.
-              </p>
-            </>
-          ) : null}
-
           {busy ? (
             <div className="modalBusyOverlay" aria-hidden={false}>
               <BusyIcon label="Creating quote" />
@@ -495,19 +448,5 @@ export function QuoteWizard({
         </div>
       </div>
     </div>
-    {caseId && createdQuoteFileId ? (
-      <SendQuoteViaPortalModal
-        token={token}
-        caseId={caseId}
-        fileId={createdQuoteFileId}
-        preferredContactId={
-          pickMatterCcId !== 'none' && pickMatterCcId !== 'all_clients' ? pickMatterCcId : null
-        }
-        open={portalSendOpen}
-        onClose={() => setPortalSendOpen(false)}
-        onSent={onQuoteCreated}
-      />
-    ) : null}
-    </>
   )
 }

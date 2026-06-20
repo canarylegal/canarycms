@@ -10,10 +10,14 @@ import { AdminConsole, RecoveryConsole } from './AdminConsole'
 import { parseAppNavigation, readBootNavigation, sanitizeAppNavigation, syncAppNavigationUrl, type AppNavState } from './appNavigation'
 import { CaseViewRoute } from './CaseViewRoute'
 import { CalendarPage } from './CalendarPage'
+import { DocusignPage } from './DocusignPage'
 import { FeeScalesPanel } from './FeeScalesPanel'
 import { QuoteSourcesPanel } from './QuoteSourcesPanel'
 import { QuoteConvertModal } from './QuoteConvertModal'
 import { QuoteWizard } from './QuoteWizard'
+import { QuoteSendPrompt } from './QuoteSendPrompt'
+import { useQuoteAwaitingSave, type QuoteAwaitingSaveContext } from './quoteAwaitingSave'
+import { QUOTE_EMAIL_PRECEDENT_REFERENCE, type PendingCaseCompose } from './quoteEmailPrecedent'
 import { ReportsPage } from './ReportsPage'
 import { AccountsPage } from './AccountsPage'
 import { TaskCreateModal } from './TaskCreateModal'
@@ -108,6 +112,7 @@ type View =
   | 'case-menu'
   | 'contacts'
   | 'calendar'
+  | 'docusign'
   | 'accounts'
   | 'reports'
   | 'user-settings'
@@ -129,6 +134,8 @@ function canaryViewTitleSegment(view: View, caseDetail: CaseOut | null): string 
       return 'Tasks'
     case 'contacts':
       return 'Contacts'
+    case 'docusign':
+      return 'DocuSign'
     case 'calendar':
       return 'Calendar'
     case 'accounts':
@@ -817,6 +824,9 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
   const canAccessAccounts = userCanAccessAccountsWorkspace(auth.me)
   const canAccessAccountsRef = useRef(canAccessAccounts)
   canAccessAccountsRef.current = canAccessAccounts
+  const [docusignEnabled, setDocusignEnabled] = useState<boolean | null>(null)
+  const docusignEnabledRef = useRef(docusignEnabled)
+  docusignEnabledRef.current = docusignEnabled
   const [reportsInitialTab, setReportsInitialTab] = useState<
     'client_account_reconcile' | null
   >(null)
@@ -837,8 +847,9 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
   const [quoteWizardOpen, setQuoteWizardOpen] = useState(false)
   const [newMatterFromQuotes, setNewMatterFromQuotes] = useState(false)
   const [quoteWizardPendingCaseId, setQuoteWizardPendingCaseId] = useState<string | null>(null)
-  const [pendingComposeKind, setPendingComposeKind] = useState<'letter' | 'email' | null>(null)
-  const [quoteComposeLetterhead, setQuoteComposeLetterhead] = useState(false)
+  const [quoteAwaitingSave, setQuoteAwaitingSave] = useState<QuoteAwaitingSaveContext | null>(null)
+  const [quoteSendOpen, setQuoteSendOpen] = useState(false)
+  const [pendingComposeKind, setPendingComposeKind] = useState<PendingCaseCompose | null>(null)
 
   const selectedCaseIdRef = useRef(selectedCaseId)
   selectedCaseIdRef.current = selectedCaseId
@@ -867,6 +878,9 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
       if (next === 'accounts' && !canAccessAccountsRef.current) {
         next = 'main-menu'
       }
+      if (next === 'docusign' && docusignEnabledRef.current !== true) {
+        next = 'main-menu'
+      }
       setViewState(next)
       syncNavFromState({ view: next, caseId: next === 'case-menu' ? selectedCaseIdRef.current : null })
     },
@@ -890,6 +904,7 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
       calendar: () => setView('calendar'),
       tasks: () => setView('tasks'),
       contacts: () => setView('contacts'),
+      docusign: () => setView('docusign'),
       accounts: () => setView('accounts'),
       reports: () => setView('reports'),
       'user-settings': () => setView('user-settings'),
@@ -903,6 +918,7 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
     view,
     canAccessAccounts,
     canAdminConsole,
+    docusignEnabled: docusignEnabled === true,
     onNavigate: primaryNavHandlers,
   })
 
@@ -1089,8 +1105,20 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
 
   const onPendingComposeConsumed = useCallback(() => {
     setPendingComposeKind(null)
-    setQuoteComposeLetterhead(false)
   }, [])
+
+  const onQuotePublished = useCallback(() => {
+    setQuoteSendOpen(true)
+  }, [])
+
+  const onQuoteDiscarded = useCallback(() => {
+    setQuoteAwaitingSave(null)
+  }, [])
+
+  useQuoteAwaitingSave(quoteAwaitingSave, {
+    onPublished: onQuotePublished,
+    onDiscarded: onQuoteDiscarded,
+  })
 
   const onCaseListInvalidate = useCallback(() => {
     void refreshCases()
@@ -1123,6 +1151,17 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
   }, [auth.me, canAdminConsole, syncNavFromState])
 
   useEffect(() => {
+    if (!token) {
+      setDocusignEnabled(false)
+      return
+    }
+    setDocusignEnabled(null)
+    void apiFetch<{ enabled: boolean }>('/docusign/options', { token })
+      .then((o) => setDocusignEnabled(Boolean(o.enabled)))
+      .catch(() => setDocusignEnabled(false))
+  }, [token])
+
+  useEffect(() => {
     if (!auth.me || canAccessAccounts) return
     if (viewRef.current !== 'accounts') return
     setViewState('main-menu')
@@ -1130,9 +1169,21 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
   }, [auth.me, canAccessAccounts, syncNavFromState])
 
   useEffect(() => {
+    if (docusignEnabled !== false) return
+    if (viewRef.current !== 'docusign') return
+    setViewState('main-menu')
+    syncNavFromState({ view: 'main-menu', caseId: null })
+  }, [docusignEnabled, syncNavFromState])
+
+  useEffect(() => {
     function onPopState() {
       const parsed = parseAppNavigation(window.location)
-      const nav = sanitizeAppNavigation(parsed, canAdminConsoleRef.current, canAccessAccountsRef.current)
+      const nav = sanitizeAppNavigation(
+        parsed,
+        canAdminConsoleRef.current,
+        canAccessAccountsRef.current,
+        docusignEnabledRef.current === true,
+      )
       if (nav.view !== parsed.view) {
         syncAppNavigationUrl(nav, 'replace')
       }
@@ -1280,7 +1331,7 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
     const saved = normalizeUiPreferences(auth.me.ui_preferences)
     setMainMenuFilterMatterTypes(saved.main_menu_filter_matter_types)
     setMainMenuFilterFeeEarnerUserIds(saved.main_menu_filter_fee_earner_user_ids)
-    setMainMenuFilterCaseStatuses(saved.main_menu_filter_case_statuses)
+    setMainMenuFilterCaseStatuses(saved.main_menu_filter_case_statuses.filter((s) => s !== 'quote'))
   }, [auth.me?.id])
 
   function renderMainContent() {
@@ -1305,6 +1356,10 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
     if (view === 'calendar')
       return <CalendarPage token={token} me={auth.me} onOpenSettings={() => setView('user-settings')} />
     if (view === 'contacts') return <Contacts token={token} me={auth.me} />
+    if (view === 'docusign') {
+      if (docusignEnabled !== true) return null
+      return <DocusignPage token={token} onSelectCase={openCaseView} />
+    }
 
     if (view === 'accounts') {
       if (!canAccessAccounts) return null
@@ -1341,7 +1396,6 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
           openDocPanel={caseOpenDocPanel}
           onOpenDocPanelConsumed={consumeCaseOpenDocPanel}
           pendingComposeKind={pendingComposeKind}
-          useQuoteLetterhead={quoteComposeLetterhead}
           onPendingComposeConsumed={onPendingComposeConsumed}
           onCaseListInvalidate={onCaseListInvalidate}
           onTaskMenuInvalidate={onTaskMenuInvalidate}
@@ -1694,12 +1748,14 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
         onCalendar={() => setView('calendar')}
         onTasks={() => setView('tasks')}
         onContacts={() => setView('contacts')}
+        onDocusign={() => setView('docusign')}
         onAccounts={() => setView('accounts')}
         onReports={() => setView('reports')}
         onUserSettings={() => setView('user-settings')}
         onAdminConsole={() => setView('admin-console')}
         canAccessAccounts={canAccessAccounts}
         canAdminConsole={canAdminConsole}
+        docusignEnabled={docusignEnabled === true}
         onLogout={confirmLogout}
       />
       <div className="appMainColumn">
@@ -1707,7 +1763,7 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
           className={
             view === 'case-menu'
               ? 'main main--caseView'
-              : view === 'main-menu' || view === 'quotes' || view === 'contacts' || view === 'tasks' || view === 'accounts' || view === 'reports'
+              : view === 'main-menu' || view === 'quotes' || view === 'contacts' || view === 'tasks' || view === 'docusign' || view === 'accounts' || view === 'reports'
                 ? 'main main--mainMenu'
                 : 'main'
           }
@@ -1755,15 +1811,32 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
             onCaseCreatedRefresh={onRefreshCases}
             pendingNewCaseId={quoteWizardPendingCaseId}
             onClearPendingNewCase={() => setQuoteWizardPendingCaseId(null)}
+            onAwaitingQuoteSave={setQuoteAwaitingSave}
+          />
+        ) : null}
+        {quoteAwaitingSave && token ? (
+          <QuoteSendPrompt
+            token={token}
+            caseId={quoteAwaitingSave.caseId}
+            fileId={quoteAwaitingSave.fileId}
+            preferredContactId={quoteAwaitingSave.preferredContactId}
+            portalEnabled={quoteAwaitingSave.portalEnabled}
+            open={quoteSendOpen}
+            onClose={() => {
+              setQuoteSendOpen(false)
+              setQuoteAwaitingSave(null)
+            }}
             onSendLetter={(caseId) => {
               openCaseView(caseId)
-              setPendingComposeKind('letter')
-              setQuoteComposeLetterhead(true)
+              setPendingComposeKind({ kind: 'letter' })
             }}
             onSendEmail={(caseId) => {
               openCaseView(caseId)
-              setPendingComposeKind('email')
-              setQuoteComposeLetterhead(true)
+              setPendingComposeKind({
+                kind: 'email',
+                preferPrecedentReference: QUOTE_EMAIL_PRECEDENT_REFERENCE,
+                attachmentFileId: quoteAwaitingSave.fileId,
+              })
             }}
           />
         ) : null}
@@ -2386,8 +2459,12 @@ function filterMainMenuCases(
   matterTypes: string[],
   feeEarnerUserIds: string[],
   caseStatuses: MainMenuCaseStatusFilter[],
+  excludeQuoteMatters = false,
 ): CaseOut[] {
   let result = cases
+  if (excludeQuoteMatters) {
+    result = result.filter((c) => c.status !== 'quote')
+  }
   if (matterTypes.length > 0) {
     result = result.filter((c) => matterTypes.includes(matterTypeLabel(c)))
   }
@@ -2408,18 +2485,22 @@ function buildCaseTableRows(
     matterTypes: string[]
     feeEarnerUserIds: string[]
     caseStatuses: MainMenuCaseStatusFilter[]
+    excludeQuoteMatters?: boolean
   },
   sortKey: 'reference' | 'client' | 'matter' | 'feeEarner' | 'status' | 'source' | 'created',
   sortDir: 'asc' | 'desc',
 ): CaseOut[] {
   const s = search.trim()
+  const excludeQuote = Boolean(filters.excludeQuoteMatters)
+  const pool = excludeQuote ? cases.filter((c) => c.status !== 'quote') : cases
   const filtered = s
-    ? cases.filter((c) => caseMatchesMainMenuSearch(c, users, search))
+    ? pool.filter((c) => caseMatchesMainMenuSearch(c, users, search))
     : filterMainMenuCases(
-        cases,
+        pool,
         filters.matterTypes,
         filters.feeEarnerUserIds,
         filters.caseStatuses,
+        false,
       )
   const dir = sortDir === 'asc' ? 1 : -1
   return [...filtered].sort((a, b) => {
@@ -2524,11 +2605,12 @@ function CasesTable({
           matterTypes: filterMatterTypes,
           feeEarnerUserIds: filterFeeEarnerUserIds,
           caseStatuses: filterCaseStatuses,
+          excludeQuoteMatters: contextMenuVariant === 'main',
         },
         sortKey,
         sortDir,
       ),
-    [cases, users, search, filterMatterTypes, filterFeeEarnerUserIds, filterCaseStatuses, sortKey, sortDir],
+    [cases, users, search, filterMatterTypes, filterFeeEarnerUserIds, filterCaseStatuses, sortKey, sortDir, contextMenuVariant],
   )
 
   const rowIds = useMemo(() => rows.map((r) => r.id), [rows])
@@ -2779,10 +2861,13 @@ function CasesTable({
 
 const MAIN_MENU_STATUS_FILTER_OPTIONS: { value: MainMenuCaseStatusFilter; label: string }[] = [
   { value: 'open', label: 'Active' },
-  { value: 'quote', label: 'Quote' },
   { value: 'post_completion', label: 'Post-completion' },
   { value: 'closed', label: 'Closed' },
   { value: 'archived', label: 'Archived' },
+]
+
+const QUOTES_MENU_STATUS_FILTER_OPTIONS: { value: MainMenuCaseStatusFilter; label: string }[] = [
+  { value: 'quote', label: 'Quote' },
 ]
 
 const MainMenuCasesPanel = memo(function MainMenuCasesPanel({
@@ -2875,6 +2960,9 @@ const MainMenuCasesPanel = memo(function MainMenuCasesPanel({
 
   const activeFilterCount =
     filterMatterTypes.length + filterFeeEarnerUserIds.length + filterCaseStatuses.length
+
+  const statusFilterOptions =
+    contextMenuVariant === 'quotes' ? QUOTES_MENU_STATUS_FILTER_OPTIONS : MAIN_MENU_STATUS_FILTER_OPTIONS
 
   const toggleFilterOpen = () => {
     setFilterOpen((open) => {
@@ -2980,7 +3068,7 @@ const MainMenuCasesPanel = memo(function MainMenuCasesPanel({
                   />
                   <MainMenuFilterCheckboxDropdown
                     label="Status"
-                    options={MAIN_MENU_STATUS_FILTER_OPTIONS}
+                    options={statusFilterOptions}
                     selected={filterCaseStatuses}
                     onChange={(next) => onFilterCaseStatusesChange(next as MainMenuCaseStatusFilter[])}
                     open={openFilterField === 'status'}

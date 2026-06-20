@@ -30,6 +30,8 @@ from app.precedent_constants import (
     BLANK_LETTER_PRECEDENT_REFERENCE,
     COMPLETION_STATEMENT_PRECEDENT_REFERENCE,
     INVOICE_TEMPLATE_PRECEDENT_REFERENCE,
+    QUOTE_EMAIL_PRECEDENT_REFERENCE,
+    QUOTE_TEMPLATE_PRECEDENT_REFERENCE,
 )
 from app.models import (
     File as DbFile,
@@ -102,9 +104,17 @@ def _validate_seed_precedent_kind(reference: str, kind: PrecedentKind) -> bool:
         if kind != PrecedentKind.letter:
             log.warning("Precedent seed: %s must be kind=letter — got %s", reference, kind)
             return False
-    elif reference in (INVOICE_TEMPLATE_PRECEDENT_REFERENCE, COMPLETION_STATEMENT_PRECEDENT_REFERENCE):
+    elif reference in (
+        INVOICE_TEMPLATE_PRECEDENT_REFERENCE,
+        COMPLETION_STATEMENT_PRECEDENT_REFERENCE,
+        QUOTE_TEMPLATE_PRECEDENT_REFERENCE,
+    ):
         if kind != PrecedentKind.document:
             log.warning("Precedent seed: %s must be kind=document — got %s", reference, kind)
+            return False
+    elif reference == QUOTE_EMAIL_PRECEDENT_REFERENCE:
+        if kind != PrecedentKind.email:
+            log.warning("Precedent seed: %s must be kind=email — got %s", reference, kind)
             return False
     return True
 

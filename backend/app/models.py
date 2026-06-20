@@ -1431,3 +1431,226 @@ class CaseDocsView(Base):
         UUID(as_uuid=True), ForeignKey("case.id", ondelete="CASCADE"), primary_key=True
     )
     last_viewed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class DocusignDocumentTier(str, enum.Enum):
+    a = "a"
+    b = "b"
+    c = "c"
+
+
+class DocusignSignatureLevel(str, enum.Enum):
+    standard = "standard"
+    wes = "wes"
+    qes = "qes"
+
+
+class DocusignSigningStatus(str, enum.Enum):
+    pending = "pending"
+    completed = "completed"
+    declined = "declined"
+    voided = "voided"
+    expired = "expired"
+    error = "error"
+
+
+class DocusignRecipientStatus(str, enum.Enum):
+    pending = "pending"
+    sent = "sent"
+    delivered = "delivered"
+    completed = "completed"
+    declined = "declined"
+    autoresponded = "autoresponded"
+
+
+class DocusignIntegrationSettings(Base):
+    """Singleton (id=1): firm DocuSign API credentials and feature toggles."""
+
+    __tablename__ = "docusign_integration_settings"
+
+    id: Mapped[int] = mapped_column(SmallInteger, primary_key=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    use_demo: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    allow_tier_a: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    allow_tier_b: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    allow_tier_c: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    allow_wes: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    allow_qes: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    account_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    integration_key: Mapped[str | None] = mapped_column(Text, nullable=True)
+    user_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    rsa_private_key_enc: Mapped[str | None] = mapped_column(Text, nullable=True)
+    connect_hmac_secret_enc: Mapped[str | None] = mapped_column(Text, nullable=True)
+    api_base_uri: Mapped[str | None] = mapped_column(Text, nullable=True)
+    cost_standard_pence: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    cost_wes_pence: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    cost_qes_pence: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+
+
+class DocusignSigningRequest(Base):
+    __tablename__ = "docusign_signing_request"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    case_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("case.id", ondelete="CASCADE"), nullable=False)
+    source_file_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("file.id", ondelete="SET NULL"), nullable=True
+    )
+    sent_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("user.id", ondelete="SET NULL"), nullable=True
+    )
+    supersedes_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("docusign_signing_request.id", ondelete="SET NULL"), nullable=True
+    )
+    docusign_envelope_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    docusign_template_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    envelope_subject: Mapped[str] = mapped_column(String(500), nullable=False, default="")
+    document_tier: Mapped[DocusignDocumentTier] = mapped_column(
+        Enum(DocusignDocumentTier, name="docusign_document_tier"),
+        nullable=False,
+        default=DocusignDocumentTier.a,
+    )
+    signature_level: Mapped[DocusignSignatureLevel] = mapped_column(
+        Enum(DocusignSignatureLevel, name="docusign_signature_level"),
+        nullable=False,
+        default=DocusignSignatureLevel.standard,
+    )
+    status: Mapped[DocusignSigningStatus] = mapped_column(
+        Enum(DocusignSigningStatus, name="docusign_signing_status"),
+        nullable=False,
+        default=DocusignSigningStatus.pending,
+    )
+    signed_file_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("file.id", ondelete="SET NULL"), nullable=True
+    )
+    certificate_file_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("file.id", ondelete="SET NULL"), nullable=True
+    )
+    status_detail: Mapped[str | None] = mapped_column(Text, nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    voided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    ledger_pair_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+
+
+class DocusignSigningRecipient(Base):
+    __tablename__ = "docusign_signing_recipient"
+    __table_args__ = (UniqueConstraint("sign_token", name="uq_docusign_signing_recipient_sign_token"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    signing_request_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("docusign_signing_request.id", ondelete="CASCADE"), nullable=False
+    )
+    case_contact_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("case_contact.id", ondelete="SET NULL"), nullable=True
+    )
+    contact_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("contact.id", ondelete="SET NULL"), nullable=True
+    )
+    name: Mapped[str] = mapped_column(String(300), nullable=False)
+    email: Mapped[str] = mapped_column(String(320), nullable=False)
+    routing_order: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    role_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    docusign_recipient_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    client_user_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    sign_token: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[DocusignRecipientStatus] = mapped_column(
+        Enum(DocusignRecipientStatus, name="docusign_recipient_status"),
+        nullable=False,
+        default=DocusignRecipientStatus.pending,
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+
+
+class PortalFormFieldType(str, enum.Enum):
+    section = "section"
+    text = "text"
+    textarea = "textarea"
+    date = "date"
+    select = "select"
+    file = "file"
+
+
+class PortalFormSubmissionStatus(str, enum.Enum):
+    pending = "pending"
+    completed = "completed"
+    voided = "voided"
+    superseded = "superseded"
+
+
+class PortalFormTemplate(Base):
+    """Firm-wide portal form precedents scoped by matter type (like fee scales)."""
+
+    __tablename__ = "portal_form_template"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name: Mapped[str] = mapped_column(String(300), nullable=False)
+    reference: Mapped[str] = mapped_column(String(200), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    matter_head_type_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("matter_head_type.id", ondelete="RESTRICT"), nullable=True, index=True
+    )
+    matter_sub_type_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("matter_sub_type.id", ondelete="RESTRICT"), nullable=True, index=True
+    )
+    owner_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("user.id", ondelete="RESTRICT"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (UniqueConstraint("reference", name="uq_portal_form_template_reference"),)
+
+
+class PortalFormTemplateField(Base):
+    __tablename__ = "portal_form_template_field"
+    __table_args__ = (UniqueConstraint("template_id", "field_key", name="uq_portal_form_template_field_key"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    template_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("portal_form_template.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    field_key: Mapped[str] = mapped_column(String(80), nullable=False)
+    label: Mapped[str] = mapped_column(String(500), nullable=False)
+    field_type: Mapped[PortalFormFieldType] = mapped_column(
+        Enum(PortalFormFieldType, name="portal_form_field_type"),
+        nullable=False,
+    )
+    help_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    required: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    select_options: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+
+
+class PortalFormSubmission(Base):
+    __tablename__ = "portal_form_submission"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    case_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("case.id", ondelete="CASCADE"), nullable=False, index=True)
+    template_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("portal_form_template.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    contact_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("contact.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    grant_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("contact_portal_grant.id", ondelete="SET NULL"), nullable=True
+    )
+    sent_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("user.id", ondelete="SET NULL"), nullable=True
+    )
+    supersedes_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("portal_form_submission.id", ondelete="SET NULL"), nullable=True
+    )
+    status: Mapped[PortalFormSubmissionStatus] = mapped_column(
+        Enum(PortalFormSubmissionStatus, name="portal_form_submission_status"),
+        nullable=False,
+        default=PortalFormSubmissionStatus.pending,
+    )
+    responses: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    snapshot_file_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("file.id", ondelete="SET NULL"), nullable=True
+    )
+    sent_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    voided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

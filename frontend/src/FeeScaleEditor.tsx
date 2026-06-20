@@ -13,6 +13,7 @@ import {
   deleteBandRowLocal,
   deleteLineLocal,
   persistDraftFeeScale,
+  setScaleMetaLocal,
   setVatRateLocal,
   updateBandRowLocal,
   updateLineLocal,
@@ -84,6 +85,8 @@ export function FeeScaleEditor({ token, scaleId, draftCreate, draftInitialDetail
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const [vatPct, setVatPct] = useState('20')
+  const [scaleName, setScaleName] = useState('')
+  const [scaleReference, setScaleReference] = useState('')
   const [modal, setModal] = useState<EditorModal>(null)
 
   const load = useCallback(async () => {
@@ -94,6 +97,8 @@ export function FeeScaleEditor({ token, scaleId, draftCreate, draftInitialDetail
       const data = await apiFetch<FeeScaleDetailOut>(`/fee-scales/${scaleId}`, { token })
       setDetail(data)
       setVatPct(String((data.vat_rate_bps ?? 2000) / 100))
+      setScaleName(data.name)
+      setScaleReference(data.reference)
     } catch (e: unknown) {
       setErr((e as { message?: string }).message ?? 'Could not load fee scale')
     } finally {
@@ -106,6 +111,8 @@ export function FeeScaleEditor({ token, scaleId, draftCreate, draftInitialDetail
       const initial = draftInitialDetail ?? buildEmptyDraftDetail(draftCreate)
       setDetail(initial)
       setVatPct(String((initial.vat_rate_bps ?? 2000) / 100))
+      setScaleName(initial.name)
+      setScaleReference(initial.reference)
       setErr(null)
       return
     }
@@ -148,8 +155,24 @@ export function FeeScaleEditor({ token, scaleId, draftCreate, draftInitialDetail
     return d.categories.some((c) => c.lines.length > 0)
   }
 
+  function validatedScaleMeta(): { name: string; reference: string } | null {
+    const name = scaleName.trim()
+    const reference = scaleReference.trim()
+    if (!name) {
+      setErr('Enter a name for the fee scale.')
+      return null
+    }
+    if (!reference) {
+      setErr('Enter a reference for the fee scale.')
+      return null
+    }
+    return { name, reference }
+  }
+
   async function saveAndClose() {
     if (!detail) return
+    const meta = validatedScaleMeta()
+    if (!meta) return
     if ((setupMode || isDraft) && !hasQuoteLines(detail)) {
       const ok = await askConfirm({
         title: 'Finish setup?',
@@ -163,13 +186,20 @@ export function FeeScaleEditor({ token, scaleId, draftCreate, draftInitialDetail
     setErr(null)
     try {
       const bps = Math.round(Number(vatPct) * 100)
-      const detailToSave =
-        Number.isFinite(bps) && bps >= 0 ? setVatRateLocal(detail, bps) : detail
+      let detailToSave = setScaleMetaLocal(detail, meta.name, meta.reference)
+      detailToSave =
+        Number.isFinite(bps) && bps >= 0 ? setVatRateLocal(detailToSave, bps) : detailToSave
       if (isDraft && draftCreate) {
         await persistDraftFeeScale(token, detailToSave, draftCreate)
       } else {
+        const patch: Record<string, unknown> = {}
         if (bps !== (detail.vat_rate_bps ?? 2000) && Number.isFinite(bps) && bps >= 0) {
-          await apiFetch(`/fee-scales/${detail.id}`, { token, method: 'PATCH', json: { vat_rate_bps: bps } })
+          patch.vat_rate_bps = bps
+        }
+        if (meta.name !== detail.name) patch.name = meta.name
+        if (meta.reference !== detail.reference) patch.reference = meta.reference
+        if (Object.keys(patch).length > 0) {
+          await apiFetch(`/fee-scales/${detail.id}`, { token, method: 'PATCH', json: patch })
         }
       }
       onBack()
@@ -392,10 +422,33 @@ export function FeeScaleEditor({ token, scaleId, draftCreate, draftInitialDetail
   return (
     <div className="stack" style={{ gap: 16 }}>
       <div className="row" style={{ justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
-        <div>
-          <h3 style={{ margin: 0 }}>{detail.name}</h3>
-          <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
-            {detail.reference} · {detail.scope_summary}
+        <div className="stack" style={{ gap: 8, flex: 1, minWidth: 0 }}>
+          <label className="field" style={{ margin: 0 }}>
+            <span>Name</span>
+            <input
+              className="input"
+              value={scaleName}
+              onChange={(e) => {
+                setScaleName(e.target.value)
+                setErr(null)
+              }}
+              disabled={busy}
+            />
+          </label>
+          <label className="field" style={{ margin: 0 }}>
+            <span>Reference</span>
+            <input
+              className="input"
+              value={scaleReference}
+              onChange={(e) => {
+                setScaleReference(e.target.value)
+                setErr(null)
+              }}
+              disabled={busy}
+            />
+          </label>
+          <div className="muted" style={{ fontSize: 12 }}>
+            {detail.scope_summary}
             {isDraft ? ' · not saved yet' : null}
           </div>
         </div>

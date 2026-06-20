@@ -4,6 +4,7 @@ export type NavIconName =
   | 'calendar'
   | 'tasks'
   | 'contacts'
+  | 'docusign'
   | 'accounts'
   | 'reports'
   | 'user-settings'
@@ -85,6 +86,19 @@ export function NavIcon({ name, className }: Props) {
             strokeWidth="2"
             strokeLinecap="round"
           />
+        </svg>
+      )
+    case 'docusign':
+      return (
+        <svg {...common}>
+          <path
+            d="M4 19.5 9 4l5 7 6-2.5"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+          <path d="M14 3h6v6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
       )
     case 'accounts':

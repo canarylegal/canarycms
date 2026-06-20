@@ -11,9 +11,13 @@ from sqlalchemy.orm import Session
 
 from app.alert_templates import (
     calendar_event_reminder,
+    docusign_sign_completed_staff,
+    docusign_sign_requested,
+    docusign_sign_sent_staff,
     portal_contact_access_granted,
     portal_contact_files_added,
     portal_contact_folder_granted,
+    portal_form_sent,
     portal_login_otp,
     portal_quote_accepted,
     portal_quote_declined,
@@ -38,6 +42,10 @@ class AlertKind(str, enum.Enum):
     portal_quote_sent = "portal_quote_sent"
     portal_quote_accepted = "portal_quote_accepted"
     portal_quote_declined = "portal_quote_declined"
+    portal_form_sent = "portal_form_sent"
+    docusign_sign_requested = "docusign_sign_requested"
+    docusign_sign_sent_staff = "docusign_sign_sent_staff"
+    docusign_sign_completed_staff = "docusign_sign_completed_staff"
 
 
 def firm_alerts_configured(db: Session) -> bool:
@@ -134,6 +142,35 @@ def dispatch_alert(
             contact_name=str(context.get("contact_name") or "Client"),
             quote_filename=str(context.get("quote_filename") or "Quote"),
             decline_reason=str(context.get("decline_reason") or ""),
+        )
+    elif kind == AlertKind.portal_form_sent:
+        subject, body, body_html = portal_form_sent(
+            firm_name=firm,
+            contact_name=str(context.get("contact_name") or "Client"),
+            form_name=str(context.get("form_name") or "Form"),
+            matter_label=str(context.get("matter_label") or "your matter"),
+            portal_url=str(context.get("portal_url") or portal_public_url()),
+        )
+    elif kind == AlertKind.docusign_sign_requested:
+        subject, body, body_html = docusign_sign_requested(
+            firm_name=firm,
+            recipient_name=str(context.get("recipient_name") or "Client"),
+            document_name=str(context.get("document_name") or "Document"),
+            matter_label=str(context.get("matter_label") or "your matter"),
+            sign_url=str(context.get("sign_url") or portal_public_url()),
+        )
+    elif kind == AlertKind.docusign_sign_sent_staff:
+        subject, body, body_html = docusign_sign_sent_staff(
+            firm_name=firm,
+            staff_name=str(context.get("staff_name") or "Colleague"),
+            document_name=str(context.get("document_name") or "Document"),
+            sender_name=str(context.get("sender_name") or "A colleague"),
+        )
+    elif kind == AlertKind.docusign_sign_completed_staff:
+        subject, body, body_html = docusign_sign_completed_staff(
+            firm_name=firm,
+            staff_name=str(context.get("staff_name") or "Colleague"),
+            document_name=str(context.get("document_name") or "Document"),
         )
     else:
         log.warning("alert_dispatch: unknown kind %s", kind)

@@ -667,7 +667,7 @@ def compose_quote_spreadsheet(
         version=1,
         checksum=None,
         oo_compose_pending=True,
-        is_portal_quote=True,
+        is_portal_quote=False,
         created_at=now,
         updated_at=now,
     )
@@ -1068,6 +1068,34 @@ def list_case_files(
         for d in deliveries:
             delivery_by_file[d.file_id] = d
 
+    from app.docusign_signing_service import signing_request_out
+    from app.models import DocusignSigningRequest, DocusignSigningStatus
+
+    signing_by_file: dict[uuid.UUID, dict] = {}
+    if file_ids:
+        signing_rows = (
+            db.execute(
+                select(DocusignSigningRequest)
+                .where(
+                    DocusignSigningRequest.source_file_id.in_(file_ids),
+                    DocusignSigningRequest.status.in_(
+                        (
+                            DocusignSigningStatus.pending,
+                            DocusignSigningStatus.completed,
+                            DocusignSigningStatus.declined,
+                            DocusignSigningStatus.voided,
+                        )
+                    ),
+                )
+                .order_by(DocusignSigningRequest.created_at.desc())
+            )
+            .scalars()
+            .all()
+        )
+        for sr in signing_rows:
+            if sr.source_file_id and sr.source_file_id not in signing_by_file:
+                signing_by_file[sr.source_file_id] = signing_request_out(db, sr)
+
     out = []
     for (f, owner_display_name, owner_email, owner_initials) in rows:
         item = {
@@ -1111,6 +1139,9 @@ def list_case_files(
                 "responded_at": delivery.responded_at.isoformat() if delivery.responded_at else None,
                 "decline_reason": delivery.decline_reason,
             }
+        signing = signing_by_file.get(f.id)
+        if signing is not None:
+            item["docusign_signing"] = signing
         out.append(item)
     return out
 

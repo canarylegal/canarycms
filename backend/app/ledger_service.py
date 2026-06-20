@@ -13,10 +13,11 @@ from app.ledger_party import resolve_ledger_party
 from app.models import LedgerAccount, LedgerAccountType, LedgerDirection, LedgerEntry, User
 from app.permission_checks import (
     assert_may_approve_anticipated_ledger,
+    assert_may_edit_ledger_pair,
     assert_may_post_ledger,
     user_may_approve_ledger,
 )
-from app.schemas import LedgerAccountSummary, LedgerEntryOut, LedgerOut, LedgerPostCreate
+from app.schemas import LedgerAccountSummary, LedgerEntryOut, LedgerOut, LedgerPairUpdate, LedgerPostCreate
 
 
 @dataclass(frozen=True)
@@ -170,6 +171,98 @@ def post_transaction(
         )
 
     return LedgerPostResult(pair_id=pair_id, is_approved=is_approved, is_anticipated=is_anticipated)
+
+
+def _ledger_pair_legs(case_id: uuid.UUID, pair_id: uuid.UUID, db: Session) -> tuple[dict[str, LedgerAccount], list[LedgerEntry]]:
+    accounts = _get_or_create_accounts(case_id, db)
+    aid = {accounts["client"].id, accounts["office"].id}
+    legs = (
+        db.execute(
+            select(LedgerEntry).where(
+                LedgerEntry.pair_id == pair_id,
+                LedgerEntry.account_id.in_(aid),
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return accounts, legs
+
+
+def _pair_directions(legs: list[LedgerEntry], accounts: dict[str, LedgerAccount]) -> tuple[str | None, str | None]:
+    client_direction = None
+    office_direction = None
+    for e in legs:
+        if e.account_id == accounts["client"].id:
+            client_direction = e.direction.value
+        elif e.account_id == accounts["office"].id:
+            office_direction = e.direction.value
+    return client_direction, office_direction
+
+
+def update_ledger_pair_unapproved(
+    case_id: uuid.UUID,
+    pair_id: uuid.UUID,
+    payload: LedgerPairUpdate,
+    user: User,
+    db: Session,
+) -> None:
+    """Edit amount, description, reference, or anticipated date before approval."""
+    accounts, legs = _ledger_pair_legs(case_id, pair_id, db)
+    if not legs:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Posting not found")
+    if any(e.is_approved for e in legs):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Approved postings cannot be edited")
+
+    client_direction, office_direction = _pair_directions(legs, accounts)
+    is_anticipated = any(e.is_anticipated for e in legs)
+    assert_may_edit_ledger_pair(
+        user,
+        client_direction=client_direction,
+        office_direction=office_direction,
+        is_anticipated=is_anticipated,
+        db=db,
+    )
+
+    if payload.anticipated_for_date is not None and not is_anticipated:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="anticipated_for_date applies only to anticipated postings",
+        )
+
+    for e in legs:
+        if payload.amount_pence is not None:
+            e.amount_pence = payload.amount_pence
+        if payload.description is not None:
+            e.description = payload.description
+        if payload.reference is not None:
+            e.reference = payload.reference or None
+        if payload.anticipated_for_date is not None and e.is_anticipated:
+            e.anticipated_for_date = payload.anticipated_for_date
+        db.add(e)
+    db.flush()
+
+
+def reject_ledger_pair_unapproved(case_id: uuid.UUID, pair_id: uuid.UUID, user: User, db: Session) -> None:
+    """Remove an unapproved or anticipated posting (reject draft)."""
+    accounts, legs = _ledger_pair_legs(case_id, pair_id, db)
+    if not legs:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Posting not found")
+    if any(e.is_approved for e in legs):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Approved postings cannot be rejected")
+
+    client_direction, office_direction = _pair_directions(legs, accounts)
+    is_anticipated = any(e.is_anticipated for e in legs)
+    assert_may_edit_ledger_pair(
+        user,
+        client_direction=client_direction,
+        office_direction=office_direction,
+        is_anticipated=is_anticipated,
+        db=db,
+    )
+    for e in legs:
+        db.delete(e)
+    db.flush()
 
 
 def delete_ledger_pair_unapproved(case_id: uuid.UUID, pair_id: uuid.UUID, db: Session) -> None:

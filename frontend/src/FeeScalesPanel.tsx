@@ -313,7 +313,7 @@ export function FeeScalesPanel({ token, onBack }: { token: string; onBack: () =>
 
   if (editId || draftCreate) {
     return (
-      <div className="mainMenuShell mainMenuShell--mainMenu">
+      <div className="mainMenuShell mainMenuShell--mainMenu mainMenuShell--pageScroll">
         <FeeScaleEditor
           token={token}
           scaleId={editId ?? undefined}
@@ -327,7 +327,7 @@ export function FeeScalesPanel({ token, onBack }: { token: string; onBack: () =>
   }
 
   return (
-    <div className="mainMenuShell mainMenuShell--mainMenu">
+    <div className="mainMenuShell mainMenuShell--mainMenu mainMenuShell--pageScroll">
       <div className="paneHead" style={{ marginBottom: 12 }}>
         <button type="button" className="btn" onClick={onBack}>
           ← Quotes

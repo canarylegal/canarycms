@@ -32,6 +32,26 @@
       "mime_type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
       "size_bytes": 37237,
       "bundle_file": "bundle/g2_completion_statement.docx"
+    },
+    {
+      "name": "Quote template",
+      "reference": "QUOTE_TEMPLATE",
+      "kind": "document",
+      "global": true,
+      "original_filename": "Universal-quote-template.docx",
+      "mime_type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "size_bytes": 37402,
+      "bundle_file": "bundle/g3_quote_template.docx"
+    },
+    {
+      "name": "Quote by e-mail",
+      "reference": "QUOTE_EMAIL",
+      "kind": "email",
+      "global": true,
+      "original_filename": "Universal-quote-email.docx",
+      "mime_type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "size_bytes": 36651,
+      "bundle_file": "bundle/g4_quote_email.docx"
     }
   ]
 }

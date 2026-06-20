@@ -4,8 +4,9 @@ import { isCaseContextMenuOpen, isEditableKeyboardTarget, isModalBlockingKeyboar
 
 export type PrimaryNavId = Exclude<AppSidebarView, 'case-menu'>
 
-function buildPrimaryNavItems(canAccessAccounts: boolean, canAdminConsole: boolean): PrimaryNavId[] {
+function buildPrimaryNavItems(canAccessAccounts: boolean, canAdminConsole: boolean, docusignEnabled: boolean): PrimaryNavId[] {
   const items: PrimaryNavId[] = ['main-menu', 'quotes', 'calendar', 'tasks', 'contacts']
+  if (docusignEnabled) items.push('docusign')
   if (canAccessAccounts) items.push('accounts')
   items.push('reports', 'user-settings')
   if (canAdminConsole) items.push('admin-console')
@@ -23,12 +24,14 @@ export function usePrimaryNavKeyboard({
   view,
   canAccessAccounts,
   canAdminConsole,
+  docusignEnabled,
   onNavigate,
 }: {
   enabled: boolean
   view: AppSidebarView
   canAccessAccounts: boolean
   canAdminConsole: boolean
+  docusignEnabled: boolean
   onNavigate: NavigateHandlers
 }) {
   useEffect(() => {
@@ -39,7 +42,7 @@ export function usePrimaryNavKeyboard({
       if (e.altKey || e.ctrlKey || e.metaKey) return
       if (isEditableKeyboardTarget(e.target) || isModalBlockingKeyboard() || isCaseContextMenuOpen()) return
 
-      const items = buildPrimaryNavItems(canAccessAccounts, canAdminConsole)
+      const items = buildPrimaryNavItems(canAccessAccounts, canAdminConsole, docusignEnabled)
       if (items.length === 0) return
 
       const current = resolvePrimaryNavView(view)
@@ -54,5 +57,5 @@ export function usePrimaryNavKeyboard({
 
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [enabled, view, canAccessAccounts, canAdminConsole, onNavigate])
+  }, [enabled, view, canAccessAccounts, canAdminConsole, docusignEnabled, onNavigate])
 }

@@ -742,7 +742,10 @@ def _normalize_post_merge_whitespace(text: str) -> str:
 _NAME_CODE_INNERS: frozenset[str] = frozenset(c[1:-1] for c in _ADDITIONAL_CLIENT_NAME_CODES)
 
 # ``[CODE]`` or ``[modifiers:CODE]`` where modifiers are one or more of b, i, u.
-_MERGE_TOKEN_RE = re.compile(r"\[((?:[biu]+):)?([A-Z0-9_]+)\]", re.IGNORECASE)
+_MERGE_TOKEN_RE = re.compile(
+    r"\[\s*((?:[biu]+)\s*:\s*)?([A-Z0-9_]+)\s*\]",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True)
@@ -756,7 +759,7 @@ class _MergeTextSegment:
 def _parse_modifier_letters(mod: str | None) -> tuple[bool | None, bool | None, bool | None]:
     if not mod:
         return None, None, None
-    letters = set(mod.lower())
+    letters = {c for c in mod.lower() if c in "biu"}
     return (
         True if "b" in letters else None,
         True if "i" in letters else None,
@@ -764,12 +767,16 @@ def _parse_modifier_letters(mod: str | None) -> tuple[bool | None, bool | None, 
     )
 
 
+def _paragraph_has_modifier_tokens(text: str) -> bool:
+    return bool(re.search(r"\[\s*(?:[biu]+)\s*:", text, re.IGNORECASE))
+
+
 def _merge_token_pattern_for_fields(fields: Mapping[str, str]) -> re.Pattern[str]:
     inners = sorted({k[1:-1] for k in fields}, key=len, reverse=True)
     if not inners:
         return re.compile(r"(?!x)")
     inner_alt = "|".join(re.escape(c) for c in inners)
-    return re.compile(rf"\[(?:[biu]+:)?(?:{inner_alt})\]", re.IGNORECASE)
+    return re.compile(rf"\[\s*(?:[biu]+\s*:\s*)?(?:{inner_alt})\s*\]", re.IGNORECASE)
 
 
 def _paragraph_has_merge_tokens(text: str, fields: Mapping[str, str]) -> bool:
@@ -1130,6 +1137,14 @@ def _rewrite_paragraph_to_runs(para: Any, segments: list[_MergeTextSegment]) -> 
     from docx.enum.text import WD_BREAK
     from docx.oxml.ns import qn
 
+    def _apply_run_formatting(run: Any, seg: _MergeTextSegment) -> None:
+        if seg.bold is not None:
+            run.bold = seg.bold
+        if seg.italic is not None:
+            run.italic = seg.italic
+        if seg.underline is not None:
+            run.underline = seg.underline
+
     p_el = para._p
     for child in list(p_el):
         if child.tag != qn("w:pPr"):
@@ -1137,19 +1152,26 @@ def _rewrite_paragraph_to_runs(para: Any, segments: list[_MergeTextSegment]) -> 
     for seg in segments:
         if not seg.text:
             continue
-        parts = seg.text.split("\n")
-        for i, part in enumerate(parts):
+        has_fmt = seg.bold is not None or seg.italic is not None or seg.underline is not None
+        lines = seg.text.split("\n")
+        if has_fmt and len(lines) > 1:
+            run = para.add_run(lines[0])
+            _apply_run_formatting(run, seg)
+            for line in lines[1:]:
+                run.add_break(WD_BREAK.LINE)
+                if line:
+                    run.add_text(line)
+            continue
+        for i, part in enumerate(lines):
             if i > 0:
-                para.add_run().add_break(WD_BREAK.LINE)
+                br_run = para.add_run()
+                br_run.add_break(WD_BREAK.LINE)
+                if has_fmt:
+                    _apply_run_formatting(br_run, seg)
             if not part:
                 continue
             run = para.add_run(part)
-            if seg.bold is not None:
-                run.bold = seg.bold
-            if seg.italic is not None:
-                run.italic = seg.italic
-            if seg.underline is not None:
-                run.underline = seg.underline
+            _apply_run_formatting(run, seg)
 
 
 def _rewrite_paragraph_to_single_run(para: Any, replaced: str) -> None:
@@ -1709,6 +1731,72 @@ def apply_digital_letterhead_headers_footers(precedent_bytes: bytes, letterhead_
     return _merge_letterhead_package_assets(out.getvalue(), letterhead_bytes)
 
 
+def _coalesce_split_merge_tokens_in_docx(doc_bytes: bytes) -> bytes:
+    """Join ``w:r`` text when ONLYOFFICE/Word split a merge token across runs inside one paragraph."""
+    import io
+
+    from docx import Document
+    from docx.oxml.ns import qn
+
+    doc = Document(io.BytesIO(doc_bytes))
+    t_tag = qn("w:t")
+    r_tag = qn("w:r")
+    changed = False
+
+    def _needs_coalesce(p_el: Any) -> bool:
+        texts = [t.text or "" for t in p_el.iter(t_tag)]
+        combined = "".join(texts)
+        if not _MERGE_TOKEN_RE.search(combined):
+            return False
+        for m in _MERGE_TOKEN_RE.finditer(combined):
+            token = m.group(0)
+            if not any(token in (t.text or "") for t in p_el.iter(t_tag)):
+                return True
+        return False
+
+    def _coalesce_p(p_el: Any) -> None:
+        nonlocal changed
+        if not _needs_coalesce(p_el):
+            return
+        combined = "".join(t.text or "" for t in p_el.iter(t_tag))
+        for r in list(p_el.findall(r_tag)):
+            p_el.remove(r)
+        if combined:
+            r = p_el.makeelement(r_tag, {})
+            attrs = {qn("xml:space"): "preserve"} if combined.strip() != combined else {}
+            t = p_el.makeelement(t_tag, attrs)
+            t.text = combined
+            r.append(t)
+            p_el.append(r)
+        changed = True
+
+    def _walk_paragraphs(container: Any) -> None:
+        for p_el in container.iter(qn("w:p")):
+            _coalesce_p(p_el)
+
+    _walk_paragraphs(doc.element.body)
+    for section in doc.sections:
+        for hf in (
+            section.header,
+            section.footer,
+            section.even_page_header,
+            section.even_page_footer,
+            section.first_page_header,
+            section.first_page_footer,
+        ):
+            _walk_paragraphs(hf._element)
+    for table in doc.tables:
+        for row in table.rows:
+            for cell in row.cells:
+                _walk_paragraphs(cell._tc)
+
+    if not changed:
+        return doc_bytes
+    out = io.BytesIO()
+    doc.save(out)
+    return out.getvalue()
+
+
 def merge_precedent_codes(
     src_bytes: bytes,
     fields: dict[str, str],
@@ -1728,7 +1816,8 @@ def merge_precedent_codes(
        in step 1; formatting modifiers may be lost when a token was split across XML nodes).
     """
     sep_flags = _inter_client_sep_flags(ordered_clients) if merge_all_clients else {}
-    merged = _merge_precedent_codes_via_python_docx(src_bytes, fields, sep_flags)
+    prepared = _coalesce_split_merge_tokens_in_docx(src_bytes)
+    merged = _merge_precedent_codes_via_python_docx(prepared, fields, sep_flags)
     return _merge_precedent_codes_in_ooxml_zip(merged, fields)
 
 
@@ -1763,8 +1852,9 @@ def _merge_precedent_codes_via_python_docx(
         # Claim only once we will rewrite, so empty / no-code paragraphs visited from duplicate
         # merged cells can still be processed on a later distinct visit (should not happen, but safe).
         seen_wp.add(wp)
+        had_modifier_tokens = _paragraph_has_modifier_tokens(full)
         segments = _replace_merge_tokens_in_formatted_segments(segments, fields)
-        if _segments_have_direct_formatting(segments):
+        if _segments_have_direct_formatting(segments) or had_modifier_tokens:
             segments = _trim_leading_segment_whitespace(segments)
             replaced = _normalize_post_merge_whitespace(_segments_plain_text(segments))
             _rewrite_paragraph_to_runs(para, segments)
@@ -1819,6 +1909,238 @@ def _merge_precedent_codes_via_python_docx(
     buf = io.BytesIO()
     doc.save(buf)
     return buf.getvalue()
+
+
+_QUOTE_TABLE_HEADER_FILL = "D0DAEA"
+_QUOTE_TABLE_SECTION_FILL = "EEF2F8"
+_QUOTE_TABLE_TOTAL_FILL = "D0DAEA"
+_QUOTE_TABLE_BORDER_COLOR = "B8C4D4"
+_QUOTE_TABLE_BORDER_LIGHT = "D8DEE8"
+
+
+def _docx_set_cell_shading(cell: Any, fill: str) -> None:
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+
+    tc = cell._tc
+    tc_pr = tc.get_or_add_tcPr()
+    shd = OxmlElement("w:shd")
+    shd.set(qn("w:val"), "clear")
+    shd.set(qn("w:color"), "auto")
+    shd.set(qn("w:fill"), fill)
+    tc_pr.append(shd)
+
+
+def _docx_set_cell_margin_dxa(
+    cell: Any,
+    *,
+    top: int = 80,
+    bottom: int = 80,
+    left: int = 120,
+    right: int = 120,
+) -> None:
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+
+    tc = cell._tc
+    tc_pr = tc.get_or_add_tcPr()
+    tc_mar = OxmlElement("w:tcMar")
+    for side, val in (("top", top), ("left", left), ("bottom", bottom), ("right", right)):
+        node = OxmlElement(f"w:{side}")
+        node.set(qn("w:w"), str(val))
+        node.set(qn("w:type"), "dxa")
+        tc_mar.append(node)
+    tc_pr.append(tc_mar)
+
+
+def _docx_set_cell_borders(
+    cell: Any,
+    *,
+    top: dict[str, object] | None = None,
+    bottom: dict[str, object] | None = None,
+    left: dict[str, object] | None = None,
+    right: dict[str, object] | None = None,
+) -> None:
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+
+    tc = cell._tc
+    tc_pr = tc.get_or_add_tcPr()
+    tc_borders = OxmlElement("w:tcBorders")
+    for side, spec in (("top", top), ("bottom", bottom), ("left", left), ("right", right)):
+        if spec is None:
+            continue
+        el = OxmlElement(f"w:{side}")
+        el.set(qn("w:val"), str(spec.get("val", "single")))
+        el.set(qn("w:sz"), str(spec.get("sz", 4)))
+        el.set(qn("w:space"), "0")
+        el.set(qn("w:color"), str(spec.get("color", "auto")))
+        tc_borders.append(el)
+    tc_pr.append(tc_borders)
+
+
+def _docx_set_table_width_pct(table: Any, pct: int = 5000) -> None:
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+
+    tbl = table._tbl
+    tbl_pr = tbl.tblPr
+    if tbl_pr is None:
+        tbl_pr = OxmlElement("w:tblPr")
+        tbl.insert(0, tbl_pr)
+    tbl_w = OxmlElement("w:tblW")
+    tbl_w.set(qn("w:w"), str(pct))
+    tbl_w.set(qn("w:type"), "pct")
+    tbl_pr.append(tbl_w)
+
+
+def _docx_style_table_paragraph(
+    para: Any,
+    *,
+    bold: bool = False,
+    size_pt: float = 10,
+    alignment: Any | None = None,
+) -> None:
+    from docx.shared import Pt
+
+    if alignment is not None:
+        para.alignment = alignment
+    text = para.text
+    para.clear()
+    run = para.add_run(text)
+    run.bold = bold
+    run.font.size = Pt(size_pt)
+
+
+def _docx_quote_border(*, light: bool = False, strong: bool = False) -> dict[str, object]:
+    if strong:
+        return {"val": "single", "sz": 8, "color": _QUOTE_TABLE_BORDER_COLOR}
+    color = _QUOTE_TABLE_BORDER_LIGHT if light else _QUOTE_TABLE_BORDER_COLOR
+    return {"val": "single", "sz": 4, "color": color}
+
+
+def _find_quote_fee_table(doc: Any) -> Any | None:
+    for table in doc.tables:
+        if not table.rows:
+            continue
+        if len(table.rows[0].cells) < 3:
+            continue
+        hdr = (table.rows[0].cells[0].text or "").strip().lower()
+        if hdr == "description":
+            return table
+    return None
+
+
+def _style_quote_fee_table_header_row(table: Any) -> None:
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.shared import Inches
+
+    col_widths = (Inches(3.85), Inches(1.35), Inches(1.35))
+    hdr = table.rows[0].cells
+    labels = ("Description", "Amount", "VAT")
+    for i, label in enumerate(labels):
+        cell = hdr[i]
+        cell.text = label
+        para = cell.paragraphs[0]
+        _docx_style_table_paragraph(
+            para,
+            bold=True,
+            alignment=WD_ALIGN_PARAGRAPH.CENTER if i > 0 else WD_ALIGN_PARAGRAPH.LEFT,
+        )
+        _docx_set_cell_shading(cell, _QUOTE_TABLE_HEADER_FILL)
+        _docx_set_cell_margin_dxa(cell)
+        _docx_set_cell_borders(
+            cell,
+            top=_docx_quote_border(strong=True),
+            bottom=_docx_quote_border(strong=True),
+            left=_docx_quote_border() if i == 0 else None,
+            right=_docx_quote_border() if i == 2 else None,
+        )
+    for i, width in enumerate(col_widths):
+        for row in table.rows:
+            row.cells[i].width = width
+
+
+def _style_quote_fee_table_data_row(
+    row: Any,
+    *,
+    line_kind: str = "item",
+) -> None:
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+
+    is_section = line_kind == "section_header"
+    is_total_row = line_kind in ("subtotal", "total")
+
+    if is_section:
+        for ci, cell in enumerate(row.cells[:3]):
+            if not cell.paragraphs:
+                cell.add_paragraph()
+            para = cell.paragraphs[0]
+            if ci == 0:
+                _docx_style_table_paragraph(para, bold=True, alignment=WD_ALIGN_PARAGRAPH.LEFT)
+            elif para.text.strip():
+                para.clear()
+            _docx_set_cell_shading(cell, _QUOTE_TABLE_SECTION_FILL)
+            _docx_set_cell_margin_dxa(cell)
+            _docx_set_cell_borders(
+                cell,
+                bottom=_docx_quote_border(light=True),
+                left=_docx_quote_border() if ci == 0 else None,
+                right=_docx_quote_border() if ci == 2 else None,
+            )
+        return
+
+    fill = _QUOTE_TABLE_TOTAL_FILL if is_total_row else None
+    for ci, cell in enumerate(row.cells[:3]):
+        if not cell.paragraphs:
+            cell.add_paragraph()
+        para = cell.paragraphs[0]
+        _docx_style_table_paragraph(
+            para,
+            bold=is_total_row,
+            alignment=WD_ALIGN_PARAGRAPH.RIGHT if ci > 0 else WD_ALIGN_PARAGRAPH.LEFT,
+        )
+        _docx_set_cell_margin_dxa(cell)
+        if fill:
+            _docx_set_cell_shading(cell, fill)
+        _docx_set_cell_borders(
+            cell,
+            bottom=_docx_quote_border(light=True),
+            left=_docx_quote_border() if ci == 0 else None,
+            right=_docx_quote_border() if ci == 2 else None,
+        )
+
+
+def apply_quote_table_presentation(doc_bytes: bytes, lines: list[Any]) -> bytes:
+    """Apply header, section, and total styling to the merged quote fee table."""
+    import io
+
+    from docx import Document
+
+    doc = Document(io.BytesIO(doc_bytes))
+    table = _find_quote_fee_table(doc)
+    if table is None:
+        return doc_bytes
+
+    _docx_set_table_width_pct(table)
+    try:
+        table.style = "Table Grid"
+    except Exception:
+        pass
+    _style_quote_fee_table_header_row(table)
+
+    for ri, line in enumerate(lines, start=1):
+        if ri >= len(table.rows):
+            break
+        kind = line.line_kind.value if hasattr(line.line_kind, "value") else str(line.line_kind)
+        _style_quote_fee_table_data_row(
+            table.rows[ri],
+            line_kind=kind,
+        )
+
+    out = io.BytesIO()
+    doc.save(out)
+    return out.getvalue()
 
 
 def strip_empty_quote_table_rows(doc_bytes: bytes) -> bytes:
@@ -2313,6 +2635,108 @@ def write_blank_docx(path: Path) -> None:
     _set_default_proofing_language_en_gb(doc)
     path.parent.mkdir(parents=True, exist_ok=True)
     doc.save(str(path))
+
+
+def write_quote_email_precedent_docx(path: Path) -> None:
+    """Plain-text-friendly e-mail body for sending a quote (Thunderbird / mailto / Graph)."""
+    from docx import Document
+
+    doc = Document()
+    _set_default_proofing_language_en_gb(doc)
+
+    lines = [
+        "[CONTACT_LETTER_DEAR]",
+        "",
+        "Thank you for your enquiry. Please find attached our quote for [MATTER_DESCRIPTION].",
+        "",
+        (
+            "The quote sets out the work we propose to undertake and our fees. It also shows VAT and "
+            "any disbursements where applicable. If you would like to proceed, or if you have any "
+            "questions, please reply to this e-mail."
+        ),
+        "",
+        "We look forward to hearing from you.",
+        "",
+        "",
+        "Kind regards",
+        "",
+        "[FEE_EARNER]",
+        "[FEE_EARNER_JOB_TITLE]",
+        "[FIRM_TRADING_NAME]",
+        "",
+        "---",
+        "Our ref: [FEE_EARNER_INITIALS]/[CASE_REF]    Your ref: [CONTACT_REF]",
+        "[DATE]",
+    ]
+    for line in lines:
+        doc.add_paragraph(line)
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    doc.save(str(path))
+
+
+def write_quote_template_docx(path: Path, *, slots: int = QUOTE_MERGE_SLOT_COUNT) -> None:
+    """Write a minimal quote .docx with indexed fee-table merge slots (no letter precedent)."""
+    from docx import Document
+    from docx.shared import Pt
+
+    doc = Document()
+    _set_default_proofing_language_en_gb(doc)
+
+    doc.add_paragraph("[ORG_AND_ADDRESS_BLOCK]")
+    doc.add_paragraph("")
+    doc.add_paragraph("[DATE]")
+    doc.add_paragraph("")
+    doc.add_paragraph("Re: [MATTER_DESCRIPTION] — [CASE_REF]")
+    doc.add_paragraph("")
+    doc.add_paragraph("Dear [CONTACT_LETTER_DEAR]")
+    doc.add_paragraph("")
+    doc.add_paragraph(
+        "Thank you for instructing us. Set out below is our estimate of costs based on a property value of "
+        "[QUOTE_PROPERTY_VALUE]."
+    )
+    doc.add_paragraph("")
+
+    table = doc.add_table(rows=1 + slots, cols=3)
+    _docx_set_table_width_pct(table)
+    try:
+        table.style = "Table Grid"
+    except Exception:
+        pass
+    _style_quote_fee_table_header_row(table)
+
+    for i in range(1, slots + 1):
+        tag = f"{i:02d}"
+        row = table.rows[i].cells
+        row[0].text = f"[QUOTE_{tag}_LABEL]"
+        row[1].paragraphs[0].text = f"[QUOTE_{tag}_AMOUNT]"
+        row[2].paragraphs[0].text = f"[QUOTE_{tag}_VAT]"
+        _style_quote_fee_table_data_row(table.rows[i])
+
+    doc.add_paragraph("")
+    closing = doc.add_paragraph("Yours faithfully")
+    closing.runs[0].font.size = Pt(11)
+    doc.add_paragraph("")
+    doc.add_paragraph("[FEE_EARNER]")
+    doc.add_paragraph("[FIRM_TRADING_NAME]")
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    doc.save(str(path))
+
+
+def write_quote_template_docx_bytes(*, slots: int = QUOTE_MERGE_SLOT_COUNT) -> bytes:
+    import tempfile
+
+    fd, tmp_name = tempfile.mkstemp(suffix=".docx")
+    tmp = Path(tmp_name)
+    try:
+        import os
+
+        os.close(fd)
+        write_quote_template_docx(tmp, slots=slots)
+        return tmp.read_bytes()
+    finally:
+        tmp.unlink(missing_ok=True)
 
 
 def write_completion_statement_docx(

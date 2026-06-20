@@ -8,10 +8,16 @@ from datetime import date, datetime
 import pytest
 from fastapi import HTTPException
 
-from app.ledger_service import approve_ledger_pair, get_ledger, post_transaction
+from app.ledger_service import (
+    approve_ledger_pair,
+    get_ledger,
+    post_transaction,
+    reject_ledger_pair_unapproved,
+    update_ledger_pair_unapproved,
+)
 from app.models import UserPermissionCategory, UserRole
 from app.reports_service import balances_by_case_ids
-from app.schemas import LedgerPostCreate
+from app.schemas import LedgerPairUpdate, LedgerPostCreate
 
 from tests.ledger_test_helpers import add_case, add_cashier_category, add_user, ledger_test_session
 
@@ -254,3 +260,65 @@ def test_anticipated_posting_affects_balance_after_post_permission_approval() ->
     ledger = get_ledger(case.id, db)
     assert ledger.client.balance_pence == 6_500
     assert all(not e.is_anticipated for e in ledger.entries if e.pair_id == pair_id)
+
+
+def test_cashier_may_edit_anticipated_office_debit_before_approval() -> None:
+    db = ledger_test_session()
+    admin = add_user(db)
+    cat = add_cashier_category(db)
+    cashier = add_user(db, role=UserRole.user, permission_category_id=cat.id)
+    case = add_case(db, fee_earner_user_id=admin.id)
+
+    pair_id = _post(
+        db,
+        case.id,
+        admin,
+        amount_pence=150,
+        office_direction="debit",
+        anticipated=True,
+    )
+    db.commit()
+
+    update_ledger_pair_unapproved(
+        case.id,
+        pair_id,
+        LedgerPairUpdate(amount_pence=200, description="DocuSign — revised"),
+        cashier,
+        db,
+    )
+    db.commit()
+
+    ledger = get_ledger(case.id, db)
+    legs = [e for e in ledger.entries if e.pair_id == pair_id]
+    assert len(legs) == 1
+    assert legs[0].amount_pence == 200
+    assert legs[0].description == "DocuSign — revised"
+    assert ledger.office.balance_pence == 0
+
+    approve_ledger_pair(case.id, pair_id, cashier, db)
+    db.commit()
+    assert get_ledger(case.id, db).office.balance_pence == -200
+
+
+def test_cashier_may_reject_anticipated_posting() -> None:
+    db = ledger_test_session()
+    admin = add_user(db)
+    cat = add_cashier_category(db)
+    cashier = add_user(db, role=UserRole.user, permission_category_id=cat.id)
+    case = add_case(db, fee_earner_user_id=admin.id)
+
+    pair_id = _post(
+        db,
+        case.id,
+        admin,
+        amount_pence=150,
+        office_direction="debit",
+        anticipated=True,
+    )
+    db.commit()
+
+    reject_ledger_pair_unapproved(case.id, pair_id, cashier, db)
+    db.commit()
+
+    ledger = get_ledger(case.id, db)
+    assert not any(e.pair_id == pair_id for e in ledger.entries)

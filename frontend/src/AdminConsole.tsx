@@ -3,6 +3,8 @@ import { AdminAudit } from './AdminAudit'
 import { AdminBilling } from './AdminBilling'
 import { AdminDeploy } from './AdminDeploy'
 import { AdminEmail } from './AdminEmail'
+import { AdminDocuSign } from './AdminDocuSign'
+import { AdminPortalForms } from './AdminPortalForms'
 import { AdminFirmDetails } from './AdminFirmDetails'
 import { AdminSubMenus } from './AdminSubMenus'
 import { AdminTasks } from './AdminTasks'
@@ -568,7 +570,7 @@ function PrecedentNamePencilIcon() {
 function AdminPrecedents({ token }: { token: string }) {
   const { askConfirm } = useDialogs()
   /** Reserved references — edit in OnlyOffice; do not delete from Admin. */
-  const systemPrecedentReferences = new Set(['BLANK_LETTER', 'INVOICE_TEMPLATE', 'COMPLETION_STATEMENT'])
+  const systemPrecedentReferences = new Set(['BLANK_LETTER', 'INVOICE_TEMPLATE', 'COMPLETION_STATEMENT', 'QUOTE_TEMPLATE', 'QUOTE_EMAIL'])
   const [items, setItems] = useState<PrecedentOut[]>([])
   const [matterHeads, setMatterHeads] = useState<MatterHeadTypeOut[]>([])
   const [uploadHeadTypeId, setUploadHeadTypeId] = useState('')
@@ -1016,16 +1018,13 @@ function AdminPrecedents({ token }: { token: string }) {
       </div>
 
       <div className="card" style={{ padding: 12, marginBottom: 16 }}>
-        <h4 style={{ marginTop: 0 }}>Quote letterhead template</h4>
+        <h4 style={{ marginTop: 0 }}>Quote letterhead</h4>
         <div className="muted" style={{ marginBottom: 12 }}>
-          Upload a .docx used as the <strong>quote document</strong> when creating quotes from fee scales. Include
-          logos and firm details in the <strong>header/footer</strong>, merge codes in the body (address block, date,
-          salutation, etc.), and place indexed fee merge codes in the body — e.g.{' '}
-          <code>[QUOTE_01_LABEL]</code> / <code>[QUOTE_01_AMOUNT]</code> (up to <code>[QUOTE_25_*]</code>), plus{' '}
-          <code>[QUOTE_PROPERTY_VALUE]</code>. Legacy <code>[QUOTE_FEE_TABLE]</code> is no longer used for quotes.
-          Place one label/amount pair per row in your layout (table or paragraphs).{' '}
-          <strong>Pre-printed</strong> skips digital headers on separate letter compose;
-          the uploaded file is still used as the quote body layout when present.
+          The <strong>quote body layout</strong> (text, fee-table merge codes) is edited under <strong>Precedents</strong>{' '}
+          as <strong>Quote template</strong> (<code>QUOTE_TEMPLATE</code>). When <strong>Digital</strong> is selected,
+          upload a .docx whose <strong>header and footer</strong> contain your logo and firm details — Canary copies those
+          onto every new quote document. The letterhead file should not need the fee table; keep that in the quote template
+          precedent. Covering letters sent after creating a quote use your normal letter precedents and firm letterhead.
         </div>
         {firmSettings ? (
           <div className="stack" style={{ gap: 10 }}>
@@ -1765,6 +1764,8 @@ export function AdminConsole({ token, refreshMe }: { token: string; refreshMe: (
     | 'matters'
     | 'billing'
     | 'email'
+    | 'docusign'
+    | 'portalForms'
     | 'deploy'
     | 'submenus'
     | 'tasks'
@@ -1777,7 +1778,11 @@ export function AdminConsole({ token, refreshMe }: { token: string; refreshMe: (
       ? 'Trading name, registered name, and firm address for precedent merge codes.'
       : tab === 'email'
       ? 'Org-wide e-mail integration (mailto vs Microsoft 365).'
-      : tab === 'deploy'
+      : tab === 'docusign'
+        ? 'DocuSign integration credentials and send options.'
+        : tab === 'portalForms'
+          ? 'Portal form templates sent manually to clients.'
+          : tab === 'deploy'
         ? 'Deploy, updates, and file storage usage.'
         : tab === 'audit'
         ? 'Activity and audit trail.'
@@ -1822,6 +1827,12 @@ export function AdminConsole({ token, refreshMe }: { token: string; refreshMe: (
           <button type="button" className={`navBtn ${tab === 'email' ? 'active' : ''}`} onClick={() => setTab('email')}>
             E-mail
           </button>
+          <button type="button" className={`navBtn ${tab === 'docusign' ? 'active' : ''}`} onClick={() => setTab('docusign')}>
+            DocuSign
+          </button>
+          <button type="button" className={`navBtn ${tab === 'portalForms' ? 'active' : ''}`} onClick={() => setTab('portalForms')}>
+            Portal forms
+          </button>
           <button type="button" className={`navBtn ${tab === 'deploy' ? 'active' : ''}`} onClick={() => setTab('deploy')}>
             Deploy
           </button>
@@ -1853,6 +1864,10 @@ export function AdminConsole({ token, refreshMe }: { token: string; refreshMe: (
           <AdminBilling token={token} />
         ) : tab === 'email' ? (
           <AdminEmail token={token} onSaved={() => void refreshMe()} />
+        ) : tab === 'docusign' ? (
+          <AdminDocuSign token={token} />
+        ) : tab === 'portalForms' ? (
+          <AdminPortalForms token={token} />
         ) : tab === 'deploy' ? (
           <AdminDeploy token={token} />
         ) : tab === 'submenus' ? (

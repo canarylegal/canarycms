@@ -192,11 +192,6 @@ def send_quote_via_portal(
     row = db.get(File, file_id)
     if row is None or row.case_id != case_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
-    if not row.is_portal_quote:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="This document is not marked as a portal quote. Mark it in Portal first.",
-        )
     if row.oo_compose_pending:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -222,14 +217,20 @@ def send_quote_via_portal(
     if access is None or not portal_access_is_active(access):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Portal access is not active for this contact")
 
-    grant = pick_portal_grant_for_case(db, case_id=case_id, contact_id=contact_id)
-    if grant is None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="This contact has no shared folders on this matter. Share a folder under Portal first.",
-        )
+    # Quotes are delivery-scoped — folder grants are optional (used for portal navigation when present).
+    grant = _grant_covering_file(
+        db,
+        case_id=case_id,
+        contact_id=contact_id,
+        folder_path=row.folder_path or "",
+    ) or pick_portal_grant_for_case(db, case_id=case_id, contact_id=contact_id)
 
     supersede_pending_quote_deliveries(db, file_id)
+
+    if not row.is_portal_quote:
+        row.is_portal_quote = True
+        row.updated_at = utcnow()
+        db.add(row)
 
     now = utcnow()
     delivery = QuotePortalDelivery(
@@ -237,7 +238,7 @@ def send_quote_via_portal(
         case_id=case_id,
         file_id=file_id,
         contact_id=contact_id,
-        grant_id=grant.id,
+        grant_id=grant.id if grant else None,
         sent_by_user_id=actor_user_id,
         file_version_at_send=int(row.version or 1),
         status=QuotePortalDeliveryStatus.pending,
@@ -257,7 +258,7 @@ def send_quote_via_portal(
         db,
         case_id=case_id,
         contact_id=contact_id,
-        grant_id=grant.id,
+        grant_id=grant.id if grant else None,
         action="portal.quote.sent",
         summary=f"Quote sent to {contact_display_name(contact)} via portal ({row.original_filename})",
     )
@@ -445,6 +446,55 @@ def portal_quote_delivery_view(
         "decline_reason": delivery.decline_reason,
         "responded_at": delivery.responded_at,
     }
+
+
+def list_pending_quote_deliveries_for_contact(
+    db: Session,
+    *,
+    contact_id: uuid.UUID,
+) -> list[QuotePortalDelivery]:
+    """Pending quotes for this contact across all matters (folder grants not required)."""
+    rows = (
+        db.execute(
+            select(QuotePortalDelivery)
+            .where(
+                QuotePortalDelivery.contact_id == contact_id,
+                QuotePortalDelivery.status == QuotePortalDeliveryStatus.pending,
+            )
+            .order_by(QuotePortalDelivery.sent_at.desc())
+        )
+        .scalars()
+        .all()
+    )
+    out: list[QuotePortalDelivery] = []
+    for delivery in rows:
+        if not delivery_can_respond(db, delivery):
+            continue
+        if db.get(File, delivery.file_id) is None:
+            continue
+        out.append(delivery)
+    return out
+
+
+def get_quote_delivery_file_for_contact(
+    db: Session,
+    *,
+    delivery_id: uuid.UUID,
+    contact_id: uuid.UUID,
+) -> tuple[QuotePortalDelivery, File]:
+    """File access for a sent quote (independent of folder grants)."""
+    delivery = get_delivery_for_contact(db, delivery_id, contact_id)
+    if delivery.status == QuotePortalDeliveryStatus.superseded:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This quote has been revised. Ask your firm for an updated copy.",
+        )
+    row = db.get(File, delivery.file_id)
+    if row is None or row.case_id != delivery.case_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Quote file not found")
+    if row.oo_compose_pending:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Quote file not found")
+    return delivery, row
 
 
 def list_pending_approvals_for_grant(

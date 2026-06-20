@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.audit import log_event
 from app.ledger_service import get_ledger
-from app.schemas import LedgerPostCreate
+from app.schemas import LedgerPairUpdate, LedgerPostCreate
 
 
 def _directions_label(
@@ -248,4 +248,51 @@ def format_ledger_directions(meta: dict[str, Any]) -> str:
         client_direction=meta.get("client_direction"),
         office_direction=meta.get("office_direction"),
         amount_pence=int(meta.get("amount_pence") or 0),
+    )
+
+
+def log_ledger_edit(
+    db: Session,
+    *,
+    actor_user_id: uuid.UUID,
+    case_id: uuid.UUID,
+    pair_id: uuid.UUID,
+    payload: LedgerPairUpdate,
+) -> None:
+    meta: dict[str, Any] = {
+        "case_id": str(case_id),
+        "pair_id": str(pair_id),
+    }
+    if payload.amount_pence is not None:
+        meta["amount_pence"] = payload.amount_pence
+    if payload.description is not None:
+        meta["description"] = payload.description
+    if payload.reference is not None:
+        meta["reference"] = payload.reference
+    if payload.anticipated_for_date is not None:
+        meta["anticipated_for_date"] = payload.anticipated_for_date.isoformat()
+    log_event(
+        db,
+        actor_user_id=actor_user_id,
+        action="ledger.edit",
+        entity_type="ledger_pair",
+        entity_id=str(pair_id),
+        meta=meta,
+    )
+
+
+def log_ledger_reject(
+    db: Session,
+    *,
+    actor_user_id: uuid.UUID,
+    case_id: uuid.UUID,
+    pair_id: uuid.UUID,
+) -> None:
+    log_event(
+        db,
+        actor_user_id=actor_user_id,
+        action="ledger.reject",
+        entity_type="ledger_pair",
+        entity_id=str(pair_id),
+        meta={"case_id": str(case_id), "pair_id": str(pair_id)},
     )
