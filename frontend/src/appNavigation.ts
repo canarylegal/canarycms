@@ -5,6 +5,7 @@ export type AppView =
   | 'case-menu'
   | 'contacts'
   | 'calendar'
+  | 'docusign'
   | 'accounts'
   | 'reports'
   | 'user-settings'
@@ -27,6 +28,7 @@ const STATIC_ROUTES: Record<string, AppView> = {
   '/calendar': 'calendar',
   '/tasks': 'tasks',
   '/contacts': 'contacts',
+  '/docusign': 'docusign',
   '/accounts': 'accounts',
   '/reports': 'reports',
   '/settings': 'user-settings',
@@ -116,6 +118,9 @@ export function buildAppNavigationUrl(state: AppNavState): string {
     case 'contacts':
       pathname = '/contacts'
       break
+    case 'docusign':
+      pathname = '/docusign'
+      break
     case 'accounts':
       pathname = '/accounts'
       break
@@ -158,16 +163,20 @@ export function readBootNavigation(initialTasksCaseFilter?: string | null): AppN
   return nav
 }
 
-/** Strip admin / accounts navigation when the signed-in user lacks access. */
+/** Strip admin / accounts / DocuSign navigation when unavailable. */
 export function sanitizeAppNavigation(
   nav: AppNavState,
   canAccessAdmin: boolean,
   canAccessAccounts: boolean = false,
+  docusignEnabled: boolean = false,
 ): AppNavState {
   if (!canAccessAdmin && nav.view === 'admin-console') {
     return { ...DEFAULT_NAV }
   }
   if (!canAccessAccounts && nav.view === 'accounts') {
+    return { ...DEFAULT_NAV }
+  }
+  if (!docusignEnabled && nav.view === 'docusign') {
     return { ...DEFAULT_NAV }
   }
   return nav

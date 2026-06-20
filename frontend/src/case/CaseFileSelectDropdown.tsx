@@ -4,6 +4,7 @@ import { SearchInput } from '../SearchInput'
 import { dropdownMenuClassName } from '../dropdownSizing'
 import { useDismissOnOutsidePointer } from '../useDismissOnOutsidePointer'
 import type { FileSummary } from '../types'
+import { quotePortalDeliveryHint } from '../quotePortalFile'
 import { DocMimeIcon } from './DocCells'
 
 type MenuPos = { top: number; left: number; width: number }
@@ -14,10 +15,14 @@ function fileSearchHaystack(f: FileSummary): string {
 
 function fileOptionHint(f: FileSummary): string | undefined {
   const folder = f.folder_path?.trim()
-  if (folder && f.is_portal_quote) return `${folder} · Portal quote`
+  const portalHint = f.quote_portal_delivery
+    ? quotePortalDeliveryHint(f.quote_portal_delivery)
+    : f.is_portal_quote
+      ? 'Quotable'
+      : undefined
+  if (folder && portalHint) return `${folder} · ${portalHint}`
   if (folder) return folder
-  if (f.is_portal_quote) return 'Portal quote'
-  return undefined
+  return portalHint
 }
 
 export function CaseFileSelectDropdown({

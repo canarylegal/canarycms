@@ -73,6 +73,35 @@ def test_merge_precedent_codes_applies_bold_in_docx() -> None:
     assert any("Bold matter" in r.text for r in bold_runs)
 
 
+def test_merge_precedent_codes_bold_multiline_org_block_single_run() -> None:
+    src = _docx_bytes_with_paragraph("[b:ORG_AND_ADDRESS_BLOCK]")
+    merged = merge_precedent_codes(
+        src,
+        {"[ORG_AND_ADDRESS_BLOCK]": "Acme Ltd\n10 High Street\nLondon"},
+    )
+    out = Document(io.BytesIO(merged))
+    para = out.paragraphs[0]
+    assert para.text == "Acme Ltd\n10 High Street\nLondon"
+    text_runs = [r for r in para.runs if r.text and r.text != "\n"]
+    assert len(text_runs) == 1
+    assert text_runs[0].bold is True
+    assert "Acme Ltd" in text_runs[0].text
+    assert "London" in text_runs[0].text
+
+
+def test_coalesce_split_modifier_token_across_runs() -> None:
+    doc = Document()
+    p = doc.add_paragraph()
+    p.add_run("[b:ORG_")
+    p.add_run("AND_ADDRESS_BLOCK]")
+    buf = io.BytesIO()
+    doc.save(buf)
+    merged = merge_precedent_codes(buf.getvalue(), {"[ORG_AND_ADDRESS_BLOCK]": "Bold block"})
+    out = Document(io.BytesIO(merged))
+    assert out.paragraphs[0].text == "Bold block"
+    assert any(r.bold for r in out.paragraphs[0].runs if r.text)
+
+
 def test_merge_precedent_codes_plain_code_unstyled() -> None:
     src = _docx_bytes_with_paragraph("[MATTER_DESCRIPTION]")
     merged = merge_precedent_codes(src, {"[MATTER_DESCRIPTION]": "Plain"})

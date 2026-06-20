@@ -6,6 +6,7 @@ import { canaryDocumentTitle } from './tabTitle'
 import { SingleSelectDropdown } from './SingleSelectDropdown'
 import type { ApiError } from './api'
 import { ConfirmModal } from './ConfirmModal'
+import { EditPendingLedgerModal } from './EditPendingLedgerModal'
 import { useModalDrag } from './useModalDrag'
 import type {
   CaseContactOut,
@@ -141,6 +142,15 @@ export function LedgerPage({ caseId, token }: Props) {
   const [wipEntries, setWipEntries] = useState<CaseTimeEntryOut[]>([])
   const [selectedWipIds, setSelectedWipIds] = useState<Set<string>>(new Set())
   const [voidInvoiceId, setVoidInvoiceId] = useState<string | null>(null)
+  const [editPair, setEditPair] = useState<{
+    pairId: string
+    amountPence: number
+    description: string
+    reference: string
+    isAnticipated: boolean
+    anticipatedForDate: string
+  } | null>(null)
+  const [rejectPairId, setRejectPairId] = useState<string | null>(null)
   const postModalDrag = useModalDrag(postOpen)
   const invoiceModalDrag = useModalDrag(invoiceModalOpen)
 
@@ -437,6 +447,34 @@ export function LedgerPage({ caseId, token }: Props) {
     } finally {
       setBusy(false)
     }
+  }
+
+  async function rejectPair(pairId: string) {
+    setBusy(true)
+    setError(null)
+    try {
+      await apiFetch(`/cases/${caseId}/ledger/pairs/${pairId}`, { method: 'DELETE', token })
+      setRejectPairId(null)
+      await load()
+    } catch (e) {
+      setError((e as ApiError).message ?? 'Could not reject posting')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  function openEditPair(pairId: string) {
+    const legs = entries.filter((e) => e.pair_id === pairId)
+    const leg = legs[0]
+    if (!leg) return
+    setEditPair({
+      pairId,
+      amountPence: leg.amount_pence,
+      description: ledgerDescriptionDisplay(leg),
+      reference: leg.reference ?? '',
+      isAnticipated: legs.some((e) => e.is_anticipated),
+      anticipatedForDate: leg.anticipated_for_date ?? '',
+    })
   }
 
   const selectedWipEntries = useMemo(
@@ -816,6 +854,7 @@ export function LedgerPage({ caseId, token }: Props) {
                   pending &&
                   approveRep.get(e.pair_id) === e.id &&
                   canApproveLedgerPair(e.pair_id, entries, ledgerPerm)
+                const showEdit = showApprove
                 const rc = runningById.get(e.id)
                 return (
                   <tr key={e.id} className={rowClass}>
@@ -828,14 +867,34 @@ export function LedgerPage({ caseId, token }: Props) {
                         {pending && !anticipated ? <span className="muted"> (pending)</span> : null}
                       </span>
                       {showApprove ? (
-                        <button
-                          type="button"
-                          className="btn ledgerApproveBtn"
-                          disabled={busy}
-                          onClick={() => void approvePair(e.pair_id)}
-                        >
-                          Approve
-                        </button>
+                        <span className="ledgerRowActions">
+                          {showEdit ? (
+                            <button
+                              type="button"
+                              className="btn ledgerApproveBtn"
+                              disabled={busy}
+                              onClick={() => openEditPair(e.pair_id)}
+                            >
+                              Edit
+                            </button>
+                          ) : null}
+                          <button
+                            type="button"
+                            className="btn ledgerApproveBtn"
+                            disabled={busy}
+                            onClick={() => void approvePair(e.pair_id)}
+                          >
+                            Approve
+                          </button>
+                          <button
+                            type="button"
+                            className="btn ledgerApproveBtn"
+                            disabled={busy}
+                            onClick={() => setRejectPairId(e.pair_id)}
+                          >
+                            Reject
+                          </button>
+                        </span>
                       ) : null}
                     </td>
                     <td className="ledgerRefCell ledgerColRef">{e.reference ?? ''}</td>
@@ -1504,8 +1563,36 @@ export function LedgerPage({ caseId, token }: Props) {
         danger
         busy={busy}
         onConfirm={() => void performVoidInvoice()}
-        onCancel={() => setVoidInvoiceId(null)}
+        onCancel={() => void setVoidInvoiceId(null)}
       />
+
+      <ConfirmModal
+        open={rejectPairId !== null}
+        title="Reject posting?"
+        message="Remove this draft posting from the ledger? It will not affect account balances."
+        confirmLabel="Reject"
+        cancelLabel="Cancel"
+        danger
+        busy={busy}
+        onConfirm={() => rejectPairId && void rejectPair(rejectPairId)}
+        onCancel={() => setRejectPairId(null)}
+      />
+
+      {editPair ? (
+        <EditPendingLedgerModal
+          caseId={caseId}
+          token={token}
+          pairId={editPair.pairId}
+          amountPence={editPair.amountPence}
+          description={editPair.description}
+          reference={editPair.reference}
+          isAnticipated={editPair.isAnticipated}
+          anticipatedForDate={editPair.anticipatedForDate}
+          open
+          onClose={() => setEditPair(null)}
+          onSaved={() => void load()}
+        />
+      ) : null}
     </div>
   )
 }

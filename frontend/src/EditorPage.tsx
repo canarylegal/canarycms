@@ -651,6 +651,30 @@ export default function EditorPage() {
     signalCaseFilesChanged(params.caseId)
   }
 
+  function notifyComposePublishedIfCase() {
+    if (params?.mode !== 'case') return
+    try {
+      window.opener?.postMessage(
+        { type: 'canary-compose-published', caseId: params.caseId, fileId: params.fileId },
+        window.location.origin,
+      )
+    } catch {
+      /* ignore */
+    }
+  }
+
+  function notifyComposeDiscardedIfCase() {
+    if (params?.mode !== 'case') return
+    try {
+      window.opener?.postMessage(
+        { type: 'canary-compose-discarded', caseId: params.caseId, fileId: params.fileId },
+        window.location.origin,
+      )
+    } catch {
+      /* ignore */
+    }
+  }
+
   function saveDocumentViaDownloadAs(format: string): Promise<void> {
     return new Promise((resolve, reject) => {
       const editor = apiRef.current
@@ -795,6 +819,7 @@ export default function EditorPage() {
       composePublishPending &&
       !hasUncommittedOoEditsRef.current &&
       !documentDirty
+    const wasComposePending = composePublishPending
     try {
       if (!composePublishOnly) {
         if (isPdfOoConfig(cfg)) {
@@ -831,6 +856,7 @@ export default function EditorPage() {
           token,
           json: { notify_portal_contacts: notifyPortalContacts },
         })
+        if (wasComposePending) notifyComposePublishedIfCase()
         notifyCaseFilesChangedIfCase()
       }
       hasUncommittedOoEditsRef.current = false
@@ -886,6 +912,7 @@ export default function EditorPage() {
   async function performCloseDiscardUnsaved() {
     if (!params || closing) return
     setClosing(true)
+    const wasComposePending = composePublishPending
     try {
       tearDownOnlyofficeEditor()
       if (params.mode === 'case') {
@@ -894,6 +921,7 @@ export default function EditorPage() {
             method: 'POST',
             token,
           })
+          if (wasComposePending) notifyComposeDiscardedIfCase()
         } catch {
           /* best-effort */
         }

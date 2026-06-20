@@ -10,11 +10,17 @@ from sqlalchemy.orm import Session
 
 from app.db import get_db
 from app.deps import get_current_user, require_case_access
-from app.ledger_audit import log_ledger_approve, log_ledger_post
+from app.ledger_audit import log_ledger_approve, log_ledger_edit, log_ledger_post, log_ledger_reject
 from app.ledger_export import build_case_ledger_workbook
-from app.ledger_service import approve_ledger_pair, get_ledger, post_transaction
+from app.ledger_service import (
+    approve_ledger_pair,
+    get_ledger,
+    post_transaction,
+    reject_ledger_pair_unapproved,
+    update_ledger_pair_unapproved,
+)
 from app.models import Case, User
-from app.schemas import LedgerOut, LedgerPostCreate
+from app.schemas import LedgerOut, LedgerPairUpdate, LedgerPostCreate
 
 router = APIRouter(prefix="/cases", tags=["ledger"])
 
@@ -84,3 +90,30 @@ def approve_posting(
     approve_ledger_pair(case_id, pair_id, user, db)
     db.commit()
     log_ledger_approve(db, actor_user_id=user.id, case_id=case_id, pair_id=pair_id)
+
+
+@router.patch("/{case_id}/ledger/pairs/{pair_id}", status_code=status.HTTP_204_NO_CONTENT)
+def edit_posting(
+    case_id: uuid.UUID,
+    pair_id: uuid.UUID,
+    payload: LedgerPairUpdate,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> None:
+    require_case_access(case_id, user, db)
+    update_ledger_pair_unapproved(case_id, pair_id, payload, user, db)
+    db.commit()
+    log_ledger_edit(db, actor_user_id=user.id, case_id=case_id, pair_id=pair_id, payload=payload)
+
+
+@router.delete("/{case_id}/ledger/pairs/{pair_id}", status_code=status.HTTP_204_NO_CONTENT)
+def reject_posting(
+    case_id: uuid.UUID,
+    pair_id: uuid.UUID,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> None:
+    require_case_access(case_id, user, db)
+    reject_ledger_pair_unapproved(case_id, pair_id, user, db)
+    db.commit()
+    log_ledger_reject(db, actor_user_id=user.id, case_id=case_id, pair_id=pair_id)

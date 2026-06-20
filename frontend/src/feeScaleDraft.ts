@@ -200,6 +200,14 @@ export function setVatRateLocal(detail: FeeScaleDetailOut, vat_rate_bps: number)
   return { ...detail, vat_rate_bps }
 }
 
+export function setScaleMetaLocal(
+  detail: FeeScaleDetailOut,
+  name: string,
+  reference: string,
+): FeeScaleDetailOut {
+  return { ...detail, name: name.trim(), reference: reference.trim() }
+}
+
 export async function persistDraftFeeScale(
   token: string,
   detail: FeeScaleDetailOut,
@@ -209,8 +217,8 @@ export async function persistDraftFeeScale(
     token,
     method: 'POST',
     json: {
-      name: draft.name,
-      reference: draft.reference,
+      name: detail.name.trim(),
+      reference: detail.reference.trim(),
       matter_head_type_id: draft.matter_head_type_id,
       matter_sub_type_id: draft.matter_sub_type_id,
       vat_rate_bps: detail.vat_rate_bps ?? 2000,

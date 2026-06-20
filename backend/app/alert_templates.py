@@ -204,6 +204,39 @@ def portal_contact_files_added(
     return subject, body, html
 
 
+def portal_form_sent(
+    *,
+    firm_name: str,
+    contact_name: str,
+    form_name: str,
+    matter_label: str,
+    portal_url: str,
+) -> tuple[str, str, str]:
+    subject = f"Form to complete — {_firm_line(firm_name)}"
+    body = "\n".join(
+        [
+            f"Dear {contact_name},",
+            "",
+            f"Please complete the form: {form_name}",
+            f"Matter: {matter_label}",
+            "",
+            f"Sign in to the client portal: {portal_url}",
+            "",
+            f"— {_firm_line(firm_name)}",
+        ]
+    )
+    html = _html_email(
+        firm_name=firm_name,
+        paragraphs=[
+            f"Dear {contact_name},",
+            f"Please complete the form: {form_name}",
+            f"Matter: {matter_label}",
+            f"Sign in to the client portal: {portal_url}",
+        ],
+    )
+    return subject, body, html
+
+
 def portal_quote_sent(
     *,
     firm_name: str,
@@ -304,6 +337,90 @@ def portal_login_otp(
             f"Your sign-in code is: {otp_code}",
             f"Enter this code at {portal_url} (valid for 15 minutes).",
             "If you did not request this code, you can ignore this e-mail.",
+        ],
+    )
+    return subject, body, html
+
+
+def docusign_sign_requested(
+    *,
+    firm_name: str,
+    recipient_name: str,
+    document_name: str,
+    matter_label: str,
+    sign_url: str,
+) -> tuple[str, str, str]:
+    subject = f"Please sign: {document_name}"
+    body = "\n".join(
+        [
+            f"Dear {recipient_name},",
+            "",
+            f"You have a document to sign for matter {matter_label}:",
+            document_name,
+            "",
+            f"Sign here: {sign_url}",
+            "",
+            f"— {_firm_line(firm_name)}",
+        ]
+    )
+    html = _html_email(
+        firm_name=firm_name,
+        paragraphs=[
+            f"Dear {recipient_name},",
+            f"You have a document to sign for matter {matter_label}: {document_name}",
+            f'Sign here: <a href="{_escape_html(sign_url)}">{_escape_html(sign_url)}</a>',
+        ],
+    )
+    return subject, body, html
+
+
+def docusign_sign_sent_staff(
+    *,
+    firm_name: str,
+    staff_name: str,
+    document_name: str,
+    sender_name: str,
+) -> tuple[str, str, str]:
+    subject = f"DocuSign sent: {document_name}"
+    body = "\n".join(
+        [
+            f"{sender_name} sent a document for signature via DocuSign:",
+            "",
+            document_name,
+            "",
+            f"— {_firm_line(firm_name)}",
+        ]
+    )
+    html = _html_email(
+        firm_name=firm_name,
+        paragraphs=[f"{sender_name} sent {document_name} for signature via DocuSign."],
+    )
+    return subject, body, html
+
+
+def docusign_sign_completed_staff(
+    *,
+    firm_name: str,
+    staff_name: str,
+    document_name: str,
+) -> tuple[str, str, str]:
+    subject = f"DocuSign completed: {document_name}"
+    body = "\n".join(
+        [
+            "A DocuSign envelope has been completed:",
+            "",
+            document_name,
+            "",
+            "The signed document has been filed on the matter in Canary.",
+            "",
+            f"— {_firm_line(firm_name)}",
+        ]
+    )
+    html = _html_email(
+        firm_name=firm_name,
+        paragraphs=[
+            f"The DocuSign envelope for {document_name} is complete.",
+            "The signed document has been filed on the matter in Canary.",
         ],
     )
     return subject, body, html

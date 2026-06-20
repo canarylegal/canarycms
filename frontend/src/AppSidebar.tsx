@@ -27,6 +27,7 @@ export type AppSidebarView =
   | 'case-menu'
   | 'contacts'
   | 'calendar'
+  | 'docusign'
   | 'accounts'
   | 'reports'
   | 'user-settings'
@@ -39,12 +40,14 @@ type Props = {
   onCalendar: () => void
   onTasks: () => void
   onContacts: () => void
+  onDocusign?: () => void
   onAccounts: () => void
   onReports: () => void
   onUserSettings: () => void
   onAdminConsole: () => void
   canAccessAccounts: boolean
   canAdminConsole: boolean
+  docusignEnabled?: boolean
   onLogout: () => void
 }
 
@@ -56,12 +59,14 @@ export function AppSidebar({
   onCalendar,
   onTasks,
   onContacts,
+  onDocusign,
   onAccounts,
   onReports,
   onUserSettings,
   onAdminConsole,
   canAccessAccounts,
   canAdminConsole,
+  docusignEnabled = false,
   onLogout,
 }: Props) {
   const [expanded, setExpanded] = useState(readSidebarExpanded)
@@ -126,6 +131,16 @@ export function AppSidebar({
           active={view === 'contacts'}
           onClick={onContacts}
         />
+        {docusignEnabled && onDocusign ? (
+          <PrimaryNavButton
+            layout="sidebar"
+            collapsed={!expanded}
+            name="docusign"
+            label="DocuSign"
+            active={view === 'docusign'}
+            onClick={onDocusign}
+          />
+        ) : null}
         {canAccessAccounts ? (
           <PrimaryNavButton
             layout="sidebar"

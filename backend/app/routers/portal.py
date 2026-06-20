@@ -13,6 +13,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, File as FastAPIFile, Form, HTTPException, Query, UploadFile, status
 from fastapi.responses import FileResponse
+from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from starlette.background import BackgroundTask
@@ -59,10 +60,26 @@ from app.portal_service import (
 )
 from app.quote_portal_service import (
     get_delivery_for_contact,
+    get_quote_delivery_file_for_contact,
     list_pending_approvals_for_grant,
+    list_pending_quote_deliveries_for_contact,
     portal_quote_delivery_view,
     respond_to_quote_delivery,
 )
+from app.docusign_signing_service import (
+    create_signing_redirect_url,
+    list_pending_for_contact,
+    portal_signing_view,
+    sync_envelope_status,
+)
+from app.portal_form_service import (
+    complete_submission,
+    get_submission_for_contact,
+    list_pending_for_contact as list_pending_forms_for_contact,
+    portal_form_detail,
+    upload_submission_file,
+)
+from app.models import DocusignSigningRequest, PortalFormSubmissionStatus
 from app.schemas import (
     PortalAuthIn,
     PortalAuthOut,
@@ -78,6 +95,11 @@ from app.schemas import (
     PortalQuoteExchangeOut,
     PortalQuoteRespondIn,
     PortalSessionOut,
+    PortalDocusignSigningOut,
+    PortalFormDetailOut,
+    PortalFormPendingOut,
+    PortalFormSubmitIn,
+    PortalFormSubmissionOut,
 )
 from app.alert_dispatch import AlertKind, dispatch_alert, portal_public_url
 from app.security import (
@@ -308,10 +330,6 @@ def portal_quote_exchange(payload: PortalQuoteExchangeIn, db: Session = Depends(
     from app.portal_case import require_case_portal_enabled
 
     require_case_portal_enabled(db, case_id)
-    grants = list_active_grants_for_contact(db, contact_id)
-    case_grants = [g for g in grants if g.case_id == case_id and grant_is_active(g)]
-    if not case_grants:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No shared folders on this matter")
 
     token = create_portal_session_token(contact_id=str(contact.id))
     log_event(
@@ -329,6 +347,16 @@ def portal_quote_exchange(payload: PortalQuoteExchangeIn, db: Session = Depends(
         grants=_grant_summaries(db, contact.id),
         quote=_quote_delivery_view(db, delivery),
     )
+
+
+@router.get("/quote-deliveries", response_model=list[PortalQuoteDeliveryViewOut])
+def portal_list_quote_deliveries(
+    contact: Contact = Depends(get_portal_contact),
+    db: Session = Depends(get_db),
+) -> list[PortalQuoteDeliveryViewOut]:
+    """Pending quotes for this contact (folder grants not required)."""
+    rows = list_pending_quote_deliveries_for_contact(db, contact_id=contact.id)
+    return [_quote_delivery_view(db, d) for d in rows]
 
 
 @router.get("/quote-deliveries/{delivery_id}", response_model=PortalQuoteDeliveryViewOut)
@@ -357,6 +385,52 @@ def portal_respond_quote_delivery(
         decline_reason=payload.decline_reason,
     )
     return _quote_delivery_view(db, updated)
+
+
+@router.get("/quote-deliveries/{delivery_id}/file")
+def portal_download_quote_delivery_file(
+    delivery_id: uuid.UUID,
+    download: bool = Query(default=False),
+    contact: Contact = Depends(get_portal_contact),
+    db: Session = Depends(get_db),
+):
+    """Download or open a quote file (delivery-scoped; no folder grant required)."""
+    delivery, row = get_quote_delivery_file_for_contact(
+        db,
+        delivery_id=delivery_id,
+        contact_id=contact.id,
+    )
+    ensure_files_root()
+    abs_path = (FILES_ROOT / row.storage_path).resolve()
+    if not str(abs_path).startswith(str(FILES_ROOT)) or not abs_path.exists():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File missing on disk")
+    log_event(
+        db,
+        actor_user_id=None,
+        action="portal.quote.file.download" if download else "portal.quote.file.open",
+        entity_type="file",
+        entity_id=str(row.id),
+        meta={
+            "contact_id": str(contact.id),
+            "case_id": str(delivery.case_id),
+            "delivery_id": str(delivery.id),
+        },
+    )
+    log_portal_activity(
+        db,
+        case_id=delivery.case_id,
+        contact_id=contact.id,
+        grant_id=delivery.grant_id,
+        action="portal.quote.file.download" if download else "portal.quote.file.open",
+        summary=f"{contact_display_name(contact)} {'downloaded' if download else 'opened'} {row.original_filename}",
+    )
+    db.commit()
+    return FileResponse(
+        path=str(abs_path),
+        media_type=row.mime_type,
+        filename=row.original_filename,
+        content_disposition_type="attachment" if download else "inline",
+    )
 
 
 def _file_out(grant: ContactPortalGrant, row: File) -> PortalFileOut:
@@ -410,7 +484,104 @@ def portal_browse_grant(
         subfolders=child_names,
         files=[_file_out(grant, f) for f in files_here if f.id not in pending_ids],
         pending_approvals=[PortalQuoteDeliveryViewOut(**portal_quote_delivery_view(db, d, grant=grant)) for d in pending],
+        pending_docusign_signings=[
+            PortalDocusignSigningOut(**portal_signing_view(db, req, contact_id=contact.id))
+            for req, _recip in list_pending_for_contact(db, contact.id)
+        ],
+        pending_portal_forms=_pending_forms_for_grant(db, contact=contact, grant=grant),
     )
+
+
+def _pending_forms_for_grant(db: Session, *, contact: Contact, grant: ContactPortalGrant) -> list[PortalFormPendingOut]:
+    out: list[PortalFormPendingOut] = []
+    for sub in list_pending_forms_for_contact(db, contact.id):
+        if sub.case_id != grant.case_id:
+            continue
+        detail = portal_form_detail(db, sub)
+        case = db.get(Case, sub.case_id)
+        label = ""
+        if case:
+            label = " — ".join(p for p in [case.case_number, case.client_name] if p)
+        out.append(
+            PortalFormPendingOut(
+                id=sub.id,
+                template_name=detail.get("template_name") or "",
+                template_reference=detail.get("template_reference") or "",
+                status=sub.status.value,
+                sent_at=sub.sent_at,
+                case_id=sub.case_id,
+                matter_label=label,
+            )
+        )
+    return out
+
+
+@router.get("/forms", response_model=list[PortalFormPendingOut])
+def portal_list_forms(
+    contact: Contact = Depends(get_portal_contact),
+    db: Session = Depends(get_db),
+) -> list[PortalFormPendingOut]:
+    out: list[PortalFormPendingOut] = []
+    for sub in list_pending_forms_for_contact(db, contact.id):
+        detail = portal_form_detail(db, sub)
+        case = db.get(Case, sub.case_id)
+        label = ""
+        if case:
+            label = " — ".join(p for p in [case.case_number, case.client_name] if p)
+        out.append(
+            PortalFormPendingOut(
+                id=sub.id,
+                template_name=detail.get("template_name") or "",
+                template_reference=detail.get("template_reference") or "",
+                status=sub.status.value,
+                sent_at=sub.sent_at,
+                case_id=sub.case_id,
+                matter_label=label,
+            )
+        )
+    return out
+
+
+@router.get("/forms/{submission_id}", response_model=PortalFormDetailOut)
+def portal_get_form(
+    submission_id: uuid.UUID,
+    contact: Contact = Depends(get_portal_contact),
+    db: Session = Depends(get_db),
+) -> PortalFormDetailOut:
+    sub = get_submission_for_contact(db, submission_id, contact.id)
+    if sub.status != PortalFormSubmissionStatus.pending:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Form is not pending")
+    return PortalFormDetailOut.model_validate(portal_form_detail(db, sub))
+
+
+@router.post("/forms/{submission_id}/submit", response_model=PortalFormSubmissionOut)
+def portal_submit_form(
+    submission_id: uuid.UUID,
+    payload: PortalFormSubmitIn,
+    contact: Contact = Depends(get_portal_contact),
+    db: Session = Depends(get_db),
+) -> PortalFormSubmissionOut:
+    from app.portal_form_service import submission_out
+
+    sub = get_submission_for_contact(db, submission_id, contact.id)
+    updated = complete_submission(db, submission=sub, contact=contact, responses_in=payload.responses or {})
+    db.commit()
+    db.refresh(updated)
+    return PortalFormSubmissionOut.model_validate(submission_out(db, updated))
+
+
+@router.post("/forms/{submission_id}/upload")
+async def portal_upload_form_file(
+    submission_id: uuid.UUID,
+    field_key: str = Query(..., min_length=1, max_length=80),
+    upload: UploadFile = FastAPIFile(...),
+    contact: Contact = Depends(get_portal_contact),
+    db: Session = Depends(get_db),
+) -> dict[str, str]:
+    sub = get_submission_for_contact(db, submission_id, contact.id)
+    result = await upload_submission_file(db, submission=sub, field_key=field_key, upload=upload, contact=contact)
+    db.commit()
+    return result
 
 
 @router.get("/grants/{grant_id}/files", response_model=list[PortalFileOut])
@@ -620,3 +791,40 @@ def portal_upload_file(
     )
     db.commit()
     return _file_out(grant, row)
+
+
+@router.get("/signing-requests", response_model=list[PortalDocusignSigningOut])
+def portal_list_signing_requests(
+    contact: Contact = Depends(get_portal_contact),
+    db: Session = Depends(get_db),
+) -> list[PortalDocusignSigningOut]:
+    out: list[PortalDocusignSigningOut] = []
+    for req, _recip in list_pending_for_contact(db, contact.id):
+        sync_envelope_status(db, req)
+        if req.status.value != "pending":
+            continue
+        out.append(PortalDocusignSigningOut(**portal_signing_view(db, req, contact_id=contact.id)))
+    return out
+
+
+class PortalSignStartOut(BaseModel):
+    url: str
+
+
+@router.post("/signing-requests/{request_id}/start", response_model=PortalSignStartOut)
+def portal_start_signing(
+    request_id: uuid.UUID,
+    contact: Contact = Depends(get_portal_contact),
+    db: Session = Depends(get_db),
+) -> PortalSignStartOut:
+    req = db.get(DocusignSigningRequest, request_id)
+    if req is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Signing request not found")
+    view = portal_signing_view(db, req, contact_id=contact.id)
+    from app.docusign_signing_service import get_recipient_by_sign_token
+
+    recipient = get_recipient_by_sign_token(db, view["sign_token"])
+    if recipient is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Recipient not found")
+    url = create_signing_redirect_url(db, recipient)
+    return PortalSignStartOut(url=url)

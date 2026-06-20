@@ -76,6 +76,24 @@ def assert_may_approve_anticipated_ledger(
     db: Session,
 ) -> None:
     """Anticipated postings are confirmed by users with post rights on each affected leg."""
+    assert_may_edit_ledger_pair(
+        user,
+        client_direction=client_direction,
+        office_direction=office_direction,
+        is_anticipated=True,
+        db=db,
+    )
+
+
+def assert_may_edit_ledger_pair(
+    user: User,
+    *,
+    client_direction: str | None,
+    office_direction: str | None,
+    is_anticipated: bool,
+    db: Session,
+) -> None:
+    """Edit/reject uses the same rights as approving the posting."""
     if user_effective_admin(user, db):
         return
     cat = _category(user, db)
@@ -84,15 +102,22 @@ def assert_may_approve_anticipated_ledger(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="No permission profile is assigned to your account. Ask an administrator to assign one.",
         )
-    if client_direction and not cat.perm_post_client:
+    if is_anticipated:
+        if client_direction and not cat.perm_post_client:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Your role is not permitted to edit client account postings.",
+            )
+        if office_direction and not cat.perm_post_office:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Your role is not permitted to edit office account postings.",
+            )
+        return
+    if not cat.perm_approve_payments:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Your role is not permitted to approve client account postings.",
-        )
-    if office_direction and not cat.perm_post_office:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Your role is not permitted to approve office account postings.",
+            detail="You do not have permission to edit ledger postings.",
         )
 
 

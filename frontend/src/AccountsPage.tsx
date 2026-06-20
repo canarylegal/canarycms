@@ -3,6 +3,8 @@ import { apiFetch } from './api'
 import { fetchCaseSearch } from './apiSearch'
 import { downloadInvoiceDocument, invoiceDownloadFilename } from './invoiceDownload'
 import type { ApiError } from './api'
+import { ConfirmModal } from './ConfirmModal'
+import { EditPendingLedgerModal } from './EditPendingLedgerModal'
 import type {
   CaseOut,
   ClientAccountReconciliationOut,
@@ -36,6 +38,7 @@ type ExceptionLedgerRow = {
   office_direction?: string | null
   is_anticipated?: boolean
   anticipated_for_date?: string | null
+  reference?: string | null
 }
 
 type ExceptionBalRow = {
@@ -180,6 +183,16 @@ export function AccountsPage({ token, me, onOpenCase, onOpenReportsReconcile }: 
     useState<PendingLedgerAccountFilter>('all')
   const [pendingLedgerDirectionFilter, setPendingLedgerDirectionFilter] =
     useState<PendingLedgerDirectionFilter>('all')
+  const [editLedger, setEditLedger] = useState<{
+    caseId: string
+    pairId: string
+    amountPence: number
+    description: string
+    reference: string
+    isAnticipated: boolean
+    anticipatedForDate: string
+  } | null>(null)
+  const [rejectLedger, setRejectLedger] = useState<{ caseId: string; pairId: string } | null>(null)
 
   const loadFeeEarners = useCallback(async () => {
     const rows = await apiFetch<FeeEarnerPick[]>('/reports/fee-earners', { token })
@@ -330,6 +343,36 @@ export function AccountsPage({ token, me, onOpenCase, onOpenReportsReconcile }: 
     } finally {
       setActionKey(null)
     }
+  }
+
+  async function rejectLedgerPosting(caseId: string, pairId: string) {
+    const key = `ledger:${caseId}:${pairId}`
+    setActionKey(key)
+    setErr(null)
+    try {
+      await apiFetch(`/cases/${caseId}/ledger/pairs/${pairId}`, { method: 'DELETE', token })
+      setRejectLedger(null)
+      await reloadQueue()
+      await reloadActivity()
+    } catch (e) {
+      setErr((e as ApiError)?.message ?? 'Could not reject posting')
+    } finally {
+      setActionKey(null)
+    }
+  }
+
+  function openEditLedger(row: ExceptionLedgerRow) {
+    const caseId = row.case_id ?? ''
+    if (!caseId) return
+    setEditLedger({
+      caseId,
+      pairId: row.pair_id,
+      amountPence: row.amount_pence,
+      description: row.description,
+      reference: row.reference ?? '',
+      isAnticipated: Boolean(row.is_anticipated),
+      anticipatedForDate: row.anticipated_for_date ?? '',
+    })
   }
 
   async function approveInvoice(caseId: string, invoiceId: string) {
@@ -533,14 +576,32 @@ export function AccountsPage({ token, me, onOpenCase, onOpenReportsReconcile }: 
                                     Ledger
                                   </button>
                                   {canApprovePendingRow(r) ? (
-                                    <button
-                                      type="button"
-                                      className="btn btn--small primary"
-                                      disabled={actionBusy}
-                                      onClick={() => void approveLedgerPosting(caseId, r.pair_id)}
-                                    >
-                                      Approve
-                                    </button>
+                                    <>
+                                      <button
+                                        type="button"
+                                        className="btn btn--small"
+                                        disabled={actionBusy}
+                                        onClick={() => openEditLedger(r)}
+                                      >
+                                        Edit
+                                      </button>
+                                      <button
+                                        type="button"
+                                        className="btn btn--small primary"
+                                        disabled={actionBusy}
+                                        onClick={() => void approveLedgerPosting(caseId, r.pair_id)}
+                                      >
+                                        Approve
+                                      </button>
+                                      <button
+                                        type="button"
+                                        className="btn btn--small"
+                                        disabled={actionBusy}
+                                        onClick={() => setRejectLedger({ caseId, pairId: r.pair_id })}
+                                      >
+                                        Reject
+                                      </button>
+                                    </>
                                   ) : null}
                                 </>
                               ) : null}
@@ -791,6 +852,39 @@ export function AccountsPage({ token, me, onOpenCase, onOpenReportsReconcile }: 
           ) : null}
         </div>
       </div>
+
+      <ConfirmModal
+        open={rejectLedger !== null}
+        title="Reject posting?"
+        message="Remove this draft posting from the ledger? It will not affect account balances."
+        confirmLabel="Reject"
+        cancelLabel="Cancel"
+        danger
+        busy={actionKey !== null}
+        onConfirm={() =>
+          rejectLedger && void rejectLedgerPosting(rejectLedger.caseId, rejectLedger.pairId)
+        }
+        onCancel={() => setRejectLedger(null)}
+      />
+
+      {editLedger ? (
+        <EditPendingLedgerModal
+          caseId={editLedger.caseId}
+          token={token}
+          pairId={editLedger.pairId}
+          amountPence={editLedger.amountPence}
+          description={editLedger.description}
+          reference={editLedger.reference}
+          isAnticipated={editLedger.isAnticipated}
+          anticipatedForDate={editLedger.anticipatedForDate}
+          open
+          onClose={() => setEditLedger(null)}
+          onSaved={() => {
+            void reloadQueue()
+            void reloadActivity()
+          }}
+        />
+      ) : null}
     </div>
   )
 }

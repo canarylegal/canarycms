@@ -3,6 +3,7 @@ import { apiFetch } from './api'
 import { BusyIcon } from './BusyIcon'
 import { CASE_FILES_STORAGE_KEY, signalCaseFilesChanged } from './caseFilesCrossTab'
 import { CaseDetail, type CaseOpenDocPanel } from './case/CaseDetail'
+import type { PendingCaseCompose } from './quoteEmailPrecedent'
 import type {
   CaseContactOut,
   CaseNoteOut,
@@ -18,8 +19,7 @@ type Props = {
   currentUser: UserPublic | null
   openDocPanel: CaseOpenDocPanel | null
   onOpenDocPanelConsumed: () => void
-  pendingComposeKind: 'letter' | 'email' | null
-  useQuoteLetterhead: boolean
+  pendingComposeKind: PendingCaseCompose | null
   onPendingComposeConsumed: () => void
   onCaseListInvalidate: () => void
   onTaskMenuInvalidate: () => void
@@ -34,7 +34,6 @@ export function CaseViewRoute({
   openDocPanel,
   onOpenDocPanelConsumed,
   pendingComposeKind,
-  useQuoteLetterhead,
   onPendingComposeConsumed,
   onCaseListInvalidate,
   onTaskMenuInvalidate,
@@ -147,7 +146,6 @@ export function CaseViewRoute({
       openDocPanel={openDocPanel}
       onOpenDocPanelConsumed={onOpenDocPanelConsumed}
       pendingComposeKind={pendingComposeKind}
-      useQuoteLetterhead={useQuoteLetterhead}
       onPendingComposeConsumed={onPendingComposeConsumed}
       onRefresh={refreshCaseDetailWithCrossTabSignal}
       onCaseListInvalidate={onCaseListInvalidate}

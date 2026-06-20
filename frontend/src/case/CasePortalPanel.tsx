@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { apiFetch } from '../api'
 import { SearchInput } from '../SearchInput'
 import { SendQuoteViaPortalModal } from '../SendQuoteViaPortalModal'
+import { SendPortalFormModal } from '../SendPortalFormModal'
 import { SingleSelectDropdown } from '../SingleSelectDropdown'
 import { CaseFileSelectDropdown } from './CaseFileSelectDropdown'
 import { DocMimeIcon } from './DocCells'
@@ -12,6 +13,7 @@ import type {
   CasePortalPreviewOut,
   CasePortalStaffUserOut,
   FileSummary,
+  PortalFormSubmissionOut,
   UserSummary,
 } from '../types'
 
@@ -59,6 +61,9 @@ export function CasePortalPanel({ token, caseId, onFilesChanged }: Props) {
   const [notice, setNotice] = useState<string | null>(null)
   const [previewContactOpen, setPreviewContactOpen] = useState(false)
   const [quoteFileId, setQuoteFileId] = useState('')
+  const [formSubmissions, setFormSubmissions] = useState<PortalFormSubmissionOut[]>([])
+  const [formSendOpen, setFormSendOpen] = useState(false)
+  const [formVoidBusyId, setFormVoidBusyId] = useState<string | null>(null)
 
   const previewContactOptions = useMemo(
     () =>
@@ -108,6 +113,15 @@ export function CasePortalPanel({ token, caseId, onFilesChanged }: Props) {
     }
   }, [caseId, token])
 
+  const loadFormSubmissions = useCallback(async () => {
+    try {
+      const rows = await apiFetch<PortalFormSubmissionOut[]>(`/cases/${caseId}/portal/forms/submissions`, { token })
+      setFormSubmissions(Array.isArray(rows) ? rows : [])
+    } catch {
+      setFormSubmissions([])
+    }
+  }, [caseId, token])
+
   const load = useCallback(async () => {
     setErr(null)
     const [activityRows, settings, previewRows] = await Promise.all([
@@ -118,12 +132,39 @@ export function CasePortalPanel({ token, caseId, onFilesChanged }: Props) {
     setActivity(activityRows)
     setSelectedStaff(settings.staff_users ?? [])
     setPreviewContacts(previewRows)
+    await loadFormSubmissions()
     setPreviewContactId((current) => {
       if (current && previewRows.some((row) => row.contact_id === current)) return current
       return previewRows[0]?.contact_id ?? ''
     })
     await loadFiles()
-  }, [caseId, token, loadFiles])
+  }, [caseId, token, loadFiles, loadFormSubmissions])
+
+  async function voidFormSubmission(submissionId: string) {
+    if (!window.confirm('Void this pending form? The client will no longer be able to submit it.')) return
+    setFormVoidBusyId(submissionId)
+    setErr(null)
+    try {
+      await apiFetch<PortalFormSubmissionOut>(`/cases/${caseId}/portal/forms/submissions/${submissionId}/void`, {
+        token,
+        method: 'POST',
+      })
+      await loadFormSubmissions()
+      await load()
+    } catch (e: unknown) {
+      setErr((e as { message?: string }).message ?? 'Could not void form')
+    } finally {
+      setFormVoidBusyId(null)
+    }
+  }
+
+  function formStatusLabel(status: string): string {
+    if (status === 'pending') return 'Awaiting client'
+    if (status === 'completed') return 'Completed'
+    if (status === 'voided') return 'Voided'
+    if (status === 'superseded') return 'Superseded'
+    return status
+  }
 
   useEffect(() => {
     void (async () => {
@@ -209,12 +250,12 @@ export function CasePortalPanel({ token, caseId, onFilesChanged }: Props) {
       })
       await loadFiles()
       onFilesChanged?.()
-      setNotice(isPortalQuote ? 'Document marked as portal quote.' : 'Portal quote mark removed.')
+      setNotice(isPortalQuote ? 'Document marked as quotable.' : 'Quotable mark removed.')
       if (!isPortalQuote && quoteFileId === file.id) {
         setQuoteFileId('')
       }
     } catch (e: unknown) {
-      setErr((e as { message?: string }).message ?? 'Could not update portal quote mark')
+      setErr((e as { message?: string }).message ?? 'Could not update quotable mark')
     } finally {
       setTagBusyFileId(null)
     }
@@ -301,8 +342,9 @@ export function CasePortalPanel({ token, caseId, onFilesChanged }: Props) {
           </button>
         </div>
         <p className="muted" style={{ margin: 0 }}>
-          Mark documents clients can accept or decline on the portal. New quotes from the quote wizard are marked
-          automatically; saving as PDF moves the mark to the PDF and clears it from the source document.
+          Mark documents as quotable so Canary treats them as quotes for portal accept/decline when you send them.
+          Sending via portal also marks the document automatically. Saving a marked quote as PDF moves the mark to the
+          PDF and clears it from the source document.
         </p>
         {filesBusy && quotableFiles.length === 0 ? <div className="muted">Loading documents…</div> : null}
         {!filesBusy && quotableFiles.length === 0 ? (
@@ -362,7 +404,7 @@ export function CasePortalPanel({ token, caseId, onFilesChanged }: Props) {
             {taggedQuoteFiles.length > 0 ? (
               <div className="stack" style={{ gap: 6 }}>
                 <div className="muted" style={{ fontSize: 13 }}>
-                  Marked portal quotes ({taggedQuoteFiles.length})
+                  Marked quotable ({taggedQuoteFiles.length})
                 </div>
                 {taggedQuoteFiles.map((f) => (
                   <div
@@ -387,13 +429,73 @@ export function CasePortalPanel({ token, caseId, onFilesChanged }: Props) {
                           ? `Awaiting ${f.quote_portal_delivery.contact_name}`
                           : f.quote_portal_delivery.status}
                       </span>
-                    ) : null}
+                    ) : (
+                      <span className="muted" style={{ fontSize: 13 }}>
+                        Not sent yet
+                      </span>
+                    )}
                   </div>
                 ))}
               </div>
             ) : null}
           </div>
         ) : null}
+      </section>
+
+      <section className="stack" style={{ gap: 8 }}>
+        <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+          <h4 style={{ margin: 0 }}>Portal forms</h4>
+          <div className="row" style={{ gap: 6 }}>
+            <button type="button" className="btn" disabled={busy} onClick={() => void loadFormSubmissions()}>
+              Refresh
+            </button>
+            <button type="button" className="btn primary" disabled={busy} onClick={() => setFormSendOpen(true)}>
+              Send form
+            </button>
+          </div>
+        </div>
+        <p className="muted" style={{ margin: 0 }}>
+          Send precedent-based information-gathering forms to portal contacts. Submissions are saved to matter history
+          and documents when the client completes the form.
+        </p>
+        {formSubmissions.length === 0 ? (
+          <div className="muted">No portal forms sent on this matter yet.</div>
+        ) : (
+          <div className="table">
+            <div className="tr th" style={{ gridTemplateColumns: '1fr 140px 120px 100px' }}>
+              <div className="thCell">Form</div>
+              <div className="thCell">Contact</div>
+              <div className="thCell">Status</div>
+              <div className="thCell">Actions</div>
+            </div>
+            {formSubmissions.map((row) => (
+              <div key={row.id} className="tr" style={{ gridTemplateColumns: '1fr 140px 120px 100px' }}>
+                <div className="td">
+                  <div>{row.template_name}</div>
+                  <div className="muted" style={{ fontSize: 12 }}>{formatWhen(row.sent_at)}</div>
+                </div>
+                <div className="td">{row.contact_name}</div>
+                <div className="td muted">{formStatusLabel(row.status)}</div>
+                <div className="td">
+                  {row.status === 'pending' ? (
+                    <button
+                      type="button"
+                      className="btn"
+                      disabled={formVoidBusyId === row.id}
+                      onClick={() => void voidFormSubmission(row.id)}
+                    >
+                      {formVoidBusyId === row.id ? 'Voiding…' : 'Void'}
+                    </button>
+                  ) : row.snapshot_filename ? (
+                    <span className="muted" style={{ fontSize: 12 }}>{row.snapshot_filename}</span>
+                  ) : (
+                    <span className="muted">—</span>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </section>
 
       {err ? <div className="error">{err}</div> : null}
@@ -503,6 +605,18 @@ export function CasePortalPanel({ token, caseId, onFilesChanged }: Props) {
         onSent={() => {
           void loadFiles()
           onFilesChanged?.()
+        }}
+      />
+    ) : null}
+    {formSendOpen ? (
+      <SendPortalFormModal
+        token={token}
+        caseId={caseId}
+        open
+        onClose={() => setFormSendOpen(false)}
+        onSent={() => {
+          void loadFormSubmissions()
+          void load()
         }}
       />
     ) : null}

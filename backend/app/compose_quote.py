@@ -2,23 +2,23 @@
 
 from __future__ import annotations
 
-import tempfile
 import uuid
-from pathlib import Path
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.compose_merge import _load_blank_letter_bytes
+from app.compose_merge import apply_quote_digital_letterhead_from_settings
+from app.global_precedent_loader import load_global_precedent_docx_bytes
 from app.docx_util import (
     QUOTE_MERGE_SLOT_COUNT,
+    apply_quote_table_presentation,
     build_merge_fields,
     ensure_docx_proofing_language_en_gb_bytes,
     format_gbp_pence,
     merge_precedent_codes,
     strip_empty_quote_table_rows,
     validate_docx_package_bytes,
-    write_blank_docx,
+    write_quote_template_docx_bytes,
 )
 from app.fee_scale_calc import ComputedQuoteLine, quote_column_totals
 from app.fee_scale_service import fee_scale_matches_case, preview_quote_draft, preview_quote_lines
@@ -26,23 +26,14 @@ from app.file_storage import FILES_ROOT
 from app.matter_contact_constants import CLIENT_SLUG, LAWYERS_SLUG, normalize_matter_contact_type_slug
 from app.models import Case as CaseModel
 from app.models import CaseContact, Contact as GlobalContact, FeeScale, File as DbFile, FirmSettings, User
+from app.precedent_constants import QUOTE_TEMPLATE_PRECEDENT_REFERENCE
 from app.schemas import ComposeQuoteIn, ComposeQuoteLineIn
 
 
-def _write_blank_docx_bytes() -> bytes:
-    fd, tmp_name = tempfile.mkstemp(suffix=".docx")
-    tmp = Path(tmp_name)
-    try:
-        import os
-
-        os.close(fd)
-        write_blank_docx(tmp)
-        return tmp.read_bytes()
-    finally:
-        tmp.unlink(missing_ok=True)
-
-
 def _load_quote_template_bytes(db: Session, firm_row: FirmSettings | None) -> bytes:
+    template = load_global_precedent_docx_bytes(db, QUOTE_TEMPLATE_PRECEDENT_REFERENCE)
+    if template is not None:
+        return template
     if firm_row and firm_row.quote_letterhead_file_id:
         lh_file = db.get(DbFile, firm_row.quote_letterhead_file_id)
         if lh_file is not None:
@@ -54,10 +45,7 @@ def _load_quote_template_bytes(db: Session, firm_row: FirmSettings | None) -> by
                     return raw
                 except ValueError:
                     pass
-    blank = _load_blank_letter_bytes(db)
-    if blank is not None:
-        return blank
-    return _write_blank_docx_bytes()
+    return write_quote_template_docx_bytes()
 
 
 def _line_vat_pence(ln: ComputedQuoteLine | ComposeQuoteLineIn) -> int | None:
@@ -327,5 +315,7 @@ def merge_compose_quote_docx_bytes(
         merge_all_clients=body.precedent_merge_all_clients,
     )
     docx_bytes = strip_empty_quote_table_rows(docx_bytes)
+    docx_bytes = apply_quote_table_presentation(docx_bytes, computed)
+    docx_bytes = apply_quote_digital_letterhead_from_settings(db, firm_row=firm_row, src_bytes=docx_bytes)
     docx_bytes = ensure_docx_proofing_language_en_gb_bytes(docx_bytes)
     return docx_bytes, mime

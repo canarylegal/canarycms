@@ -12,6 +12,10 @@ export const TASKS_MENU_TABLE_GRID =
 export const CONTACTS_TABLE_GRID =
   'minmax(0, 90fr) minmax(0, 70fr) minmax(0, 70fr) minmax(0, 70fr)'
 
+/** DocuSign envelope list: Sent · Status · Document · Recipients · Client · Reference · Sent by */
+export const DOCUSIGN_TABLE_GRID =
+  'minmax(0, 13fr) minmax(0, 11fr) minmax(0, 22fr) minmax(0, 22fr) minmax(0, 14fr) minmax(0, 8fr) minmax(0, 10fr)'
+
 /** Pixel defaults auto-filled on first deploy; treat as “not customized”. */
 export const LEGACY_AUTO_MAIN_MENU_COLUMN_WIDTHS = [110, 165, 300, 130, 225] as const
 export const LEGACY_AUTO_TASKS_MENU_COLUMN_WIDTHS = [90, 66, 90, 210, 300, 183, 73] as const

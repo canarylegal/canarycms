@@ -32,9 +32,14 @@ import {
   matterSubDropdownOptions,
 } from '../matterTypeOptions'
 import { SendQuoteViaPortalModal } from '../SendQuoteViaPortalModal'
+import { SendDocusignModal } from '../SendDocusignModal'
 import { TaskCreateModal } from '../TaskCreateModal'
 import { useExclusiveDropdownOpen } from '../useExclusiveDropdownOpen'
 import { QuoteWizard } from '../QuoteWizard'
+import { QuoteSendPrompt } from '../QuoteSendPrompt'
+import { useQuoteAwaitingSave, type QuoteAwaitingSaveContext } from '../quoteAwaitingSave'
+import { isQuotePortalSendCandidate } from '../quotePortalFile'
+import { QUOTE_EMAIL_PRECEDENT_REFERENCE, type PendingCaseCompose, type PrecedentPickerState } from '../quoteEmailPrecedent'
 import { CANARY_FOLLOW_UP_STANDARD_TASK_ID } from '../standardTasks'
 import { TextPromptModal } from '../TextPromptModal'
 import { LedgerPage } from '../LedgerPage'
@@ -299,7 +304,6 @@ export function CaseDetail({
   openDocPanel,
   onOpenDocPanelConsumed,
   pendingComposeKind,
-  useQuoteLetterhead,
   onPendingComposeConsumed,
 }: {
   token: string
@@ -318,9 +322,8 @@ export function CaseDetail({
   /** When set from the main menu, open this documents sub-panel once the matter has loaded. */
   openDocPanel?: CaseOpenDocPanel | null
   onOpenDocPanelConsumed?: () => void
-  /** After quote send flow: open letter or e-mail precedent picker once the matter has loaded. */
-  pendingComposeKind?: 'letter' | 'email' | null
-  useQuoteLetterhead?: boolean
+  /** After quote wizard: open letter or e-mail precedent picker once the matter has loaded. */
+  pendingComposeKind?: PendingCaseCompose | null
   onPendingComposeConsumed?: () => void
 }) {
   void _notes
@@ -349,6 +352,15 @@ export function CaseDetail({
   useEffect(() => {
     refreshPortalFolderGrants()
   }, [refreshPortalFolderGrants, files])
+  useEffect(() => {
+    if (!token) {
+      setDocusignEnabled(false)
+      return
+    }
+    void apiFetch<{ enabled: boolean }>('/docusign/options', { token })
+      .then((o) => setDocusignEnabled(Boolean(o.enabled)))
+      .catch(() => setDocusignEnabled(false))
+  }, [token])
   useEffect(() => {
     if (!busy) return
     lockBodyWaitCursor()
@@ -448,6 +460,8 @@ export function CaseDetail({
   const newMenuRef = useRef<HTMLDivElement | null>(null)
   const [newMenuOpen, setNewMenuOpen] = useState(false)
   const [quoteWizardOpen, setQuoteWizardOpen] = useState(false)
+  const [quoteAwaitingSave, setQuoteAwaitingSave] = useState<QuoteAwaitingSaveContext | null>(null)
+  const [quoteSendOpen, setQuoteSendOpen] = useState(false)
   const quoteWasCreatedRef = useRef(false)
   const closeQuoteWizard = useCallback(() => {
     setQuoteWizardOpen(false)
@@ -456,6 +470,19 @@ export function CaseDetail({
       onRefresh()
     }
   }, [onRefresh])
+
+  const onQuotePublished = useCallback(() => {
+    setQuoteSendOpen(true)
+  }, [])
+
+  const onQuoteDiscarded = useCallback(() => {
+    setQuoteAwaitingSave(null)
+  }, [])
+
+  useQuoteAwaitingSave(quoteAwaitingSave, {
+    onPublished: onQuotePublished,
+    onDiscarded: onQuoteDiscarded,
+  })
   const [taskCreateOpen, setTaskCreateOpen] = useState(false)
   const [taskCreatePreset, setTaskCreatePreset] = useState<{ standardTaskId?: string; title?: string } | null>(null)
   const [commentOpen, setCommentOpen] = useState(false)
@@ -527,6 +554,12 @@ export function CaseDetail({
   const [portalQuoteSend, setPortalQuoteSend] = useState<{ fileId: string; fileName: string; folderPath: string } | null>(
     null,
   )
+  const [docusignEnabled, setDocusignEnabled] = useState(false)
+  const [docusignSend, setDocusignSend] = useState<{
+    fileId: string
+    fileName: string
+    amendFromId?: string | null
+  } | null>(null)
   const [caseTaskMenuRows, setCaseTaskMenuRows] = useState<TaskMenuRow[]>([])
   const [caseTasksSearch, setCaseTasksSearch] = useState('')
   const [caseTasksLayoutOpen, setCaseTasksLayoutOpen] = useState(false)
@@ -554,15 +587,15 @@ export function CaseDetail({
   const [propertyLoading, setPropertyLoading] = useState(false)
   const [propertyDraft, setPropertyDraft] = useState<CasePropertyPayload | null>(null)
   const [propertyBaseline, setPropertyBaseline] = useState<CasePropertyPayload | null>(null)
-  const [precedentPicker, setPrecedentPicker] = useState<null | { kind: 'letter' | 'document' | 'email' }>(null)
+  const [precedentPicker, setPrecedentPicker] = useState<PrecedentPickerState | null>(null)
   const [precedentChoices, setPrecedentChoices] = useState<PrecedentOut[]>([])
   const [precedentCategories, setPrecedentCategories] = useState<PrecedentCategoryOut[]>([])
   const [precedentPickerCategoryId, setPrecedentPickerCategoryId] = useState<string | null>(null)
   const [precedentSearch, setPrecedentSearch] = useState('')
   const [precedentChosenId, setPrecedentChosenId] = useState<string | null>(null)
-  const [contactPickModal, setContactPickModal] = useState<null | { precedentId: string | null; composeKind: 'letter' | 'email' }>(
-    null,
-  )
+  const [contactPickModal, setContactPickModal] = useState<
+    null | { precedentId: string | null; composeKind: 'letter' | 'email'; attachmentFileIds?: string[] }
+  >(null)
   const [pickMatterCcId, setPickMatterCcId] = useState<string>('none') // 'none' | 'all_clients' | case contact id
   const [pickSelectedContact, setPickSelectedContact] = useState<ContactOut | null>(null)
   const [pickLinkGlobal, setPickLinkGlobal] = useState(false)
@@ -733,14 +766,16 @@ export function CaseDetail({
     setCaseDocPanel('documents')
   }, [caseId, selectedCaseId, openDocPanel, onOpenDocPanelConsumed])
 
-  const useQuoteLetterheadRef = useRef(false)
   useEffect(() => {
     if (!pendingComposeKind || !matterScopeId) return
-    useQuoteLetterheadRef.current = Boolean(useQuoteLetterhead)
     setCaseDocPanel('documents')
-    setPrecedentPicker({ kind: pendingComposeKind })
+    setPrecedentPicker({
+      kind: pendingComposeKind.kind,
+      preferPrecedentReference: pendingComposeKind.preferPrecedentReference,
+      attachmentFileId: pendingComposeKind.attachmentFileId,
+    })
     onPendingComposeConsumed?.()
-  }, [pendingComposeKind, matterScopeId, useQuoteLetterhead, onPendingComposeConsumed])
+  }, [pendingComposeKind, matterScopeId, onPendingComposeConsumed])
 
   useEffect(() => {
     if (!contactRowMenu) return
@@ -1034,6 +1069,7 @@ export function CaseDetail({
     const subId = caseDetail?.matter_sub_type_id
     const headOnlyId = caseDetail?.matter_head_type_id
     const kind = precedentPicker.kind
+    const preferReference = precedentPicker.preferPrecedentReference
     let cancelled = false
     async function load() {
       try {
@@ -1046,7 +1082,9 @@ export function CaseDetail({
             if (cancelled) return
             setPrecedentCategories([])
             setPrecedentChoices(list)
-            setPrecedentChosenId(null)
+            setPrecedentChosenId(
+              preferReference ? list.find((p) => p.reference === preferReference)?.id ?? null : null,
+            )
             setPrecedentSearch('')
             setPrecedentPickerCategoryId(null)
             return
@@ -1058,7 +1096,9 @@ export function CaseDetail({
           if (cancelled) return
           setPrecedentCategories([])
           setPrecedentChoices(list)
-          setPrecedentChosenId(null)
+          setPrecedentChosenId(
+            preferReference ? list.find((p) => p.reference === preferReference)?.id ?? null : null,
+          )
           setPrecedentSearch('')
           setPrecedentPickerCategoryId(null)
           return
@@ -1070,7 +1110,9 @@ export function CaseDetail({
         if (cancelled) return
         setPrecedentCategories(cats)
         setPrecedentChoices(list)
-        setPrecedentChosenId(null)
+        setPrecedentChosenId(
+          preferReference ? list.find((p) => p.reference === preferReference)?.id ?? null : null,
+        )
         setPrecedentSearch('')
         setPrecedentPickerCategoryId(cats.length > 0 ? cats[0].id : null)
       } catch {
@@ -1401,7 +1443,7 @@ export function CaseDetail({
     caseContactId?: string | null,
     globalContactId?: string | null,
     precedentMergeAllClients?: boolean,
-    composeOfficeRole?: 'letter' | 'document' | 'quote_letter' | null,
+    composeOfficeRole?: 'letter' | 'document' | null,
   ) {
     if (!caseId) return
     setBusy(true)
@@ -1432,7 +1474,8 @@ export function CaseDetail({
     caseContactId: string | null,
     globalContactId: string | null,
     precedentMergeAllClients: boolean,
-    composeOfficeRole?: 'letter' | 'document' | 'quote_letter' | null,
+    composeOfficeRole?: 'letter' | 'document' | null,
+    attachmentFileIds: string[] = [],
   ) {
     if (!caseId) return
     setBusy(true)
@@ -1448,14 +1491,18 @@ export function CaseDetail({
           global_contact_id: globalContactId,
           precedent_merge_all_clients: precedentMergeAllClients,
           compose_office_role: composeOfficeRole ?? null,
-          attachment_file_ids: [],
+          attachment_file_ids: attachmentFileIds,
         },
       })
       try {
         await apiFetch(`/mail-plugin/pending-send`, {
           token,
           method: 'PUT',
-          json: { case_id: caseId, ttl_seconds: 86400 },
+          json: {
+            case_id: caseId,
+            source_file_id: attachmentFileIds[0] ?? null,
+            ttl_seconds: 86400,
+          },
         })
       } catch {
         /* Best-effort: add-in send capture works without this if user files manually. */
@@ -1821,6 +1868,7 @@ export function CaseDetail({
   function confirmPrecedentPicker() {
     if (!precedentPicker) return
     const pid = precedentChosenId
+    const attachmentFileIds = precedentPicker.attachmentFileId ? [precedentPicker.attachmentFileId] : []
     if (precedentPicker.kind === 'document') {
       setPrecedentPicker(null)
       void composeOfficeFile(`Document — ${new Date().toISOString().slice(0, 10)}.docx`, pid, undefined, undefined, undefined, 'document')
@@ -1835,7 +1883,7 @@ export function CaseDetail({
     if (precedentPicker.kind === 'email') {
       setPrecedentPicker(null)
       resetContactPickForm()
-      setContactPickModal({ precedentId: pid, composeKind: 'email' })
+      setContactPickModal({ precedentId: pid, composeKind: 'email', attachmentFileIds })
       return
     }
   }
@@ -1894,7 +1942,8 @@ export function CaseDetail({
           caseContactIdForMerge,
           globalContactIdForMerge,
           mergeAllClients,
-          useQuoteLetterheadRef.current ? 'quote_letter' : 'letter',
+          'letter',
+          contactPickModal.attachmentFileIds ?? [],
         )
         setContactPickModal(null)
         resetContactPickForm()
@@ -1908,7 +1957,7 @@ export function CaseDetail({
         caseContactIdForMerge,
         globalContactIdForMerge,
         mergeAllClients,
-        useQuoteLetterheadRef.current ? 'quote_letter' : 'letter',
+        'letter',
       )
       setContactPickModal(null)
       resetContactPickForm()
@@ -3488,6 +3537,25 @@ export function CaseDetail({
           />
         ) : null}
 
+        {caseId && docusignSend ? (
+          <SendDocusignModal
+            token={token}
+            caseId={caseId}
+            fileId={docusignSend.fileId}
+            fileName={docusignSend.fileName}
+            caseContacts={caseContacts}
+            amendFromId={docusignSend.amendFromId ?? null}
+            existing={
+              files.find((x) => x.id === docusignSend.fileId)?.docusign_signing ?? null
+            }
+            open
+            onClose={() => setDocusignSend(null)}
+            onSent={() => {
+              onRefresh()
+            }}
+          />
+        ) : null}
+
         {caseId ? (
           <CaseEventCreateModal
             open={caseEventModalOpen}
@@ -3521,15 +3589,37 @@ export function CaseDetail({
             onQuoteCreated={() => {
               quoteWasCreatedRef.current = true
             }}
+            onAwaitingQuoteSave={setQuoteAwaitingSave}
+          />
+        ) : null}
+
+        {quoteAwaitingSave ? (
+          <QuoteSendPrompt
+            token={token}
+            caseId={quoteAwaitingSave.caseId}
+            fileId={quoteAwaitingSave.fileId}
+            preferredContactId={quoteAwaitingSave.preferredContactId}
+            portalEnabled={quoteAwaitingSave.portalEnabled}
+            open={quoteSendOpen}
+            onClose={() => {
+              setQuoteSendOpen(false)
+              setQuoteAwaitingSave(null)
+            }}
             onSendLetter={(_caseId) => {
-              useQuoteLetterheadRef.current = true
               setCaseDocPanel('documents')
               setPrecedentPicker({ kind: 'letter' })
             }}
             onSendEmail={(_caseId) => {
-              useQuoteLetterheadRef.current = true
               setCaseDocPanel('documents')
-              setPrecedentPicker({ kind: 'email' })
+              setPrecedentPicker({
+                kind: 'email',
+                preferPrecedentReference: QUOTE_EMAIL_PRECEDENT_REFERENCE,
+                attachmentFileId: quoteAwaitingSave?.fileId,
+              })
+            }}
+            onSent={() => {
+              quoteWasCreatedRef.current = true
+              onRefresh()
             }}
           />
         ) : null}
@@ -3690,8 +3780,20 @@ export function CaseDetail({
                     {contactPickModal.composeKind === 'email' ? (
                       <>
                         Optional: pick a recipient to pre-fill <strong>To</strong>. Compose opens in your mail program (or
-                        Outlook on the web) with merged subject and body. Attach case files with{' '}
-                        <strong>Compose from matter</strong> in the Canary Outlook or Thunderbird add-in.
+                        Outlook on the web) with merged subject and body.
+                        {(contactPickModal.attachmentFileIds?.length ?? 0) > 0 ? (
+                          <>
+                            {' '}
+                            Attach the quote using <strong>Compose from matter</strong> in the Canary Thunderbird or Outlook
+                            add-in (mailto links cannot attach files automatically).
+                          </>
+                        ) : (
+                          <>
+                            {' '}
+                            Attach case files with <strong>Compose from matter</strong> in the Canary Outlook or Thunderbird
+                            add-in.
+                          </>
+                        )}
                       </>
                     ) : (
                       <>
@@ -4115,7 +4217,7 @@ export function CaseDetail({
                       >
                         Download
                       </div>
-                      {f.is_portal_quote ? (
+                      {portalEnabled && isQuotePortalSendCandidate(f) ? (
                         <div
                           className="docContextItem"
                           onClick={() => {
@@ -4129,6 +4231,89 @@ export function CaseDetail({
                         >
                           Send quote via portal
                         </div>
+                      ) : null}
+                      {docusignEnabled && f.category !== 'system' ? (
+                        <>
+                          {f.docusign_signing?.status === 'pending' ? (
+                            <>
+                              <div
+                                className="docContextItem"
+                                onClick={() => {
+                                  setDocMenu(null)
+                                  void (async () => {
+                                    if (!caseId) return
+                                    setBusy(true)
+                                    try {
+                                      await apiFetch(`/cases/${caseId}/docusign/requests/${f.docusign_signing!.id}/resend`, {
+                                        token,
+                                        method: 'POST',
+                                      })
+                                      setActionNotice('Signing reminders sent.')
+                                    } catch (e: any) {
+                                      setActionErr(e?.message ?? 'Resend failed')
+                                    } finally {
+                                      setBusy(false)
+                                    }
+                                  })()
+                                }}
+                              >
+                                Resend DocuSign link
+                              </div>
+                              <div
+                                className="docContextItem"
+                                onClick={() => {
+                                  setDocMenu(null)
+                                  setDocusignSend({
+                                    fileId: f.id,
+                                    fileName: f.original_filename,
+                                    amendFromId: f.docusign_signing!.id,
+                                  })
+                                }}
+                              >
+                                Amend & re-send
+                              </div>
+                              <div
+                                className="docContextItem"
+                                onClick={() => {
+                                  setDocMenu(null)
+                                  void (async () => {
+                                    if (!caseId) return
+                                    const ok = await askConfirm({
+                                      title: 'Void DocuSign envelope',
+                                      message: 'Void this envelope? Recipients will no longer be able to sign.',
+                                    })
+                                    if (!ok) return
+                                    setBusy(true)
+                                    try {
+                                      await apiFetch(`/cases/${caseId}/docusign/requests/${f.docusign_signing!.id}/void`, {
+                                        token,
+                                        method: 'POST',
+                                        json: { reason: 'Voided from Canary' },
+                                      })
+                                      onRefresh()
+                                    } catch (e: any) {
+                                      setActionErr(e?.message ?? 'Void failed')
+                                    } finally {
+                                      setBusy(false)
+                                    }
+                                  })()
+                                }}
+                              >
+                                Void DocuSign envelope
+                              </div>
+                            </>
+                          ) : (
+                            <div
+                              className="docContextItem"
+                              onClick={() => {
+                                setDocMenu(null)
+                                setDocusignSend({ fileId: f.id, fileName: f.original_filename })
+                              }}
+                            >
+                              Send for signature (DocuSign)
+                            </div>
+                          )}
+                        </>
                       ) : null}
                     </>
                   )

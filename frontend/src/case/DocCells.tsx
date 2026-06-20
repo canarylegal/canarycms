@@ -1,4 +1,4 @@
-import type { FileSummary, QuotePortalDeliverySummary } from '../types'
+import type { FileSummary, QuotePortalDeliverySummary, DocusignSigningRequestOut } from '../types'
 
 /** Vimix-doder (regular / non-dark theme) icons in `public/icons/vimix/`. */
 export function DocMimeIcon({ mime, filename }: { mime: string; filename?: string }) {
@@ -142,19 +142,36 @@ function quotePortalStatusLabel(d: QuotePortalDeliverySummary): string {
   }
 }
 
+function docusignStatusLabel(d: DocusignSigningRequestOut): string {
+  switch (d.status) {
+    case 'pending':
+      return 'DocuSign — awaiting signature'
+    case 'completed':
+      return 'DocuSign — signed'
+    case 'declined':
+      return 'DocuSign — declined'
+    case 'voided':
+      return 'DocuSign — voided'
+    case 'expired':
+      return 'DocuSign — expired'
+    case 'error':
+      return d.status_detail ? `DocuSign — error: ${d.status_detail}` : 'DocuSign — error'
+    default:
+      return `DocuSign — ${d.status}`
+  }
+}
+
 export function DocsFileDescCell({ f, showPin }: { f: FileSummary; showPin: boolean }) {
   const sub = fileMailFromSubline(f)
-  const quoteSub = f.quote_portal_delivery
-    ? quotePortalStatusLabel(f.quote_portal_delivery)
-    : f.is_portal_quote
-      ? 'Portal quote'
-      : null
+  const quoteSub = f.quote_portal_delivery ? quotePortalStatusLabel(f.quote_portal_delivery) : null
+  const docusignSub = f.docusign_signing ? docusignStatusLabel(f.docusign_signing) : null
+  const statusSub = quoteSub || docusignSub
   const mailRoot = isCaseMailRootFile(f)
   const displayName = f.parent_file_id ? `↳ ${docsListDisplayFilename(f)}` : docsListDisplayFilename(f)
   return (
-    <div className={sub || quoteSub ? 'docsDescWrapper docsDescWrapper--hasSub' : 'docsDescWrapper'}>
+    <div className={sub || statusSub ? 'docsDescWrapper docsDescWrapper--hasSub' : 'docsDescWrapper'}>
       <div className="docsDescCell">
-        <div className={sub || quoteSub ? 'docsDescRow docsDescRow--hasSub' : 'docsDescRow'}>
+        <div className={sub || statusSub ? 'docsDescRow docsDescRow--hasSub' : 'docsDescRow'}>
           {showPin ? (
             <span className="docsPinIcon">
               <DocPinIcon />
@@ -171,6 +188,7 @@ export function DocsFileDescCell({ f, showPin }: { f: FileSummary; showPin: bool
             <span className="docsDescName">{displayName}</span>
             {sub ? <div className="docsDescSub muted">{sub}</div> : null}
             {quoteSub ? <div className="docsDescSub muted portalQuoteFileStatus">{quoteSub}</div> : null}
+            {docusignSub && !quoteSub ? <div className="docsDescSub muted portalQuoteFileStatus">{docusignSub}</div> : null}
           </div>
         </div>
       </div>

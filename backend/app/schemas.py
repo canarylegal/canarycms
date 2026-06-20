@@ -912,7 +912,7 @@ class ComposeOfficeDocumentIn(BaseModel):
     # When ``precedent_id`` is omitted: ``letter`` resolves to the reserved ``BLANK_LETTER`` precedent;
     # ``document`` keeps a minimal empty .docx. If omitted, the server infers from ``original_filename``
     # (``Letter — …`` vs ``Document — …`` as produced by the web UI).
-    compose_office_role: Literal["letter", "document", "quote_letter"] | None = None
+    compose_office_role: Literal["letter", "document"] | None = None
     # Contact for precedent code merge; one of these may be supplied
     case_contact_id: uuid.UUID | None = None   # CaseContact row id
     global_contact_id: uuid.UUID | None = None  # global Contact row id
@@ -930,7 +930,7 @@ class CaseEmailDraftM365In(BaseModel):
     case_contact_id: uuid.UUID | None = None
     global_contact_id: uuid.UUID | None = None
     precedent_merge_all_clients: bool = False
-    compose_office_role: Literal["letter", "document", "quote_letter"] | None = None
+    compose_office_role: Literal["letter", "document"] | None = None
     attachment_file_ids: list[uuid.UUID] = Field(default_factory=list)
 
 
@@ -1707,6 +1707,28 @@ class LedgerPostCreate(BaseModel):
     model_config = {"extra": "forbid"}
 
 
+class LedgerPairUpdate(BaseModel):
+    """Edit an unapproved or anticipated posting before approval."""
+
+    amount_pence: int | None = Field(default=None, gt=0)
+    description: str | None = Field(default=None, min_length=1, max_length=500)
+    reference: str | None = Field(default=None, max_length=200)
+    anticipated_for_date: date | None = None
+
+    model_config = {"extra": "forbid"}
+
+    @model_validator(mode="after")
+    def at_least_one_field(self) -> LedgerPairUpdate:
+        if (
+            self.amount_pence is None
+            and self.description is None
+            and self.reference is None
+            and self.anticipated_for_date is None
+        ):
+            raise ValueError("At least one field is required.")
+        return self
+
+
 class LedgerEntryOut(BaseModel):
     id: uuid.UUID
     pair_id: uuid.UUID
@@ -2298,6 +2320,108 @@ class PortalBrowseOut(BaseModel):
     subfolders: list[str]
     files: list[PortalFileOut]
     pending_approvals: list[PortalQuoteDeliveryViewOut] = []
+    pending_docusign_signings: list[PortalDocusignSigningOut] = []
+    pending_portal_forms: list["PortalFormPendingOut"] = []
+
+
+class PortalFormTemplateFieldIn(BaseModel):
+    field_key: str = Field(min_length=1, max_length=80)
+    label: str = Field(min_length=1, max_length=500)
+    field_type: Literal["section", "text", "textarea", "date", "select", "file"]
+    help_text: str | None = Field(default=None, max_length=2000)
+    required: bool = False
+    sort_order: int = 0
+    select_options: list[str] = Field(default_factory=list)
+
+
+class PortalFormTemplateFieldOut(PortalFormTemplateFieldIn):
+    id: uuid.UUID
+
+
+class PortalFormTemplateOut(BaseModel):
+    id: uuid.UUID
+    name: str
+    reference: str
+    description: str | None = None
+    matter_head_type_id: uuid.UUID | None = None
+    matter_sub_type_id: uuid.UUID | None = None
+    scope_summary: str = ""
+    field_count: int = 0
+    created_at: datetime
+    updated_at: datetime
+
+
+class PortalFormTemplateDetailOut(PortalFormTemplateOut):
+    fields: list[PortalFormTemplateFieldOut] = []
+
+
+class PortalFormTemplateCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=300)
+    reference: str = Field(min_length=1, max_length=200)
+    description: str | None = Field(default=None, max_length=5000)
+    matter_head_type_id: uuid.UUID | None = None
+    matter_sub_type_id: uuid.UUID | None = None
+    fields: list[PortalFormTemplateFieldIn] = Field(default_factory=list)
+
+
+class PortalFormTemplateUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=300)
+    reference: str | None = Field(default=None, min_length=1, max_length=200)
+    description: str | None = Field(default=None, max_length=5000)
+    matter_head_type_id: uuid.UUID | None = None
+    matter_sub_type_id: uuid.UUID | None = None
+    fields: list[PortalFormTemplateFieldIn] | None = None
+
+
+class PortalFormSendIn(BaseModel):
+    template_id: uuid.UUID
+    contact_id: uuid.UUID
+
+
+class PortalFormSubmissionOut(BaseModel):
+    id: uuid.UUID
+    case_id: uuid.UUID
+    template_id: uuid.UUID
+    template_name: str
+    template_reference: str
+    contact_id: uuid.UUID
+    contact_name: str
+    status: str
+    responses: dict = {}
+    snapshot_file_id: uuid.UUID | None = None
+    snapshot_filename: str = ""
+    sent_at: datetime
+    completed_at: datetime | None = None
+    voided_at: datetime | None = None
+
+
+class PortalFormFieldOut(BaseModel):
+    field_key: str
+    label: str
+    field_type: str
+    help_text: str | None = None
+    required: bool
+    sort_order: int
+    select_options: list[str] = []
+
+
+class PortalFormPendingOut(BaseModel):
+    id: uuid.UUID
+    template_name: str
+    template_reference: str
+    status: str
+    sent_at: datetime
+    case_id: uuid.UUID | None = None
+    matter_label: str = ""
+
+
+class PortalFormDetailOut(PortalFormSubmissionOut):
+    description: str | None = None
+    fields: list[PortalFormFieldOut] = []
+
+
+class PortalFormSubmitIn(BaseModel):
+    responses: dict = Field(default_factory=dict)
 
 
 class PortalOtpRequestIn(BaseModel):
@@ -2498,4 +2622,137 @@ class ContactPortalGrantUpdateIn(BaseModel):
     can_download: bool | None = None
     can_upload: bool | None = None
     expires_at: datetime | None = None
+
+
+class DocusignIntegrationSettingsOut(BaseModel):
+    enabled: bool
+    use_demo: bool
+    allow_tier_a: bool
+    allow_tier_b: bool
+    allow_tier_c: bool
+    allow_wes: bool
+    allow_qes: bool
+    account_id: str | None = None
+    integration_key: str | None = None
+    user_id: str | None = None
+    rsa_private_key_configured: bool = False
+    connect_hmac_secret_configured: bool = False
+    api_base_uri: str | None = None
+    configured: bool = False
+    cost_standard_pence: int | None = None
+    cost_wes_pence: int | None = None
+    cost_qes_pence: int | None = None
+
+
+class DocusignIntegrationSettingsUpdate(BaseModel):
+    enabled: bool | None = None
+    use_demo: bool | None = None
+    allow_tier_a: bool | None = None
+    allow_tier_b: bool | None = None
+    allow_tier_c: bool | None = None
+    allow_wes: bool | None = None
+    allow_qes: bool | None = None
+    account_id: str | None = Field(default=None, max_length=2000)
+    integration_key: str | None = Field(default=None, max_length=2000)
+    user_id: str | None = Field(default=None, max_length=2000)
+    rsa_private_key: str | None = Field(default=None, max_length=20000)
+    connect_hmac_secret: str | None = Field(default=None, max_length=2000)
+    api_base_uri: str | None = Field(default=None, max_length=2000)
+    cost_standard_pence: int | None = Field(default=None, ge=0)
+    cost_wes_pence: int | None = Field(default=None, ge=0)
+    cost_qes_pence: int | None = Field(default=None, ge=0)
+
+
+class DocusignTemplateOut(BaseModel):
+    template_id: str
+    name: str
+    description: str | None = None
+    roles: list[str] = []
+
+
+class DocusignSendRecipientIn(BaseModel):
+    name: str = Field(min_length=1, max_length=300)
+    email: EmailStr
+    routing_order: int = Field(default=1, ge=1, le=99)
+    role_name: str | None = Field(default=None, max_length=100)
+    case_contact_id: uuid.UUID | None = None
+    contact_id: uuid.UUID | None = None
+
+
+class DocusignSendIn(BaseModel):
+    source_file_id: uuid.UUID | None = None
+    template_id: str | None = Field(default=None, max_length=64)
+    envelope_subject: str | None = Field(default=None, max_length=500)
+    document_tier: Literal["a", "b", "c"] = "a"
+    signature_level: Literal["standard", "wes", "qes"] = "standard"
+    recipients: list[DocusignSendRecipientIn] = Field(min_length=1, max_length=20)
+
+
+class DocusignVoidIn(BaseModel):
+    reason: str | None = Field(default=None, max_length=500)
+
+
+class DocusignSigningRecipientOut(BaseModel):
+    id: uuid.UUID
+    name: str
+    email: str
+    routing_order: int
+    role_name: str | None = None
+    status: str
+    completed_at: datetime | None = None
+
+
+class DocusignSigningRequestOut(BaseModel):
+    id: uuid.UUID
+    case_id: uuid.UUID
+    source_file_id: uuid.UUID | None = None
+    source_filename: str = ""
+    docusign_envelope_id: str | None = None
+    docusign_template_id: str | None = None
+    envelope_subject: str
+    document_tier: str
+    signature_level: str
+    status: str
+    status_detail: str | None = None
+    signed_file_id: uuid.UUID | None = None
+    certificate_file_id: uuid.UUID | None = None
+    completed_at: datetime | None = None
+    voided_at: datetime | None = None
+    created_at: datetime | None = None
+    recipients: list[DocusignSigningRecipientOut] = []
+
+
+class DocusignStaffOptionsOut(BaseModel):
+    enabled: bool
+    allow_tier_a: bool
+    allow_tier_b: bool
+    allow_tier_c: bool
+    allow_wes: bool
+    allow_qes: bool
+
+
+class DocusignMenuRowOut(BaseModel):
+    id: uuid.UUID
+    case_id: uuid.UUID
+    case_number: str
+    client_name: str | None = None
+    matter_description: str = ""
+    envelope_subject: str
+    source_filename: str = ""
+    status: str
+    status_detail: str | None = None
+    sent_by_display_name: str | None = None
+    recipients_summary: str = ""
+    created_at: datetime
+    completed_at: datetime | None = None
+    voided_at: datetime | None = None
+
+
+class PortalDocusignSigningOut(BaseModel):
+    id: uuid.UUID
+    envelope_subject: str
+    status: str
+    can_sign: bool
+    recipient_id: uuid.UUID
+    sign_token: str
 

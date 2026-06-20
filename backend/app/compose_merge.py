@@ -70,7 +70,44 @@ def _effective_compose_office_role(body: ComposeOfficeDocumentIn) -> str | None:
 
 
 def _is_letter_compose_role(role: str | None) -> bool:
-    return role in ("letter", "quote_letter")
+    return role == "letter"
+
+
+def _read_firm_letterhead_file_bytes(db: Session, file_id: uuid.UUID | None) -> bytes | None:
+    if file_id is None:
+        return None
+    lh_file = db.get(DbFile, file_id)
+    if lh_file is None:
+        return None
+    lh_abs = (FILES_ROOT / lh_file.storage_path).resolve()
+    if not str(lh_abs).startswith(str(FILES_ROOT)) or not lh_abs.is_file():
+        return None
+    try:
+        return lh_abs.read_bytes()
+    except OSError as exc:
+        log.warning("letterhead file read failed: %s", exc)
+        return None
+
+
+def apply_quote_digital_letterhead_from_settings(
+    db: Session,
+    *,
+    firm_row: FirmSettings | None,
+    src_bytes: bytes,
+) -> bytes:
+    """Overlay quote letterhead headers/footers onto the quote document body (fee-scale compose)."""
+    if firm_row is None:
+        return src_bytes
+    if firm_row.quote_letterhead_style != LetterheadStyle.digital:
+        return src_bytes
+    lh_bytes = _read_firm_letterhead_file_bytes(db, firm_row.quote_letterhead_file_id)
+    if lh_bytes is None:
+        return src_bytes
+    try:
+        return apply_digital_letterhead_headers_footers(src_bytes, lh_bytes)
+    except Exception as lh_exc:
+        log.warning("quote digital letterhead merge failed: %s", lh_exc)
+        return src_bytes
 
 
 def _apply_configured_digital_letterhead(
@@ -89,19 +126,15 @@ def _apply_configured_digital_letterhead(
     role = _effective_compose_office_role(body)
     if not _is_letter_compose_role(role):
         return src_bytes
-    use_quote_lh = role == "quote_letter"
-    lh_style = firm_row.quote_letterhead_style if use_quote_lh else firm_row.letterhead_style
-    lh_file_id = firm_row.quote_letterhead_file_id if use_quote_lh else firm_row.letterhead_file_id
+    lh_style = firm_row.letterhead_style
+    lh_file_id = firm_row.letterhead_file_id
     if lh_style != LetterheadStyle.digital or lh_file_id is None:
         return src_bytes
-    lh_file = db.get(DbFile, lh_file_id)
-    if lh_file is None:
-        return src_bytes
-    lh_abs = (FILES_ROOT / lh_file.storage_path).resolve()
-    if not str(lh_abs).startswith(str(FILES_ROOT)) or not lh_abs.is_file():
+    lh_bytes = _read_firm_letterhead_file_bytes(db, lh_file_id)
+    if lh_bytes is None:
         return src_bytes
     try:
-        return apply_digital_letterhead_headers_footers(src_bytes, lh_abs.read_bytes())
+        return apply_digital_letterhead_headers_footers(src_bytes, lh_bytes)
     except Exception as lh_exc:
         log.warning("digital letterhead merge failed: %s", lh_exc)
         return src_bytes
