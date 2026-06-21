@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Canary — Compose from matter</title>
-    <link rel="stylesheet" href="./styles.css?v=1.0.8.1" />
+    <link rel="stylesheet" href="./styles.css?v=1.0.11.0" />
   </head>
   <body>
     <div class="stack">
@@ -12,23 +12,10 @@
 
       <div id="panel-pre-auth" class="panel">
         <p class="muted">
-          Sign in once to merge a precedent, pick a recipient, and attach files from a Canary matter to this message.
-          No Microsoft Graph required.
+          Sign in once via Canary&apos;s secure sign-in page to merge a precedent, pick a recipient, and attach files from a Canary matter to this message. Passkeys and authenticator apps are supported. No Microsoft Graph required.
         </p>
-        <label class="field">
-          <span>Email</span>
-          <input id="login-email" type="email" autocomplete="username" />
-        </label>
-        <label class="field">
-          <span>Password</span>
-          <input id="login-password" type="password" autocomplete="current-password" />
-        </label>
-        <label class="field">
-          <span>2FA code (if enabled)</span>
-          <input id="login-totp" type="text" inputmode="numeric" autocomplete="one-time-code" placeholder="optional" />
-        </label>
         <div id="login-err" class="error" style="display: none"></div>
-        <button type="button" id="btn-sign-in" class="primary">Sign in</button>
+        <button type="button" id="btn-sign-in" class="primary">Connect to Canary…</button>
       </div>
 
       <div id="panel-post-auth" class="panel panel-hidden">
@@ -89,8 +76,8 @@
     </div>
 
     <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
-    <script src="./outlook-shared.js?v=1.0.10.1"></script>
-    <script src="./compose-apply.js?v=1.0.10.1"></script>
-    <script src="./compose-pane.js?v=1.0.10.1"></script>
+    <script src="./outlook-shared.js?v=1.0.11.0"></script>
+    <script src="./compose-apply.js?v=1.0.11.0"></script>
+    <script src="./compose-pane.js?v=1.0.11.0"></script>
   </body>
 </html>

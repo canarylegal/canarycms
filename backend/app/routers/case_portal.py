@@ -89,6 +89,20 @@ def _grant_for_exact_folder(
     return None
 
 
+def _portal_access_by_contact_ids(
+    db: Session,
+    contact_ids: list[uuid.UUID],
+) -> dict[uuid.UUID, ContactPortalAccess]:
+    if not contact_ids:
+        return {}
+    rows = (
+        db.execute(select(ContactPortalAccess).where(ContactPortalAccess.contact_id.in_(contact_ids)))
+        .scalars()
+        .all()
+    )
+    return {row.contact_id: row for row in rows}
+
+
 def _preview_contacts_for_case(db: Session, case_id: uuid.UUID) -> list[CasePortalPreviewContactOut]:
     case_contacts = (
         db.execute(select(CaseContact).where(CaseContact.case_id == case_id).order_by(CaseContact.name.asc()))
@@ -96,8 +110,8 @@ def _preview_contacts_for_case(db: Session, case_id: uuid.UUID) -> list[CasePort
         .all()
     )
     grants = db.execute(select(ContactPortalGrant).where(ContactPortalGrant.case_id == case_id)).scalars().all()
-    access_rows = db.execute(select(ContactPortalAccess)).scalars().all()
-    access_by_contact = {row.contact_id: row for row in access_rows}
+    contact_ids = [cc.contact_id for cc in case_contacts if cc.contact_id]
+    access_by_contact = _portal_access_by_contact_ids(db, contact_ids)
     grant_counts: dict[uuid.UUID, int] = {}
     for grant in grants:
         if not grant_is_active(grant):
@@ -188,8 +202,8 @@ def list_case_portal_folder_share_contacts(
         .all()
     )
     grants = db.execute(select(ContactPortalGrant).where(ContactPortalGrant.case_id == case_id)).scalars().all()
-    access_rows = db.execute(select(ContactPortalAccess)).scalars().all()
-    access_by_contact = {row.contact_id: row for row in access_rows}
+    contact_ids = [cc.contact_id for cc in case_contacts if cc.contact_id]
+    access_by_contact = _portal_access_by_contact_ids(db, contact_ids)
 
     out: list[CasePortalFolderShareContactOut] = []
     seen: set[uuid.UUID] = set()

@@ -68,6 +68,28 @@ if (!el) {
     void import('./PortalPage.tsx').then(({ default: PortalPage }) => {
       root.render(<PortalPage />)
     })
+  } else if (window.location.pathname === '/connect/mail-plugin/callback') {
+    document.documentElement.style.zoom = '1'
+    void import('./MailPluginConnectCallbackPage.tsx').then(({ default: MailPluginConnectCallbackPage }) => {
+      root.render(
+        <StrictMode>
+          <AppErrorBoundary>
+            <MailPluginConnectCallbackPage />
+          </AppErrorBoundary>
+        </StrictMode>,
+      )
+    })
+  } else if (window.location.pathname === '/connect/mail-plugin') {
+    document.documentElement.style.zoom = '1'
+    void import('./MailPluginConnectPage.tsx').then(({ default: MailPluginConnectPage }) => {
+      root.render(
+        <StrictMode>
+          <AppErrorBoundary>
+            <MailPluginConnectPage />
+          </AppErrorBoundary>
+        </StrictMode>,
+      )
+    })
   } else if (window.location.pathname === '/oo-print') {
     document.documentElement.style.zoom = '1'
     void import('./OnlyOfficePrintPage.tsx').then(({ default: OnlyOfficePrintPage }) => {

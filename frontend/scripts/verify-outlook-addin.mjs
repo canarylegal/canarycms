@@ -23,7 +23,8 @@ const REQUIRED_DIST = [
   'outlook-shared.js',
   'commands.html',
   'commands.js',
-  'canary-login.html',
+  'auth-callback.html',
+  'auth-callback.js',
   'styles.css',
 ]
 

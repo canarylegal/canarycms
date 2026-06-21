@@ -84,7 +84,10 @@ export function QuoteSendPrompt({
         preferredContactId={preferredContactId}
         open={portalSendOpen}
         onClose={() => setPortalSendOpen(false)}
-        onSent={onSent}
+        onSent={() => {
+          onSent?.()
+          onClose()
+        }}
       />
     </>
   )

@@ -7,7 +7,7 @@ export function buildCaseContextMenuActions(
   const actions: CaseContextMenuActionKind[] = ['open']
   if (variant === 'quotes') {
     if (caseStatus === 'quote') actions.push('convert')
-    actions.push('close')
+    if (caseStatus === 'quote') actions.push('close')
   } else {
     actions.push('accounts')
   }

@@ -16,6 +16,11 @@ SCOPE_STAFF_LOGIN_EMAIL = "staff_login_email"
 SCOPE_STAFF_LOGIN_IP = "staff_login_ip"
 SCOPE_FORGOT_PASSWORD_EMAIL = "forgot_password_email"
 SCOPE_FORGOT_PASSWORD_IP = "forgot_password_ip"
+SCOPE_PORTAL_AUTH_IP = "portal_auth_ip"
+SCOPE_PORTAL_OTP_REQUEST_EMAIL = "portal_otp_request_email"
+SCOPE_PORTAL_OTP_REQUEST_IP = "portal_otp_request_ip"
+SCOPE_PORTAL_OTP_VERIFY_EMAIL = "portal_otp_verify_email"
+SCOPE_PORTAL_OTP_VERIFY_IP = "portal_otp_verify_ip"
 
 
 def utcnow() -> datetime:
@@ -54,6 +59,38 @@ def forgot_password_lockout_minutes() -> int:
 
 def forgot_password_ip_max_attempts() -> int:
     return _int_env("FORGOT_PASSWORD_IP_MAX_ATTEMPTS", 15)
+
+
+def portal_auth_ip_max_attempts() -> int:
+    return _int_env("PORTAL_AUTH_IP_MAX_FAILED_ATTEMPTS", 25)
+
+
+def portal_auth_lockout_minutes() -> int:
+    return _int_env("PORTAL_AUTH_LOCKOUT_MINUTES", 15)
+
+
+def portal_otp_request_email_max_attempts() -> int:
+    return _int_env("PORTAL_OTP_REQUEST_EMAIL_MAX_ATTEMPTS", 5)
+
+
+def portal_otp_request_ip_max_attempts() -> int:
+    return _int_env("PORTAL_OTP_REQUEST_IP_MAX_ATTEMPTS", 15)
+
+
+def portal_otp_request_lockout_minutes() -> int:
+    return _int_env("PORTAL_OTP_REQUEST_LOCKOUT_MINUTES", 15)
+
+
+def portal_otp_verify_email_max_attempts() -> int:
+    return _int_env("PORTAL_OTP_VERIFY_EMAIL_MAX_FAILED_ATTEMPTS", 5)
+
+
+def portal_otp_verify_ip_max_attempts() -> int:
+    return _int_env("PORTAL_OTP_VERIFY_IP_MAX_FAILED_ATTEMPTS", 25)
+
+
+def portal_otp_verify_lockout_minutes() -> int:
+    return _int_env("PORTAL_OTP_VERIFY_LOCKOUT_MINUTES", 15)
 
 
 def _normalize_identifier(raw: str) -> str:
@@ -209,3 +246,65 @@ def record_forgot_password_attempt(db: Session, *, email: str, ip: str | None) -
         max_attempts=forgot_password_ip_max_attempts(),
         lockout_minutes=forgot_password_lockout_minutes(),
     )
+
+
+def check_portal_auth_rate_limits(db: Session, *, ip: str | None) -> None:
+    assert_not_rate_limited(db, scope=SCOPE_PORTAL_AUTH_IP, identifier=ip, action="portal sign-in")
+
+
+def record_portal_auth_ip_failure(db: Session, *, ip: str | None) -> None:
+    record_rate_limit_failure(
+        db,
+        scope=SCOPE_PORTAL_AUTH_IP,
+        identifier=ip,
+        max_attempts=portal_auth_ip_max_attempts(),
+        lockout_minutes=portal_auth_lockout_minutes(),
+    )
+
+
+def check_portal_otp_request_rate_limits(db: Session, *, email: str, ip: str | None) -> None:
+    assert_not_rate_limited(db, scope=SCOPE_PORTAL_OTP_REQUEST_EMAIL, identifier=email, action="sign-in code request")
+    assert_not_rate_limited(db, scope=SCOPE_PORTAL_OTP_REQUEST_IP, identifier=ip, action="sign-in code request")
+
+
+def record_portal_otp_request_attempt(db: Session, *, email: str, ip: str | None) -> None:
+    record_rate_limit_failure(
+        db,
+        scope=SCOPE_PORTAL_OTP_REQUEST_EMAIL,
+        identifier=email,
+        max_attempts=portal_otp_request_email_max_attempts(),
+        lockout_minutes=portal_otp_request_lockout_minutes(),
+    )
+    record_rate_limit_failure(
+        db,
+        scope=SCOPE_PORTAL_OTP_REQUEST_IP,
+        identifier=ip,
+        max_attempts=portal_otp_request_ip_max_attempts(),
+        lockout_minutes=portal_otp_request_lockout_minutes(),
+    )
+
+
+def check_portal_otp_verify_rate_limits(db: Session, *, email: str, ip: str | None) -> None:
+    assert_not_rate_limited(db, scope=SCOPE_PORTAL_OTP_VERIFY_EMAIL, identifier=email, action="sign-in code verification")
+    assert_not_rate_limited(db, scope=SCOPE_PORTAL_OTP_VERIFY_IP, identifier=ip, action="sign-in code verification")
+
+
+def record_portal_otp_verify_failure(db: Session, *, email: str, ip: str | None) -> None:
+    record_rate_limit_failure(
+        db,
+        scope=SCOPE_PORTAL_OTP_VERIFY_EMAIL,
+        identifier=email,
+        max_attempts=portal_otp_verify_email_max_attempts(),
+        lockout_minutes=portal_otp_verify_lockout_minutes(),
+    )
+    record_rate_limit_failure(
+        db,
+        scope=SCOPE_PORTAL_OTP_VERIFY_IP,
+        identifier=ip,
+        max_attempts=portal_otp_verify_ip_max_attempts(),
+        lockout_minutes=portal_otp_verify_lockout_minutes(),
+    )
+
+
+def clear_portal_otp_verify_rate_limits(db: Session, *, email: str) -> None:
+    clear_rate_limit(db, scope=SCOPE_PORTAL_OTP_VERIFY_EMAIL, identifier=email)

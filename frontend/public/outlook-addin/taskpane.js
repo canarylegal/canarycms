@@ -11,7 +11,7 @@
   /** Outlook master + item category applied after a successful file (client-only). */
   const CANARY_CATEGORY = 'Canary'
   /** Bumped when task pane logic changes — shown in error text so you can confirm the browser loaded the new bundle. */
-  const ADDIN_UI_VERSION = '1.0.10.1'
+  const ADDIN_UI_VERSION = '1.0.11.0'
   const officeMail = function () {
     return globalThis.canaryOutlookShared || {}
   }
@@ -192,50 +192,24 @@
     el.textContent = msg || ''
   }
 
-  async function submitLogin() {
+  async function connectToCanary() {
     loginShowErr('')
     show('msg', '', true)
     show('ok', '', false)
-    const email = ($('login-email') && $('login-email').value.trim()) || ''
-    const password = ($('login-password') && $('login-password').value) || ''
-    const totp = ($('login-totp') && $('login-totp').value.trim()) || ''
-    if (!email || !password) {
-      loginShowErr('Email and password are required.')
-      return
-    }
+    const btn = $('btn-sign-in')
+    if (btn) btn.disabled = true
     try {
-      const res = await fetch(apiRoot() + '/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          email,
-          password,
-          totp_code: totp || null,
-        }),
-      })
-      const body = await res.json().catch(() => null)
-      if (!res.ok) {
-        const detail = body && typeof body === 'object' && body.detail
-        const msg =
-          typeof detail === 'string'
-            ? detail
-            : res.status === 401
-              ? 'Invalid credentials or 2FA required.'
-              : 'Sign-in failed.'
-        loginShowErr(msg)
+      const run = officeMail().runPluginConnect
+      if (typeof run !== 'function') {
+        loginShowErr('Add-in update required — reload the add-in.')
         return
       }
-      const token = body && body.access_token
-      if (!token) {
-        loginShowErr('No access token returned.')
-        return
-      }
-      await persistTokenAsync(token)
-      if ($('login-password')) $('login-password').value = ''
-      if ($('login-totp')) $('login-totp').value = ''
+      await run()
       await refreshAuthAndCases()
     } catch (e) {
-      loginShowErr(e && e.message ? String(e.message) : 'Network error.')
+      loginShowErr(e && e.message ? String(e.message) : 'Could not connect.')
+    } finally {
+      if (btn) btn.disabled = false
     }
   }
 
@@ -1112,20 +1086,8 @@
     const signIn = $('btn-sign-in')
     if (signIn) {
       signIn.onclick = () => {
-        void submitLogin()
+        void connectToCanary()
       }
-    }
-    const loginEmail = $('login-email')
-    if (loginEmail) {
-      loginEmail.addEventListener('keydown', (ev) => {
-        if (ev.key === 'Enter') void submitLogin()
-      })
-    }
-    const loginPw = $('login-password')
-    if (loginPw) {
-      loginPw.addEventListener('keydown', (ev) => {
-        if (ev.key === 'Enter') void submitLogin()
-      })
     }
     const mailDesc = $('mail-description')
     if (mailDesc) {

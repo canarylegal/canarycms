@@ -290,6 +290,128 @@
     return '<' + s + '>'
   }
 
+  function randomPluginState() {
+    const bytes = new Uint8Array(24)
+    crypto.getRandomValues(bytes)
+    let out = ''
+    for (let i = 0; i < bytes.length; i++) {
+      out += String(bytes[i]).padStart(3, '0')
+    }
+    return out.slice(0, 32)
+  }
+
+  function getOutlookPluginAuthCallbackUrl() {
+    return pageOrigin() + '/outlook-addin/auth-callback.html'
+  }
+
+  function buildPluginConnectUrl(origin, client, state, redirectUri) {
+    const base = String(origin || '')
+      .trim()
+      .replace(/\/$/, '')
+    const url = new URL(base + '/connect/mail-plugin')
+    url.searchParams.set('client', client)
+    url.searchParams.set('state', state)
+    url.searchParams.set('redirect_uri', redirectUri)
+    return url.toString()
+  }
+
+  async function exchangePluginToken(origin, client, state, code) {
+    const root = String(origin || '')
+      .trim()
+      .replace(/\/$/, '')
+    const res = await fetch(root + '/api/auth/plugin/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({ client: client, state: state, code: code }),
+    })
+    const body = await res.json().catch(function () {
+      return null
+    })
+    if (!res.ok) {
+      const detail = body && typeof body === 'object' && body.detail
+      throw new Error(typeof detail === 'string' ? detail : 'Could not complete add-in authorization.')
+    }
+    const token = body && body.access_token
+    if (!token) throw new Error('No access token returned.')
+    return String(token)
+  }
+
+  function runPluginConnect() {
+    return new Promise(function (resolve, reject) {
+      const origin = pageOrigin()
+      if (!origin) {
+        reject(new Error('Could not determine Canary site URL.'))
+        return
+      }
+      const state = randomPluginState()
+      const redirectUri = getOutlookPluginAuthCallbackUrl()
+      const connectUrl = buildPluginConnectUrl(origin, 'outlook', state, redirectUri)
+      if (!Office.context.ui || typeof Office.context.ui.displayDialogAsync !== 'function') {
+        reject(new Error('Cannot open a sign-in window in this Outlook client.'))
+        return
+      }
+      Office.context.ui.displayDialogAsync(
+        connectUrl,
+        { height: 65, width: 35, displayInIframe: false },
+        function (asyncResult) {
+          if (asyncResult.status !== Office.AsyncResultStatus.Succeeded) {
+            const msg =
+              asyncResult.error && asyncResult.error.message
+                ? asyncResult.error.message
+                : 'Could not open sign-in window.'
+            reject(new Error(msg))
+            return
+          }
+          const dialog = asyncResult.value
+          let settled = false
+          function finish(err, token) {
+            if (settled) return
+            settled = true
+            try {
+              dialog.close()
+            } catch (_) {}
+            if (err) reject(err)
+            else resolve(token)
+          }
+          dialog.addEventHandler(Office.EventType.DialogMessageReceived, function (arg) {
+            let payload
+            try {
+              payload = JSON.parse(arg.message)
+            } catch (_) {
+              finish(new Error('Invalid authorization response.'))
+              return
+            }
+            if (payload.error) {
+              finish(new Error(String(payload.error)))
+              return
+            }
+            if (!payload.code || payload.state !== state) {
+              finish(new Error('Authorization did not complete.'))
+              return
+            }
+            exchangePluginToken(origin, 'outlook', state, payload.code)
+              .then(function (token) {
+                return persistTokenAsync(token).then(function () {
+                  return token
+                })
+              })
+              .then(function (token) {
+                finish(null, token)
+              })
+              .catch(function (e) {
+                finish(e instanceof Error ? e : new Error('Could not complete authorization.'))
+              })
+          })
+          dialog.addEventHandler(Office.EventType.DialogEventReceived, function (arg) {
+            if (arg.error === 12006) {
+              finish(new Error('Sign-in window was closed.'))
+            }
+          })
+        },
+      )
+    })
+  }
+
   globalThis.canaryOutlookShared = {
     LS_KEY: LS_KEY,
     pageOrigin: pageOrigin,
@@ -310,5 +432,8 @@
     getSubjectAsync: getSubjectAsync,
     safeInternetMessageId: safeInternetMessageId,
     wrapMessageId: wrapMessageId,
+    runPluginConnect: runPluginConnect,
+    exchangePluginToken: exchangePluginToken,
+    buildPluginConnectUrl: buildPluginConnectUrl,
   }
 })()

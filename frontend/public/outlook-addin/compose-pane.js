@@ -9,7 +9,7 @@
     return globalThis.canaryOutlookApplyCompose
   }
   const MAX_ATTACH = 25
-  const ADDIN_UI_VERSION = '1.0.10.1'
+  const ADDIN_UI_VERSION = '1.0.11.0'
   const DRAFT_KEY = 'canary_outlook_compose_draft'
   const ATTACH_STORAGE_PREFIX = 'canary_outlook_attach_'
 
@@ -62,42 +62,24 @@
     return body
   }
 
-  async function submitLogin() {
+  async function connectToCanary() {
     loginShowErr('')
     showStatus('msg', '', true)
     showStatus('ok', '', false)
-    const email = ($('login-email') && $('login-email').value.trim()) || ''
-    const password = ($('login-password') && $('login-password').value) || ''
-    const totp = ($('login-totp') && $('login-totp').value.trim()) || ''
-    if (!email || !password) {
-      loginShowErr('Email and password are required.')
-      return
-    }
+    const btn = $('btn-sign-in')
+    if (btn) btn.disabled = true
     try {
-      const res = await fetch(sh().apiRoot() + '/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: email, password: password, totp_code: totp || null }),
-      })
-      const body = await res.json().catch(function () {
-        return null
-      })
-      if (!res.ok) {
-        const detail = body && body.detail
-        loginShowErr(typeof detail === 'string' ? detail : 'Sign-in failed.')
+      const run = sh().runPluginConnect
+      if (typeof run !== 'function') {
+        loginShowErr('Add-in update required — reload the add-in.')
         return
       }
-      const token = body && body.access_token
-      if (!token) {
-        loginShowErr('No access token returned.')
-        return
-      }
-      await sh().persistTokenAsync(token)
-      if ($('login-password')) $('login-password').value = ''
-      if ($('login-totp')) $('login-totp').value = ''
+      await run()
       await refreshAuthAndCases()
     } catch (e) {
-      loginShowErr(e && e.message ? String(e.message) : 'Network error.')
+      loginShowErr(e && e.message ? String(e.message) : 'Could not connect.')
+    } finally {
+      if (btn) btn.disabled = false
     }
   }
 
@@ -591,19 +573,7 @@
   Office.onReady(function () {
     const signIn = $('btn-sign-in')
     if (signIn) signIn.onclick = function () {
-      void submitLogin()
-    }
-    const loginEmail = $('login-email')
-    if (loginEmail) {
-      loginEmail.addEventListener('keydown', function (ev) {
-        if (ev.key === 'Enter') void submitLogin()
-      })
-    }
-    const loginPw = $('login-password')
-    if (loginPw) {
-      loginPw.addEventListener('keydown', function (ev) {
-        if (ev.key === 'Enter') void submitLogin()
-      })
+      void connectToCanary()
     }
     $('btn-logout').onclick = function () {
       void (async function () {

@@ -234,7 +234,7 @@ The add-in is included in the frontend build. After deploy, confirm these URLs r
 |-----|--------|
 | `https://canary.yourfirm.co.uk/outlook-addin/manifest.xml` | XML manifest, `Content-Type: text/xml` |
 | `https://canary.yourfirm.co.uk/outlook-addin/taskpane.html` | Sign-in / task UI |
-| `https://canary.yourfirm.co.uk/outlook-addin/canary-login.html` | Login helper page |
+| `https://canary.yourfirm.co.uk/outlook-addin/auth-callback.html` | OAuth-style callback for add-in connect |
 | `https://canary.yourfirm.co.uk/icons/icon16.png` (and 32, 64, 80, 128) | PNG icons |
 
 If you change `CANARY_PUBLIC_URL`, rebuild and redeploy the **frontend** image:

@@ -23,7 +23,7 @@ node scripts/sync-and-verify-thunderbird-addin.mjs
 
 ## User flow (compose)
 
-1. Sign in once via toolbar **Server & sign-in** (same Canary site URL as the web app).
+1. Set your Canary site URL, then **Connect to Canary…** (opens sign-in in your **default browser** — passkeys and authenticator apps supported). When authorisation finishes, return to Thunderbird.
 2. Open or focus a compose window → click **Canary** on the compose toolbar.
 3. Pick matter (or **None**), contact, precedent, folder, attachments → **Apply to message**.
 4. On a **reply**, the incoming message is filed and tagged immediately.

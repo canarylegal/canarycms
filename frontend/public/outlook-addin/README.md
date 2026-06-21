@@ -33,7 +33,7 @@ After changing the manifest, validate with Microsoft’s tooling if needed, e.g.
 3. Confirm these URLs over **HTTPS**:
    - `/outlook-addin/manifest.xml`
    - `/outlook-addin/taskpane.html`
-   - `/outlook-addin/canary-login.html`
+   - `/outlook-addin/auth-callback.html`
    - `/icons/icon64.png`, `icon128.png`, `icon16.png`, `icon32.png`, `icon80.png`
 
 This add-in gives Outlook on the web and Outlook desktop:
@@ -49,13 +49,15 @@ This add-in gives Outlook on the web and Outlook desktop:
 ### Compose from matter (no Graph)
 
 1. Open or start a **compose** message in Outlook.
-2. Ribbon → **Compose from matter** → sign in, pick matter, precedent, recipient, and case files.
+2. Ribbon → **Compose from matter** → **Connect to Canary…**, pick matter, precedent, recipient, and case files.
 3. **Apply to message** — merge, attachments, pending-send, and (when supported) the **Canary** category on the draft.
 4. **Send** — `OnMessageSend` saves a synthetic `.eml` (+ attachments) to the linked matter via pending-send.
 
 **Important:** Compose send filing requires **`OnMessageSend`** in `manifest.xml` (v1.0.10+). You must click **Apply to message** before sending so pending-send is set for the matter.
 
-It calls the same backend routes as the main app: `POST /api/auth/login`, `GET /api/cases`, `POST /api/cases/{case_id}/files`, `POST /api/mail-plugin/cases/{case_id}/compose-bundle`.
+It calls the same backend routes as the main app: `POST /api/auth/plugin/authorize`, `POST /api/auth/plugin/token`, `GET /api/cases`, `POST /api/cases/{case_id}/files`, `POST /api/mail-plugin/cases/{case_id}/compose-bundle`.
+
+Sign-in opens `/connect/mail-plugin` in an Office dialog so passkeys and authenticator apps work (inline password login is not used).
 
 ## Central deployment (preferred)
 

@@ -120,6 +120,25 @@ def list_active_grants_for_contact(db: Session, contact_id: uuid.UUID) -> list[C
     return [g for g in rows if grant_is_active(g, now=now)]
 
 
+def contact_has_portal_content(db: Session, contact_id: uuid.UUID) -> bool:
+    """True when a contact has folder shares or other portal work (quotes, forms, etc.)."""
+    from app.portal_case import filter_grants_for_portal_enabled_cases
+
+    if filter_grants_for_portal_enabled_cases(db, list_active_grants_for_contact(db, contact_id)):
+        return True
+    from app.quote_portal_service import list_pending_quote_deliveries_for_contact
+
+    if list_pending_quote_deliveries_for_contact(db, contact_id=contact_id):
+        return True
+    from app.portal_form_service import list_pending_for_contact as list_pending_portal_forms
+
+    if list_pending_portal_forms(db, contact_id):
+        return True
+    from app.docusign_signing_service import list_pending_for_contact as list_pending_docusign
+
+    return bool(list_pending_docusign(db, contact_id))
+
+
 def get_grant_for_contact(db: Session, *, contact_id: uuid.UUID, grant_id: uuid.UUID) -> ContactPortalGrant:
     grant = db.get(ContactPortalGrant, grant_id)
     if not grant or grant.contact_id != contact_id:

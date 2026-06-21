@@ -1026,7 +1026,7 @@
         loginShowErr('')
         if (searchInput) {
           searchInput.disabled = true
-          searchInput.placeholder = 'Sign in to search matters'
+          searchInput.placeholder = 'Connect to Canary to search matters'
         }
         void syncBlockVisibility()
         return
@@ -1067,12 +1067,12 @@
           if (authEl) authEl.textContent = ''
           setAuthPanels(false)
           settingsOpen = true
-          loginShowErr('Session expired or the Canary site changed — sign in again.')
+          loginShowErr('Session expired or the Canary site changed — connect again.')
         }
         allCases = []
         if (searchInput) {
           searchInput.disabled = msg !== '401 Unauthorized'
-          searchInput.placeholder = msg === '401 Unauthorized' ? 'Sign in to search matters' : 'Type to search…'
+          searchInput.placeholder = msg === '401 Unauthorized' ? 'Connect to Canary to search matters' : 'Type to search…'
         }
         if (results) {
           results.innerHTML = ''
@@ -1082,7 +1082,7 @@
       }
     }
 
-    async function submitLogin() {
+    async function connectToCanary() {
       loginShowErr('')
       out($('out'), '', false)
       const origin = await requireOrigin(ext)
@@ -1091,43 +1091,22 @@
         return
       }
       if (originInput && !originInput.value) originInput.value = origin
-      const email = ($('login-email') && $('login-email').value.trim()) || ''
-      const password = ($('login-password') && $('login-password').value) || ''
-      const totp = ($('login-totp') && $('login-totp').value.trim()) || ''
-      if (!email || !password) {
-        loginShowErr('Email and password are required.')
+      const sh = globalThis.canaryShared
+      if (!sh || typeof sh.runPluginConnect !== 'function') {
+        loginShowErr('Connect helper not loaded.')
         return
       }
+      const connectBtn = $('btn-connect')
+      if (connectBtn) connectBtn.disabled = true
       try {
-        const res = await fetch(apiRoot(origin) + '/auth/login', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email, password, totp_code: totp || null }),
-        })
-        const body = await res.json().catch(() => null)
-        if (!res.ok) {
-          const detail = body && typeof body === 'object' && body.detail
-          const msg =
-            typeof detail === 'string'
-              ? detail
-              : res.status === 401
-                ? 'Invalid credentials or 2FA required.'
-                : 'Sign-in failed.'
-          loginShowErr(msg)
-          return
-        }
-        const at = body && body.access_token
-        if (!at) {
-          loginShowErr('No access token returned.')
-          return
-        }
-        await setJwt(ext, at)
-        if ($('login-password')) $('login-password').value = ''
-        if ($('login-totp')) $('login-totp').value = ''
+        out($('out'), 'Sign in and authorise in your browser. Waiting…', false)
+        await sh.runPluginConnect(ext, origin, 'thunderbird')
         settingsOpen = false
         await refreshAuthAndCases(ext, origin, { preferFilingOnSuccess: true })
       } catch (e) {
-        loginShowErr(e && e.message ? String(e.message) : 'Network error.')
+        loginShowErr(e && e.message ? String(e.message) : 'Could not connect to Canary.')
+      } finally {
+        if (connectBtn) connectBtn.disabled = false
       }
     }
 
@@ -1216,24 +1195,8 @@
       })
     }
 
-    const signIn = $('btn-sign-in')
-    if (signIn) signIn.onclick = () => void submitLogin()
-    if ($('login-email') && signIn) {
-      $('login-email').addEventListener('keydown', (ev) => {
-        if (ev.key === 'Enter') {
-          ev.preventDefault()
-          signIn.click()
-        }
-      })
-    }
-    if ($('login-password') && signIn) {
-      $('login-password').addEventListener('keydown', (ev) => {
-        if (ev.key === 'Enter') {
-          ev.preventDefault()
-          signIn.click()
-        }
-      })
-    }
+    const connectBtn = $('btn-connect')
+    if (connectBtn) connectBtn.onclick = () => void connectToCanary()
 
     const btnLogout = $('btn-logout')
     if (btnLogout) {

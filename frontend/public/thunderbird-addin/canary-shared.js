@@ -3,6 +3,8 @@
 ;(function () {
   const ORIGIN_KEY = 'canaryApiOrigin'
   const JWT_KEY = 'canary_jwt'
+  const PLUGIN_AUTH_STATE_KEY = 'canaryPluginAuthState'
+  const PLUGIN_AUTH_PENDING_KEY = 'canaryPluginAuthPending'
 
   function getGecko() {
     return globalThis.messenger || globalThis.browser
@@ -193,6 +195,108 @@
     return new Promise(function (resolve) {
       setTimeout(resolve, ms)
     })
+  }
+
+  function randomPluginState() {
+    const bytes = new Uint8Array(24)
+    crypto.getRandomValues(bytes)
+    let out = ''
+    for (let i = 0; i < bytes.length; i++) {
+      out += String(bytes[i]).padStart(3, '0')
+    }
+    return out.slice(0, 32)
+  }
+
+  function getPluginAuthCallbackUrl(origin) {
+    const base = String(origin || '')
+      .trim()
+      .replace(/\/$/, '')
+    if (!base) throw new Error('Enter your Canary site URL first.')
+    // Browser sign-in cannot redirect to moz-extension:// from script — use HTTPS callback; add-in polls by state.
+    return base + '/connect/mail-plugin/callback'
+  }
+
+  function buildPluginConnectUrl(origin, client, state, redirectUri) {
+    const base = String(origin || '')
+      .trim()
+      .replace(/\/$/, '')
+    const url = new URL(base + '/connect/mail-plugin')
+    url.searchParams.set('client', client)
+    url.searchParams.set('state', state)
+    url.searchParams.set('redirect_uri', redirectUri)
+    return url.toString()
+  }
+
+  async function exchangePluginToken(origin, client, state, code) {
+    const payload = { client: client, state: state }
+    if (code) payload.code = code
+    const res = await fetch(apiRoot(origin) + '/auth/plugin/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify(payload),
+    })
+    const body = await res.json().catch(function () {
+      return null
+    })
+    if (!res.ok) {
+      const detail = body && typeof body === 'object' && body.detail
+      throw new Error(typeof detail === 'string' ? detail : 'Could not complete add-in authorization.')
+    }
+    const token = body && body.access_token
+    if (!token) throw new Error('No access token returned.')
+    return String(token)
+  }
+
+  async function waitForPluginToken(origin, client, expectedState, timeoutMs) {
+    const deadline = Date.now() + (timeoutMs || 300000)
+    while (Date.now() < deadline) {
+      try {
+        return await exchangePluginToken(origin, client, expectedState, null)
+      } catch (e) {
+        const msg = e && e.message ? String(e.message) : ''
+        if (
+          msg.indexOf('Invalid or expired') >= 0 ||
+          msg.indexOf('Authorization code is required') >= 0
+        ) {
+          await sleep(400)
+          continue
+        }
+        throw e
+      }
+    }
+    throw new Error('Authorization timed out. Finish sign-in in your browser, then try Connect to Canary again.')
+  }
+
+  async function waitForPluginAuthPending(ext, expectedState, timeoutMs) {
+    const deadline = Date.now() + (timeoutMs || 300000)
+    while (Date.now() < deadline) {
+      const st = await ext.storage.local.get([PLUGIN_AUTH_PENDING_KEY, PLUGIN_AUTH_STATE_KEY])
+      const pending = st && st[PLUGIN_AUTH_PENDING_KEY]
+      const savedState = st && st[PLUGIN_AUTH_STATE_KEY]
+      if (pending && savedState === expectedState && pending.state === expectedState) {
+        return pending
+      }
+      await sleep(400)
+    }
+    throw new Error('Authorization timed out. Finish sign-in in your browser, then try Connect to Canary again.')
+  }
+
+  async function runPluginConnect(ext, origin, client) {
+    const originNorm = String(origin || '').trim().replace(/\/$/, '')
+    if (!originNorm) throw new Error('Enter your Canary site URL first.')
+    const state = randomPluginState()
+    const redirectUri = getPluginAuthCallbackUrl(originNorm)
+    await ext.storage.local.set({ [PLUGIN_AUTH_STATE_KEY]: state })
+    await ext.storage.local.remove(PLUGIN_AUTH_PENDING_KEY)
+    const connectUrl = buildPluginConnectUrl(originNorm, client, state, redirectUri)
+    if (!ext.windows || typeof ext.windows.openDefaultBrowser !== 'function') {
+      throw new Error('Cannot open your default browser from this mail client.')
+    }
+    await ext.windows.openDefaultBrowser(connectUrl)
+    const token = await waitForPluginToken(originNorm, client, state, 300000)
+    await ext.storage.local.set({ [JWT_KEY]: token, [ORIGIN_KEY]: originNorm })
+    await ext.storage.local.remove([PLUGIN_AUTH_PENDING_KEY, PLUGIN_AUTH_STATE_KEY])
+    return token
   }
 
   function formatComposeRecipients(recipients) {
@@ -717,6 +821,14 @@
     extractMessagesFromQueryResult,
     queryMessagesByHeaderMessageId,
     queryAllMessagesByHeaderMessageId,
+    randomPluginState,
+    getPluginAuthCallbackUrl,
+    buildPluginConnectUrl,
+    exchangePluginToken,
+    waitForPluginAuthPending,
+    runPluginConnect,
+    PLUGIN_AUTH_STATE_KEY,
+    PLUGIN_AUTH_PENDING_KEY,
     isPopoutWindow,
     closeExtensionWindow,
     wirePopoutCloseButton,

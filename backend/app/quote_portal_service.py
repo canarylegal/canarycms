@@ -181,9 +181,6 @@ def send_quote_via_portal(
     actor_user_id: uuid.UUID,
 ) -> tuple[QuotePortalDelivery, bool, str | None]:
     """Create delivery, e-mail contact, return (delivery, email_sent, skip_reason)."""
-    if not firm_alerts_configured(db):
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=ALERTS_NOT_CONFIGURED_MSG)
-
     case = db.get(Case, case_id)
     if case is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Case not found")
@@ -290,6 +287,8 @@ def send_quote_via_portal(
             "email_sent": email_sent,
         },
     )
+    if not email_sent:
+        db.commit()
     db.refresh(delivery)
     return delivery, email_sent, skip_reason
 

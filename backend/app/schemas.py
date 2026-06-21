@@ -25,6 +25,22 @@ class TokenResponse(BaseModel):
     token_type: str = "bearer"
 
 
+class PluginAuthorizeIn(BaseModel):
+    client: Literal["thunderbird", "outlook"]
+    state: str = Field(min_length=16, max_length=128)
+    redirect_uri: str = Field(min_length=1, max_length=2048)
+
+
+class PluginAuthorizeOut(BaseModel):
+    code: str
+
+
+class PluginTokenIn(BaseModel):
+    client: Literal["thunderbird", "outlook"]
+    state: str = Field(min_length=16, max_length=128)
+    code: str | None = Field(default=None, max_length=256)
+
+
 class UserAppearanceOut(BaseModel):
     font: str = ""
     accent: str = "#2563eb"
@@ -106,10 +122,10 @@ class UserUiPreferencesUpdate(BaseModel):
     main_menu_search: str | None = Field(default=None, max_length=500)
     main_menu_filter_matter_type: str | None = Field(default=None, max_length=200)
     main_menu_filter_fee_earner_user_id: str | None = Field(default=None, max_length=36)
-    main_menu_filter_case_status: Literal["", "open", "closed", "archived", "quote", "post_completion"] | None = None
+    main_menu_filter_case_status: Literal["", "open", "closed", "archived", "quote", "quote_closed", "post_completion"] | None = None
     main_menu_filter_matter_types: list[str] | None = None
     main_menu_filter_fee_earner_user_ids: list[str] | None = None
-    main_menu_filter_case_statuses: list[Literal["open", "closed", "archived", "quote", "post_completion"]] | None = None
+    main_menu_filter_case_statuses: list[Literal["open", "closed", "archived", "quote", "quote_closed", "post_completion"]] | None = None
     tasks_menu_search: str | None = Field(default=None, max_length=500)
     tasks_menu_filter_matter_type: str | None = Field(default=None, max_length=200)
     contacts_search: str | None = Field(default=None, max_length=500)
@@ -2520,6 +2536,10 @@ class PortalQuoteExchangeOut(BaseModel):
     contact_name: str
     grants: list[PortalGrantSummaryOut]
     quote: PortalQuoteDeliveryViewOut
+
+
+class QuotePortalSendPreflightOut(BaseModel):
+    alerts_configured: bool
 
 
 class SendQuoteViaPortalIn(BaseModel):

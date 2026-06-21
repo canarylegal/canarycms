@@ -7,6 +7,7 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
+from app.alert_dispatch import firm_alerts_configured
 from app.db import get_db
 from app.deps import get_current_user, require_case_access
 from app.models import Contact, File, User
@@ -18,7 +19,7 @@ from app.quote_portal_service import (
     respond_to_quote_delivery,
     send_quote_via_portal,
 )
-from app.schemas import QuotePortalDeliveryOut, SendQuoteViaPortalIn
+from app.schemas import QuotePortalDeliveryOut, QuotePortalSendPreflightOut, SendQuoteViaPortalIn
 
 router = APIRouter(prefix="/cases/{case_id}/files/{file_id}/quote-portal", tags=["quote-portal"])
 
@@ -61,6 +62,20 @@ def get_quote_portal_delivery(
     if delivery is None:
         return None
     return _delivery_out(db, delivery)
+
+
+@router.get("/send-preflight", response_model=QuotePortalSendPreflightOut)
+def get_quote_portal_send_preflight(
+    case_id: uuid.UUID,
+    file_id: uuid.UUID,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> QuotePortalSendPreflightOut:
+    require_case_access(case_id, user, db)
+    row = db.get(File, file_id)
+    if row is None or row.case_id != case_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+    return QuotePortalSendPreflightOut(alerts_configured=firm_alerts_configured(db))
 
 
 @router.post("/send", response_model=QuotePortalDeliveryOut)

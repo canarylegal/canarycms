@@ -60,21 +60,11 @@
         <div class="divider" role="separator"></div>
 
         <div id="panel-pre-auth" class="panel">
-          <p class="section-title">Account</p>
-          <label class="field" for="login-email">
-            <span>Email</span>
-            <input type="email" id="login-email" autocomplete="username" />
-          </label>
-          <label class="field" for="login-password">
-            <span>Password</span>
-            <input type="password" id="login-password" autocomplete="current-password" />
-          </label>
-          <label class="field" for="login-totp">
-            <span>2FA (if enabled)</span>
-            <input type="text" id="login-totp" inputmode="numeric" autocomplete="one-time-code" />
-          </label>
+          <p class="muted" style="margin-top: 0">
+            Opens Canary sign-in in your default browser (passkeys and authenticator apps supported). After you authorise, return to Thunderbird — the add-on connects automatically.
+          </p>
           <p id="login-err" class="inline-err" hidden></p>
-          <button type="button" class="primary" id="btn-sign-in">Sign in</button>
+          <button type="button" class="primary" id="btn-connect">Connect to Canary…</button>
         </div>
 
         <div id="panel-post-auth" class="panel panel-hidden">
@@ -91,6 +81,7 @@
 
       <div class="status" id="out" role="status" aria-live="polite"></div>
     </div>
+    <script src="../canary-shared.js"></script>
     <script src="popup.js"></script>
   </body>
 </html>

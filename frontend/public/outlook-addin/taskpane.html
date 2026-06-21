@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Canary — File to Case</title>
-    <link rel="stylesheet" href="./styles.css?v=1.0.9.2" />
+    <link rel="stylesheet" href="./styles.css?v=1.0.11.0" />
   </head>
   <body>
     <noscript><p class="error">JavaScript is required for this add-in.</p></noscript>
@@ -31,22 +31,10 @@
 
       <div id="panel-pre-auth" class="panel">
         <p class="muted" id="intro-text">
-          Use the search box to find a matter, then file the open message. Attachments are saved under the message file in Canary. Sign in once; your session is stored in this add-in for this mailbox.
+          Use the search box to find a matter, then file the open message. Attachments are saved under the message file in Canary. Sign in once via Canary&apos;s secure sign-in page; passkeys and authenticator apps are supported.
         </p>
-        <label class="field">
-          <span>Email</span>
-          <input id="login-email" type="email" autocomplete="username" />
-        </label>
-        <label class="field">
-          <span>Password</span>
-          <input id="login-password" type="password" autocomplete="current-password" />
-        </label>
-        <label class="field">
-          <span>2FA code (if enabled)</span>
-          <input id="login-totp" type="text" inputmode="numeric" autocomplete="one-time-code" placeholder="optional" />
-        </label>
         <div id="login-err" class="error" style="display: none"></div>
-        <button type="button" id="btn-sign-in" class="primary">Sign in</button>
+        <button type="button" id="btn-sign-in" class="primary">Connect to Canary…</button>
       </div>
 
       <div id="panel-post-auth" class="panel panel-hidden">
@@ -82,7 +70,7 @@
     </div>
 
     <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
-    <script src="./outlook-shared.js?v=1.0.10.1"></script>
-    <script src="./taskpane.js?v=1.0.10.1"></script>
+    <script src="./outlook-shared.js?v=1.0.11.0"></script>
+    <script src="./taskpane.js?v=1.0.11.0"></script>
   </body>
 </html>
