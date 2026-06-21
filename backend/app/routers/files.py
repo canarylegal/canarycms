@@ -33,7 +33,7 @@ from app.file_storage import FILES_ROOT, StoredFilePaths, case_file_paths, ensur
 from app.models import Case as CaseRow
 from app.models import CaseContact, Contact as GlobalContactRow, ContactPortalGrant
 from app.models import CaseLockMode, CaseQuoteSnapshot, CaseStatus, File as DbFile, FileCategory, FileEditSession, MatterHeadType, MatterSubType, Precedent, PrecedentKind, User
-from app.portal_service import grant_is_active
+from app.portal_service import grant_is_client_visible
 from app.portal_case import require_case_portal_enabled
 from app.portal_notifications import notify_portal_contacts_files_added_batch
 from app.audit import log_event
@@ -1069,8 +1069,9 @@ def list_case_files(
             delivery_by_file[d.file_id] = d
 
     from app.docusign_signing_service import signing_request_file_list_item
-    from app.models import Contact, DocusignSigningRequest, DocusignSigningStatus
+    from app.models import Contact, DocusignSigningRequest, DocusignSigningStatus, PortalFormSubmission
     from app.portal_service import contact_display_name
+    from app.portal_form_service import form_submission_file_list_item
 
     delivery_contact_ids = {d.contact_id for d in delivery_by_file.values()}
     contacts_by_id: dict[uuid.UUID, Contact] = {}
@@ -1104,6 +1105,19 @@ def list_case_files(
         for sr in signing_rows:
             if sr.source_file_id and sr.source_file_id not in signing_by_file:
                 signing_by_file[sr.source_file_id] = signing_request_file_list_item(sr)
+
+    form_by_file: dict[uuid.UUID, PortalFormSubmission] = {}
+    if file_ids:
+        form_rows = (
+            db.execute(
+                select(PortalFormSubmission).where(PortalFormSubmission.snapshot_file_id.in_(file_ids))
+            )
+            .scalars()
+            .all()
+        )
+        for sub in form_rows:
+            if sub.snapshot_file_id and sub.snapshot_file_id not in form_by_file:
+                form_by_file[sub.snapshot_file_id] = sub
 
     out = []
     for (f, owner_display_name, owner_email, owner_initials) in rows:
@@ -1148,6 +1162,9 @@ def list_case_files(
         signing = signing_by_file.get(f.id)
         if signing is not None:
             item["docusign_signing"] = signing
+        form_sub = form_by_file.get(f.id)
+        if form_sub is not None:
+            item["portal_form_submission"] = form_submission_file_list_item(db, form_sub)
         out.append(item)
     return out
 
@@ -1172,7 +1189,7 @@ def list_case_portal_folder_access(
     )
     out: list[CasePortalFolderAccessGrantOut] = []
     for grant, contact in rows:
-        if not grant_is_active(grant):
+        if not grant_is_client_visible(db, grant):
             continue
         out.append(
             CasePortalFolderAccessGrantOut(
@@ -1365,6 +1382,9 @@ def rename_case_folder(
         row.updated_at = datetime.utcnow()
         db.add(row)
 
+    from app.portal_service import rename_portal_grants_for_folder
+
+    rename_portal_grants_for_folder(db, case_id=case_id, old_folder_path=old_path, new_folder_path=new_path)
     db.commit()
 
     log_event(
@@ -1413,6 +1433,10 @@ def delete_case_folder(
 
     for row in rows:
         db.delete(row)
+    removed_grants = 0
+    from app.portal_service import revoke_portal_grants_for_deleted_folder
+
+    removed_grants = revoke_portal_grants_for_deleted_folder(db, case_id=case_id, folder_path=folder_path)
     db.commit()
 
     log_event(
@@ -1421,7 +1445,7 @@ def delete_case_folder(
         action="case.folder.delete",
         entity_type="case",
         entity_id=str(case_id),
-        meta={"folder_path": folder_path, "deleted_count": len(rows)},
+        meta={"folder_path": folder_path, "deleted_count": len(rows), "portal_grants_removed": removed_grants},
     )
 
     return {"folder_path": folder_path, "deleted_count": len(rows)}
@@ -2060,33 +2084,13 @@ def delete_case_file(
     return None
 
 
-def _shell_single_quote(s: str) -> str:
-    """Wrap for POSIX shells (single-quote, escaping embedded quotes)."""
-    return "'" + s.replace("'", "'\"'\"'") + "'"
-
-
-def _libreoffice_cli_executable(original_filename: str) -> str:
-    """Use module binaries (lowriter/localc/limpress), not `libreoffice --writer`.
-
-    Some systems map the generic `libreoffice` command to another suite (e.g. ONLYOFFICE) via
-    alternatives or wrappers; lowriter/localc/limpress are LibreOffice-specific on typical Linux installs.
-    """
-    ext = Path(original_filename).suffix.lower()
-    if ext in (".xls", ".xlsx", ".ods", ".csv"):
-        return "localc"
-    if ext in (".ppt", ".pptx", ".odp"):
-        return "limpress"
-    return "lowriter"
-
-
 def _onlyoffice_cli_hint() -> str:
     """ONLYOFFICE DesktopEditors treats CLI arguments as *local file paths* only, not http(s) URLs.
 
     Running ``desktopeditors 'https://…/webdav/…'`` makes the app look for a file literally named like
-    the URL string, which surfaces as "file type is not supported". Many ONLYOFFICE Desktop builds also
-    **do not** expose a generic "paste this WebDAV http(s) URL" flow like LibreOffice **Open Remote**;
-    vendor docs focus on cloud/DMS integration instead. Use **Edit in browser** (Document Server), LibreOffice,
-    or an OS WebDAV mount. We return an empty string so clients do not suggest a broken terminal command.
+    the URL string, which surfaces as "file type is not supported". Prefer **Edit in browser**
+    (Document Server) or an OS WebDAV mount. We return an empty string so clients do not suggest a
+    broken terminal command.
     """
     return ""
 
@@ -2113,14 +2117,12 @@ def checkout_desktop_edit(
         case_id,
         base,
     )
-    lo_exe = _libreoffice_cli_executable(fn)
-    libreoffice_cli_hint = f"{lo_exe} {_shell_single_quote(file_url)}"
     onlyoffice_cli_hint = _onlyoffice_cli_hint()
     instructions = (
-        "Open the WebDAV file URL in a desktop app that supports arbitrary WebDAV URLs (e.g. LibreOffice "
-        "File → Open Remote). ONLYOFFICE Desktop often has no equivalent menu; prefer Canary "
-        "\"Edit in browser (ONLYOFFICE)\" or mount the folder URL with davfs2/GVfs and open the file locally. "
-        "The ONLYOFFICE terminal command does not accept http(s) URLs. Use Stop desktop editing when finished."
+        "Prefer Canary \"Edit in browser (ONLYOFFICE)\". For desktop editing, mount the folder URL with "
+        "davfs2/GVfs (or another WebDAV client) and open the file locally, or paste the file URL into a "
+        "desktop app that supports remote WebDAV URLs. ONLYOFFICE Desktop CLI does not accept http(s) URLs. "
+        "Use Stop desktop editing when finished."
     )
 
     log_event(
@@ -2139,7 +2141,6 @@ def checkout_desktop_edit(
         filename=fn,
         expires_at=sess.expires_at,
         instructions=instructions,
-        libreoffice_cli_hint=libreoffice_cli_hint,
         onlyoffice_cli_hint=onlyoffice_cli_hint,
     )
 

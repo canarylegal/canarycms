@@ -802,6 +802,9 @@ class QuotePortalDelivery(Base):
     sent_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
     responded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     decline_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    portal_pdf_file_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("file.id", ondelete="SET NULL"), nullable=True, index=True
+    )
 
 
 class PortalLoginOtp(Base):

@@ -3362,6 +3362,15 @@ select {
   position: relative;
 }
 
+.caseDocPanelScrollHost {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
 .caseDocPanelZoomFitContent {
   width: 100%;
   max-width: 100%;
@@ -5495,6 +5504,26 @@ html.dark .emlPreviewBodyWrap {
   width: min(920px, 100%);
 }
 
+.portalQuotePdfViewer {
+  border: 1px solid var(--border, #e2e8f0);
+  border-radius: 10px;
+  background: #f8fafc;
+  padding: 12px;
+  max-height: min(70vh, 720px);
+  overflow: auto;
+}
+
+.portalQuotePdfPages {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.portalQuotePdfStatus {
+  margin: 0 0 8px;
+  text-align: center;
+}
+
 .portalFilesTable .tr {
   align-items: center;
 }
@@ -5599,6 +5628,34 @@ html.dark .portalShell {
 
 .portalStaffSearchHit:hover {
   background: var(--hover-bg, rgba(127, 127, 127, 0.12));
+}
+
+.portalFormFill {
+  overflow: visible;
+}
+
+.portalFormFields {
+  overflow: visible;
+}
+
+.portalFormField {
+  overflow: visible;
+  min-width: 0;
+}
+
+.portalFormField .singleSelectDropdownField {
+  width: 100%;
+  min-width: 0;
+}
+
+.portalFormField .singleSelectDropdown {
+  width: 100%;
+  min-width: 0;
+}
+
+.portalFormField .singleSelectDropdownTrigger {
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .portalStaffPreviewBanner {

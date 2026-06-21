@@ -417,7 +417,7 @@ def _notify_recipients_sign(db: Session, req: DocusignSigningRequest, recipients
     if not firm_alerts_configured(db):
         return
     case = db.get(Case, req.case_id)
-    matter = (case.case_number if case else "") or "your matter"
+    matter = (case.title if case else "").strip() or "your matter"
     for r in recipients:
         link = _sign_link(r.sign_token)
         dispatch_alert(

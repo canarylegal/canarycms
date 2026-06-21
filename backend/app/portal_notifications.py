@@ -162,3 +162,32 @@ def notify_portal_staff_client_upload(
         ):
             staff_sent += 1
     return PortalNotifyResult(0, staff_sent, None)
+
+
+def notify_portal_staff_form_completed(
+    db: Session,
+    *,
+    case_id: uuid.UUID,
+    contact: Contact,
+    form_name: str,
+    matter_label: str,
+) -> PortalNotifyResult:
+    if not firm_alerts_configured(db):
+        return PortalNotifyResult(0, 0, ALERTS_NOT_CONFIGURED_MSG)
+    staff_sent = 0
+    for user in list_portal_staff_recipient_users(db, case_id):
+        email = (user.email or "").strip()
+        if not email:
+            continue
+        if dispatch_alert(
+            db,
+            AlertKind.portal_form_completed,
+            to_email=email,
+            context={
+                "contact_name": contact_display_name(contact),
+                "form_name": form_name,
+                "matter_label": matter_label,
+            },
+        ):
+            staff_sent += 1
+    return PortalNotifyResult(0, staff_sent, None)

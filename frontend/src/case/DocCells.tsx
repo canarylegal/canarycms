@@ -1,4 +1,5 @@
 import type { FileSummary, QuotePortalDeliverySummary, DocusignSigningRequestOut } from '../types'
+import { portalFormStatusLabel } from '../portalFormFile'
 
 /** Vimix-doder (regular / non-dark theme) icons in `public/icons/vimix/`. */
 export function DocMimeIcon({ mime, filename }: { mime: string; filename?: string }) {
@@ -164,8 +165,9 @@ function docusignStatusLabel(d: DocusignSigningRequestOut): string {
 export function DocsFileDescCell({ f, showPin }: { f: FileSummary; showPin: boolean }) {
   const sub = fileMailFromSubline(f)
   const quoteSub = f.quote_portal_delivery ? quotePortalStatusLabel(f.quote_portal_delivery) : null
+  const formSub = f.portal_form_submission ? portalFormStatusLabel(f.portal_form_submission) : null
   const docusignSub = f.docusign_signing ? docusignStatusLabel(f.docusign_signing) : null
-  const statusSub = quoteSub || docusignSub
+  const statusSub = quoteSub || formSub || docusignSub
   const mailRoot = isCaseMailRootFile(f)
   const displayName = f.parent_file_id ? `↳ ${docsListDisplayFilename(f)}` : docsListDisplayFilename(f)
   return (
@@ -188,7 +190,10 @@ export function DocsFileDescCell({ f, showPin }: { f: FileSummary; showPin: bool
             <span className="docsDescName">{displayName}</span>
             {sub ? <div className="docsDescSub muted">{sub}</div> : null}
             {quoteSub ? <div className="docsDescSub muted portalQuoteFileStatus">{quoteSub}</div> : null}
-            {docusignSub && !quoteSub ? <div className="docsDescSub muted portalQuoteFileStatus">{docusignSub}</div> : null}
+            {formSub && !quoteSub ? <div className="docsDescSub muted portalQuoteFileStatus">{formSub}</div> : null}
+            {docusignSub && !quoteSub && !formSub ? (
+              <div className="docsDescSub muted portalQuoteFileStatus">{docusignSub}</div>
+            ) : null}
           </div>
         </div>
       </div>

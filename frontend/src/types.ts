@@ -756,7 +756,17 @@ export type FileSummary = {
   uploaded_via_portal?: boolean
   is_portal_quote?: boolean
   quote_portal_delivery?: QuotePortalDeliverySummary | null
+  portal_form_submission?: PortalFormSubmissionSummary | null
   docusign_signing?: DocusignSigningRequestOut | null
+}
+
+export type PortalFormSubmissionSummary = {
+  id: string
+  status: 'pending' | 'completed' | 'voided' | 'superseded'
+  contact_name: string
+  template_name: string
+  sent_at: string
+  completed_at: string | null
 }
 
 export type QuotePortalDeliverySummary = {
@@ -881,6 +891,7 @@ export type QuotePortalDeliveryOut = {
   file_version_at_send: number
   email_sent: boolean
   email_skip_reason: string | null
+  portal_pdf_generated?: boolean
 }
 
 export type QuotePortalSendPreflightOut = {
@@ -891,6 +902,8 @@ export type PortalQuoteDeliveryViewOut = {
   id: string
   file_id: string
   grant_id: string | null
+  case_id?: string | null
+  case_title?: string
   original_filename: string
   mime_type?: string
   size_bytes?: number
@@ -899,6 +912,7 @@ export type PortalQuoteDeliveryViewOut = {
   can_respond: boolean
   decline_reason: string | null
   responded_at: string | null
+  portal_pdf_available?: boolean
 }
 
 export type PortalQuoteExchangeOut = {
@@ -1315,11 +1329,14 @@ export type PortalAuthOut = {
   session_token: string
   contact_name: string
   grants: PortalGrantSummaryOut[]
+  focus_case_id?: string | null
+  staff_preview?: boolean
 }
 
 export type PortalSessionOut = {
   contact_name: string
   grants: PortalGrantSummaryOut[]
+  staff_preview?: boolean
 }
 
 export type PortalFileOut = {
@@ -1391,6 +1408,8 @@ export type PortalFormSubmissionOut = {
   sent_at: string
   completed_at?: string | null
   voided_at?: string | null
+  email_sent?: boolean
+  email_skip_reason?: string | null
 }
 
 export type PortalFormFieldOut = {
@@ -1447,6 +1466,8 @@ export type CasePortalPreviewContactOut = {
   contact_id: string
   contact_name: string
   shared_folder_count: number
+  pending_quote_count?: number
+  pending_form_count?: number
 }
 
 export type CasePortalPreviewOut = {

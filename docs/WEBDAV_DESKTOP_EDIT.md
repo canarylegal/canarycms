@@ -1,27 +1,25 @@
 # Desktop editing via WebDAV
 
-Canary can issue a **short-lived WebDAV session** so users edit case files in **LibreOffice**, a **WebDAV mount**, or other clients that accept a **paste-this-https/http WebDAV URL**. Saves go straight back to the server; the case file version is incremented on each successful `PUT`. For **ONLYOFFICE**, the practical path in this stack is usually **Edit in browser** (Document Server)—see `ONLYOFFICE_BROWSER_EDIT.md`.
+Canary can issue a **short-lived WebDAV session** so users edit case files via a **WebDAV mount** or other clients that accept a **paste-this-https/http WebDAV URL**. Saves go straight back to the server; the case file version is incremented on each successful `PUT`. For **ONLYOFFICE**, the practical path in this stack is usually **Edit in browser** (Document Server)—see `ONLYOFFICE_BROWSER_EDIT.md`.
 
-**Important:** Opening the WebDAV `https://…` file URL in a normal browser tab usually **downloads** the file to **Downloads**. Paste the URL **inside** a desktop app, or use the **LibreOffice terminal command** returned by `checkout-edit` (see below)—do not rely on the browser navigating to the raw file URL.
+**Important:** Opening the WebDAV `https://…` file URL in a normal browser tab usually **downloads** the file to **Downloads**. Paste the URL **inside** a desktop app that supports remote WebDAV URLs, or mount the folder URL (see below)—do not rely on the browser navigating to the raw file URL.
 
-## Can the web app open ONLYOFFICE Desktop or LibreOffice automatically?
+## Can the web app open ONLYOFFICE Desktop automatically?
 
-**Not in a generic, zero-setup way.** A normal website cannot silently launch a desktop program or “pull” a WebDAV session into an office suite: browsers block that for security. Canary **copies the WebDAV URL** and then **probes custom URL schemes** (hidden iframes) such as `onlyoffice://` / `oo-office://`, or schemes you configure with **`VITE_ONLYOFFICE_DESKTOP_URI`** / **`VITE_ONLYOFFICE_DESKTOP_LAUNCH_URIS`** — these are **no-ops** unless your OS or IT registers a handler. ONLYOFFICE does **not** document a generic “paste this WebDAV URL” handoff from a browser; desktop builds often lack that menu entirely—use **Edit in browser**, **LibreOffice**, or a **WebDAV mount**.
+**Not in a generic, zero-setup way.** A normal website cannot silently launch a desktop program or “pull” a WebDAV session into an office suite: browsers block that for security. Canary **copies the WebDAV URL** and then **probes custom URL schemes** (hidden iframes) such as `onlyoffice://` / `oo-office://`, or schemes you configure with **`VITE_ONLYOFFICE_DESKTOP_URI`** / **`VITE_ONLYOFFICE_DESKTOP_LAUNCH_URIS`** — these are **no-ops** unless your OS or IT registers a handler. ONLYOFFICE does **not** document a generic “paste this WebDAV URL” handoff from a browser; desktop builds often lack that menu entirely—use **Edit in browser** or a **WebDAV mount**.
 
 Practical options if you need one-click behavior:
 
 - **Windows + Microsoft Office:** some setups support `ms-word:ofe|u|https://…`-style links from the browser (Canary does not emit these today).
-- **Custom protocol / `.desktop` handler:** register a URL scheme or MIME handler on each workstation that runs a small script (`libreoffice …` or ONLYOFFICE) with the URL—requires IT packaging.
+- **Custom protocol / `.desktop` handler:** register a URL scheme or MIME handler on each workstation that runs a small script with the URL—requires IT packaging.
 - **Local helper app:** a desktop wrapper around Canary could call `xdg-open` or spawn the editor with the WebDAV URL.
 - **ONLYOFFICE “Connect to cloud” / DMS:** browse Canary from inside ONLYOFFICE Desktop’s web UI (if you expose a compatible portal)—different product integration than “click in Chrome.”
 
-**LibreOffice on Linux:** use **File → Open Remote** (WebDAV) and paste the **file** URL, or run **`libreoffice_cli_hint`** from `POST …/checkout-edit` in a terminal. **ONLYOFFICE Desktop:** many builds **do not** ship a LibreOffice-style “paste this WebDAV `http(s)` URL” entry in the File menu; integration is aimed at **cloud/DMS** (`AscDesktopEditor.execCommand`, Workspace “Add account”, etc.). So you may see **no** `/webdav` hits in Canary logs—not a server bug. Prefer **Edit in browser (ONLYOFFICE)** in Canary, or mount the **folder** URL (below) and open the file in ONLYOFFICE from disk. The **`desktopeditors` CLI only accepts local paths**, not URLs.
+**ONLYOFFICE Desktop:** many builds **do not** ship a “paste this WebDAV `http(s)` URL” entry in the File menu; integration is aimed at **cloud/DMS** (`AscDesktopEditor.execCommand`, Workspace “Add account”, etc.). So you may see **no** `/webdav` hits in Canary logs—not a server bug. Prefer **Edit in browser (ONLYOFFICE)** in Canary, or mount the **folder** URL (below) and open the file from disk. The **`desktopeditors` CLI only accepts local paths**, not URLs.
 
-## LibreOffice without using the remote dialog
+## Desktop editing without a browser tab
 
-The web UI **copies the WebDAV file URL** to the clipboard after checkout. Paste that into **LibreOffice → File → Open Remote** (WebDAV). For ONLYOFFICE Desktop, use **Edit in browser** or a **WebDAV mount** instead.
-
-Power users can call `POST …/checkout-edit` and run **`libreoffice_cli_hint`** in a terminal: it uses **`lowriter` / `localc` / `limpress`**, not the generic `libreoffice` binary—on some Linux setups `libreoffice` is wired (alternatives/wrapper) to **ONLYOFFICE** or another app. There is **no** equivalent ONLYOFFICE terminal script for remote URLs.
+The web UI **copies the WebDAV file URL** to the clipboard after checkout. Paste that into a desktop app that supports remote WebDAV URLs, or mount the **folder** URL and open the file locally.
 
 **True one-click from the browser** (no paste, no terminal) still needs extra setup: a **custom URL scheme** + OS handler, a **dedicated desktop Canary client** that spawns the editor, or (on some Windows setups) **Microsoft Office** protocol links—not something a plain HTTPS site can do alone.
 
@@ -43,7 +41,7 @@ Power users can call `POST …/checkout-edit` and run **`libreoffice_cli_hint`**
 
 ## API
 
-- `POST /cases/{case_id}/files/{file_id}/checkout-edit` — Bearer auth; returns WebDAV URLs + expiry + **`libreoffice_cli_hint`** (shell) and **`onlyoffice_cli_hint`** (always empty; ONLYOFFICE CLI does not open http(s) URLs; many desktop builds also lack a paste-WebDAV-URL menu).
+- `POST /cases/{case_id}/files/{file_id}/checkout-edit` — Bearer auth; returns WebDAV URLs + expiry + **`onlyoffice_cli_hint`** (always empty; ONLYOFFICE CLI does not open http(s) URLs).
 - `GET /cases/{case_id}/files/{file_id}/edit-session` — Whether the current user has an active session (includes file URL again).
 - `POST /cases/{case_id}/files/{file_id}/release-edit` — End the session.
 - WebDAV (no Bearer; **token is in the path** — treat like a password):  
@@ -65,13 +63,12 @@ alembic upgrade head
 
 ## ONLYOFFICE Desktop vs WebDAV
 
-**Expectation check:** If your ONLYOFFICE build has **no** entry to paste a raw WebDAV `http(s)` URL, that matches current product positioning: Desktop Editors focus on **cloud/DMS** (`execCommand` / provider APIs), not LibreOffice-style **Open Remote**.
+**Expectation check:** If your ONLYOFFICE build has **no** entry to paste a raw WebDAV `http(s)` URL, that matches current product positioning: Desktop Editors focus on **cloud/DMS** (`execCommand` / provider APIs), not generic remote URL open dialogs.
 
 **What works without extra integration:**
 
 1. **Edit in browser (ONLYOFFICE)** in Canary — uses Document Server; no WebDAV URL paste required.
-2. **LibreOffice** — **File → Open Remote** → paste the **file** URL from checkout.
-3. **Linux: mount the folder URL**, then open the file in ANY office app from the mount point, e.g. **davfs2** (token is already in the path; username/password are often unused—try blank or any placeholder if the client insists):
+2. **Linux: mount the folder URL**, then open the file in any office app from the mount point, e.g. **davfs2** (token is already in the path; username/password are often unused—try blank or any placeholder if the client insists):
 
    ```bash
    # Example: mount webdav_folder_url from checkout (ends with .../sessions/<token>/)
@@ -127,20 +124,20 @@ Browsers only allow **`navigator.clipboard`** on **HTTPS** or **`http://localhos
 
 ### “File type is not supported” with ONLYOFFICE
 
-1. **If you used the terminal** (`desktopeditors 'https://…'`): ONLYOFFICE treats CLI arguments as **local file paths**, not URLs—that error is expected. Use **Edit in browser**, **LibreOffice Open Remote**, or a **WebDAV mount** instead.
+1. **If you used the terminal** (`desktopeditors 'https://…'`): ONLYOFFICE treats CLI arguments as **local file paths**, not URLs—that error is expected. Use **Edit in browser** or a **WebDAV mount** instead.
 
 2. **If a client did reach `/webdav`:** it may infer format from HTTP **`Content-Type`**. Canary’s WebDAV **`GET`** maps common Office extensions to canonical MIME types when the stored upload type is generic. Ensure the file has a normal extension. Check:
 
 `curl -sI 'https://…/webdav/sessions/TOKEN/YourFile.docx' | grep -i content-type`
 
-## LibreOffice: “The folder contents could not be displayed” / “operation not supported” when saving
+## WebDAV save issues (“folder contents could not be displayed”)
 
-Opening with **`libreoffice --writer 'https://…/file.docx'`** sometimes uses a **plain HTTP** document context. **Save** can then open a remote folder browser that **PROPFIND**s the session collection; if that fails or hrefs are wrong, you see this error.
+Some desktop clients open a remote file with a **plain HTTP** document context. **Save** can then open a remote folder browser that **PROPFIND**s the session collection; if that fails or hrefs are wrong, you see this error.
 
 **Try in order:**
 
-1. **Upgrade Canary** (WebDAV now returns **absolute** `href` values and **`displayname`** in PROPFIND, and **405** instead of **404** for `GET` on the session folder—helps LibreOffice/GVfs).
+1. **Upgrade Canary** (WebDAV returns **absolute** `href` values and **`displayname`** in PROPFIND, and **405** instead of **404** for `GET` on the session folder—helps GVfs and similar clients).
 
-2. Prefer **File → Open Remote…** → **WebDAV** (or **HTTP**), paste the **full WebDAV file URL**, open, then **Save**—this keeps the document on the WebDAV UCP and usually saves with **PUT** reliably.
+2. Prefer opening via a **WebDAV mount** (folder URL), edit locally on the mount, then **Save**—this usually saves with **PUT** reliably.
 
-3. If it still fails: **File → Save as…** to a local path, then **re-upload** the file in Canary (or use **Download** / **Import** as your workflow allows).
+3. If it still fails: **Save as…** to a local path, then **re-upload** the file in Canary (or use **Download** / **Import** as your workflow allows).

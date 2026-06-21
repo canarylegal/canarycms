@@ -30,6 +30,7 @@ def _delivery_out(
     *,
     email_sent: bool = False,
     email_skip_reason: str | None = None,
+    portal_pdf_generated: bool | None = None,
 ) -> QuotePortalDeliveryOut:
     meta = delivery_out_meta(db, delivery)
     return QuotePortalDeliveryOut(
@@ -44,6 +45,11 @@ def _delivery_out(
         file_version_at_send=delivery.file_version_at_send,
         email_sent=email_sent,
         email_skip_reason=email_skip_reason,
+        portal_pdf_generated=(
+            portal_pdf_generated
+            if portal_pdf_generated is not None
+            else bool(meta.get("portal_pdf_generated"))
+        ),
     )
 
 
@@ -87,11 +93,17 @@ def post_send_quote_via_portal(
     db: Session = Depends(get_db),
 ) -> QuotePortalDeliveryOut:
     require_case_access(case_id, user, db)
-    delivery, email_sent, skip_reason = send_quote_via_portal(
+    delivery, email_sent, skip_reason, portal_pdf_generated = send_quote_via_portal(
         db,
         case_id=case_id,
         file_id=file_id,
         contact_id=payload.contact_id,
         actor_user_id=user.id,
     )
-    return _delivery_out(db, delivery, email_sent=email_sent, email_skip_reason=skip_reason)
+    return _delivery_out(
+        db,
+        delivery,
+        email_sent=email_sent,
+        email_skip_reason=skip_reason,
+        portal_pdf_generated=portal_pdf_generated,
+    )

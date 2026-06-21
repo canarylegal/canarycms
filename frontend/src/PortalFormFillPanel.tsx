@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { applyAuthHeaders, apiUrl, formatApiErrorDetail } from './api'
+import { SingleSelectDropdown } from './SingleSelectDropdown'
 import type { PortalFormDetailOut, PortalFormFieldOut } from './types'
 
 type Props = {
@@ -7,6 +8,7 @@ type Props = {
   portalToken: string
   onBack: () => void
   onSubmitted: () => void
+  previewMode?: boolean
 }
 
 type FileValue = { file_id: string; filename: string }
@@ -38,11 +40,12 @@ function fileFromResponse(raw: unknown): FileValue | null {
   return { file_id: String(o.file_id), filename: String(o.filename || 'upload') }
 }
 
-export function PortalFormFillPanel({ submissionId, portalToken, onBack, onSubmitted }: Props) {
+export function PortalFormFillPanel({ submissionId, portalToken, onBack, onSubmitted, previewMode = false }: Props) {
   const [form, setForm] = useState<PortalFormDetailOut | null>(null)
   const [values, setValues] = useState<Record<string, unknown>>({})
   const [busy, setBusy] = useState(false)
   const [uploadBusyKey, setUploadBusyKey] = useState<string | null>(null)
+  const [openSelectKey, setOpenSelectKey] = useState<string | null>(null)
   const [err, setErr] = useState<string | null>(null)
 
   const sortedFields = useMemo(() => {
@@ -93,6 +96,7 @@ export function PortalFormFillPanel({ submissionId, portalToken, onBack, onSubmi
   }
 
   async function uploadFile(field: PortalFormFieldOut, file: File) {
+    if (previewMode) return
     setUploadBusyKey(field.field_key)
     setErr(null)
     try {
@@ -164,14 +168,12 @@ export function PortalFormFillPanel({ submissionId, portalToken, onBack, onSubmi
 
     const val = values[field.field_key]
     const help = field.help_text?.trim()
+    const label = `${field.label}${field.required ? ' *' : ''}`
 
     if (field.field_type === 'textarea') {
       return (
-        <label key={field.field_key} className="field">
-          <span>
-            {field.label}
-            {field.required ? ' *' : ''}
-          </span>
+        <label key={field.field_key} className="field portalFormField">
+          <span>{label}</span>
           {help ? <span className="muted" style={{ fontSize: 13 }}>{help}</span> : null}
           <textarea
             className="input"
@@ -186,11 +188,8 @@ export function PortalFormFillPanel({ submissionId, portalToken, onBack, onSubmi
 
     if (field.field_type === 'date') {
       return (
-        <label key={field.field_key} className="field">
-          <span>
-            {field.label}
-            {field.required ? ' *' : ''}
-          </span>
+        <label key={field.field_key} className="field portalFormField">
+          <span>{label}</span>
           {help ? <span className="muted" style={{ fontSize: 13 }}>{help}</span> : null}
           <input
             type="date"
@@ -207,26 +206,25 @@ export function PortalFormFillPanel({ submissionId, portalToken, onBack, onSubmi
       const options = dropdownOptions(field)
       const selected = displaySelectValue(val)
       return (
-        <label key={field.field_key} className="field">
-          <span>
-            {field.label}
-            {field.required ? ' *' : ''}
-          </span>
-          {help ? <span className="muted" style={{ fontSize: 13 }}>{help}</span> : null}
-          <select
-            className="input"
+        <div key={field.field_key} className="field portalFormField">
+          {help ? <span className="muted" style={{ fontSize: 13, marginBottom: 6, display: 'block' }}>{help}</span> : null}
+          <SingleSelectDropdown
+            label={label}
+            options={options.map((opt) => ({ value: opt, label: opt }))}
             value={selected}
-            onChange={(e) => setFieldValue(field.field_key, e.target.value)}
-            disabled={busy}
-          >
-            <option value="">{field.required ? 'Choose…' : '— None —'}</option>
-            {options.map((opt) => (
-              <option key={opt} value={opt}>
-                {opt}
-              </option>
-            ))}
-          </select>
-        </label>
+            onChange={(next) => setFieldValue(field.field_key, next)}
+            open={openSelectKey === field.field_key}
+            onOpenChange={(open) => setOpenSelectKey(open ? field.field_key : null)}
+            disabled={busy || options.length === 0}
+            placeholder={options.length === 0 ? 'No choices configured' : field.required ? 'Choose…' : '— None —'}
+            emptyMessage="No choices configured"
+          />
+          {options.length === 0 ? (
+            <div className="error" style={{ marginTop: 6, fontSize: 13 }}>
+              This question has no answer choices yet. Please contact your firm.
+            </div>
+          ) : null}
+        </div>
       )
     }
 
@@ -234,19 +232,16 @@ export function PortalFormFillPanel({ submissionId, portalToken, onBack, onSubmi
       const uploaded = fileFromResponse(val) ?? fileFromResponse(responseValue(form?.responses ?? {}, field.field_key))
       const uploading = uploadBusyKey === field.field_key
       return (
-        <div key={field.field_key} className="field">
-          <span>
-            {field.label}
-            {field.required ? ' *' : ''}
-          </span>
+        <div key={field.field_key} className="field portalFormField">
+          <span>{label}</span>
           {help ? <span className="muted" style={{ fontSize: 13 }}>{help}</span> : null}
           {uploaded ? <div className="muted" style={{ fontSize: 13 }}>Uploaded: {uploaded.filename}</div> : null}
-          <label className="btn" style={{ cursor: uploading || busy ? 'wait' : 'pointer', alignSelf: 'flex-start' }}>
+          <label className="btn" style={{ cursor: uploading || busy || previewMode ? 'not-allowed' : 'pointer', alignSelf: 'flex-start', opacity: previewMode ? 0.6 : 1 }}>
             {uploading ? 'Uploading…' : uploaded ? 'Replace file' : 'Choose file'}
             <input
               type="file"
               hidden
-              disabled={busy || uploading}
+              disabled={busy || uploading || previewMode}
               onChange={(e) => {
                 const file = e.target.files?.[0]
                 if (file) void uploadFile(field, file)
@@ -259,11 +254,8 @@ export function PortalFormFillPanel({ submissionId, portalToken, onBack, onSubmi
     }
 
     return (
-      <label key={field.field_key} className="field">
-        <span>
-          {field.label}
-          {field.required ? ' *' : ''}
-        </span>
+      <label key={field.field_key} className="field portalFormField">
+        <span>{label}</span>
         {help ? <span className="muted" style={{ fontSize: 13 }}>{help}</span> : null}
         <input
           className="input"
@@ -287,13 +279,19 @@ export function PortalFormFillPanel({ submissionId, portalToken, onBack, onSubmi
       {err ? <div className="error">{err}</div> : null}
       {busy && !form ? <div className="muted">Loading form…</div> : null}
       {form ? (
-        <div className="stack" style={{ gap: 10 }}>
+        <div className="stack portalFormFields" style={{ gap: 10 }}>
           {sortedFields.map((f) => renderField(f))}
-          <div className="row" style={{ gap: 8, marginTop: 8 }}>
-            <button type="button" className="btn primary" disabled={busy || uploadBusyKey !== null} onClick={() => void submit()}>
-              {busy ? 'Submitting…' : 'Submit form'}
-            </button>
-          </div>
+          {previewMode ? (
+            <p className="muted" style={{ margin: '8px 0 0' }}>
+              Form submission is disabled in preview mode.
+            </p>
+          ) : (
+            <div className="row" style={{ gap: 8, marginTop: 8 }}>
+              <button type="button" className="btn primary" disabled={busy || uploadBusyKey !== null} onClick={() => void submit()}>
+                {busy ? 'Submitting…' : 'Submit form'}
+              </button>
+            </div>
+          )}
         </div>
       ) : null}
     </div>

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { apiFetch } from './api'
+import { lockBodyWaitCursor, unlockBodyWaitCursor } from './bodyCursorLock'
 import { useDialogs } from './DialogProvider'
 import { SingleSelectDropdown } from './SingleSelectDropdown'
 import type { CasePortalFolderShareContactOut, QuotePortalDeliveryOut, QuotePortalSendPreflightOut } from './types'
@@ -38,6 +39,12 @@ export function SendQuoteViaPortalModal({
   const [loadBusy, setLoadBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!busy) return
+    lockBodyWaitCursor()
+    return () => unlockBodyWaitCursor()
+  }, [busy])
 
   useEffect(() => {
     if (!open) return
@@ -114,7 +121,9 @@ export function SendQuoteViaPortalModal({
         { token, method: 'POST', json: { contact_id: contactId } },
       )
       const msg = out.email_sent
-        ? `Quote sent to ${out.contact_name} via portal.`
+        ? out.portal_pdf_generated
+          ? `Quote sent to ${out.contact_name} via portal with a mobile-friendly PDF preview.`
+          : `Quote sent to ${out.contact_name} via portal, but the PDF preview could not be generated — the client can still download the original file.`
         : `Quote queued for ${out.contact_name}; e-mail was not sent${out.email_skip_reason ? `: ${out.email_skip_reason}` : '.'}`
       setNotice(msg)
       onSent?.()

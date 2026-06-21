@@ -17,6 +17,7 @@ from app.alert_templates import (
     portal_contact_access_granted,
     portal_contact_files_added,
     portal_contact_folder_granted,
+    portal_form_completed_staff,
     portal_form_sent,
     portal_login_otp,
     portal_quote_accepted,
@@ -42,6 +43,7 @@ class AlertKind(str, enum.Enum):
     portal_quote_sent = "portal_quote_sent"
     portal_quote_accepted = "portal_quote_accepted"
     portal_quote_declined = "portal_quote_declined"
+    portal_form_completed = "portal_form_completed"
     portal_form_sent = "portal_form_sent"
     docusign_sign_requested = "docusign_sign_requested"
     docusign_sign_sent_staff = "docusign_sign_sent_staff"
@@ -128,6 +130,7 @@ def dispatch_alert(
             firm_name=firm,
             contact_name=str(context.get("contact_name") or "Client"),
             quote_filename=str(context.get("quote_filename") or "Quote"),
+            matter_label=str(context.get("matter_label") or "your matter"),
             portal_url=str(context.get("portal_url") or portal_public_url()),
         )
     elif kind == AlertKind.portal_quote_accepted:
@@ -142,6 +145,13 @@ def dispatch_alert(
             contact_name=str(context.get("contact_name") or "Client"),
             quote_filename=str(context.get("quote_filename") or "Quote"),
             decline_reason=str(context.get("decline_reason") or ""),
+        )
+    elif kind == AlertKind.portal_form_completed:
+        subject, body, body_html = portal_form_completed_staff(
+            firm_name=firm,
+            contact_name=str(context.get("contact_name") or "Client"),
+            form_name=str(context.get("form_name") or "Form"),
+            matter_label=str(context.get("matter_label") or "your matter"),
         )
     elif kind == AlertKind.portal_form_sent:
         subject, body, body_html = portal_form_sent(

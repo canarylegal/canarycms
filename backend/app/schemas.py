@@ -1627,17 +1627,10 @@ class FileDesktopCheckoutOut(BaseModel):
     filename: str
     expires_at: datetime
     instructions: str
-    libreoffice_cli_hint: str = Field(
-        description=(
-            "Example shell command using lowriter/localc/limpress (Linux). "
-            "Avoids generic `libreoffice`, which some systems redirect to another office suite."
-        ),
-    )
     onlyoffice_cli_hint: str = Field(
         description=(
             "Always empty: ONLYOFFICE Desktop does not open http(s) WebDAV URLs from the CLI (args are local paths only). "
-            "Many desktop builds also lack a LibreOffice-style 'open this WebDAV URL' menu; use in-browser ONLYOFFICE, "
-            "LibreOffice Open Remote, or a WebDAV mount."
+            "Use in-browser ONLYOFFICE or a WebDAV mount."
         ),
     )
 
@@ -2312,11 +2305,14 @@ class PortalAuthOut(BaseModel):
     session_token: str
     contact_name: str
     grants: list[PortalGrantSummaryOut]
+    focus_case_id: uuid.UUID | None = None
+    staff_preview: bool = False
 
 
 class PortalSessionOut(BaseModel):
     contact_name: str
     grants: list[PortalGrantSummaryOut]
+    staff_preview: bool = False
 
 
 class PortalFileOut(BaseModel):
@@ -2409,6 +2405,8 @@ class PortalFormSubmissionOut(BaseModel):
     sent_at: datetime
     completed_at: datetime | None = None
     voided_at: datetime | None = None
+    email_sent: bool = False
+    email_skip_reason: str | None = None
 
 
 class PortalFormFieldOut(BaseModel):
@@ -2492,6 +2490,8 @@ class CasePortalPreviewContactOut(BaseModel):
     contact_id: uuid.UUID
     contact_name: str
     shared_folder_count: int
+    pending_quote_count: int = 0
+    pending_form_count: int = 0
 
 
 class CasePortalPreviewIn(BaseModel):
@@ -2516,6 +2516,8 @@ class PortalQuoteDeliveryViewOut(BaseModel):
     id: uuid.UUID
     file_id: uuid.UUID
     grant_id: uuid.UUID | None
+    case_id: uuid.UUID | None = None
+    case_title: str = ""
     original_filename: str
     mime_type: str = "application/octet-stream"
     size_bytes: int = 0
@@ -2524,6 +2526,7 @@ class PortalQuoteDeliveryViewOut(BaseModel):
     can_respond: bool
     decline_reason: str | None = None
     responded_at: datetime | None = None
+    portal_pdf_available: bool = False
 
 
 class PortalQuoteRespondIn(BaseModel):
@@ -2562,6 +2565,7 @@ class QuotePortalDeliveryOut(BaseModel):
     file_version_at_send: int
     email_sent: bool = False
     email_skip_reason: str | None = None
+    portal_pdf_generated: bool = False
 
 
 class PublishComposeIn(BaseModel):

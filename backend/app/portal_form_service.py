@@ -33,13 +33,25 @@ from app.models import (
     User,
 )
 from app.portal_activity import log_portal_activity
-from app.portal_service import contact_display_name, portal_access_is_active
+from app.portal_notifications import notify_portal_staff_form_completed
+from app.portal_service import client_matter_description, contact_display_name, portal_access_is_active
 from app.portal_case import require_case_portal_enabled
+from app.portal_notifications import ALERTS_NOT_CONFIGURED_MSG
 from app.quote_portal_service import pick_portal_grant_for_case
 
-ALERTS_NOT_CONFIGURED_MSG = "Firm alert e-mail is not configured."
-
 _FIELD_KEY_RE = re.compile(r"^[a-z][a-z0-9_]{0,79}$")
+
+FORM_EMAIL_SEND_FAILED_MSG = (
+    "The notification e-mail could not be delivered. The form is still available on the portal."
+)
+
+
+def _form_email_skip_reason(db: Session, *, email_sent: bool) -> str | None:
+    if email_sent:
+        return None
+    if not firm_alerts_configured(db):
+        return ALERTS_NOT_CONFIGURED_MSG
+    return FORM_EMAIL_SEND_FAILED_MSG
 
 
 def utcnow() -> datetime:
@@ -108,6 +120,73 @@ def _active_pending(
     ).scalar_one_or_none()
 
 
+def form_submission_file_list_item(db: Session, submission: PortalFormSubmission) -> dict[str, Any]:
+    contact = db.get(Contact, submission.contact_id)
+    template = db.get(PortalFormTemplate, submission.template_id)
+    return {
+        "id": str(submission.id),
+        "status": submission.status.value,
+        "contact_name": contact_display_name(contact) if contact else "Contact",
+        "template_name": template.name if template else "",
+        "sent_at": submission.sent_at.isoformat(),
+        "completed_at": submission.completed_at.isoformat() if submission.completed_at else None,
+    }
+
+
+def _form_list_filename(*, template: PortalFormTemplate, contact: Contact) -> str:
+    return f"{template.name} — {contact_display_name(contact)}.docx"
+
+
+def _create_form_list_file(
+    db: Session,
+    *,
+    case: Case,
+    template: PortalFormTemplate,
+    contact: Contact,
+    owner: User,
+    body: bytes | None = None,
+    awaiting_completion: bool = False,
+) -> File:
+    if body is None:
+        doc = Document()
+        doc.add_heading(template.name, level=1)
+        if awaiting_completion:
+            doc.add_paragraph(
+                f"Sent to {contact_display_name(contact)} — awaiting completion via the client portal."
+            )
+        bio = BytesIO()
+        doc.save(bio)
+        body = bio.getvalue()
+
+    ensure_files_root()
+    file_id = uuid.uuid4()
+    filename = _form_list_filename(template=template, contact=contact)
+    paths = case_file_paths(case_id=case.id, file_id=file_id, original_filename=filename, folder_path="")
+    paths.abs_path.write_bytes(body)
+    now = datetime.utcnow()
+    row = File(
+        id=file_id,
+        case_id=case.id,
+        owner_id=owner.id,
+        category=FileCategory.case_document,
+        storage_path=paths.rel_path,
+        folder_path=paths.folder_path,
+        is_pinned=False,
+        original_filename=filename,
+        mime_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        size_bytes=len(body),
+        version=1,
+        checksum=None,
+        parent_file_id=None,
+        uploaded_via_portal=False,
+        created_at=now,
+        updated_at=now,
+    )
+    db.add(row)
+    db.flush()
+    return row
+
+
 def send_form_to_contact(
     db: Session,
     *,
@@ -115,10 +194,8 @@ def send_form_to_contact(
     template_id: uuid.UUID,
     contact_id: uuid.UUID,
     actor: User,
-) -> PortalFormSubmission:
+) -> tuple[PortalFormSubmission, bool, str | None]:
     require_case_portal_enabled(db, case_id)
-    if not firm_alerts_configured(db):
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=ALERTS_NOT_CONFIGURED_MSG)
 
     case = db.get(Case, case_id)
     if case is None:
@@ -146,12 +223,8 @@ def send_form_to_contact(
     if access is None or not portal_access_is_active(access):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Contact does not have active portal access")
 
+    # Forms are delivery-scoped — folder grants are optional (used for portal navigation when present).
     grant = pick_portal_grant_for_case(db, case_id=case_id, contact_id=contact_id)
-    if grant is None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="This contact has no shared folders on this matter. Share a folder under Portal first.",
-        )
 
     existing = _active_pending(db, case_id=case_id, template_id=template_id, contact_id=contact_id)
     if existing is not None:
@@ -165,38 +238,49 @@ def send_form_to_contact(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Form template has no fields")
 
     now = utcnow()
+    list_file = _create_form_list_file(
+        db,
+        case=case,
+        template=template,
+        contact=contact,
+        owner=actor,
+        awaiting_completion=True,
+    )
+
     submission = PortalFormSubmission(
         id=uuid.uuid4(),
         case_id=case_id,
         template_id=template_id,
         contact_id=contact_id,
-        grant_id=grant.id,
+        grant_id=grant.id if grant else None,
         sent_by_user_id=actor.id,
         status=PortalFormSubmissionStatus.pending,
         responses={},
+        snapshot_file_id=list_file.id,
         sent_at=now,
     )
     db.add(submission)
     db.flush()
 
     portal_url = portal_public_url().rstrip("/")
-    dispatch_alert(
+    email_sent = dispatch_alert(
         db,
         AlertKind.portal_form_sent,
         to_email=email,
         context={
             "contact_name": contact_display_name(contact),
             "form_name": template.name,
-            "matter_label": case.case_number or case.title,
+            "matter_label": client_matter_description(case),
             "portal_url": portal_url,
         },
         actor_user_id=actor.id,
     )
+    skip_reason = _form_email_skip_reason(db, email_sent=email_sent)
     log_portal_activity(
         db,
         case_id=case_id,
         contact_id=contact_id,
-        grant_id=grant.id,
+        grant_id=grant.id if grant else None,
         action="portal.form.sent",
         summary=f"{template.name} sent to {contact_display_name(contact)} via portal",
     )
@@ -206,9 +290,14 @@ def send_form_to_contact(
         action="portal.form.sent",
         entity_type="portal_form_submission",
         entity_id=str(submission.id),
-        meta={"case_id": str(case_id), "template_id": str(template_id), "contact_id": str(contact_id)},
+        meta={
+            "case_id": str(case_id),
+            "template_id": str(template_id),
+            "contact_id": str(contact_id),
+            "email_sent": email_sent,
+        },
     )
-    return submission
+    return submission, email_sent, skip_reason
 
 
 def void_submission(db: Session, *, submission: PortalFormSubmission, actor: User) -> PortalFormSubmission:
@@ -324,7 +413,7 @@ def _render_submission_docx(
 ) -> bytes:
     doc = Document()
     doc.add_heading(template.name, level=1)
-    doc.add_paragraph(f"Matter: {case.case_number} — {case.title}")
+    doc.add_paragraph(f"Matter: {client_matter_description(case)}")
     doc.add_paragraph(f"Contact: {contact_display_name(contact)}")
     doc.add_paragraph(f"Completed: {completed_at.strftime('%d/%m/%Y %H:%M UTC')}")
     doc.add_paragraph("")
@@ -365,33 +454,29 @@ def _save_snapshot_on_matter(
         contact=contact,
         completed_at=completed_at,
     )
-    ensure_files_root()
-    file_id = uuid.uuid4()
-    safe_ref = re.sub(r"[^\w\-]+", "-", template.reference).strip("-") or "form"
-    filename = f"{safe_ref} — {contact_display_name(contact)}.docx"
-    folder = "Client documents/Portal forms"
-    paths = case_file_paths(case_id=case.id, file_id=file_id, original_filename=filename, folder_path=folder)
-    paths.abs_path.write_bytes(data)
-    row = File(
-        id=file_id,
-        case_id=case.id,
-        owner_id=owner.id,
-        category=FileCategory.case_document,
-        storage_path=paths.rel_path,
-        folder_path=paths.folder_path,
-        is_pinned=False,
-        original_filename=filename,
-        mime_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        size_bytes=len(data),
-        version=1,
-        checksum=None,
-        parent_file_id=None,
-        uploaded_via_portal=True,
-        created_at=datetime.utcnow(),
-        updated_at=datetime.utcnow(),
+    existing = db.get(File, submission.snapshot_file_id) if submission.snapshot_file_id else None
+    if existing is not None and existing.case_id == case.id:
+        paths = case_file_paths(
+            case_id=case.id,
+            file_id=existing.id,
+            original_filename=existing.original_filename,
+            folder_path=existing.folder_path or "",
+        )
+        paths.abs_path.write_bytes(data)
+        existing.size_bytes = len(data)
+        existing.updated_at = datetime.utcnow()
+        db.add(existing)
+        db.flush()
+        return existing
+
+    row = _create_form_list_file(
+        db,
+        case=case,
+        template=template,
+        contact=contact,
+        owner=owner,
+        body=data,
     )
-    db.add(row)
-    db.flush()
     return row
 
 
@@ -423,12 +508,12 @@ async def upload_submission_file(
     mime = upload.content_type or "application/octet-stream"
     ensure_files_root()
     file_id = uuid.uuid4()
-    folder = f"Client documents/Portal forms/{submission.id}"
+    parent_id = submission.snapshot_file_id
     paths = case_file_paths(
         case_id=submission.case_id,
         file_id=file_id,
         original_filename=original,
-        folder_path=folder,
+        folder_path="",
     )
     paths.abs_path.write_bytes(raw)
     owner = db.get(User, submission.sent_by_user_id) if submission.sent_by_user_id else None
@@ -451,7 +536,7 @@ async def upload_submission_file(
         size_bytes=len(raw),
         version=1,
         checksum=None,
-        parent_file_id=None,
+        parent_file_id=parent_id,
         uploaded_via_portal=True,
         created_at=datetime.utcnow(),
         updated_at=datetime.utcnow(),
@@ -527,6 +612,13 @@ def complete_submission(
             "contact_id": str(contact.id),
             "snapshot_file_id": str(snapshot.id),
         },
+    )
+    notify_portal_staff_form_completed(
+        db,
+        case_id=submission.case_id,
+        contact=contact,
+        form_name=template.name,
+        matter_label=client_matter_description(case),
     )
     return submission
 

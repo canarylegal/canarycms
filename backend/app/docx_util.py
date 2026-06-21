@@ -308,7 +308,7 @@ def validate_docx_package_bytes(raw: bytes) -> None:
         if ct_name is None:
             raise ValueError(
                 "Missing [Content_Types].xml — this is not a valid Office Open XML (.docx) package. "
-                "Re-save from Microsoft Word (or export as .docx from Google Docs / LibreOffice). "
+                "Re-save from Microsoft Word (or export as .docx from Google Docs). "
                 "If you renamed another format to .docx, merge will not work."
             )
         doc_name = _find_ooxml_document_xml_member(names)

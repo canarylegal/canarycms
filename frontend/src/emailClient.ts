@@ -3,7 +3,12 @@
  * Uses the same OWA deeplink shapes as ``emailLauncher.ts``; naming matches the experimental UI.
  */
 
-import { buildOutlookWebReadItemUrl, DEFAULT_OUTLOOK_WEB_MAIL_URL } from './emailLauncher'
+import type { CaseEmailDraftM365Out } from './types'
+import {
+  buildOutlookWebReadItemUrl,
+  DEFAULT_OUTLOOK_WEB_MAIL_URL,
+  normalizeComposeQueryPlusAsSpaces,
+} from './emailLauncher'
 
 /**
  * Build OWA “read item” URL from a Microsoft Graph message id or Exchange REST item id.
@@ -90,4 +95,23 @@ export function outlookWebMailBase(owaBaseFromUser: string | null | undefined): 
   } catch {
     return `${new URL(DEFAULT_OUTLOOK_WEB_MAIL_URL).origin}/mail/`
   }
+}
+
+/** Best OWA URL to open a Graph-created compose draft (attachments on the message). */
+export function pickM365ComposeDraftOpenUrl(draft: CaseEmailDraftM365Out): string {
+  return (draft.draft_compose_web_link || draft.open_url || draft.compose_prefill_url || '').trim()
+}
+
+/** Open a Graph draft created by ``POST …/files/email-drafts/m365``. */
+export function openM365ComposeDraft(
+  draft: CaseEmailDraftM365Out,
+  loginHint: string | null | undefined,
+): boolean {
+  const raw = pickM365ComposeDraftOpenUrl(draft)
+  if (!raw) return false
+  const url = normalizeComposeQueryPlusAsSpaces(appendOutlookWebAuthHintsForNav(raw, loginHint))
+  return openOutlookWebAppFromGraphWebLink(url, {
+    windowFeatures: OWA_MESSAGE_WINDOW_FEATURES,
+    windowName: OWA_MAIL_WINDOW_NAME,
+  })
 }

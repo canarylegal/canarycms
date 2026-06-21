@@ -22,8 +22,8 @@ from app.portal_notifications import (
 from app.portal_case import active_portal_share_counts, require_case_portal_enabled
 from app.portal_service import (
     contact_display_name,
-    grant_is_active,
-    list_active_grants_for_contact,
+    contact_has_portal_content_on_case,
+    grant_is_client_visible,
     portal_access_is_active,
 )
 from app.schemas import (
@@ -73,6 +73,7 @@ def _notification_settings_out(db: Session, user_ids: list[uuid.UUID]) -> CasePo
 
 
 def _grant_for_exact_folder(
+    db: Session,
     grants: list[ContactPortalGrant],
     *,
     contact_id: uuid.UUID,
@@ -82,7 +83,7 @@ def _grant_for_exact_folder(
     for grant in grants:
         if grant.contact_id != contact_id:
             continue
-        if not grant_is_active(grant):
+        if not grant_is_client_visible(db, grant):
             continue
         if sanitize_folder_path(grant.folder_path) == folder:
             return grant
@@ -104,6 +105,9 @@ def _portal_access_by_contact_ids(
 
 
 def _preview_contacts_for_case(db: Session, case_id: uuid.UUID) -> list[CasePortalPreviewContactOut]:
+    from app.portal_form_service import list_pending_for_contact as list_pending_portal_forms
+    from app.quote_portal_service import list_pending_quote_deliveries_for_contact
+
     case_contacts = (
         db.execute(select(CaseContact).where(CaseContact.case_id == case_id).order_by(CaseContact.name.asc()))
         .scalars()
@@ -114,7 +118,7 @@ def _preview_contacts_for_case(db: Session, case_id: uuid.UUID) -> list[CasePort
     access_by_contact = _portal_access_by_contact_ids(db, contact_ids)
     grant_counts: dict[uuid.UUID, int] = {}
     for grant in grants:
-        if not grant_is_active(grant):
+        if not grant_is_client_visible(db, grant):
             continue
         grant_counts[grant.contact_id] = grant_counts.get(grant.contact_id, 0) + 1
 
@@ -127,7 +131,15 @@ def _preview_contacts_for_case(db: Session, case_id: uuid.UUID) -> list[CasePort
         if access is None or not portal_access_is_active(access):
             continue
         shared = grant_counts.get(cc.contact_id, 0)
-        if shared <= 0:
+        pending_quotes = sum(
+            1
+            for d in list_pending_quote_deliveries_for_contact(db, contact_id=cc.contact_id)
+            if d.case_id == case_id
+        )
+        pending_forms = sum(
+            1 for s in list_pending_portal_forms(db, cc.contact_id) if s.case_id == case_id
+        )
+        if shared <= 0 and pending_quotes <= 0 and pending_forms <= 0:
             continue
         seen.add(cc.contact_id)
         out.append(
@@ -135,6 +147,8 @@ def _preview_contacts_for_case(db: Session, case_id: uuid.UUID) -> list[CasePort
                 contact_id=cc.contact_id,
                 contact_name=(cc.name or "").strip() or "Contact",
                 shared_folder_count=shared,
+                pending_quote_count=pending_quotes,
+                pending_form_count=pending_forms,
             )
         )
     return out
@@ -152,33 +166,21 @@ def _validate_preview_contact(db: Session, case_id: uuid.UUID, contact_id: uuid.
     access = db.execute(select(ContactPortalAccess).where(ContactPortalAccess.contact_id == contact_id)).scalar_one_or_none()
     if access is None or not portal_access_is_active(access):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Portal access is not active for this contact")
-    grants = [
-        g
-        for g in db.execute(
-            select(ContactPortalGrant).where(
-                ContactPortalGrant.case_id == case_id,
-                ContactPortalGrant.contact_id == contact_id,
-            )
-        ).scalars().all()
-        if grant_is_active(g)
-    ]
-    if not grants:
+    if not contact_has_portal_content_on_case(db, contact_id=contact_id, case_id=case_id):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="This contact has no shared folders on this matter",
+            detail="This contact has no portal content on this matter (share a folder, send a quote, or send a form)",
         )
-    all_grants = list_active_grants_for_contact(db, contact_id)
-    if not all_grants:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No document areas are available for this contact")
     return contact
 
 
 def _any_active_grant_on_case(
+    db: Session,
     grants: list[ContactPortalGrant],
     *,
     contact_id: uuid.UUID,
 ) -> ContactPortalGrant | None:
-    active = [g for g in grants if g.contact_id == contact_id and grant_is_active(g)]
+    active = [g for g in grants if g.contact_id == contact_id and grant_is_client_visible(db, g)]
     if not active:
         return None
     downloadable = [g for g in active if g.can_download]
@@ -215,9 +217,9 @@ def list_case_portal_folder_share_contacts(
             continue
         seen.add(cc.contact_id)
         if matter_scope:
-            grant = _any_active_grant_on_case(grants, contact_id=cc.contact_id)
+            grant = _any_active_grant_on_case(db, grants, contact_id=cc.contact_id)
         else:
-            grant = _grant_for_exact_folder(grants, contact_id=cc.contact_id, folder_path=folder)
+            grant = _grant_for_exact_folder(db, grants, contact_id=cc.contact_id, folder_path=folder)
         out.append(
             CasePortalFolderShareContactOut(
                 case_contact_id=cc.id,

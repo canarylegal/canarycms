@@ -200,6 +200,7 @@ PORTAL_QUOTE_EXCHANGE_TTL_SECONDS = int(os.getenv("PORTAL_QUOTE_EXCHANGE_TTL_SEC
 @dataclass(frozen=True)
 class PortalSessionPayload:
     contact_id: str
+    staff_preview: bool = False
 
 
 @dataclass(frozen=True)
@@ -217,11 +218,12 @@ class PortalQuoteExchangePayload:
     delivery_id: str
 
 
-def create_portal_session_token(*, contact_id: str) -> str:
+def create_portal_session_token(*, contact_id: str, staff_preview: bool = False) -> str:
     now = int(time.time())
     payload = {
         "sub": contact_id,
         "purpose": "portal",
+        "staff_preview": bool(staff_preview),
         "iat": now,
         "exp": now + PORTAL_SESSION_TTL_SECONDS,
     }
@@ -238,7 +240,7 @@ def decode_portal_session_token(token: str) -> PortalSessionPayload:
     sub = payload.get("sub")
     if not isinstance(sub, str) or not sub.strip():
         raise ValueError("Invalid session")
-    return PortalSessionPayload(contact_id=sub)
+    return PortalSessionPayload(contact_id=sub, staff_preview=bool(payload.get("staff_preview")))
 
 
 def create_portal_preview_exchange_token(*, contact_id: str, case_id: str, staff_user_id: str) -> str:

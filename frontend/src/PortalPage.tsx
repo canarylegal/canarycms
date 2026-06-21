@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { applyAuthHeaders, apiUrl, formatApiErrorDetail } from './api'
 import { DocMimeIcon } from './case/DocCells'
 import { PortalFormFillPanel } from './PortalFormFillPanel'
+import { PortalQuotePdfViewer } from './PortalQuotePdfViewer'
 import type { PortalAuthOut, PortalBrowseOut, PortalDocusignSigningOut, PortalFileOut, PortalFormPendingOut, PortalGrantSummaryOut, PortalQuoteDeliveryViewOut, PortalQuoteExchangeOut, PortalSessionOut } from './types'
 
 const PORTAL_FILES_GRID = '32px 1fr 120px 100px 180px'
@@ -72,7 +73,11 @@ type MatterGroup = {
   grants: PortalGrantSummaryOut[]
 }
 
-function groupGrantsByMatter(grants: PortalGrantSummaryOut[]): MatterGroup[] {
+function buildMatterGroups(
+  grants: PortalGrantSummaryOut[],
+  forms: PortalFormPendingOut[],
+  quotes: PortalQuoteDeliveryViewOut[],
+): MatterGroup[] {
   const map = new Map<string, MatterGroup>()
   for (const g of grants) {
     let group = map.get(g.case_id)
@@ -82,12 +87,38 @@ function groupGrantsByMatter(grants: PortalGrantSummaryOut[]): MatterGroup[] {
     }
     group.grants.push(g)
   }
+  for (const f of forms) {
+    if (!f.case_id) continue
+    if (!map.has(f.case_id)) {
+      map.set(f.case_id, { caseId: f.case_id, caseTitle: f.matter_label, grants: [] })
+    }
+  }
+  for (const q of quotes) {
+    if (!q.case_id) continue
+    if (!map.has(q.case_id)) {
+      map.set(q.case_id, { caseId: q.case_id, caseTitle: (q.case_title || '').trim() || 'Matter', grants: [] })
+    }
+  }
   return Array.from(map.values()).sort((a, b) => a.caseTitle.localeCompare(b.caseTitle))
+}
+
+function matterGroupSubtitle(group: MatterGroup): string {
+  const parts: string[] = []
+  if (group.grants.length > 0) {
+    parts.push(`${group.grants.length} shared ${group.grants.length === 1 ? 'folder' : 'folders'}`)
+  }
+  return parts.join(' · ')
 }
 
 function quoteDeliveryFileUrl(deliveryId: string, download: boolean): string {
   const q = download ? '?download=1' : ''
   return apiUrl(`/portal/quote-deliveries/${encodeURIComponent(deliveryId)}/file${q}`)
+}
+
+function quoteExchangeTokenFromLocation(): string | null {
+  const pathMatch = window.location.pathname.match(/^\/portal\/q\/([^/]+)$/i)
+  if (pathMatch?.[1]) return pathMatch[1].trim()
+  return new URLSearchParams(window.location.search).get('quote')?.trim() || null
 }
 
 export default function PortalPage() {
@@ -120,8 +151,13 @@ export default function PortalPage() {
   const [activeFormId, setActiveFormId] = useState<string | null>(null)
   const [allPendingForms, setAllPendingForms] = useState<PortalFormPendingOut[]>([])
   const [pendingQuoteDeliveries, setPendingQuoteDeliveries] = useState<PortalQuoteDeliveryViewOut[]>([])
+  const [previewFocusCaseId, setPreviewFocusCaseId] = useState<string | null>(null)
+  const [staffPreviewSession, setStaffPreviewSession] = useState(false)
 
-  const matterGroups = useMemo(() => groupGrantsByMatter(grants), [grants])
+  const matterGroups = useMemo(
+    () => buildMatterGroups(grants, allPendingForms, pendingQuoteDeliveries),
+    [grants, allPendingForms, pendingQuoteDeliveries],
+  )
   const activeMatter = useMemo(
     () => matterGroups.find((m) => m.caseId === activeCaseId) ?? null,
     [matterGroups, activeCaseId],
@@ -129,9 +165,10 @@ export default function PortalPage() {
   const activeGrant = useMemo(() => grants.find((g) => g.id === activeGrantId) ?? null, [grants, activeGrantId])
 
   const staffPreview = useMemo(() => {
-    if (typeof window === 'undefined') return false
+    if (typeof window === 'undefined') return staffPreviewSession
+    if (staffPreviewSession) return true
     return new URLSearchParams(window.location.search).get('staff_preview') === '1'
-  }, [])
+  }, [staffPreviewSession])
 
   const pendingPortalForms = useMemo(() => {
     const fromBrowse = browse?.pending_portal_forms ?? []
@@ -173,6 +210,14 @@ export default function PortalPage() {
         setSessionToken(out.session_token)
         setContactName(out.contact_name)
         setGrants(out.grants)
+        setStaffPreviewSession(Boolean(out.staff_preview))
+        if (out.focus_case_id) {
+          setPreviewFocusCaseId(out.focus_case_id)
+          setActiveCaseId(out.focus_case_id)
+          setActiveGrantId(null)
+          setBrowse(null)
+          setBrowseSubfolder('')
+        }
         params.delete('preview_exchange')
         const qs = params.toString()
         window.history.replaceState(null, '', `${window.location.pathname}${qs ? `?${qs}` : ''}${window.location.hash}`)
@@ -187,8 +232,7 @@ export default function PortalPage() {
   }, [])
 
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search)
-    const quoteToken = params.get('quote')?.trim()
+    const quoteToken = quoteExchangeTokenFromLocation()
     if (!quoteToken) return
     void (async () => {
       setQuoteExchangeBusy(true)
@@ -210,9 +254,7 @@ export default function PortalPage() {
             setActiveGrantId(grant.id)
           }
         }
-        params.delete('quote')
-        const qs = params.toString()
-        window.history.replaceState(null, '', `${window.location.pathname}${qs ? `?${qs}` : ''}${window.location.hash}`)
+        window.history.replaceState(null, '', '/portal')
       } catch (e: unknown) {
         storePortalToken('')
         setSessionToken('')
@@ -227,6 +269,7 @@ export default function PortalPage() {
     const sess = await portalFetch<PortalSessionOut>('/portal/session', { portalToken: token })
     setContactName(sess.contact_name)
     setGrants(sess.grants)
+    setStaffPreviewSession(Boolean(sess.staff_preview))
     return sess
   }, [])
 
@@ -246,12 +289,14 @@ export default function PortalPage() {
       return grantId
     })
     setActiveCaseId((caseId) => {
-      if (caseId && !grants.some((g) => g.case_id === caseId)) {
-        return null
-      }
-      return caseId
+      if (!caseId) return caseId
+      if (caseId === previewFocusCaseId) return caseId
+      if (grants.some((g) => g.case_id === caseId)) return caseId
+      if (allPendingForms.some((f) => f.case_id === caseId)) return caseId
+      if (pendingQuoteDeliveries.some((q) => q.case_id === caseId)) return caseId
+      return null
     })
-  }, [grants, sessionToken])
+  }, [grants, sessionToken, allPendingForms, pendingQuoteDeliveries, previewFocusCaseId])
 
   const loadBrowse = useCallback(async (grantId: string, subfolder: string, token: string) => {
     const q = subfolder ? `?subfolder=${encodeURIComponent(subfolder)}` : ''
@@ -328,12 +373,25 @@ export default function PortalPage() {
   useEffect(() => {
     const token = sessionToken.trim()
     if (!token) return
-    const onFocus = () => {
+    const refresh = () => {
       void refreshSession(token).catch(() => {})
     }
-    window.addEventListener('focus', onFocus)
-    return () => window.removeEventListener('focus', onFocus)
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') refresh()
+    }
+    window.addEventListener('focus', refresh)
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => {
+      window.removeEventListener('focus', refresh)
+      document.removeEventListener('visibilitychange', onVisibility)
+    }
   }, [sessionToken, refreshSession])
+
+  useEffect(() => {
+    const token = sessionToken.trim()
+    if (!token || !activeCaseId || activeGrantId) return
+    void refreshSession(token).catch(() => {})
+  }, [sessionToken, activeCaseId, activeGrantId, refreshSession])
 
   useEffect(() => {
     const token = sessionToken.trim()
@@ -376,6 +434,7 @@ export default function PortalPage() {
       setSessionToken(out.session_token)
       setContactName(out.contact_name)
       setGrants(out.grants)
+      setStaffPreviewSession(Boolean(out.staff_preview))
       setActiveCaseId(null)
       setActiveGrantId(null)
       setBrowse(null)
@@ -418,6 +477,7 @@ export default function PortalPage() {
       setSessionToken(out.session_token)
       setContactName(out.contact_name)
       setGrants(out.grants)
+      setStaffPreviewSession(Boolean(out.staff_preview))
       setActiveCaseId(null)
       setActiveGrantId(null)
       setBrowse(null)
@@ -456,11 +516,7 @@ export default function PortalPage() {
     if (!token) return
     setErr(null)
     try {
-      const url = quoteDelivery.grant_id
-        ? apiUrl(
-            `/portal/grants/${quoteDelivery.grant_id}/files/${quoteDelivery.file_id}?download=1`,
-          )
-        : quoteDeliveryFileUrl(quoteDelivery.id, true)
+      const url = quoteDeliveryFileUrl(quoteDelivery.id, true)
       const headers = new Headers()
       applyAuthHeaders(headers, token)
       const res = await fetch(url, { headers })
@@ -525,12 +581,9 @@ export default function PortalPage() {
   async function downloadApprovalFile(delivery: PortalQuoteDeliveryViewOut) {
     const token = sessionToken.trim()
     if (!token) return
-    const grantId = delivery.grant_id ?? activeGrantId
     setErr(null)
     try {
-      const url = grantId
-        ? apiUrl(`/portal/grants/${grantId}/files/${delivery.file_id}?download=1`)
-        : quoteDeliveryFileUrl(delivery.id, true)
+      const url = quoteDeliveryFileUrl(delivery.id, true)
       const headers = new Headers()
       applyAuthHeaders(headers, token)
       const res = await fetch(url, { headers })
@@ -550,12 +603,9 @@ export default function PortalPage() {
   async function openApprovalFile(delivery: PortalQuoteDeliveryViewOut) {
     const token = sessionToken.trim()
     if (!token) return
-    const grantId = delivery.grant_id ?? activeGrantId
     setErr(null)
     try {
-      const url = grantId
-        ? apiUrl(`/portal/grants/${grantId}/files/${delivery.file_id}`)
-        : quoteDeliveryFileUrl(delivery.id, false)
+      const url = quoteDeliveryFileUrl(delivery.id, false)
       const headers = new Headers()
       applyAuthHeaders(headers, token)
       const res = await fetch(url, { headers })
@@ -715,7 +765,10 @@ export default function PortalPage() {
         return
       }
     }
-    if (!visibleGrants.some((g) => g.case_id === caseId)) {
+    const hasGrant = visibleGrants.some((g) => g.case_id === caseId)
+    const hasForm = allPendingForms.some((f) => f.case_id === caseId)
+    const hasQuote = pendingQuoteDeliveries.some((q) => q.case_id === caseId)
+    if (!hasGrant && !hasForm && !hasQuote) {
       setActiveCaseId(null)
       return
     }
@@ -736,6 +789,7 @@ export default function PortalPage() {
     }
     setActiveCaseId(null)
     setActiveGrantId(null)
+    setPreviewFocusCaseId(null)
     setBrowse(null)
     setBrowseSubfolder('')
   }
@@ -959,11 +1013,24 @@ export default function PortalPage() {
         {err ? <div className="error" style={{ marginTop: 12 }}>{err}</div> : null}
         {info ? <div className="notice" style={{ marginTop: 12 }}>{info}</div> : null}
 
-        {quoteDelivery && !activeGrantId ? (
+        {quoteDelivery ? (
           <div className="portalQuotePanel card" style={{ marginTop: 16, padding: 16 }}>
             <h2 style={{ marginTop: 0, fontSize: 18 }}>Quote</h2>
             <div className="listTitle">{quoteDelivery.original_filename}</div>
             <p className="muted" style={{ marginBottom: 12 }}>{quoteStatusMessage(quoteDelivery)}</p>
+            {quoteDelivery.portal_pdf_available && sessionToken.trim() ? (
+              <div style={{ marginBottom: 16 }}>
+                <PortalQuotePdfViewer
+                  fetchUrl={quoteDeliveryFileUrl(quoteDelivery.id, false)}
+                  portalToken={sessionToken}
+                  title={quoteDelivery.original_filename}
+                />
+              </div>
+            ) : (
+              <p className="muted" style={{ marginTop: 0, marginBottom: 16 }}>
+                Download the quote to view it in Word, Google Docs, or your device&apos;s files app.
+              </p>
+            )}
             {quoteDelivery.can_respond && !quoteDeclineOpen ? (
               <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
                 <button type="button" className="btn" onClick={() => void downloadQuoteFile()}>
@@ -1039,6 +1106,7 @@ export default function PortalPage() {
           <PortalFormFillPanel
             submissionId={activeFormId}
             portalToken={sessionToken}
+            previewMode={staffPreview}
             onBack={() => setActiveFormId(null)}
             onSubmitted={() => {
               setActiveFormId(null)
@@ -1090,7 +1158,7 @@ export default function PortalPage() {
                     >
                       <div className="listTitle">{m.caseTitle}</div>
                       <div className="muted">
-                        {m.grants.length} shared {m.grants.length === 1 ? 'folder' : 'folders'}
+                        {matterGroupSubtitle(m) || 'Quotes and forms'}
                       </div>
                     </button>
                   ))}
@@ -1111,7 +1179,34 @@ export default function PortalPage() {
               <h2 style={{ margin: 0, flex: 1 }}>{activeMatter?.caseTitle ?? 'Matter'}</h2>
             </div>
             {renderPendingPortalForms()}
-            {activeMatter && activeMatter.grants.length === 0 ? <div className="muted">No folders are shared for this matter.</div> : null}
+            {activeCaseId &&
+            pendingQuoteDeliveries.filter((q) => q.case_id === activeCaseId).length > 0 ? (
+              <div style={{ marginBottom: 20 }}>
+                <h3 style={{ margin: '0 0 8px', fontSize: 16 }}>Quotes awaiting your response</h3>
+                <div className="list">
+                  {pendingQuoteDeliveries
+                    .filter((q) => q.case_id === activeCaseId)
+                    .map((q) => (
+                      <button
+                        key={q.id}
+                        type="button"
+                        className="listCard rowbtn"
+                        style={{ width: '100%', textAlign: 'left' }}
+                        onClick={() => {
+                          setQuoteDelivery(q)
+                          setActiveGrantId(null)
+                        }}
+                      >
+                        <div className="listTitle">{q.original_filename}</div>
+                        <div className="muted">{quoteStatusMessage(q)}</div>
+                      </button>
+                    ))}
+                </div>
+              </div>
+            ) : null}
+            {activeMatter && activeMatter.grants.length === 0 ? (
+              <div className="muted">No folders are shared for this matter.</div>
+            ) : null}
             <div className="list">
               {activeMatter?.grants.map((g) => (
                 <button

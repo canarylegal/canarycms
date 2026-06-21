@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import uuid
 from datetime import datetime, timezone
 
@@ -26,21 +27,76 @@ from app.portal_activity import log_portal_activity
 from app.portal_case import require_case_portal_enabled
 from app.portal_notifications import ALERTS_NOT_CONFIGURED_MSG, list_portal_staff_recipient_users
 from app.portal_service import (
+    client_matter_description,
     contact_display_name,
     file_folder_in_grant,
-    grant_is_active,
+    grant_is_client_visible,
     portal_access_is_active,
 )
-from app.security import create_portal_quote_exchange_token
+from app.quote_portal_pdf import create_portal_quote_pdf_snapshot
+from app.security import PORTAL_QUOTE_EXCHANGE_TTL_SECONDS, decode_portal_quote_exchange_token
+
+_QUOTE_DELIVERY_ID_RE = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+    re.IGNORECASE,
+)
 
 
 def utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _quote_link(exchange_token: str) -> str:
+def quote_link_for_delivery(delivery_id: uuid.UUID) -> str:
+    """Short client portal link for a quote delivery (used in e-mail)."""
     base = portal_public_url().rstrip("/")
-    return f"{base}?quote={exchange_token}"
+    return f"{base}/q/{delivery_id}"
+
+
+def _quote_delivery_link_expired(delivery: QuotePortalDelivery) -> bool:
+    sent_at = delivery.sent_at
+    if sent_at.tzinfo is None:
+        sent_at = sent_at.replace(tzinfo=timezone.utc)
+    age = (utcnow() - sent_at).total_seconds()
+    return age > PORTAL_QUOTE_EXCHANGE_TTL_SECONDS
+
+
+def resolve_quote_exchange_delivery(db: Session, exchange_token: str) -> QuotePortalDelivery:
+    """Resolve a quote e-mail link token (delivery UUID or legacy JWT) to a delivery row."""
+    token = (exchange_token or "").strip()
+    if not token:
+        raise ValueError("Invalid or expired quote link")
+
+    if _QUOTE_DELIVERY_ID_RE.match(token):
+        delivery_id = uuid.UUID(token)
+        delivery = db.get(QuotePortalDelivery, delivery_id)
+        if delivery is None:
+            raise ValueError("Invalid or expired quote link")
+        if _quote_delivery_link_expired(delivery):
+            raise ValueError("Invalid or expired quote link")
+        return delivery
+
+    try:
+        exchange = decode_portal_quote_exchange_token(token)
+    except ValueError as exc:
+        raise ValueError("Invalid or expired quote link") from exc
+
+    try:
+        delivery_id = uuid.UUID(exchange.delivery_id)
+        contact_id = uuid.UUID(exchange.contact_id)
+        case_id = uuid.UUID(exchange.case_id)
+        file_id = uuid.UUID(exchange.file_id)
+    except ValueError as exc:
+        raise ValueError("Invalid or expired quote link") from exc
+
+    delivery = db.get(QuotePortalDelivery, delivery_id)
+    if (
+        delivery is None
+        or delivery.contact_id != contact_id
+        or delivery.case_id != case_id
+        or delivery.file_id != file_id
+    ):
+        raise ValueError("Invalid or expired quote link")
+    return delivery
 
 
 def supersede_pending_quote_deliveries(db: Session, file_id: uuid.UUID) -> int:
@@ -88,7 +144,20 @@ def delivery_out_meta(db: Session, delivery: QuotePortalDelivery) -> dict:
         "responded_at": delivery.responded_at.isoformat() if delivery.responded_at else None,
         "decline_reason": delivery.decline_reason,
         "file_version_at_send": delivery.file_version_at_send,
+        "portal_pdf_generated": delivery.portal_pdf_file_id is not None,
     }
+
+
+def client_quote_file_row(db: Session, delivery: QuotePortalDelivery) -> File | None:
+    """File row shown to portal clients (PDF snapshot when available)."""
+    source = db.get(File, delivery.file_id)
+    if source is None:
+        return None
+    if delivery.portal_pdf_file_id:
+        pdf_row = db.get(File, delivery.portal_pdf_file_id)
+        if pdf_row is not None and pdf_row.case_id == delivery.case_id:
+            return pdf_row
+    return source
 
 
 def _grant_covering_file(
@@ -109,7 +178,7 @@ def _grant_covering_file(
         .all()
     )
     for grant in grants:
-        if grant_is_active(grant) and file_folder_in_grant(
+        if grant_is_client_visible(db, grant) and file_folder_in_grant(
             file_folder=folder_path,
             grant_folder=grant.folder_path or "",
         ):
@@ -134,7 +203,7 @@ def pick_portal_grant_for_case(
         )
         .scalars()
         .all()
-        if grant_is_active(g)
+        if grant_is_client_visible(db, g)
     ]
     if not grants:
         return None
@@ -179,8 +248,8 @@ def send_quote_via_portal(
     file_id: uuid.UUID,
     contact_id: uuid.UUID,
     actor_user_id: uuid.UUID,
-) -> tuple[QuotePortalDelivery, bool, str | None]:
-    """Create delivery, e-mail contact, return (delivery, email_sent, skip_reason)."""
+) -> tuple[QuotePortalDelivery, bool, str | None, bool]:
+    """Create delivery, PDF snapshot, e-mail contact. Returns (delivery, email_sent, skip_reason, portal_pdf_generated)."""
     case = db.get(Case, case_id)
     if case is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Case not found")
@@ -244,13 +313,16 @@ def send_quote_via_portal(
     db.add(delivery)
     db.flush()
 
-    exchange = create_portal_quote_exchange_token(
-        contact_id=str(contact_id),
-        case_id=str(case_id),
-        file_id=str(file_id),
-        delivery_id=str(delivery.id),
+    pdf_row = create_portal_quote_pdf_snapshot(
+        db,
+        source=row,
+        delivery=delivery,
+        owner_user_id=actor_user_id,
     )
-    quote_url = _quote_link(exchange)
+    portal_pdf_generated = pdf_row is not None
+    client_filename = pdf_row.original_filename if pdf_row else row.original_filename
+
+    quote_url = quote_link_for_delivery(delivery.id)
     log_portal_activity(
         db,
         case_id=case_id,
@@ -266,7 +338,8 @@ def send_quote_via_portal(
         to_email=email,
         context={
             "contact_name": contact_display_name(contact),
-            "quote_filename": row.original_filename,
+            "quote_filename": client_filename,
+            "matter_label": client_matter_description(case),
             "portal_url": quote_url,
         },
         actor_user_id=actor_user_id,
@@ -285,12 +358,13 @@ def send_quote_via_portal(
             "contact_id": str(contact_id),
             "file_version": delivery.file_version_at_send,
             "email_sent": email_sent,
+            "portal_pdf_generated": portal_pdf_generated,
         },
     )
     if not email_sent:
         db.commit()
     db.refresh(delivery)
-    return delivery, email_sent, skip_reason
+    return delivery, email_sent, skip_reason, portal_pdf_generated
 
 
 def _notify_staff_quote_response(
@@ -419,7 +493,13 @@ def portal_quote_delivery_view(
     from app.portal_service import relative_folder_under_grant
 
     row = db.get(File, delivery.file_id)
-    filename = row.original_filename if row else "Document"
+    client_row = client_quote_file_row(db, delivery)
+    filename = client_row.original_filename if client_row else (row.original_filename if row else "Document")
+    mime_type = client_row.mime_type if client_row else (row.mime_type if row else "application/octet-stream")
+    size_bytes = int(client_row.size_bytes or 0) if client_row else (int(row.size_bytes or 0) if row else 0)
+    portal_pdf_available = bool(
+        client_row and (client_row.mime_type or "").strip().lower() == "application/pdf"
+    )
     folder_display = ""
     if row and grant is not None:
         if file_folder_in_grant(file_folder=row.folder_path or "", grant_folder=grant.folder_path or ""):
@@ -436,9 +516,12 @@ def portal_quote_delivery_view(
         "id": delivery.id,
         "file_id": delivery.file_id,
         "grant_id": delivery.grant_id,
+        "case_id": delivery.case_id,
+        "case_title": (case.title or "").strip() if (case := db.get(Case, delivery.case_id)) else "",
         "original_filename": filename,
-        "mime_type": row.mime_type if row else "application/octet-stream",
-        "size_bytes": int(row.size_bytes or 0) if row else 0,
+        "mime_type": mime_type,
+        "size_bytes": size_bytes,
+        "portal_pdf_available": portal_pdf_available,
         "folder_display": folder_display,
         "status": delivery.status.value,
         "can_respond": delivery_can_respond(db, delivery),
@@ -488,10 +571,13 @@ def get_quote_delivery_file_for_contact(
             status_code=status.HTTP_409_CONFLICT,
             detail="This quote has been revised. Ask your firm for an updated copy.",
         )
-    row = db.get(File, delivery.file_id)
+    row = client_quote_file_row(db, delivery)
     if row is None or row.case_id != delivery.case_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Quote file not found")
-    if row.oo_compose_pending:
+    source = db.get(File, delivery.file_id)
+    if source is None or source.case_id != delivery.case_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Quote file not found")
+    if source.oo_compose_pending:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Quote file not found")
     return delivery, row
 

@@ -238,24 +238,38 @@ def get_case_if_accessible(case_id: uuid.UUID, user: User, db: Session) -> Case 
     return None
 
 
-def get_portal_contact(
+def get_portal_session(
     request: Request,
     creds: HTTPAuthorizationCredentials | None = Depends(_bearer),
-    db: Session = Depends(get_db),
-) -> Contact:
-    from app.models import ContactPortalAccess
-    from app.portal_service import portal_access_is_active
+) -> PortalSessionPayload:
     from app.security import decode_portal_session_token
 
     raw = _jwt_raw_from_request(request, creds)
     if raw is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing portal session")
     try:
-        payload = decode_portal_session_token(raw)
+        return decode_portal_session_token(raw)
     except ValueError:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired portal session")
+
+
+def require_portal_client_write(session: PortalSessionPayload) -> None:
+    if session.staff_preview:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Form submission is disabled in preview mode",
+        )
+
+
+def get_portal_contact(
+    session: PortalSessionPayload = Depends(get_portal_session),
+    db: Session = Depends(get_db),
+) -> Contact:
+    from app.models import ContactPortalAccess
+    from app.portal_service import portal_access_is_active
+
     try:
-        contact_id = uuid.UUID(payload.contact_id)
+        contact_id = uuid.UUID(session.contact_id)
     except ValueError:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid portal session")
     contact = db.get(Contact, contact_id)
