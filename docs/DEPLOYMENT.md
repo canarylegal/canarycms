@@ -68,12 +68,13 @@ ONLYOFFICE_CALLBACK_REQUIRE_JWT=1
 WEBAUTHN_RP_ID=canary.yourfirm.co.uk
 WEBAUTHN_RP_NAME=Canary
 
-# Trust your reverse proxy for HTTPS and client IP (Cloudflare/nginx)
+# Trust your reverse proxy for HTTPS and client IP (Cloudflare/nginx/cloudflared on loopback)
 CANARY_BEHIND_REVERSE_PROXY=1
-CANARY_PROXY_TRUSTED_HOSTS=*
+CANARY_PROXY_TRUSTED_HOSTS=127.0.0.1,172.16.0.0/12,::1
 
-# Publish frontend on localhost; outer proxy forwards 443 → 8080
+# Prod nginx: loopback (cloudflared) + Tailscale admin — replace with `tailscale ip -4` on each host
 FRONTEND_PORT_PUBLISH=127.0.0.1:8080:80
+FRONTEND_TAILSCALE_PORT_PUBLISH=100.x.x.x:8080:80
 BACKEND_PORT_PUBLISH=127.0.0.1:8004:8000
 
 # Optional: disable GUI “Update now” on first install

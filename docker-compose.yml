@@ -215,7 +215,11 @@ services:
       radicale:
         condition: service_started
     ports:
-      - "${FRONTEND_PORT_PUBLISH:-0.0.0.0:8080:80}"
+      # Loopback for cloudflared / host reverse proxy; Tailscale bind is separate (see FRONTEND_TAILSCALE_PORT_PUBLISH).
+      - "${FRONTEND_PORT_PUBLISH:-127.0.0.1:8080:80}"
+      - "${FRONTEND_TAILSCALE_PORT_PUBLISH:-127.0.0.2:8080:80}"
+      # Optional: Docker bridge IP so cloudflared-in-Docker can reach nginx (local dev). Default is inert loopback.
+      - "${FRONTEND_DOCKER_HOST_PORT_PUBLISH:-127.0.0.3:8080:80}"
 
   frontend_dev:
     profiles: [dev]
@@ -240,7 +244,8 @@ services:
       - ./frontend:/app
       - frontend-node-modules:/app/node_modules
     ports:
-      - "${FRONTEND_DEV_PORT_PUBLISH:-0.0.0.0:5173:5173}"
+      - "${FRONTEND_DEV_PORT_PUBLISH:-127.0.0.1:5173:5173}"
+      - "${FRONTEND_DEV_TAILSCALE_PORT_PUBLISH:-127.0.0.2:5173:5173}"
 
 volumes:
   db-data:

@@ -1,0 +1,45 @@
+# Local dev: cloudflared reaches nginx via 127.0.0.1:8080 inside the frontend network namespace.
+# Requires Cloudflare tunnel origin: http://127.0.0.1:8080 (not 172.17.0.1:8080).
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.dev-tunnel.yml --profile prod up -d
+#
+# Set CLOUDFLARE_TUNNEL_TOKEN_DEV in .env (dev.canarylegalsoftware.co.uk tunnel token).
+
+services:
+  frontend:
+    ports: !reset []
+
+  cloudflared-socat:
+    profiles: [prod]
+    image: alpine/socat:1.0.5
+    container_name: canary-cloudflared-socat
+    restart: unless-stopped
+    network_mode: "service:frontend"
+    cap_add:
+      - NET_ADMIN
+    depends_on:
+      frontend:
+        condition: service_started
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        ip addr add 172.17.0.1/32 dev lo 2>/dev/null || true
+        socat TCP-LISTEN:8080,bind=127.0.0.1,fork,reuseaddr TCP:127.0.0.1:80 &
+        exec socat TCP-LISTEN:8080,bind=172.17.0.1,fork,reuseaddr TCP:127.0.0.1:80
+
+  cloudflared-dev:
+    profiles: [prod]
+    image: cloudflare/cloudflared:latest
+    container_name: canary-cloudflared-dev
+    restart: unless-stopped
+    network_mode: "service:frontend"
+    depends_on:
+      cloudflared-socat:
+        condition: service_started
+    command:
+      - tunnel
+      - --no-autoupdate
+      - run
+      - --token
+      - ${CLOUDFLARE_TUNNEL_TOKEN_DEV:?Set CLOUDFLARE_TUNNEL_TOKEN_DEV in .env}
