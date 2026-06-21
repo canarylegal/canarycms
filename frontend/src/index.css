@@ -1826,6 +1826,10 @@ html.dark .singleSelectDropdownTrigger {
   margin: 0;
 }
 
+.mainMenuFilterCheckRow span {
+  white-space: nowrap;
+}
+
 .mainMenuFilterDropdownBody {
   padding: 8px 12px 12px;
 }

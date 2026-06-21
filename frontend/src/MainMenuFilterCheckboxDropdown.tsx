@@ -5,7 +5,7 @@ import { useDismissOnOutsidePointer } from './useDismissOnOutsidePointer'
 
 export type MainMenuFilterOption = { value: string; label: string }
 
-type MenuPos = { top: number; left: number; width: number }
+type MenuPos = { top: number; left: number; minWidth: number; maxWidth: number }
 
 function selectionSummary(selected: string[], options: MainMenuFilterOption[], emptyLabel = 'All'): string {
   if (selected.length === 0) return emptyLabel
@@ -50,7 +50,8 @@ export function MainMenuFilterCheckboxDropdown({
     setMenuPos({
       top: rect.bottom + 4,
       left: rect.left,
-      width: rect.width,
+      minWidth: rect.width,
+      maxWidth: Math.min(520, window.innerWidth - rect.left - 8),
     })
   }, [])
 
@@ -95,7 +96,9 @@ export function MainMenuFilterCheckboxDropdown({
           position: 'fixed',
           top: menuPos.top,
           left: menuPos.left,
-          width: menuPos.width,
+          minWidth: menuPos.minWidth,
+          maxWidth: menuPos.maxWidth,
+          width: 'max-content',
         }}
         onMouseDown={(e) => e.stopPropagation()}
       >

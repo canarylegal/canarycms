@@ -12,7 +12,7 @@ TaskLayout = Literal["list", "kanban"]
 TaskSortKey = Literal["reference", "client", "matter", "task", "date", "assigned", "priority"]
 MainMenuSortKey = Literal["reference", "client", "matter", "feeEarner", "status", "created"]
 ContactsSortKey = Literal["name", "type", "email", "phone"]
-CaseStatusFilter = Literal["", "open", "closed", "archived", "quote", "post_completion"]
+CaseStatusFilter = Literal["", "open", "closed", "archived", "quote", "quote_closed", "post_completion"]
 SortDir = Literal["asc", "desc"]
 
 _CALENDAR_VIEWS = frozenset({"dayGridMonth", "timeGridWeek", "timeGridDay", "listYear", "listWeek"})
@@ -20,7 +20,7 @@ _TASK_LAYOUTS = frozenset({"list", "kanban"})
 _TASK_SORT_KEYS = frozenset({"reference", "client", "matter", "task", "date", "assigned", "priority"})
 _MAIN_MENU_SORT_KEYS = frozenset({"reference", "client", "matter", "feeEarner", "status", "created"})
 _CONTACTS_SORT_KEYS = frozenset({"name", "type", "email", "phone"})
-_CASE_STATUS_FILTERS = frozenset({"", "open", "closed", "archived", "quote", "post_completion"})
+_CASE_STATUS_FILTERS = frozenset({"", "open", "closed", "archived", "quote", "quote_closed", "post_completion"})
 _SORT_DIRS = frozenset({"asc", "desc"})
 
 MAIN_MENU_COLUMN_WIDTHS_DEFAULT = [110, 165, 300, 130, 225]

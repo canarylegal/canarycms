@@ -55,6 +55,7 @@ from app.routers import (
     mail_plugin,
     outlook_plugin,
     portal,
+    plugin_auth,
     precedents,
     reports,
     reconciliations,
@@ -206,6 +207,7 @@ app.add_middleware(WebdavPublicCORSMiddleware)
 _install_proxy_headers_middleware(app)
 
 app.include_router(auth.router)
+app.include_router(plugin_auth.router)
 app.include_router(webauthn.router)
 app.include_router(admin_users.router)
 app.include_router(admin_firm_settings.router)

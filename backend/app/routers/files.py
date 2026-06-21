@@ -1068,8 +1068,17 @@ def list_case_files(
         for d in deliveries:
             delivery_by_file[d.file_id] = d
 
-    from app.docusign_signing_service import signing_request_out
-    from app.models import DocusignSigningRequest, DocusignSigningStatus
+    from app.docusign_signing_service import signing_request_file_list_item
+    from app.models import Contact, DocusignSigningRequest, DocusignSigningStatus
+    from app.portal_service import contact_display_name
+
+    delivery_contact_ids = {d.contact_id for d in delivery_by_file.values()}
+    contacts_by_id: dict[uuid.UUID, Contact] = {}
+    if delivery_contact_ids:
+        for contact in (
+            db.execute(select(Contact).where(Contact.id.in_(delivery_contact_ids))).scalars().all()
+        ):
+            contacts_by_id[contact.id] = contact
 
     signing_by_file: dict[uuid.UUID, dict] = {}
     if file_ids:
@@ -1094,7 +1103,7 @@ def list_case_files(
         )
         for sr in signing_rows:
             if sr.source_file_id and sr.source_file_id not in signing_by_file:
-                signing_by_file[sr.source_file_id] = signing_request_out(db, sr)
+                signing_by_file[sr.source_file_id] = signing_request_file_list_item(sr)
 
     out = []
     for (f, owner_display_name, owner_email, owner_initials) in rows:
@@ -1127,10 +1136,7 @@ def list_case_files(
         }
         delivery = delivery_by_file.get(f.id)
         if delivery is not None:
-            from app.models import Contact
-            from app.portal_service import contact_display_name
-
-            contact = db.get(Contact, delivery.contact_id)
+            contact = contacts_by_id.get(delivery.contact_id)
             item["quote_portal_delivery"] = {
                 "id": str(delivery.id),
                 "status": delivery.status.value,
@@ -1506,6 +1512,7 @@ def _format_case_status_label(status: CaseStatus) -> str:
         CaseStatus.closed: "Closed",
         CaseStatus.archived: "Archived",
         CaseStatus.quote: "Quote",
+        CaseStatus.quote_closed: "Closed",
         CaseStatus.post_completion: "Post-completion",
     }
     return labels.get(status, str(status.value if hasattr(status, "value") else status))

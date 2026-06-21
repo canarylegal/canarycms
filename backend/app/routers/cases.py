@@ -456,7 +456,14 @@ def update_case(
                 ),
             )
 
-    if "status" in data and data["status"] in (CaseStatus.closed, CaseStatus.archived):
+    if "status" in data and data["status"] == CaseStatus.quote_closed:
+        if case.status != CaseStatus.quote:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Only an open quote can be closed from the Quotes menu.",
+            )
+
+    if "status" in data and data["status"] in (CaseStatus.closed, CaseStatus.archived, CaseStatus.quote_closed):
         ledger = get_ledger(case_id, db)
         c_bal = ledger.client.balance_pence
         o_bal = ledger.office.balance_pence

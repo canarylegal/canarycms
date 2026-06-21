@@ -5,7 +5,7 @@ export type TaskLayout = 'list' | 'kanban'
 export type TaskSortKey = 'reference' | 'client' | 'matter' | 'task' | 'date' | 'assigned' | 'priority'
 export type MainMenuSortKey = 'reference' | 'client' | 'matter' | 'feeEarner' | 'status' | 'source' | 'created'
 export type ContactsSortKey = 'name' | 'type' | 'email' | 'phone'
-export type CaseStatusFilter = '' | 'open' | 'closed' | 'archived' | 'quote' | 'post_completion'
+export type CaseStatusFilter = '' | 'open' | 'closed' | 'archived' | 'quote' | 'quote_closed' | 'post_completion'
 export type MainMenuCaseStatusFilter = Exclude<CaseStatusFilter, ''>
 export type SortDir = 'asc' | 'desc'
 
@@ -118,6 +118,7 @@ const CASE_STATUS_FILTERS = new Set<CaseStatusFilter>([
   'closed',
   'archived',
   'quote',
+  'quote_closed',
   'post_completion',
 ])
 const SORT_DIRS = new Set<SortDir>(['asc', 'desc'])

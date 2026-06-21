@@ -132,6 +132,8 @@ def _case_status_label(s: CaseStatus) -> str:
         return "Active"
     if s == CaseStatus.quote:
         return "Quote"
+    if s == CaseStatus.quote_closed:
+        return "Closed quote"
     if s == CaseStatus.closed:
         return "Closed"
     if s == CaseStatus.archived:
@@ -162,7 +164,7 @@ def report_client_office_balances(
             .where(
                 Case.fee_earner_user_id.in_(fee_earner_user_ids),
                 Case.fee_earner_user_id.isnot(None),
-                Case.status.notin_((CaseStatus.closed, CaseStatus.archived)),
+                Case.status.notin_((CaseStatus.closed, CaseStatus.archived, CaseStatus.quote_closed)),
             )
             .order_by(Case.case_number.asc())
         )

@@ -53,7 +53,7 @@ export type TaskLayout = 'list' | 'kanban'
 export type TaskSortKey = 'reference' | 'client' | 'matter' | 'task' | 'date' | 'assigned' | 'priority'
 export type MainMenuSortKey = 'reference' | 'client' | 'matter' | 'feeEarner' | 'status' | 'created'
 export type ContactsSortKey = 'name' | 'type' | 'email' | 'phone'
-export type CaseStatusFilter = '' | 'open' | 'closed' | 'archived' | 'quote' | 'post_completion'
+export type CaseStatusFilter = '' | 'open' | 'closed' | 'archived' | 'quote' | 'quote_closed' | 'post_completion'
 export type SortDir = 'asc' | 'desc'
 
 export type UserUiPreferencesOut = {
@@ -399,13 +399,19 @@ export type MatterMenuItemOut = {
 }
 
 /** Stored case workflow status (`open` is shown as Active in the UI). */
-export type CaseWorkflowStatus = 'open' | 'closed' | 'archived' | 'quote' | 'post_completion'
+export type CaseWorkflowStatus = 'open' | 'closed' | 'archived' | 'quote' | 'quote_closed' | 'post_completion'
+
+export function isQuoteWorkflowStatus(status: string): boolean {
+  return status === 'quote' || status === 'quote_closed'
+}
 
 export function formatCaseStatusLabel(status: string): string {
   switch (status) {
     case 'open':
       return 'Active'
     case 'closed':
+      return 'Closed'
+    case 'quote_closed':
       return 'Closed'
     case 'archived':
       return 'Archived'
@@ -875,6 +881,10 @@ export type QuotePortalDeliveryOut = {
   file_version_at_send: number
   email_sent: boolean
   email_skip_reason: string | null
+}
+
+export type QuotePortalSendPreflightOut = {
+  alerts_configured: boolean
 }
 
 export type PortalQuoteDeliveryViewOut = {

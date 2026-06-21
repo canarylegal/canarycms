@@ -33,6 +33,8 @@ const REQUIRED = [
   'popup/popup.html',
   'popup/popup.js',
   'popup/popup.css',
+  'auth-callback.html',
+  'auth-callback.js',
   'icons/icon16.png',
   'icons/icon32.png',
   'icons/icon64.png',

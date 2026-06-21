@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
 import { apiFetch } from './api'
+import { useDialogs } from './DialogProvider'
 import { SingleSelectDropdown } from './SingleSelectDropdown'
-import type { CasePortalFolderShareContactOut, QuotePortalDeliveryOut } from './types'
+import type { CasePortalFolderShareContactOut, QuotePortalDeliveryOut, QuotePortalSendPreflightOut } from './types'
+import { PORTAL_ALERTS_NOT_CONFIGURED_MSG } from './types'
 
 export type SendQuoteViaPortalModalProps = {
   token: string
@@ -27,9 +29,11 @@ export function SendQuoteViaPortalModal({
   onClose,
   onSent,
 }: SendQuoteViaPortalModalProps) {
+  const { askConfirm } = useDialogs()
   const [recipients, setRecipients] = useState<CasePortalFolderShareContactOut[]>([])
   const [contactId, setContactId] = useState('')
   const [contactOpen, setContactOpen] = useState(false)
+  const [alertsConfigured, setAlertsConfigured] = useState<boolean | null>(null)
   const [busy, setBusy] = useState(false)
   const [loadBusy, setLoadBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
@@ -41,16 +45,24 @@ export function SendQuoteViaPortalModal({
     setNotice(null)
     setContactId('')
     setRecipients([])
+    setAlertsConfigured(null)
     let cancelled = false
     void (async () => {
       setLoadBusy(true)
       try {
-        const rows = await apiFetch<CasePortalFolderShareContactOut[]>(
-          `/cases/${caseId}/portal/folder-share?grant_scope=matter`,
-          { token },
-        )
+        const [rows, preflight] = await Promise.all([
+          apiFetch<CasePortalFolderShareContactOut[]>(
+            `/cases/${caseId}/portal/folder-share?grant_scope=matter`,
+            { token },
+          ),
+          apiFetch<QuotePortalSendPreflightOut>(
+            `/cases/${caseId}/files/${fileId}/quote-portal/send-preflight`,
+            { token },
+          ),
+        ])
         if (cancelled) return
         setRecipients(rows)
+        setAlertsConfigured(preflight.alerts_configured)
         if (rows.length === 0) {
           setErr(
             'No contacts on this matter have active portal access. Enable portal access for a contact under Contacts first.',
@@ -71,15 +83,28 @@ export function SendQuoteViaPortalModal({
     return () => {
       cancelled = true
     }
-  }, [open, caseId, token, preferredContactId])
+  }, [open, caseId, fileId, token, preferredContactId])
 
   const recipientOptions = useMemo(
     () => recipients.map((r) => ({ value: r.contact_id, label: r.contact_name })),
     [recipients],
   )
 
+  async function confirmSendWithoutEmail(): Promise<boolean> {
+    return askConfirm({
+      title: 'Send without e-mail notification?',
+      message: `${PORTAL_ALERTS_NOT_CONFIGURED_MSG} The quote will still be sent via the portal, but the contact will not receive an automated e-mail with the link. Send anyway?`,
+      confirmLabel: 'Send anyway',
+      cancelLabel: 'Cancel',
+    })
+  }
+
   async function send() {
     if (!contactId) return
+    if (alertsConfigured === false) {
+      const ok = await confirmSendWithoutEmail()
+      if (!ok) return
+    }
     setBusy(true)
     setErr(null)
     setNotice(null)
@@ -93,6 +118,7 @@ export function SendQuoteViaPortalModal({
         : `Quote queued for ${out.contact_name}; e-mail was not sent${out.email_skip_reason ? `: ${out.email_skip_reason}` : '.'}`
       setNotice(msg)
       onSent?.()
+      onClose()
     } catch (e: unknown) {
       setErr((e as { message?: string }).message ?? 'Could not send via portal')
     } finally {
@@ -116,6 +142,9 @@ export function SendQuoteViaPortalModal({
         <div className="stack modalBodyScroll" style={{ marginTop: 12, gap: 12 }}>
           {err ? <div className="error">{err}</div> : null}
           {notice ? <div className="notice">{notice}</div> : null}
+          {!loadBusy && alertsConfigured === false && !notice ? (
+            <div className="notice">{PORTAL_ALERTS_NOT_CONFIGURED_MSG}</div>
+          ) : null}
           {loadBusy ? (
             <div className="muted">Loading portal contacts…</div>
           ) : (

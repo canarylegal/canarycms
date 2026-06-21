@@ -1290,7 +1290,7 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
       })
       if (!ok || !token) return
       try {
-        await apiFetch(`/cases/${caseId}`, { method: 'PATCH', token, json: { status: 'closed' } })
+        await apiFetch(`/cases/${caseId}`, { method: 'PATCH', token, json: { status: 'quote_closed' } })
         void refreshCases()
       } catch (e: unknown) {
         const msg =
@@ -1331,7 +1331,7 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
     const saved = normalizeUiPreferences(auth.me.ui_preferences)
     setMainMenuFilterMatterTypes(saved.main_menu_filter_matter_types)
     setMainMenuFilterFeeEarnerUserIds(saved.main_menu_filter_fee_earner_user_ids)
-    setMainMenuFilterCaseStatuses(saved.main_menu_filter_case_statuses.filter((s) => s !== 'quote'))
+    setMainMenuFilterCaseStatuses(saved.main_menu_filter_case_statuses.filter((s) => s !== 'quote' && s !== 'quote_closed'))
   }, [auth.me?.id])
 
   function renderMainContent() {
@@ -2459,12 +2459,8 @@ function filterMainMenuCases(
   matterTypes: string[],
   feeEarnerUserIds: string[],
   caseStatuses: MainMenuCaseStatusFilter[],
-  excludeQuoteMatters = false,
 ): CaseOut[] {
   let result = cases
-  if (excludeQuoteMatters) {
-    result = result.filter((c) => c.status !== 'quote')
-  }
   if (matterTypes.length > 0) {
     result = result.filter((c) => matterTypes.includes(matterTypeLabel(c)))
   }
@@ -2486,22 +2482,20 @@ function buildCaseTableRows(
     feeEarnerUserIds: string[]
     caseStatuses: MainMenuCaseStatusFilter[]
     excludeQuoteMatters?: boolean
+    quotesOnlyMatters?: boolean
   },
   sortKey: 'reference' | 'client' | 'matter' | 'feeEarner' | 'status' | 'source' | 'created',
   sortDir: 'asc' | 'desc',
 ): CaseOut[] {
   const s = search.trim()
-  const excludeQuote = Boolean(filters.excludeQuoteMatters)
-  const pool = excludeQuote ? cases.filter((c) => c.status !== 'quote') : cases
+  const pool = filters.quotesOnlyMatters
+    ? cases.filter((c) => c.status === 'quote' || c.status === 'quote_closed')
+    : filters.excludeQuoteMatters
+      ? cases.filter((c) => c.status !== 'quote' && c.status !== 'quote_closed')
+      : cases
   const filtered = s
     ? pool.filter((c) => caseMatchesMainMenuSearch(c, users, search))
-    : filterMainMenuCases(
-        pool,
-        filters.matterTypes,
-        filters.feeEarnerUserIds,
-        filters.caseStatuses,
-        false,
-      )
+    : filterMainMenuCases(pool, filters.matterTypes, filters.feeEarnerUserIds, filters.caseStatuses)
   const dir = sortDir === 'asc' ? 1 : -1
   return [...filtered].sort((a, b) => {
     const av =
@@ -2606,6 +2600,7 @@ function CasesTable({
           feeEarnerUserIds: filterFeeEarnerUserIds,
           caseStatuses: filterCaseStatuses,
           excludeQuoteMatters: contextMenuVariant === 'main',
+          quotesOnlyMatters: contextMenuVariant === 'quotes',
         },
         sortKey,
         sortDir,
@@ -2868,6 +2863,7 @@ const MAIN_MENU_STATUS_FILTER_OPTIONS: { value: MainMenuCaseStatusFilter; label:
 
 const QUOTES_MENU_STATUS_FILTER_OPTIONS: { value: MainMenuCaseStatusFilter; label: string }[] = [
   { value: 'quote', label: 'Quote' },
+  { value: 'quote_closed', label: 'Closed' },
 ]
 
 const MainMenuCasesPanel = memo(function MainMenuCasesPanel({

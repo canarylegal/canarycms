@@ -11,7 +11,7 @@ import zipfile
 from datetime import datetime
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File as FastAPIFile, Form, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, Depends, File as FastAPIFile, Form, HTTPException, Query, Request, UploadFile, status
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy import select
@@ -49,6 +49,7 @@ from app.portal_service import (
     grant_folder_display_name,
     grant_is_active,
     issue_portal_login_otp,
+    contact_has_portal_content,
     list_active_grants_for_contact,
     list_grant_files,
     normalize_access_code,
@@ -102,6 +103,16 @@ from app.schemas import (
     PortalFormSubmissionOut,
 )
 from app.alert_dispatch import AlertKind, dispatch_alert, portal_public_url
+from app.auth_rate_limit import (
+    check_portal_auth_rate_limits,
+    check_portal_otp_request_rate_limits,
+    check_portal_otp_verify_rate_limits,
+    clear_portal_otp_verify_rate_limits,
+    record_portal_auth_ip_failure,
+    record_portal_otp_request_attempt,
+    record_portal_otp_verify_failure,
+)
+from app.client_ip import client_ip_from_request
 from app.security import (
     create_portal_session_token,
     decode_portal_preview_exchange_token,
@@ -159,20 +170,23 @@ def portal_config(db: Session = Depends(get_db)) -> PortalConfigOut:
 
 
 @router.post("/auth", response_model=PortalAuthOut)
-def portal_auth(payload: PortalAuthIn, db: Session = Depends(get_db)) -> PortalAuthOut:
+def portal_auth(payload: PortalAuthIn, request: Request, db: Session = Depends(get_db)) -> PortalAuthOut:
+    ip = client_ip_from_request(request)
+    check_portal_auth_rate_limits(db, ip=ip)
     code = normalize_access_code(payload.access_code)
     if len(code) < 8:
+        record_portal_auth_ip_failure(db, ip=ip)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid access code")
     row = get_portal_access_by_code(db, code)
     if row is None or not portal_access_is_active(row):
         if row is not None:
             record_portal_auth_failure(db, row)
+        record_portal_auth_ip_failure(db, ip=ip)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid access code")
     contact = db.get(Contact, row.contact_id)
     if contact is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid access code")
-    grants = list_active_grants_for_contact(db, contact.id)
-    if not grants:
+    if not contact_has_portal_content(db, contact.id):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No document areas are available for this access code")
     record_portal_auth_success(db, row)
     token = create_portal_session_token(contact_id=str(contact.id))
@@ -192,8 +206,12 @@ def portal_auth(payload: PortalAuthIn, db: Session = Depends(get_db)) -> PortalA
 
 
 @router.post("/auth/request-otp", status_code=status.HTTP_204_NO_CONTENT)
-def portal_request_otp(payload: PortalOtpRequestIn, db: Session = Depends(get_db)) -> None:
+def portal_request_otp(payload: PortalOtpRequestIn, request: Request, db: Session = Depends(get_db)) -> None:
     """Send a one-time sign-in code if this e-mail has active portal access."""
+    ip = client_ip_from_request(request)
+    email = (payload.email or "").strip().lower()
+    check_portal_otp_request_rate_limits(db, email=email, ip=ip)
+    record_portal_otp_request_attempt(db, email=email, ip=ip)
     contact = find_portal_contact_by_email(db, payload.email)
     if contact is None:
         return
@@ -212,12 +230,16 @@ def portal_request_otp(payload: PortalOtpRequestIn, db: Session = Depends(get_db
 
 
 @router.post("/auth/verify-otp", response_model=PortalAuthOut)
-def portal_verify_otp(payload: PortalOtpVerifyIn, db: Session = Depends(get_db)) -> PortalAuthOut:
+def portal_verify_otp(payload: PortalOtpVerifyIn, request: Request, db: Session = Depends(get_db)) -> PortalAuthOut:
+    ip = client_ip_from_request(request)
+    email = (payload.email or "").strip().lower()
+    check_portal_otp_verify_rate_limits(db, email=email, ip=ip)
     contact = find_portal_contact_by_email(db, payload.email)
     if contact is None or not verify_portal_login_otp(db, contact.id, payload.code.strip()):
+        record_portal_otp_verify_failure(db, email=email, ip=ip)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired sign-in code")
-    grants = list_active_grants_for_contact(db, contact.id)
-    if not grants:
+    clear_portal_otp_verify_rate_limits(db, email=email)
+    if not contact_has_portal_content(db, contact.id):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No document areas are available for this access code")
     access_row = db.execute(
         select(ContactPortalAccess).where(ContactPortalAccess.contact_id == contact.id)
@@ -456,8 +478,7 @@ def _file_out(grant: ContactPortalGrant, row: File) -> PortalFileOut:
 
 @router.get("/session", response_model=PortalSessionOut)
 def portal_session(contact: Contact = Depends(get_portal_contact), db: Session = Depends(get_db)) -> PortalSessionOut:
-    grants = list_active_grants_for_contact(db, contact.id)
-    if not grants:
+    if not contact_has_portal_content(db, contact.id):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No document areas are available")
     return PortalSessionOut(contact_name=contact_display_name(contact), grants=_grant_summaries(db, contact.id))
 

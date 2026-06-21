@@ -49,6 +49,19 @@ export function CaseViewRoute({
   const caseIdRef = useRef(caseId)
   caseIdRef.current = caseId
 
+  const refreshCaseFiles = useCallback(
+    async (id: string) => {
+      try {
+        const f = await apiFetch<FileSummary[]>(`/cases/${id}/files`, { token })
+        if (String(id) !== String(caseIdRef.current)) return
+        setFiles(Array.isArray(f) ? f : [])
+      } catch {
+        /* keep existing file list */
+      }
+    },
+    [token],
+  )
+
   const refreshCaseDetail = useCallback(
     async (id: string) => {
       setDetailErr(null)
@@ -97,12 +110,12 @@ export function CaseViewRoute({
       if (e.origin !== window.location.origin) return
       const d = e.data as { type?: string; caseId?: string } | null
       if (d?.type === 'canary-files-changed' && d.caseId === caseId) {
-        void refreshCaseDetail(caseId)
+        void refreshCaseFiles(caseId)
       }
     }
     window.addEventListener('message', onMsg)
     return () => window.removeEventListener('message', onMsg)
-  }, [caseId, refreshCaseDetail])
+  }, [caseId, refreshCaseFiles])
 
   useEffect(() => {
     function onStorage(e: StorageEvent) {
@@ -113,11 +126,11 @@ export function CaseViewRoute({
       } catch {
         return
       }
-      if (parsed.caseId === caseId) void refreshCaseDetail(caseId)
+      if (parsed.caseId === caseId) void refreshCaseFiles(caseId)
     }
     window.addEventListener('storage', onStorage)
     return () => window.removeEventListener('storage', onStorage)
-  }, [caseId, refreshCaseDetail])
+  }, [caseId, refreshCaseFiles])
 
   const refreshCaseDetailWithCrossTabSignal = useCallback(() => {
     void refreshCaseDetail(caseId)

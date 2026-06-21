@@ -230,6 +230,29 @@ export default function PortalPage() {
     return sess
   }, [])
 
+  const isRevokedGrantError = useCallback((message: string) => {
+    const msg = message.toLowerCase()
+    return msg.includes('not found') || msg.includes('no longer available')
+  }, [])
+
+  useEffect(() => {
+    if (!sessionToken.trim()) return
+    setActiveGrantId((grantId) => {
+      if (grantId && !grants.some((g) => g.id === grantId)) {
+        setBrowse(null)
+        setBrowseSubfolder('')
+        return null
+      }
+      return grantId
+    })
+    setActiveCaseId((caseId) => {
+      if (caseId && !grants.some((g) => g.case_id === caseId)) {
+        return null
+      }
+      return caseId
+    })
+  }, [grants, sessionToken])
+
   const loadBrowse = useCallback(async (grantId: string, subfolder: string, token: string) => {
     const q = subfolder ? `?subfolder=${encodeURIComponent(subfolder)}` : ''
     const data = await portalFetch<PortalBrowseOut>(`/portal/grants/${grantId}/browse${q}`, { portalToken: token })
@@ -304,19 +327,40 @@ export default function PortalPage() {
 
   useEffect(() => {
     const token = sessionToken.trim()
+    if (!token) return
+    const onFocus = () => {
+      void refreshSession(token).catch(() => {})
+    }
+    window.addEventListener('focus', onFocus)
+    return () => window.removeEventListener('focus', onFocus)
+  }, [sessionToken, refreshSession])
+
+  useEffect(() => {
+    const token = sessionToken.trim()
     if (!token || !activeGrantId) return
     void (async () => {
-      setBusy(true)
-      setErr(null)
       try {
         await loadBrowse(activeGrantId, browseSubfolder, token)
       } catch (e: unknown) {
-        setErr((e as { message?: string }).message ?? 'Could not load folder')
+        const msg = (e as { message?: string }).message ?? 'Could not load folder'
+        if (isRevokedGrantError(msg)) {
+          setBrowse(null)
+          setBrowseSubfolder('')
+          setActiveGrantId(null)
+          try {
+            await refreshSession(token)
+          } catch {
+            /* session refresh may sign out if no grants remain */
+          }
+          setInfo('This shared folder is no longer available.')
+        } else {
+          setErr(msg)
+        }
       } finally {
         setBusy(false)
       }
     })()
-  }, [activeGrantId, sessionToken, browseSubfolder, loadBrowse])
+  }, [activeGrantId, sessionToken, browseSubfolder, loadBrowse, isRevokedGrantError, refreshSession])
 
   async function signInWithCode(e: React.FormEvent) {
     e.preventDefault()
@@ -654,9 +698,60 @@ export default function PortalPage() {
   }
 
   function openGrant(grantId: string) {
+    if (!grants.some((g) => g.id === grantId)) return
     setActiveGrantId(grantId)
     setBrowseSubfolder('')
     setBrowse(null)
+  }
+
+  async function openMatter(caseId: string) {
+    const token = sessionToken.trim()
+    let visibleGrants = grants
+    if (token) {
+      try {
+        const sess = await refreshSession(token)
+        visibleGrants = sess.grants
+      } catch {
+        return
+      }
+    }
+    if (!visibleGrants.some((g) => g.case_id === caseId)) {
+      setActiveCaseId(null)
+      return
+    }
+    setActiveCaseId(caseId)
+    setActiveGrantId(null)
+    setBrowse(null)
+    setBrowseSubfolder('')
+  }
+
+  async function backToAllMatters() {
+    const token = sessionToken.trim()
+    if (token) {
+      try {
+        await refreshSession(token)
+      } catch {
+        /* ignore */
+      }
+    }
+    setActiveCaseId(null)
+    setActiveGrantId(null)
+    setBrowse(null)
+    setBrowseSubfolder('')
+  }
+
+  async function backToFolderList() {
+    const token = sessionToken.trim()
+    if (token) {
+      try {
+        await refreshSession(token)
+      } catch {
+        /* ignore */
+      }
+    }
+    setActiveGrantId(null)
+    setBrowse(null)
+    setBrowseSubfolder('')
   }
 
   function navigateToSubfolder(name: string) {
@@ -869,68 +964,68 @@ export default function PortalPage() {
             <h2 style={{ marginTop: 0, fontSize: 18 }}>Quote</h2>
             <div className="listTitle">{quoteDelivery.original_filename}</div>
             <p className="muted" style={{ marginBottom: 12 }}>{quoteStatusMessage(quoteDelivery)}</p>
-            <div className="row" style={{ gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
-              <button type="button" className="btn" onClick={() => void downloadQuoteFile()}>
-                Download
-              </button>
-            </div>
-            {quoteDelivery.can_respond ? (
-              <>
-                {!quoteDeclineOpen ? (
-                  <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
-                    <button
-                      type="button"
-                      className="btn primary"
-                      disabled={quoteRespondBusy}
-                      onClick={() => void respondToQuote(true)}
-                    >
-                      Accept quote
-                    </button>
-                    <button
-                      type="button"
-                      className="btn"
-                      disabled={quoteRespondBusy}
-                      onClick={() => setQuoteDeclineOpen(true)}
-                    >
-                      Decline
-                    </button>
-                  </div>
-                ) : (
-                  <div className="stack" style={{ gap: 8 }}>
-                    <label className="field">
-                      <span>Reason for declining (optional)</span>
-                      <textarea
-                        className="input"
-                        rows={3}
-                        value={quoteDeclineReason}
-                        onChange={(e) => setQuoteDeclineReason(e.target.value)}
-                      />
-                    </label>
-                    <div className="row" style={{ gap: 8 }}>
-                      <button
-                        type="button"
-                        className="btn primary"
-                        disabled={quoteRespondBusy}
-                        onClick={() => void respondToQuote(false)}
-                      >
-                        {quoteRespondBusy ? 'Submitting…' : 'Submit decline'}
-                      </button>
-                      <button
-                        type="button"
-                        className="btn"
-                        disabled={quoteRespondBusy}
-                        onClick={() => {
-                          setQuoteDeclineOpen(false)
-                          setQuoteDeclineReason('')
-                        }}
-                      >
-                        Cancel
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </>
-            ) : null}
+            {quoteDelivery.can_respond && !quoteDeclineOpen ? (
+              <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
+                <button type="button" className="btn" onClick={() => void downloadQuoteFile()}>
+                  Download
+                </button>
+                <button
+                  type="button"
+                  className="btn primary"
+                  disabled={quoteRespondBusy}
+                  onClick={() => void respondToQuote(true)}
+                >
+                  Accept quote
+                </button>
+                <button
+                  type="button"
+                  className="btn"
+                  disabled={quoteRespondBusy}
+                  onClick={() => setQuoteDeclineOpen(true)}
+                >
+                  Decline
+                </button>
+              </div>
+            ) : quoteDelivery.can_respond && quoteDeclineOpen ? (
+              <div className="stack" style={{ gap: 8 }}>
+                <label className="field">
+                  <span>Reason for declining (optional)</span>
+                  <textarea
+                    className="input"
+                    rows={3}
+                    value={quoteDeclineReason}
+                    onChange={(e) => setQuoteDeclineReason(e.target.value)}
+                  />
+                </label>
+                <div className="row" style={{ gap: 8 }}>
+                  <button
+                    type="button"
+                    className="btn primary"
+                    disabled={quoteRespondBusy}
+                    onClick={() => void respondToQuote(false)}
+                  >
+                    {quoteRespondBusy ? 'Submitting…' : 'Submit decline'}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn"
+                    disabled={quoteRespondBusy}
+                    onClick={() => {
+                      setQuoteDeclineOpen(false)
+                      setQuoteDeclineReason('')
+                    }}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
+                <button type="button" className="btn" onClick={() => void downloadQuoteFile()}>
+                  Download
+                </button>
+              </div>
+            )}
           </div>
         ) : null}
 
@@ -981,34 +1076,36 @@ export default function PortalPage() {
                 </div>
               </div>
             ) : null}
-            <h2 style={{ marginTop: 0 }}>Your matters</h2>
-            {matterGroups.length === 0 && pendingQuoteDeliveries.length === 0 ? (
+            {matterGroups.length > 0 ? (
+              <>
+                <h2 style={{ marginTop: 0 }}>Your matters</h2>
+                <div className="list">
+                  {matterGroups.map((m) => (
+                    <button
+                      key={m.caseId}
+                      type="button"
+                      className="listCard rowbtn"
+                      style={{ width: '100%', textAlign: 'left' }}
+                      onClick={() => void openMatter(m.caseId)}
+                    >
+                      <div className="listTitle">{m.caseTitle}</div>
+                      <div className="muted">
+                        {m.grants.length} shared {m.grants.length === 1 ? 'folder' : 'folders'}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </>
+            ) : matterGroups.length === 0 &&
+              pendingQuoteDeliveries.length === 0 &&
+              pendingPortalForms.length === 0 ? (
               <div className="muted">No matters are available.</div>
             ) : null}
-            {matterGroups.length === 0 && pendingQuoteDeliveries.length > 0 ? (
-              <div className="muted">No shared document folders yet.</div>
-            ) : null}
-            <div className="list">
-              {matterGroups.map((m) => (
-                <button
-                  key={m.caseId}
-                  type="button"
-                  className="listCard rowbtn"
-                  style={{ width: '100%', textAlign: 'left' }}
-                  onClick={() => setActiveCaseId(m.caseId)}
-                >
-                  <div className="listTitle">{m.caseTitle}</div>
-                  <div className="muted">
-                    {m.grants.length} shared {m.grants.length === 1 ? 'folder' : 'folders'}
-                  </div>
-                </button>
-              ))}
-            </div>
           </div>
         ) : activeCaseId && !activeGrantId ? (
           <div style={{ marginTop: 20 }}>
             <div className="row" style={{ gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
-              <button type="button" className="btn" onClick={() => setActiveCaseId(null)}>
+              <button type="button" className="btn" onClick={() => void backToAllMatters()}>
                 ← All matters
               </button>
               <h2 style={{ margin: 0, flex: 1 }}>{activeMatter?.caseTitle ?? 'Matter'}</h2>
@@ -1036,15 +1133,7 @@ export default function PortalPage() {
         ) : (
           <div style={{ marginTop: 20 }}>
             <div className="row" style={{ gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
-              <button
-                type="button"
-                className="btn"
-                onClick={() => {
-                  setActiveGrantId(null)
-                  setBrowse(null)
-                  setBrowseSubfolder('')
-                }}
-              >
+              <button type="button" className="btn" onClick={() => void backToFolderList()}>
                 ← Folders
               </button>
               <h2 style={{ margin: 0, flex: 1 }}>{activeGrant?.folder_label ?? 'Documents'}</h2>

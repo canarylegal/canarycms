@@ -105,6 +105,17 @@ def active_signing_for_file(db: Session, file_id: uuid.UUID) -> DocusignSigningR
     ).scalar_one_or_none()
 
 
+def signing_request_file_list_item(req: DocusignSigningRequest) -> dict[str, Any]:
+    """Minimal signing payload for matter file lists (no per-row recipient queries)."""
+    return {
+        "id": str(req.id),
+        "case_id": str(req.case_id),
+        "source_file_id": str(req.source_file_id) if req.source_file_id else None,
+        "status": req.status.value,
+        "status_detail": req.status_detail,
+    }
+
+
 def signing_request_out(db: Session, req: DocusignSigningRequest) -> dict[str, Any]:
     recipients = db.execute(
         select(DocusignSigningRecipient)

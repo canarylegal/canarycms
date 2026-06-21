@@ -11,10 +11,14 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.auth_rate_limit import (
+    SCOPE_PORTAL_OTP_VERIFY_EMAIL,
     SCOPE_STAFF_LOGIN_EMAIL,
     assert_not_rate_limited,
+    check_portal_otp_verify_rate_limits,
     check_staff_login_rate_limits,
+    clear_portal_otp_verify_rate_limits,
     clear_staff_login_rate_limits,
+    record_portal_otp_verify_failure,
     record_rate_limit_failure,
     record_staff_login_failure,
 )
@@ -79,3 +83,25 @@ def test_check_staff_login_rate_limits_uses_ip(db: Session) -> None:
     with pytest.raises(HTTPException) as exc:
         check_staff_login_rate_limits(db, email="anyone@example.com", ip=ip)
     assert exc.value.status_code == 429
+
+
+def test_portal_otp_verify_locks_email_after_max_failures(db: Session) -> None:
+    email = "client@example.com"
+    ip = "198.51.100.4"
+    for _ in range(5):
+        record_portal_otp_verify_failure(db, email=email, ip=ip)
+    with pytest.raises(HTTPException) as exc:
+        check_portal_otp_verify_rate_limits(db, email=email, ip=ip)
+    assert exc.value.status_code == 429
+
+
+def test_portal_otp_verify_success_clears_email_counter(db: Session) -> None:
+    email = "client2@example.com"
+    record_portal_otp_verify_failure(db, email=email, ip=None)
+    clear_portal_otp_verify_rate_limits(db, email=email)
+    assert_not_rate_limited(
+        db,
+        scope=SCOPE_PORTAL_OTP_VERIFY_EMAIL,
+        identifier=email,
+        action="sign-in code verification",
+    )

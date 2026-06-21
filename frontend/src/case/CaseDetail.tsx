@@ -858,6 +858,7 @@ export function CaseDetail({
     const opts = [
       { value: 'open', label: 'Active' },
       ...(caseDetail?.status === 'quote' ? [{ value: 'quote', label: 'Quote' }] : []),
+      ...(caseDetail?.status === 'quote_closed' ? [{ value: 'quote_closed', label: 'Closed' }] : []),
       { value: 'post_completion', label: 'Post-completion' },
       { value: 'closed', label: 'Closed' },
       { value: 'archived', label: 'Archived' },
