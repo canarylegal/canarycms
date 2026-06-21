@@ -34,7 +34,9 @@ export async function apiFetchWithRetry<T>(
         err?.status === 503 ||
         err?.status === 504 ||
         err?.status === 520 ||
-        (typeof err?.message === 'string' && /failed to fetch|networkerror|load failed/i.test(err.message))
+        err?.status === 0 ||
+        (typeof err?.message === 'string' &&
+          /failed to fetch|network\s*error|load failed|could not reach the server/i.test(err.message))
       if (!retry || attempt === POLL_FETCH_RETRIES - 1) throw e
       await sleep(POLL_FETCH_RETRY_MS)
     }
