@@ -4,6 +4,9 @@
 # Usage:
 #   docker compose -f docker-compose.yml -f docker-compose.dev-tunnel.yml --profile prod up -d
 #
+# After rebuilding/recreating frontend, also recreate the tunnel sidecars (they share its network stack):
+#   docker compose -f docker-compose.yml -f docker-compose.dev-tunnel.yml --profile prod up -d --force-recreate cloudflared-socat cloudflared-dev
+#
 # Set CLOUDFLARE_TUNNEL_TOKEN_DEV in .env (dev.canarylegalsoftware.co.uk tunnel token).
 
 services:
@@ -21,6 +24,7 @@ services:
     depends_on:
       frontend:
         condition: service_started
+        restart: true
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
@@ -37,9 +41,15 @@ services:
     depends_on:
       cloudflared-socat:
         condition: service_started
+        restart: true
+      frontend:
+        condition: service_started
+        restart: true
     command:
       - tunnel
       - --no-autoupdate
+      - --edge-ip-version
+      - "4"
       - run
       - --token
       - ${CLOUDFLARE_TUNNEL_TOKEN_DEV:?Set CLOUDFLARE_TUNNEL_TOKEN_DEV in .env}

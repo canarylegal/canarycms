@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { apiFetch } from '../api'
+import { useDialogs } from '../DialogProvider'
 import { SearchInput } from '../SearchInput'
 import { SendQuoteViaPortalModal } from '../SendQuoteViaPortalModal'
-import { SendPortalFormModal } from '../SendPortalFormModal'
 import { SingleSelectDropdown } from '../SingleSelectDropdown'
 import { CaseFileSelectDropdown } from './CaseFileSelectDropdown'
 import { DocMimeIcon } from './DocCells'
@@ -38,7 +38,26 @@ function staffUserLabel(u: Pick<CasePortalStaffUserOut, 'display_name' | 'email'
   return name || email || 'Unknown user'
 }
 
+function previewContactSummary(row: CasePortalPreviewContactOut): string {
+  const parts: string[] = []
+  if (row.shared_folder_count > 0) {
+    parts.push(
+      row.shared_folder_count === 1 ? '1 shared folder' : `${row.shared_folder_count} shared folders`,
+    )
+  }
+  const quotes = row.pending_quote_count ?? 0
+  if (quotes > 0) {
+    parts.push(quotes === 1 ? '1 quote' : `${quotes} quotes`)
+  }
+  const forms = row.pending_form_count ?? 0
+  if (forms > 0) {
+    parts.push(forms === 1 ? '1 form' : `${forms} forms`)
+  }
+  return parts.length > 0 ? ` · ${parts.join(' · ')}` : ''
+}
+
 export function CasePortalPanel({ token, caseId, onFilesChanged }: Props) {
+  const { askConfirm } = useDialogs()
   const [activity, setActivity] = useState<CasePortalActivityOut[]>([])
   const [previewContacts, setPreviewContacts] = useState<CasePortalPreviewContactOut[]>([])
   const [previewContactId, setPreviewContactId] = useState('')
@@ -62,18 +81,13 @@ export function CasePortalPanel({ token, caseId, onFilesChanged }: Props) {
   const [previewContactOpen, setPreviewContactOpen] = useState(false)
   const [quoteFileId, setQuoteFileId] = useState('')
   const [formSubmissions, setFormSubmissions] = useState<PortalFormSubmissionOut[]>([])
-  const [formSendOpen, setFormSendOpen] = useState(false)
   const [formVoidBusyId, setFormVoidBusyId] = useState<string | null>(null)
 
   const previewContactOptions = useMemo(
     () =>
       previewContacts.map((row) => ({
         value: row.contact_id,
-        label: `${row.contact_name}${
-          row.shared_folder_count === 1
-            ? ' · 1 shared folder'
-            : ` · ${row.shared_folder_count} shared folders`
-        }`,
+        label: `${row.contact_name}${previewContactSummary(row)}`,
       })),
     [previewContacts],
   )
@@ -141,7 +155,13 @@ export function CasePortalPanel({ token, caseId, onFilesChanged }: Props) {
   }, [caseId, token, loadFiles, loadFormSubmissions])
 
   async function voidFormSubmission(submissionId: string) {
-    if (!window.confirm('Void this pending form? The client will no longer be able to submit it.')) return
+    const ok = await askConfirm({
+      title: 'Void pending form?',
+      message: 'The client will no longer be able to submit it.',
+      danger: true,
+      confirmLabel: 'Void form',
+    })
+    if (!ok) return
     setFormVoidBusyId(submissionId)
     setErr(null)
     try {
@@ -299,13 +319,14 @@ export function CasePortalPanel({ token, caseId, onFilesChanged }: Props) {
       <section className="stack portalPreviewSection" style={{ gap: 8 }}>
         <h4 style={{ margin: 0 }}>Preview client view</h4>
         <p className="muted" style={{ margin: 0 }}>
-          Open the portal as a contact on this matter — no access code needed. Only contacts with portal login and at
-          least one shared folder on this matter are listed.
+          Open the portal as a contact on this matter — no access code needed. Contacts with portal login and shared
+          folders, pending quotes, and/or pending forms on this matter are listed.
         </p>
         {busy && previewContacts.length === 0 ? <div className="muted">Loading contacts…</div> : null}
         {!busy && previewContacts.length === 0 ? (
           <div className="muted">
-            No previewable contacts yet. Grant portal access on the contact card and share a folder from Documents.
+            No previewable contacts yet. Grant portal access on the contact card, then share a folder, send a quote, or
+            send a form on this matter.
           </div>
         ) : null}
         {previewContacts.length > 0 ? (
@@ -343,8 +364,8 @@ export function CasePortalPanel({ token, caseId, onFilesChanged }: Props) {
         </div>
         <p className="muted" style={{ margin: 0 }}>
           Mark documents as quotable so Canary treats them as quotes for portal accept/decline when you send them.
-          Sending via portal also marks the document automatically. Saving a marked quote as PDF moves the mark to the
-          PDF and clears it from the source document.
+          Sending via portal also marks the document automatically and creates a PDF snapshot for clients to read on
+          mobile. Saving a marked quote as PDF moves the mark to the PDF and clears it from the source document.
         </p>
         {filesBusy && quotableFiles.length === 0 ? <div className="muted">Loading documents…</div> : null}
         {!filesBusy && quotableFiles.length === 0 ? (
@@ -445,18 +466,13 @@ export function CasePortalPanel({ token, caseId, onFilesChanged }: Props) {
       <section className="stack" style={{ gap: 8 }}>
         <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
           <h4 style={{ margin: 0 }}>Portal forms</h4>
-          <div className="row" style={{ gap: 6 }}>
-            <button type="button" className="btn" disabled={busy} onClick={() => void loadFormSubmissions()}>
-              Refresh
-            </button>
-            <button type="button" className="btn primary" disabled={busy} onClick={() => setFormSendOpen(true)}>
-              Send form
-            </button>
-          </div>
+          <button type="button" className="btn" disabled={busy} onClick={() => void loadFormSubmissions()}>
+            Refresh
+          </button>
         </div>
         <p className="muted" style={{ margin: 0 }}>
-          Send precedent-based information-gathering forms to portal contacts. Submissions are saved to matter history
-          and documents when the client completes the form.
+          Send forms from Documents → New → Portal form. Submissions appear in document history with their status; you
+          can void pending forms here.
         </p>
         {formSubmissions.length === 0 ? (
           <div className="muted">No portal forms sent on this matter yet.</div>
@@ -605,18 +621,6 @@ export function CasePortalPanel({ token, caseId, onFilesChanged }: Props) {
         onSent={() => {
           void loadFiles()
           onFilesChanged?.()
-        }}
-      />
-    ) : null}
-    {formSendOpen ? (
-      <SendPortalFormModal
-        token={token}
-        caseId={caseId}
-        open
-        onClose={() => setFormSendOpen(false)}
-        onSent={() => {
-          void loadFormSubmissions()
-          void load()
         }}
       />
     ) : null}

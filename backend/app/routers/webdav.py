@@ -177,7 +177,7 @@ def _collection_href(token: str) -> str:
 
 
 def _absolute_webdav_href(request: Request, path: str) -> str:
-    """Build absolute URL for multistatus hrefs (LibreOffice/GIO often reject relative hrefs when listing).
+    """Build absolute URL for multistatus hrefs (some WebDAV clients reject relative hrefs when listing).
 
     Prefer CANARY_PUBLIC_URL so hrefs match the same origin users paste from checkout-edit. If we echo
     internal hosts (docker service name, 127.0.0.1) while the client opened a public URL, desktop apps
@@ -282,7 +282,7 @@ def webdav_session_options_slash(token: str) -> Response:
 @router.api_route("/sessions/{token}", methods=["GET"], response_model=None)
 @router.api_route("/sessions/{token}/", methods=["GET"], response_model=None)
 def webdav_collection_get_not_allowed(token: str) -> Response:
-    """LibreOffice/GVfs sometimes probe collections with GET; 404 breaks folder UI — use explicit 405."""
+    """Some WebDAV clients probe collections with GET; 404 breaks folder UI — use explicit 405."""
     return Response(
         status_code=405,
         headers={"Allow": "OPTIONS, PROPFIND"},

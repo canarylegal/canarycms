@@ -1,4 +1,9 @@
-"""Portal form dropdown (select) field type with configurable options."""
+"""Repair portal_form_template_field.select_options when y8 migration partially applied.
+
+The original y8 migration called connection.commit() mid-upgrade, which could leave
+databases at head with portal_form_field_type.select present but select_options missing.
+This migration is idempotent and safe on fresh installs (column already added by y8).
+"""
 
 from __future__ import annotations
 
@@ -6,14 +11,34 @@ import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects import postgresql
 
-revision = "y8z9a0b1c2d3"
-down_revision = "x7y8z9a0b1c2"
+revision = "b1c2d3e4f5a6"
+down_revision = "a0b1c2d3e4f5"
 branch_labels = None
 depends_on = None
 
 
+def _select_options_column_exists(connection) -> bool:
+    return (
+        connection.execute(
+            sa.text(
+                """
+                SELECT 1
+                FROM information_schema.columns
+                WHERE table_schema = 'public'
+                  AND table_name = 'portal_form_template_field'
+                  AND column_name = 'select_options'
+                """
+            )
+        ).scalar()
+        is not None
+    )
+
+
 def upgrade() -> None:
-    # Enum ADD VALUE must run outside Alembic's migration transaction (PostgreSQL).
+    connection = op.get_bind()
+    if _select_options_column_exists(connection):
+        return
+
     with op.get_context().autocommit_block():
         op.execute(sa.text("ALTER TYPE portal_form_field_type ADD VALUE IF NOT EXISTS 'select'"))
 
@@ -39,6 +64,9 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    connection = op.get_bind()
+    if not _select_options_column_exists(connection):
+        return
     op.execute(
         sa.text(
             """
@@ -50,4 +78,3 @@ def downgrade() -> None:
         )
     )
     op.drop_column("portal_form_template_field", "select_options")
-    # PostgreSQL cannot remove enum values; leave 'select' on portal_form_field_type.

@@ -20,7 +20,8 @@ from starlette.background import BackgroundTask
 
 from app.audit import log_event
 from app.db import get_db
-from app.deps import get_portal_contact
+from app.deps import get_portal_contact, get_portal_session, require_portal_client_write
+from app.security import PortalSessionPayload
 from app.file_storage import FILES_ROOT, case_file_paths, ensure_files_root
 from app.models import (
     Case,
@@ -39,6 +40,7 @@ from app.portal_notifications import notify_portal_staff_client_upload
 from app.portal_case import filter_grants_for_portal_enabled_cases
 from app.portal_service import (
     browse_grant_folder,
+    client_matter_description,
     contact_display_name,
     default_grant_label,
     ensure_upload_folder_allowed,
@@ -50,6 +52,7 @@ from app.portal_service import (
     grant_is_active,
     issue_portal_login_otp,
     contact_has_portal_content,
+    contact_has_portal_content_on_case,
     list_active_grants_for_contact,
     list_grant_files,
     normalize_access_code,
@@ -65,6 +68,7 @@ from app.quote_portal_service import (
     list_pending_approvals_for_grant,
     list_pending_quote_deliveries_for_contact,
     portal_quote_delivery_view,
+    resolve_quote_exchange_delivery,
     respond_to_quote_delivery,
 )
 from app.docusign_signing_service import (
@@ -116,7 +120,6 @@ from app.client_ip import client_ip_from_request
 from app.security import (
     create_portal_session_token,
     decode_portal_preview_exchange_token,
-    decode_portal_quote_exchange_token,
 )
 
 log = logging.getLogger(__name__)
@@ -285,17 +288,16 @@ def portal_preview_exchange(payload: PortalPreviewExchangeIn, db: Session = Depe
     ).scalar_one_or_none()
     if access_row is None or not portal_access_is_active(access_row):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Portal access is not active for this contact")
-    grants = list_active_grants_for_contact(db, contact_id)
-    if not grants:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No document areas are available for this contact")
-    case_grants = [g for g in grants if g.case_id == case_id and grant_is_active(g)]
-    if not case_grants:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No shared folders on this matter for this contact")
 
     from app.portal_case import require_case_portal_enabled
 
     require_case_portal_enabled(db, case_id)
-    token = create_portal_session_token(contact_id=str(contact.id))
+    if not contact_has_portal_content_on_case(db, contact_id=contact_id, case_id=case_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="No portal content on this matter for this contact",
+        )
+    token = create_portal_session_token(contact_id=str(contact.id), staff_preview=True)
     log_event(
         db,
         actor_user_id=staff_user_id,
@@ -309,6 +311,8 @@ def portal_preview_exchange(payload: PortalPreviewExchangeIn, db: Session = Depe
         session_token=token,
         contact_name=contact_display_name(contact),
         grants=_grant_summaries(db, contact.id),
+        focus_case_id=case_id,
+        staff_preview=True,
     )
 
 
@@ -321,16 +325,12 @@ def _quote_delivery_view(db: Session, delivery: QuotePortalDelivery) -> PortalQu
 def portal_quote_exchange(payload: PortalQuoteExchangeIn, db: Session = Depends(get_db)) -> PortalQuoteExchangeOut:
     """Exchange a quote e-mail link for a portal session and quote details."""
     try:
-        exchange = decode_portal_quote_exchange_token(payload.exchange_token.strip())
+        delivery = resolve_quote_exchange_delivery(db, payload.exchange_token)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired quote link") from exc
-    try:
-        contact_id = uuid.UUID(exchange.contact_id)
-        case_id = uuid.UUID(exchange.case_id)
-        file_id = uuid.UUID(exchange.file_id)
-        delivery_id = uuid.UUID(exchange.delivery_id)
-    except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid quote link") from exc
+
+    contact_id = delivery.contact_id
+    case_id = delivery.case_id
 
     contact = db.get(Contact, contact_id)
     if contact is None:
@@ -340,14 +340,6 @@ def portal_quote_exchange(payload: PortalQuoteExchangeIn, db: Session = Depends(
     ).scalar_one_or_none()
     if access_row is None or not portal_access_is_active(access_row):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Portal access is not active")
-    delivery = db.get(QuotePortalDelivery, delivery_id)
-    if (
-        delivery is None
-        or delivery.contact_id != contact_id
-        or delivery.case_id != case_id
-        or delivery.file_id != file_id
-    ):
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Quote not found")
 
     from app.portal_case import require_case_portal_enabled
 
@@ -360,7 +352,7 @@ def portal_quote_exchange(payload: PortalQuoteExchangeIn, db: Session = Depends(
         action="portal.quote.exchange",
         entity_type="quote_portal_delivery",
         entity_id=str(delivery.id),
-        meta={"case_id": str(case_id), "file_id": str(file_id), "contact_id": str(contact_id)},
+        meta={"case_id": str(case_id), "file_id": str(delivery.file_id), "contact_id": str(contact_id)},
     )
     db.commit()
     return PortalQuoteExchangeOut(
@@ -477,10 +469,18 @@ def _file_out(grant: ContactPortalGrant, row: File) -> PortalFileOut:
 
 
 @router.get("/session", response_model=PortalSessionOut)
-def portal_session(contact: Contact = Depends(get_portal_contact), db: Session = Depends(get_db)) -> PortalSessionOut:
+def portal_session(
+    contact: Contact = Depends(get_portal_contact),
+    session: PortalSessionPayload = Depends(get_portal_session),
+    db: Session = Depends(get_db),
+) -> PortalSessionOut:
     if not contact_has_portal_content(db, contact.id):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No document areas are available")
-    return PortalSessionOut(contact_name=contact_display_name(contact), grants=_grant_summaries(db, contact.id))
+    return PortalSessionOut(
+        contact_name=contact_display_name(contact),
+        grants=_grant_summaries(db, contact.id),
+        staff_preview=session.staff_preview,
+    )
 
 
 @router.get("/grants/{grant_id}/browse", response_model=PortalBrowseOut)
@@ -520,9 +520,7 @@ def _pending_forms_for_grant(db: Session, *, contact: Contact, grant: ContactPor
             continue
         detail = portal_form_detail(db, sub)
         case = db.get(Case, sub.case_id)
-        label = ""
-        if case:
-            label = " — ".join(p for p in [case.case_number, case.client_name] if p)
+        label = client_matter_description(case)
         out.append(
             PortalFormPendingOut(
                 id=sub.id,
@@ -546,9 +544,7 @@ def portal_list_forms(
     for sub in list_pending_forms_for_contact(db, contact.id):
         detail = portal_form_detail(db, sub)
         case = db.get(Case, sub.case_id)
-        label = ""
-        if case:
-            label = " — ".join(p for p in [case.case_number, case.client_name] if p)
+        label = client_matter_description(case)
         out.append(
             PortalFormPendingOut(
                 id=sub.id,
@@ -580,10 +576,12 @@ def portal_submit_form(
     submission_id: uuid.UUID,
     payload: PortalFormSubmitIn,
     contact: Contact = Depends(get_portal_contact),
+    session: PortalSessionPayload = Depends(get_portal_session),
     db: Session = Depends(get_db),
 ) -> PortalFormSubmissionOut:
     from app.portal_form_service import submission_out
 
+    require_portal_client_write(session)
     sub = get_submission_for_contact(db, submission_id, contact.id)
     updated = complete_submission(db, submission=sub, contact=contact, responses_in=payload.responses or {})
     db.commit()
@@ -597,8 +595,10 @@ async def portal_upload_form_file(
     field_key: str = Query(..., min_length=1, max_length=80),
     upload: UploadFile = FastAPIFile(...),
     contact: Contact = Depends(get_portal_contact),
+    session: PortalSessionPayload = Depends(get_portal_session),
     db: Session = Depends(get_db),
 ) -> dict[str, str]:
+    require_portal_client_write(session)
     sub = get_submission_for_contact(db, submission_id, contact.id)
     result = await upload_submission_file(db, submission=sub, field_key=field_key, upload=upload, contact=contact)
     db.commit()

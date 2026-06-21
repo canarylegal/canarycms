@@ -10,12 +10,14 @@ import { apiFetch, apiUrl, applyAuthHeaders, browserAbsoluteApiUrl } from '../ap
 import {
   appendOutlookWebAuthHintsForNav,
   OWA_MESSAGE_WINDOW_FEATURES,
+  openM365ComposeDraft,
   openOutlookWebAppFromGraphWebLink,
   OWA_MAIL_WINDOW_NAME,
 } from '../emailClient'
 import {
   buildMailtoComposeUrl,
   buildOutlookWebComposeUrl,
+  isOrgMicrosoftGraphConfigured,
   normalizeComposeQueryPlusAsSpaces,
   buildOutlookWebReadItemUrl,
   isLikelyExchangeRestItemId,
@@ -32,6 +34,7 @@ import {
   matterSubDropdownOptions,
 } from '../matterTypeOptions'
 import { SendQuoteViaPortalModal } from '../SendQuoteViaPortalModal'
+import { SendPortalFormModal } from '../SendPortalFormModal'
 import { SendDocusignModal } from '../SendDocusignModal'
 import { TaskCreateModal } from '../TaskCreateModal'
 import { useExclusiveDropdownOpen } from '../useExclusiveDropdownOpen'
@@ -48,6 +51,7 @@ import { openOnlyOfficeCaseEditor } from '../onlyofficeEditorWindow'
 import { caseHasRevokedUserAccess, formatCaseStatusLabel, type CaseWorkflowStatus } from '../types'
 import type {
   CaseContactOut,
+  CaseEmailDraftM365Out,
   CaseEmailMailtoOut,
   CaseEventsOut,
   CaseNoteOut,
@@ -285,6 +289,11 @@ function CaseDocPanelZoomFit({
   )
 }
 
+/** Panel body that scrolls vertically when content exceeds the documents card. */
+function CaseDocPanelScroll({ children }: { children: React.ReactNode }) {
+  return <div className="caseDocPanelScrollHost">{children}</div>
+}
+
 export type CaseOpenDocPanel = 'accounts'
 
 export function CaseDetail({
@@ -460,6 +469,7 @@ export function CaseDetail({
   const newMenuRef = useRef<HTMLDivElement | null>(null)
   const [newMenuOpen, setNewMenuOpen] = useState(false)
   const [quoteWizardOpen, setQuoteWizardOpen] = useState(false)
+  const [formSendOpen, setFormSendOpen] = useState(false)
   const [quoteAwaitingSave, setQuoteAwaitingSave] = useState<QuoteAwaitingSaveContext | null>(null)
   const [quoteSendOpen, setQuoteSendOpen] = useState(false)
   const quoteWasCreatedRef = useRef(false)
@@ -1483,17 +1493,72 @@ export function CaseDetail({
     setActionErr(null)
     setActionNotice(null)
     try {
+      const composePayload = {
+        folder: docFolder,
+        precedent_id: precedentId,
+        case_contact_id: caseContactId,
+        global_contact_id: globalContactId,
+        precedent_merge_all_clients: precedentMergeAllClients,
+        compose_office_role: composeOfficeRole ?? null,
+        attachment_file_ids: attachmentFileIds,
+      }
+
+      const useGraphDraft =
+        isOrgMicrosoftGraphConfigured(currentUser) && attachmentFileIds.length > 0
+
+      if (useGraphDraft) {
+        try {
+          const res = await apiFetch<CaseEmailDraftM365Out>(`/cases/${caseId}/files/email-drafts/m365`, {
+            token,
+            json: composePayload,
+          })
+          try {
+            await apiFetch(`/mail-plugin/pending-send`, {
+              token,
+              method: 'PUT',
+              json: {
+                case_id: caseId,
+                source_file_id: attachmentFileIds[0] ?? null,
+                ttl_seconds: 86400,
+              },
+            })
+          } catch {
+            /* Best-effort: add-in send capture works without this if user files manually. */
+          }
+          const opened = openM365ComposeDraft(res, currentUser?.email?.trim() || null)
+          if (!opened) {
+            setActionErr('Your browser blocked opening Outlook. Allow pop-ups for this site.')
+            return
+          }
+          const attachNames = (res.attachment_files ?? []).map((f) => f.filename).filter(Boolean)
+          const attachLabel =
+            attachNames.length === 1
+              ? attachNames[0]
+              : attachNames.length > 1
+                ? `${attachNames.length} files`
+                : res.attachment_count === 1
+                  ? '1 file'
+                  : res.attachment_count
+                    ? `${res.attachment_count} files`
+                    : 'attachments'
+          setActionNotice(
+            `Outlook draft created with ${attachLabel} attached. Review and send from the draft window, or from Drafts in Outlook desktop.`,
+          )
+          return
+        } catch (e: unknown) {
+          const err = e as { status?: number; message?: string }
+          if (err.status !== 503) {
+            throw e
+          }
+          setActionNotice(
+            'Microsoft Graph drafts are unavailable — opening compose without automatic attachment.',
+          )
+        }
+      }
+
       const res = await apiFetch<CaseEmailMailtoOut>(`/cases/${caseId}/files/email-mailto`, {
         token,
-        json: {
-          folder: docFolder,
-          precedent_id: precedentId,
-          case_contact_id: caseContactId,
-          global_contact_id: globalContactId,
-          precedent_merge_all_clients: precedentMergeAllClients,
-          compose_office_role: composeOfficeRole ?? null,
-          attachment_file_ids: attachmentFileIds,
-        },
+        json: composePayload,
       })
       try {
         await apiFetch(`/mail-plugin/pending-send`, {
@@ -2563,6 +2628,19 @@ export function CaseDetail({
                         >
                           Quote
                         </button>
+                        {portalEnabled ? (
+                          <button
+                            type="button"
+                            className="caseToolbarDropdownItem"
+                            role="menuitem"
+                            onClick={() => {
+                              setNewMenuOpen(false)
+                              setFormSendOpen(true)
+                            }}
+                          >
+                            Portal form
+                          </button>
+                        ) : null}
                         <button
                           type="button"
                           className="caseToolbarDropdownItem"
@@ -3036,9 +3114,9 @@ export function CaseDetail({
                       Close
                     </button>
                   </div>
-                  <CaseDocPanelZoomFit>
+                  <CaseDocPanelScroll>
                     <CasePortalPanel token={token} caseId={caseId} onFilesChanged={onRefresh} />
-                  </CaseDocPanelZoomFit>
+                  </CaseDocPanelScroll>
                 </div>
               ) : caseDocPanel === 'portal-share' && caseId && portalEnabled && portalShareFolderPath !== null ? (
                 <div
@@ -3625,6 +3703,16 @@ export function CaseDetail({
           />
         ) : null}
 
+        {formSendOpen && caseId ? (
+          <SendPortalFormModal
+            token={token}
+            caseId={caseId}
+            open={formSendOpen}
+            onClose={() => setFormSendOpen(false)}
+            onSent={() => onRefresh()}
+          />
+        ) : null}
+
         {precedentPicker ? (
           <div
             className="modalOverlay"
@@ -3780,19 +3868,27 @@ export function CaseDetail({
                   <div className="muted">
                     {contactPickModal.composeKind === 'email' ? (
                       <>
-                        Optional: pick a recipient to pre-fill <strong>To</strong>. Compose opens in your mail program (or
-                        Outlook on the web) with merged subject and body.
-                        {(contactPickModal.attachmentFileIds?.length ?? 0) > 0 ? (
+                        Optional: pick a recipient to pre-fill <strong>To</strong>.
+                        {(contactPickModal.attachmentFileIds?.length ?? 0) > 0 &&
+                        isOrgMicrosoftGraphConfigured(currentUser) ? (
                           <>
                             {' '}
-                            Attach the quote using <strong>Compose from matter</strong> in the Canary Thunderbird or Outlook
-                            add-in (mailto links cannot attach files automatically).
+                            Canary creates an Outlook draft via Microsoft Graph with the quote attached and opens it for
+                            review (also available under Drafts in Outlook desktop).
+                          </>
+                        ) : (contactPickModal.attachmentFileIds?.length ?? 0) > 0 ? (
+                          <>
+                            {' '}
+                            Compose opens in your mail program with merged subject and body. Attach the quote using{' '}
+                            <strong>Compose from matter</strong> in the Canary Thunderbird or Outlook add-in (mailto
+                            links cannot attach files automatically).
                           </>
                         ) : (
                           <>
                             {' '}
-                            Attach case files with <strong>Compose from matter</strong> in the Canary Outlook or Thunderbird
-                            add-in.
+                            Compose opens in your mail program (or Outlook on the web) with merged subject and body.
+                            Attach case files with <strong>Compose from matter</strong> in the Canary Outlook or
+                            Thunderbird add-in.
                           </>
                         )}
                       </>

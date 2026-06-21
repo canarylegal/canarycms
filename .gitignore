@@ -17,6 +17,9 @@ data/
 .canary-compose-job-state.json
 .canary-compose-up-*.json
 
+# Firm-specific seed scripts (local deployments only; not for GitHub)
+backend/scripts/seed_mcwilliams_portal_forms.py
+
 # Stray artifacts
 backend/=2.8.0
 claudecanary1.txt

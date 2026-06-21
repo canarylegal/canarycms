@@ -41,9 +41,9 @@ def filter_grants_for_portal_enabled_cases(
 
 
 def active_portal_share_counts(db: Session, case_id: uuid.UUID) -> tuple[int, int]:
-    from app.portal_service import grant_is_active
+    from app.portal_service import grant_is_client_visible
 
     rows = db.execute(select(ContactPortalGrant).where(ContactPortalGrant.case_id == case_id)).scalars().all()
-    active = [g for g in rows if grant_is_active(g)]
+    active = [g for g in rows if grant_is_client_visible(db, g)]
     contacts = {g.contact_id for g in active}
     return len(active), len(contacts)

@@ -8,11 +8,6 @@ WORKDIR /app
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
-# Headless LibreOffice for server-side .docx/.xlsx → .pdf conversion (no per-seat licence).
-RUN apt-get update \
-  && apt-get install -y --no-install-recommends libreoffice-writer libreoffice-calc \
-  && rm -rf /var/lib/apt/lists/*
-
 # docker-compose CLI + git (optional CANARY_COMPOSE_GIT_PULL) for CANARY_COMPOSE_UPDATE_ENABLED GUI updates via mounted docker.sock.
 # Binaries below are linux-amd64; use buildx with a different Dockerfile stage for arm64 hosts if needed.
 ARG DOCKER_STATIC_VERSION=27.3.1

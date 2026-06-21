@@ -8,7 +8,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 from fastapi import HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.file_storage import sanitize_folder_path
@@ -90,6 +90,73 @@ def grant_is_active(grant: ContactPortalGrant, *, now: datetime | None = None) -
     return True
 
 
+def grant_folder_still_exists(db: Session, *, case_id: uuid.UUID, folder_path: str) -> bool:
+    """True when the shared folder (or a subfolder under it) still exists on the matter."""
+    gf = sanitize_folder_path(folder_path)
+    if not gf:
+        return True
+    like = f"{gf}/%"
+    row = db.execute(
+        select(File.id)
+        .where(
+            File.case_id == case_id,
+            or_(File.folder_path == gf, File.folder_path.like(like)),
+        )
+        .limit(1)
+    ).scalar_one_or_none()
+    return row is not None
+
+
+def grant_is_client_visible(db: Session, grant: ContactPortalGrant, *, now: datetime | None = None) -> bool:
+    if not grant_is_active(grant, now=now):
+        return False
+    from app.portal_case import case_portal_enabled
+
+    if not case_portal_enabled(db, grant.case_id):
+        return False
+    return grant_folder_still_exists(db, case_id=grant.case_id, folder_path=grant.folder_path or "")
+
+
+def revoke_portal_grants_for_deleted_folder(db: Session, *, case_id: uuid.UUID, folder_path: str) -> int:
+    """Remove portal grants scoped to a deleted folder (exact path or subfolders)."""
+    prefix = sanitize_folder_path(folder_path)
+    if not prefix:
+        return 0
+    grants = db.execute(select(ContactPortalGrant).where(ContactPortalGrant.case_id == case_id)).scalars().all()
+    removed = 0
+    for grant in grants:
+        gf = sanitize_folder_path(grant.folder_path)
+        if gf == prefix or (gf and gf.startswith(prefix + "/")):
+            db.delete(grant)
+            removed += 1
+    return removed
+
+
+def rename_portal_grants_for_folder(
+    db: Session,
+    *,
+    case_id: uuid.UUID,
+    old_folder_path: str,
+    new_folder_path: str,
+) -> int:
+    """Keep portal grant paths aligned when staff rename a matter folder."""
+    old_p = sanitize_folder_path(old_folder_path)
+    new_p = sanitize_folder_path(new_folder_path)
+    if not old_p:
+        return 0
+    grants = db.execute(select(ContactPortalGrant).where(ContactPortalGrant.case_id == case_id)).scalars().all()
+    updated = 0
+    for grant in grants:
+        gf = sanitize_folder_path(grant.folder_path)
+        if gf == old_p:
+            grant.folder_path = new_p
+            updated += 1
+        elif gf.startswith(old_p + "/"):
+            grant.folder_path = new_p + gf[len(old_p) :]
+            updated += 1
+    return updated
+
+
 def portal_access_is_active(row: ContactPortalAccess, *, now: datetime | None = None) -> bool:
     now = now or utcnow()
     if not row.enabled:
@@ -117,7 +184,15 @@ def get_portal_access_by_code(db: Session, access_code: str) -> ContactPortalAcc
 def list_active_grants_for_contact(db: Session, contact_id: uuid.UUID) -> list[ContactPortalGrant]:
     now = utcnow()
     rows = db.execute(select(ContactPortalGrant).where(ContactPortalGrant.contact_id == contact_id)).scalars().all()
-    return [g for g in rows if grant_is_active(g, now=now)]
+    return [g for g in rows if grant_is_client_visible(db, g, now=now)]
+
+
+def client_matter_description(case: Case | None) -> str:
+    """Matter description for client-facing portal labels and e-mails (not the internal reference)."""
+    if case is None:
+        return "Your matter"
+    title = (case.title or "").strip()
+    return title or "Your matter"
 
 
 def contact_has_portal_content(db: Session, contact_id: uuid.UUID) -> bool:
@@ -126,6 +201,11 @@ def contact_has_portal_content(db: Session, contact_id: uuid.UUID) -> bool:
 
     if filter_grants_for_portal_enabled_cases(db, list_active_grants_for_contact(db, contact_id)):
         return True
+    return contact_has_portal_delivery_content(db, contact_id=contact_id)
+
+
+def contact_has_portal_delivery_content(db: Session, *, contact_id: uuid.UUID) -> bool:
+    """Pending quotes, forms, or DocuSign (folder grants not required)."""
     from app.quote_portal_service import list_pending_quote_deliveries_for_contact
 
     if list_pending_quote_deliveries_for_contact(db, contact_id=contact_id):
@@ -139,6 +219,38 @@ def contact_has_portal_content(db: Session, contact_id: uuid.UUID) -> bool:
     return bool(list_pending_docusign(db, contact_id))
 
 
+def contact_has_portal_content_on_case(db: Session, *, contact_id: uuid.UUID, case_id: uuid.UUID) -> bool:
+    """True when a contact has folder shares or delivery-only portal work on one matter."""
+    from app.portal_case import require_case_portal_enabled
+
+    require_case_portal_enabled(db, case_id)
+    grants = [
+        g
+        for g in db.execute(
+            select(ContactPortalGrant).where(
+                ContactPortalGrant.case_id == case_id,
+                ContactPortalGrant.contact_id == contact_id,
+            )
+        )
+        .scalars()
+        .all()
+        if grant_is_client_visible(db, g)
+    ]
+    if grants:
+        return True
+    from app.quote_portal_service import list_pending_quote_deliveries_for_contact
+
+    if any(d.case_id == case_id for d in list_pending_quote_deliveries_for_contact(db, contact_id=contact_id)):
+        return True
+    from app.portal_form_service import list_pending_for_contact as list_pending_portal_forms
+
+    if any(s.case_id == case_id for s in list_pending_portal_forms(db, contact_id)):
+        return True
+    from app.docusign_signing_service import list_pending_for_contact as list_pending_docusign
+
+    return any(req.case_id == case_id for req, _ in list_pending_docusign(db, contact_id))
+
+
 def get_grant_for_contact(db: Session, *, contact_id: uuid.UUID, grant_id: uuid.UUID) -> ContactPortalGrant:
     grant = db.get(ContactPortalGrant, grant_id)
     if not grant or grant.contact_id != contact_id:
@@ -148,6 +260,8 @@ def get_grant_for_contact(db: Session, *, contact_id: uuid.UUID, grant_id: uuid.
     from app.portal_case import require_case_portal_enabled
 
     require_case_portal_enabled(db, grant.case_id)
+    if not grant_folder_still_exists(db, case_id=grant.case_id, folder_path=grant.folder_path or ""):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Area not found")
     return grant
 
 
