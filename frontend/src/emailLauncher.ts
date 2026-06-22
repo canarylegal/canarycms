@@ -3,11 +3,33 @@ import type { UserPublic } from './types'
 /** Default Outlook on the web inbox (user may override in settings). */
 export const DEFAULT_OUTLOOK_WEB_MAIL_URL = 'https://outlook.office.com/mail'
 
+export type EmailDesktopClient = 'outlook' | 'other'
+
 /** Admin → E-mail Graph mode with resolvable Entra credentials (OWA links, Outlook categories — not compose). */
 export function isOrgMicrosoftGraphConfigured(user: UserPublic | null | undefined): boolean {
   return (
     user?.email_integration_mode === 'microsoft_graph' && user?.m365_graph_drafts_configured === true
   )
+}
+
+/** Desktop compose target when ``email_launch_preference`` is ``desktop``. */
+export function userEmailDesktopClient(user: UserPublic | null | undefined): EmailDesktopClient {
+  return user?.email_desktop_client === 'other' ? 'other' : 'outlook'
+}
+
+/**
+ * Use Microsoft Graph draft + OWA / Outlook handoff for matter e-mail (e.g. quote send with attachments).
+ * Thunderbird/other desktop users stay on ``mailto:`` even when Graph is configured.
+ */
+export function shouldUseGraphDraftForMatterEmail(
+  user: UserPublic | null | undefined,
+  attachmentFileIds: string[],
+): boolean {
+  if (!isOrgMicrosoftGraphConfigured(user)) return false
+  if (!attachmentFileIds.length) return false
+  const pref = user?.email_launch_preference ?? 'desktop'
+  if (pref === 'outlook_web') return true
+  return userEmailDesktopClient(user) === 'outlook'
 }
 
 export const OUTLOOK_WEB_WITHOUT_GRAPH_CONFIRM_MESSAGE =

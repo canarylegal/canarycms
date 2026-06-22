@@ -18,6 +18,8 @@ export type UserPublic = {
   has_passkeys?: boolean
   /** Matter compose: `mailto:` vs Outlook web URL */
   email_launch_preference?: 'desktop' | 'outlook_web'
+  /** When ``email_launch_preference`` is ``desktop``: Outlook (M365 handoff) vs Thunderbird/other (mailto). */
+  email_desktop_client?: 'outlook' | 'other'
   email_outlook_web_url?: string | null
   /** Org-wide: Admin → E-mail — desktop mailto vs Microsoft 365 Graph drafts. */
   email_integration_mode?: 'mailto' | 'microsoft_graph'
@@ -947,6 +949,14 @@ export type CaseEmailComposeHandoffOut = {
   case_id: string
   expires_in_seconds: number
   thunderbird_hint: string
+}
+
+/** Response from ``PUT /mail-plugin/pending-compose-handoff`` (Outlook add-in queue). */
+export type OutlookPluginPendingComposeHandoffOut = {
+  active: boolean
+  handoff_token?: string | null
+  case_id?: string | null
+  expires_at?: string | null
 }
 
 /** Response from ``POST /cases/{id}/files/email-mailto``. */

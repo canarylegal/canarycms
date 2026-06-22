@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import uuid
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -25,9 +26,12 @@ from app.schemas import (
     OutlookPluginLinkedCaseOut,
     OutlookPluginLinkedCaseResolveIn,
     OutlookPluginLinkedCaseResolveOut,
+    OutlookPluginPendingComposeHandoffOut,
+    OutlookPluginPendingComposeHandoffPutIn,
     OutlookPluginPendingSendOut,
     OutlookPluginPendingSendPutIn,
 )
+from app.security import decode_compose_handoff_token
 
 router = APIRouter(prefix="/outlook-plugin", tags=["outlook-plugin"])
 log = logging.getLogger(__name__)
@@ -40,12 +44,45 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _as_utc_aware(dt: datetime | None) -> datetime | None:
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
 def _clear_expired_pending(db: Session, user_row: User) -> None:
     exp = user_row.outlook_pending_send_expires_at
     if exp is not None and exp < _utcnow():
         user_row.outlook_pending_send_case_id = None
         user_row.outlook_pending_send_source_file_id = None
         user_row.outlook_pending_send_expires_at = None
+
+
+def _clear_expired_compose_handoff(db: Session, user_row: User) -> None:
+    exp = _as_utc_aware(user_row.outlook_pending_compose_handoff_expires_at)
+    if exp is not None and exp < _utcnow():
+        user_row.outlook_pending_compose_handoff_token = None
+        user_row.outlook_pending_compose_handoff_expires_at = None
+
+
+def _pending_compose_handoff_out(row: User) -> OutlookPluginPendingComposeHandoffOut:
+    token = (row.outlook_pending_compose_handoff_token or "").strip()
+    exp = row.outlook_pending_compose_handoff_expires_at
+    if not token or not exp:
+        return OutlookPluginPendingComposeHandoffOut(active=False)
+    try:
+        payload = decode_compose_handoff_token(token)
+        case_id = uuid.UUID(payload.case_id)
+    except (ValueError, TypeError):
+        return OutlookPluginPendingComposeHandoffOut(active=False)
+    return OutlookPluginPendingComposeHandoffOut(
+        active=True,
+        handoff_token=token,
+        case_id=case_id,
+        expires_at=exp,
+    )
 
 
 def _internet_message_id_variants(raw: str | None) -> list[str]:
@@ -258,6 +295,76 @@ def outlook_plugin_delete_pending_send(
     row.outlook_pending_send_expires_at = None
     row.updated_at = _utcnow()
     db.commit()
+
+
+@router.put("/pending-compose-handoff", response_model=OutlookPluginPendingComposeHandoffOut)
+def outlook_plugin_put_pending_compose_handoff(
+    payload: OutlookPluginPendingComposeHandoffPutIn,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> OutlookPluginPendingComposeHandoffOut:
+    """Queue a compose handoff JWT for the Outlook add-in (Canary web → desktop compose)."""
+    try:
+        handoff = decode_compose_handoff_token(payload.handoff_token.strip())
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
+    if str(user.id) != handoff.user_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Handoff token does not match this user.")
+    try:
+        case_id = uuid.UUID(handoff.case_id)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid case id in handoff.") from e
+    require_case_access(case_id, user, db)
+
+    ttl = payload.ttl_seconds if payload.ttl_seconds is not None else 3600
+    ttl = max(_PENDING_TTL_MIN, min(_PENDING_TTL_MAX, int(ttl)))
+
+    row = db.get(User, user.id)
+    if not row:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found.")
+    row.outlook_pending_compose_handoff_token = payload.handoff_token.strip()
+    row.outlook_pending_compose_handoff_expires_at = _utcnow() + timedelta(seconds=ttl)
+    row.updated_at = _utcnow()
+    db.commit()
+    db.refresh(row)
+    return _pending_compose_handoff_out(row)
+
+
+@router.post("/pending-compose-handoff/claim", response_model=OutlookPluginPendingComposeHandoffOut)
+def outlook_plugin_claim_pending_compose_handoff(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> OutlookPluginPendingComposeHandoffOut:
+    """Atomically return and clear a queued compose handoff (Outlook add-in poll)."""
+    row = db.get(User, user.id)
+    if not row:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found.")
+    _clear_expired_compose_handoff(db, row)
+    pending = _pending_compose_handoff_out(row)
+    if not pending.active or not pending.handoff_token:
+        db.commit()
+        return OutlookPluginPendingComposeHandoffOut(active=False)
+    try:
+        require_case_access(pending.case_id, user, db)
+    except HTTPException:
+        row.outlook_pending_compose_handoff_token = None
+        row.outlook_pending_compose_handoff_expires_at = None
+        row.updated_at = _utcnow()
+        db.commit()
+        return OutlookPluginPendingComposeHandoffOut(active=False)
+    token = pending.handoff_token
+    case_id = pending.case_id
+    expires_at = pending.expires_at
+    row.outlook_pending_compose_handoff_token = None
+    row.outlook_pending_compose_handoff_expires_at = None
+    row.updated_at = _utcnow()
+    db.commit()
+    return OutlookPluginPendingComposeHandoffOut(
+        active=True,
+        handoff_token=token,
+        case_id=case_id,
+        expires_at=expires_at,
+    )
 
 
 @router.post("/ensure-master-category", response_model=OutlookPluginEnsureMasterCategoryOut)

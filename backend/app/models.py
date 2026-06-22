@@ -75,6 +75,8 @@ class User(Base):
     # Matter e-mail compose: desktop mailto vs Outlook on the web (user setting).
     email_launch_preference: Mapped[str] = mapped_column(String(32), nullable=False, default="desktop")
     email_outlook_web_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # When email_launch_preference is desktop: Outlook (Graph handoff) vs Thunderbird/other (mailto only).
+    email_desktop_client: Mapped[str] = mapped_column(String(32), nullable=False, default="outlook")
 
     appearance_font: Mapped[str | None] = mapped_column(Text, nullable=True)
     appearance_accent: Mapped[str] = mapped_column(String(7), nullable=False, default="#2563eb")
@@ -94,6 +96,12 @@ class User(Base):
         UUID(as_uuid=True), ForeignKey("file.id", ondelete="SET NULL"), nullable=True
     )
     outlook_pending_send_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    # Canary web → Outlook add-in: open compose with merge + attachments (Phase 3 handoff).
+    outlook_pending_compose_handoff_token: Mapped[str | None] = mapped_column(Text, nullable=True)
+    outlook_pending_compose_handoff_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)

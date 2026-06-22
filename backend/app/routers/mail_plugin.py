@@ -19,6 +19,8 @@ from app.schemas import (
     MailPluginMessageContextOut,
     OutlookPluginLinkedCaseResolveIn,
     OutlookPluginLinkedCaseResolveOut,
+    OutlookPluginPendingComposeHandoffOut,
+    OutlookPluginPendingComposeHandoffPutIn,
     OutlookPluginPendingSendOut,
     OutlookPluginPendingSendPutIn,
 )
@@ -70,6 +72,23 @@ def mail_plugin_delete_pending_send(
     db: Session = Depends(get_db),
 ) -> None:
     return outlook_plugin_router.outlook_plugin_delete_pending_send(user, db)
+
+
+@router.put("/pending-compose-handoff", response_model=OutlookPluginPendingComposeHandoffOut)
+def mail_plugin_put_pending_compose_handoff(
+    payload: OutlookPluginPendingComposeHandoffPutIn,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> OutlookPluginPendingComposeHandoffOut:
+    return outlook_plugin_router.outlook_plugin_put_pending_compose_handoff(payload, user, db)
+
+
+@router.post("/pending-compose-handoff/claim", response_model=OutlookPluginPendingComposeHandoffOut)
+def mail_plugin_claim_pending_compose_handoff(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> OutlookPluginPendingComposeHandoffOut:
+    return outlook_plugin_router.outlook_plugin_claim_pending_compose_handoff(user, db)
 
 
 @router.post("/cases/{case_id}/compose-bundle", response_model=MailPluginComposeHandoffOut)

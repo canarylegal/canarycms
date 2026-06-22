@@ -76,6 +76,7 @@ class UserPublic(BaseModel):
     has_passkeys: bool = False
     email_launch_preference: Literal["desktop", "outlook_web"] = "desktop"
     email_outlook_web_url: str | None = None
+    email_desktop_client: Literal["outlook", "other"] = "outlook"
     email_integration_mode: Literal["mailto", "microsoft_graph"] = "microsoft_graph"
     m365_graph_drafts_configured: bool = False
     admin_console_access: bool = Field(
@@ -150,6 +151,7 @@ class UserEmailHandlingUpdate(BaseModel):
 
     email_launch_preference: Literal["desktop", "outlook_web"]
     email_outlook_web_url: str | None = Field(default=None, max_length=2000)
+    email_desktop_client: Literal["outlook", "other"] | None = None
 
 
 class LedgerPermissionsOut(BaseModel):
@@ -1514,6 +1516,20 @@ class OutlookPluginPendingSendOut(BaseModel):
     active: bool
     case_id: uuid.UUID | None = None
     source_file_id: uuid.UUID | None = None
+    expires_at: datetime | None = None
+
+
+class OutlookPluginPendingComposeHandoffPutIn(BaseModel):
+    """Queue a compose handoff for the signed-in user's Outlook add-in to claim and open."""
+
+    handoff_token: str = Field(min_length=10)
+    ttl_seconds: int | None = 3600
+
+
+class OutlookPluginPendingComposeHandoffOut(BaseModel):
+    active: bool
+    handoff_token: str | None = None
+    case_id: uuid.UUID | None = None
     expires_at: datetime | None = None
 
 
