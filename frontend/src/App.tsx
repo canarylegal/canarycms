@@ -3171,6 +3171,7 @@ function UserSettingsPage({
   const [pkLabel, setPkLabel] = useState('')
 
   const [emailPref, setEmailPref] = useState<'desktop' | 'outlook_web'>('desktop')
+  const [emailDesktopClient, setEmailDesktopClient] = useState<'outlook' | 'other'>('outlook')
   const [outlookUrl, setOutlookUrl] = useState(DEFAULT_OUTLOOK_WEB_MAIL_URL)
   const [emailSaveErr, setEmailSaveErr] = useState<string | null>(null)
   const [emailSaveOk, setEmailSaveOk] = useState(false)
@@ -3225,6 +3226,7 @@ function UserSettingsPage({
   useEffect(() => {
     if (!account) return
     setEmailPref(account.email_launch_preference ?? 'desktop')
+    setEmailDesktopClient(account.email_desktop_client === 'other' ? 'other' : 'outlook')
     setOutlookUrl((account.email_outlook_web_url ?? '').trim() || DEFAULT_OUTLOOK_WEB_MAIL_URL)
   }, [account])
 
@@ -3253,6 +3255,7 @@ function UserSettingsPage({
         json: {
           email_launch_preference: emailPref,
           email_outlook_web_url: emailPref === 'outlook_web' ? outlookUrl.trim() : null,
+          email_desktop_client: emailPref === 'desktop' ? emailDesktopClient : undefined,
         },
       })
       setAccount(u)
@@ -4012,16 +4015,17 @@ function UserSettingsPage({
         <section className="card" style={{ padding: 16, marginTop: 16 }}>
           <h3 style={{ marginTop: 0 }}>E-mail</h3>
           <p className="muted" style={{ marginTop: 0 }}>
-            Choose how <strong>New → E-mail</strong> opens compose: your system&apos;s default mail program (
-            <code>mailto:</code>) or Outlook on the web. Attach case files with <strong>Compose from matter</strong> in
-            the Canary Outlook or Thunderbird add-in after compose opens.
+            Choose how <strong>New → E-mail</strong> and <strong>Send by e-mail</strong> open compose.{' '}
+            <strong>Outlook on the web</strong> uses your tenant&apos;s OWA URL. <strong>Desktop app</strong> uses either
+            Microsoft 365 + the Canary Outlook add-in, or <code>mailto:</code> for Thunderbird and other clients (attach
+            case files with <strong>Compose from matter</strong> in the add-in).
           </p>
           <div className="stack" style={{ maxWidth: 560, gap: 14, marginTop: 12 }}>
             <SingleSelectDropdown
               label="Compose with"
               options={[
-                { value: 'desktop', label: 'Desktop client (system default)' },
-                { value: 'outlook_web', label: 'Outlook web' },
+                { value: 'desktop', label: 'Desktop app' },
+                { value: 'outlook_web', label: 'Outlook on the web' },
               ]}
               value={emailPref}
               onChange={(v) => {
@@ -4038,6 +4042,34 @@ function UserSettingsPage({
               }}
               disabled={emailBusy}
             />
+            {emailPref === 'desktop' ? (
+              <SingleSelectDropdown
+                label="Desktop mail program"
+                options={[
+                  { value: 'outlook', label: 'Outlook (Microsoft 365)' },
+                  { value: 'other', label: 'Thunderbird or other' },
+                ]}
+                value={emailDesktopClient}
+                onChange={(v) => setEmailDesktopClient(v === 'other' ? 'other' : 'outlook')}
+                disabled={emailBusy}
+              />
+            ) : null}
+            {emailPref === 'desktop' ? (
+              <p className="muted" style={{ margin: 0, fontSize: 13 }}>
+                {emailDesktopClient === 'outlook' ? (
+                  <>
+                    With Microsoft 365 configured, <strong>Send by e-mail</strong> creates an Exchange draft and opens
+                    compose via the Canary Outlook add-in (Drafts is the fallback).
+                  </>
+                ) : (
+                  <>
+                    Compose uses <code>mailto:</code> even when Microsoft 365 is configured. Attach case files with{' '}
+                    <strong>Compose from matter</strong> in the Canary Thunderbird or Outlook add-in after compose
+                    opens.
+                  </>
+                )}
+              </p>
+            ) : null}
             {emailPref === 'outlook_web' ? (
               <label className="field">
                 <span>Outlook web URL</span>

@@ -241,6 +241,13 @@ def put_my_email_handling(
         user.email_outlook_web_url = _validate_http_url(raw)
     else:
         user.email_outlook_web_url = None
+        client = (body.email_desktop_client or user.email_desktop_client or "outlook").strip()
+        if client not in ("outlook", "other"):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="email_desktop_client must be outlook or other.",
+            )
+        user.email_desktop_client = client
     user.updated_at = now
     db.add(user)
     db.commit()

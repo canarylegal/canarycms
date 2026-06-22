@@ -53,7 +53,17 @@ This add-in gives Outlook on the web and Outlook desktop:
 3. **Apply to message** — merge, attachments, pending-send, and (when supported) the **Canary** category on the draft.
 4. **Send** — `OnMessageSend` saves a synthetic `.eml` (+ attachments) to the linked matter via pending-send.
 
-**Important:** Compose send filing requires **`OnMessageSend`** in `manifest.xml` (v1.0.10+). You must click **Apply to message** before sending so pending-send is set for the matter.
+### Send by e-mail from Canary web (Graph + desktop preference)
+
+When a fee earner uses **Send by e-mail** on a matter with attachments and **Desktop client** selected in account settings, Canary:
+
+1. Creates an Exchange draft via Microsoft Graph (also in **Drafts** as fallback).
+2. Queues a compose handoff (`PUT /api/mail-plugin/pending-compose-handoff`).
+3. The add-in polls (`POST …/pending-compose-handoff/claim`), fetches `GET …/compose-handoff/{token}`, and opens **`displayNewMessageForm`** with merge text and attachments.
+
+**Requirements:** Outlook desktop with this add-in installed and signed in. Polling runs from `commands.html` while Outlook is open.
+
+**Important:** Compose send filing requires **`OnMessageSend`** in `manifest.xml` (v1.0.10+). Web-initiated compose sets pending-send automatically; manual **Compose from matter** still requires **Apply to message** before send.
 
 It calls the same backend routes as the main app: `POST /api/auth/plugin/authorize`, `POST /api/auth/plugin/token`, `GET /api/cases`, `POST /api/cases/{case_id}/files`, `POST /api/mail-plugin/cases/{case_id}/compose-bundle`.
 

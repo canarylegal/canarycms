@@ -181,9 +181,56 @@
     })
   }
 
+  function openNewMessageFromBundle(bundle) {
+    return new Promise(function (resolve, reject) {
+      if (!Office.context.mailbox || typeof Office.context.mailbox.displayNewMessageForm !== 'function') {
+        reject(new Error('This Outlook client cannot open a new compose window automatically.'))
+        return
+      }
+      const params = {}
+      if (bundle && bundle.to) {
+        const recipients = parseRecipients(bundle.to)
+        if (recipients.length) {
+          params.toRecipients = recipients.map(function (r) {
+            return r.emailAddress
+          })
+        }
+      }
+      if (bundle && bundle.subject != null) {
+        params.subject = String(bundle.subject || '')
+      }
+      const bodyText = String((bundle && bundle.body) || '').trim()
+      if (bodyText) {
+        params.body = bodyText
+      }
+      const attachments = []
+      const atts = (bundle && bundle.attachments) || []
+      for (let i = 0; i < atts.length && attachments.length < MAX_ATTACH; i++) {
+        const a = atts[i]
+        if (!a || !a.content_base64) continue
+        attachments.push({
+          type: Office.MailboxEnums.AttachmentType.File,
+          name: String(a.filename || 'attachment').trim() || 'attachment',
+          inLine: false,
+          contentBytes: a.content_base64,
+        })
+      }
+      if (attachments.length) {
+        params.attachments = attachments
+      }
+      try {
+        Office.context.mailbox.displayNewMessageForm(params)
+        resolve(attachments.length)
+      } catch (e) {
+        reject(e instanceof Error ? e : new Error('Could not open a new compose window.'))
+      }
+    })
+  }
+
   globalThis.canaryOutlookApplyCompose = {
     getComposeTypeAsync: getComposeTypeAsync,
     applyComposeBundle: applyComposeBundle,
     applyCanaryCategoryAsync: applyCanaryCategoryAsync,
+    openNewMessageFromBundle: openNewMessageFromBundle,
   }
 })()

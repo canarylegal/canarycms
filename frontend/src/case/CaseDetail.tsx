@@ -17,12 +17,12 @@ import {
 import {
   buildMailtoComposeUrl,
   buildOutlookWebComposeUrl,
-  isOrgMicrosoftGraphConfigured,
   normalizeComposeQueryPlusAsSpaces,
   buildOutlookWebReadItemUrl,
   isLikelyExchangeRestItemId,
   isUsableOutlookMessageWebLink,
   normalizeOutlookWebReadLink,
+  shouldUseGraphDraftForMatterEmail,
 } from '../emailLauncher'
 import { ContactSearchPicker } from '../ContactSearchPicker'
 import { useDialogs } from '../DialogProvider'
@@ -74,6 +74,7 @@ import type {
   CasePortalFolderAccessGrantOut,
   CasePortalNotifyFilesOut,
   CasePortalShareStatusOut,
+  OutlookPluginPendingComposeHandoffOut,
 } from '../types'
 import { TasksTable } from '../TasksTable'
 import { useUserUiPreferences } from '../useUserUiPreferences'
@@ -1503,8 +1504,7 @@ export function CaseDetail({
         attachment_file_ids: attachmentFileIds,
       }
 
-      const useGraphDraft =
-        isOrgMicrosoftGraphConfigured(currentUser) && attachmentFileIds.length > 0
+      const useGraphDraft = shouldUseGraphDraftForMatterEmail(currentUser, attachmentFileIds)
 
       if (useGraphDraft) {
         try {
@@ -1525,11 +1525,6 @@ export function CaseDetail({
           } catch {
             /* Best-effort: add-in send capture works without this if user files manually. */
           }
-          const opened = openM365ComposeDraft(res, currentUser?.email?.trim() || null)
-          if (!opened) {
-            setActionErr('Your browser blocked opening Outlook. Allow pop-ups for this site.')
-            return
-          }
           const attachNames = (res.attachment_files ?? []).map((f) => f.filename).filter(Boolean)
           const attachLabel =
             attachNames.length === 1
@@ -1541,9 +1536,35 @@ export function CaseDetail({
                   : res.attachment_count
                     ? `${res.attachment_count} files`
                     : 'attachments'
-          setActionNotice(
-            `Outlook draft created with ${attachLabel} attached. Review and send from the draft window, or from Drafts in Outlook desktop.`,
-          )
+          const launchPref = currentUser?.email_launch_preference ?? 'desktop'
+          if (launchPref === 'outlook_web') {
+            const opened = openM365ComposeDraft(res, currentUser?.email?.trim() || null)
+            if (!opened) {
+              setActionErr('Your browser blocked opening Outlook. Allow pop-ups for this site.')
+              return
+            }
+            setActionNotice(
+              `Outlook draft created with ${attachLabel} attached. Review and send from the draft window.`,
+            )
+          } else {
+            if (res.compose_handoff_token) {
+              try {
+                await apiFetch<OutlookPluginPendingComposeHandoffOut>(`/mail-plugin/pending-compose-handoff`, {
+                  token,
+                  method: 'PUT',
+                  json: {
+                    handoff_token: res.compose_handoff_token,
+                    ttl_seconds: 3600,
+                  },
+                })
+              } catch {
+                /* Best-effort: user can open Drafts or use Compose from matter manually. */
+              }
+            }
+            setActionNotice(
+              `Draft created with ${attachLabel} attached. If Outlook is open with the Canary add-in signed in, a compose window should appear shortly — otherwise open Drafts in Outlook or use Compose from matter in the add-in.`,
+            )
+          }
           return
         } catch (e: unknown) {
           const err = e as { status?: number; message?: string }
@@ -3870,18 +3891,28 @@ export function CaseDetail({
                       <>
                         Optional: pick a recipient to pre-fill <strong>To</strong>.
                         {(contactPickModal.attachmentFileIds?.length ?? 0) > 0 &&
-                        isOrgMicrosoftGraphConfigured(currentUser) ? (
+                        shouldUseGraphDraftForMatterEmail(
+                          currentUser,
+                          contactPickModal.attachmentFileIds ?? [],
+                        ) ? (
                           <>
                             {' '}
-                            Canary creates an Outlook draft via Microsoft Graph with the quote attached and opens it for
-                            review (also available under Drafts in Outlook desktop).
+                            Canary creates an Outlook draft via Microsoft Graph with the quote attached.
+                            {currentUser?.email_launch_preference === 'outlook_web' ? (
+                              <> Outlook on the web opens for review.</>
+                            ) : (
+                              <>
+                                {' '}
+                                With <strong>Outlook</strong> selected under desktop e-mail settings, the Canary Outlook
+                                add-in opens compose; the draft is also in Drafts as a fallback.
+                              </>
+                            )}
                           </>
                         ) : (contactPickModal.attachmentFileIds?.length ?? 0) > 0 ? (
                           <>
                             {' '}
                             Compose opens in your mail program with merged subject and body. Attach the quote using{' '}
-                            <strong>Compose from matter</strong> in the Canary Thunderbird or Outlook add-in (mailto
-                            links cannot attach files automatically).
+                            <strong>Compose from matter</strong> in the Canary Thunderbird or Outlook add-in.
                           </>
                         ) : (
                           <>
