@@ -567,6 +567,11 @@ function PrecedentNamePencilIcon() {
   )
 }
 
+function precedentDisplayNameFromFile(file: File): string {
+  const stem = file.name.replace(/\.docx$/i, '').trim()
+  return stem || file.name
+}
+
 function AdminPrecedents({ token }: { token: string }) {
   const { askConfirm } = useDialogs()
   /** Reserved references — edit in OnlyOffice; do not delete from Admin. */
@@ -643,13 +648,35 @@ function AdminPrecedents({ token }: { token: string }) {
     ],
     [uploadCats],
   )
-  const scopeFormComplete = useMemo(() => {
-    if (!uploadHeadTypeId) return false
-    if (headIsGlobal) return true
-    if (!uploadSubTypeId) return false
-    if (uploadSubTypeId === GLOBAL_PRECEDENT_SCOPE) return true
-    return Boolean(uploadCategoryId)
-  }, [uploadHeadTypeId, headIsGlobal, uploadSubTypeId, uploadCategoryId])
+  const uploadBlockers = useMemo(() => {
+    const blockers: string[] = []
+    if (uploadCatsLoading) blockers.push('Wait for precedent categories to finish loading')
+    if (!name.trim()) blockers.push('Enter a precedent name')
+    if (!reference.trim()) blockers.push('Enter a reference')
+    if (!file) blockers.push('Choose a .docx file to upload')
+    if (!uploadHeadTypeId) blockers.push('Select a matter type (or Global)')
+    else if (!headIsGlobal && !uploadSubTypeId) blockers.push('Select a sub-type (or Global)')
+    else if (
+      !headIsGlobal &&
+      uploadSubTypeId &&
+      uploadSubTypeId !== GLOBAL_PRECEDENT_SCOPE &&
+      !uploadCategoryId
+    ) {
+      blockers.push('Select a precedent category (or Global)')
+    }
+    return blockers
+  }, [
+    uploadCatsLoading,
+    name,
+    reference,
+    file,
+    uploadHeadTypeId,
+    headIsGlobal,
+    uploadSubTypeId,
+    uploadCategoryId,
+  ])
+
+  const uploadReady = uploadBlockers.length === 0
 
   const mergeFiltered = useMemo(() => {
     const q = mergeFilter.trim().toLowerCase()
@@ -1100,8 +1127,14 @@ function AdminPrecedents({ token }: { token: string }) {
         {uploadCatsFetchErr ? <div className="error" style={{ marginBottom: 8 }}>{uploadCatsFetchErr}</div> : null}
         <div className="stack">
           <label className="field">
-            <span>Name</span>
-            <input value={name} onChange={(e) => setName(e.target.value)} />
+            <span>Name (required)</span>
+            <input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              required
+              aria-required
+              placeholder="e.g. Purchase exchange letter"
+            />
           </label>
           <label className="field">
             <span>Reference</span>
@@ -1182,9 +1215,19 @@ function AdminPrecedents({ token }: { token: string }) {
           !uploadCatsLoading &&
           !uploadCatsFetchErr &&
           uploadCats.length === 0 ? (
-            <div className="error" style={{ fontSize: 13 }}>
-              No named precedent categories exist for this sub-type. You can still choose <strong>Global</strong> above
-              to apply to all categories, or add categories under <strong>Admin → Matters</strong>.
+            <div
+              className="muted"
+              style={{
+                fontSize: 13,
+                padding: '8px 10px',
+                border: '1px solid var(--border)',
+                borderRadius: 6,
+                background: 'var(--panel)',
+              }}
+            >
+              No named precedent categories exist for this sub-type. You can still choose{' '}
+              <strong>Global</strong> above to apply to all categories, or add categories under{' '}
+              <strong>Admin → Matters</strong>.
             </div>
           ) : null}
           {uploadHeadTypeId &&
@@ -1205,22 +1248,30 @@ function AdminPrecedents({ token }: { token: string }) {
             <input
               key={fileInputKey}
               type="file"
-              onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+              accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+              onChange={(e) => {
+                const f = e.target.files?.[0] ?? null
+                setFile(f)
+                if (f && !name.trim()) {
+                  setName(precedentDisplayNameFromFile(f))
+                }
+              }}
             />
           </label>
+          {uploadBlockers.length > 0 ? (
+            <div className="muted" style={{ fontSize: 13 }}>
+              Before uploading: {uploadBlockers.join(' · ')}
+            </div>
+          ) : null}
           <button
             type="button"
             className="btn primary"
-            disabled={
-              busy ||
-              uploadCatsLoading ||
-              !name.trim() ||
-              !reference.trim() ||
-              !file ||
-              !scopeFormComplete
-            }
+            disabled={busy || !uploadReady}
             onClick={async () => {
-              if (!file || !scopeFormComplete) return
+              if (!uploadReady || !file) {
+                setErr(uploadBlockers[0] ?? 'Complete the form before uploading')
+                return
+              }
               setBusy(true)
               setErr(null)
               try {

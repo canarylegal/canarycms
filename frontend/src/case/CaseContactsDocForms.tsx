@@ -14,6 +14,8 @@ import type { ApiError } from '../api'
 import { useDialogs } from '../DialogProvider'
 import { ContactSearchPicker } from '../ContactSearchPicker'
 import { SingleSelectDropdown } from '../SingleSelectDropdown'
+import { defaultLetterSalutationForContact, LetterSalutationFields } from '../LetterSalutationFields'
+import { coerceLetterSalutation, type LetterSalutation } from '../letterSalutation'
 import type { CaseContactOut, ContactOut } from '../types'
 import { applyCaseContactFieldPatch } from './caseContactPatch'
 import { CaseContactPortalSection } from './CaseContactPortalSection'
@@ -82,6 +84,18 @@ export function CaseContactsAddDocForm({
   const [globalEditErr, setGlobalEditErr] = useState<string | null>(null)
   const [lawyerClientsErr, setLawyerClientsErr] = useState<string | null>(null)
   const [matterTypeOpen, setMatterTypeOpen] = useState(false)
+  const [addContactType, setAddContactType] = useState<'person' | 'organisation'>('person')
+  const [letterSalutation, setLetterSalutation] = useState<LetterSalutation | null>(null)
+  const [letterSalutationCustom, setLetterSalutationCustom] = useState<string | null>(null)
+
+  const addSalutationContactType =
+    matterContactType.trim().toLowerCase() === LAWYERS_TYPE_SLUG ? 'organisation' : addContactType
+
+  function resetSalutationForAdd(matterType: string, contactType: 'person' | 'organisation') {
+    const defaults = defaultLetterSalutationForContact(matterType, contactType)
+    setLetterSalutation(defaults.letterSalutation)
+    setLetterSalutationCustom(defaults.letterSalutationCustom)
+  }
 
   const matterTypeDropdownOptions = useMemo(
     () => matterTypeOptions.map((o) => ({ value: o.value, label: o.label })),
@@ -109,6 +123,8 @@ export function CaseContactsAddDocForm({
             setMatterContactType(v)
             setContactAddErr(null)
             setLawyerClientsErr(null)
+            const contactType = v.trim().toLowerCase() === LAWYERS_TYPE_SLUG ? 'organisation' : addContactType
+            resetSalutationForAdd(v, contactType)
             if (v.trim().toLowerCase() !== LAWYERS_TYPE_SLUG) {
               setLawyerLinkClientIds([])
             } else if (selectedGlobalContactId) {
@@ -171,6 +187,19 @@ export function CaseContactsAddDocForm({
             {lawyerClientsErr ? <div className="error" style={{ marginTop: 8 }}>{lawyerClientsErr}</div> : null}
           </div>
         ) : null}
+        {matterContactType.trim() ? (
+          <LetterSalutationFields
+            matterContactType={matterContactType}
+            contactType={addSalutationContactType}
+            value={letterSalutation}
+            customValue={letterSalutationCustom}
+            busy={busy}
+            onChange={({ letterSalutation: nextSalutation, letterSalutationCustom: nextCustom }) => {
+              setLetterSalutation(nextSalutation)
+              setLetterSalutationCustom(nextCustom)
+            }}
+          />
+        ) : null}
       </div>
       {contactAddErr ? <div className="error">{contactAddErr}</div> : null}
       <div className="card" style={{ padding: 12 }}>
@@ -180,7 +209,15 @@ export function CaseContactsAddDocForm({
         <ContactSearchPicker
           token={token}
           value={selectedGlobalContactId}
-          onChange={(id) => setSelectedGlobalContactId(id)}
+          onChange={(id, contact) => {
+            setSelectedGlobalContactId(id)
+            if (contact) {
+              setAddContactType(contact.type)
+              if (matterContactType.trim()) {
+                resetSalutationForAdd(matterContactType, contact.type)
+              }
+            }
+          }}
           disabled={busy}
           organisationOnly={matterContactType.trim().toLowerCase() === LAWYERS_TYPE_SLUG}
           listMaxHeight={140}
@@ -308,6 +345,15 @@ export function CaseContactsAddDocForm({
               contact_id: selectedGlobalContactId,
               matter_contact_type: matterContactType.trim(),
               matter_contact_reference: matterContactReference.trim() || null,
+              letter_salutation: coerceLetterSalutation(
+                letterSalutation,
+                matterContactType,
+                addSalutationContactType,
+              ),
+              letter_salutation_custom:
+                coerceLetterSalutation(letterSalutation, matterContactType, addSalutationContactType) === 'custom'
+                  ? (letterSalutationCustom ?? '').trim() || null
+                  : null,
             }
             if (matterContactType.trim().toLowerCase() === LAWYERS_TYPE_SLUG) {
               linkBody.lawyer_client_ids = lawyerLinkClientIds
@@ -335,6 +381,21 @@ export function CaseContactsAddDocForm({
           formError={contactAddErr}
           submitLabel="Create & link"
           intro={<div className="muted" style={{ marginBottom: 8 }}>Create new contact</div>}
+          onFieldsChange={(fields) => {
+            setAddContactType(fields.type)
+            if (matterContactType.trim()) {
+              const contactType =
+                matterContactType.trim().toLowerCase() === LAWYERS_TYPE_SLUG ? 'organisation' : fields.type
+              const nextSalutation = coerceLetterSalutation(
+                letterSalutation,
+                matterContactType,
+                contactType,
+              )
+              if (nextSalutation !== letterSalutation) {
+                resetSalutationForAdd(matterContactType, contactType)
+              }
+            }
+          }}
           onSubmit={async (payload) => {
             setContactAddErr(null)
             setActionErr(null)
@@ -355,10 +416,21 @@ export function CaseContactsAddDocForm({
                 method: 'POST',
                 json: payload,
               })
+              const createContactType =
+                matterContactType.trim().toLowerCase() === LAWYERS_TYPE_SLUG ? 'organisation' : payload.type
               const createLinkBody: Record<string, unknown> = {
                 contact_id: created.id,
                 matter_contact_type: matterContactType.trim(),
                 matter_contact_reference: matterContactReference.trim() || null,
+                letter_salutation: coerceLetterSalutation(
+                  letterSalutation,
+                  matterContactType,
+                  createContactType,
+                ),
+                letter_salutation_custom:
+                  coerceLetterSalutation(letterSalutation, matterContactType, createContactType) === 'custom'
+                    ? (letterSalutationCustom ?? '').trim() || null
+                    : null,
               }
               if (matterContactType.trim().toLowerCase() === LAWYERS_TYPE_SLUG) {
                 createLinkBody.lawyer_client_ids = lawyerLinkClientIds
@@ -439,10 +511,18 @@ export function CaseContactsEditDocForm({
         onChange={(v) => {
           const val = v ? v : null
           const isLawyers = (val || '').trim().toLowerCase() === LAWYERS_TYPE_SLUG
+          const contactType = isLawyers ? ('organisation' as const) : editSnapshot.type
+          const nextSalutation = coerceLetterSalutation(
+            editSnapshot.letter_salutation,
+            val || '',
+            contactType,
+          )
           setEditSnapshot({
             ...editSnapshot,
             matter_contact_type: val,
             ...(isLawyers ? { type: 'organisation' as const } : {}),
+            letter_salutation: nextSalutation,
+            letter_salutation_custom: nextSalutation === 'custom' ? editSnapshot.letter_salutation_custom : null,
           })
           if (!isLawyers) {
             setEditLawyerLinkClientIds([])
@@ -504,6 +584,26 @@ export function CaseContactsEditDocForm({
           {lawyerClientsErr ? <div className="error" style={{ marginTop: 8 }}>{lawyerClientsErr}</div> : null}
         </div>
       ) : null}
+      {(editSnapshot.matter_contact_type || '').trim() ? (
+        <LetterSalutationFields
+          matterContactType={editSnapshot.matter_contact_type ?? ''}
+          contactType={
+            (editSnapshot.matter_contact_type || '').trim().toLowerCase() === LAWYERS_TYPE_SLUG
+              ? 'organisation'
+              : editSnapshot.type
+          }
+          value={editSnapshot.letter_salutation}
+          customValue={editSnapshot.letter_salutation_custom}
+          busy={busy}
+          onChange={({ letterSalutation, letterSalutationCustom }) =>
+            setEditSnapshot({
+              ...editSnapshot,
+              letter_salutation: letterSalutation,
+              letter_salutation_custom: letterSalutationCustom,
+            })
+          }
+        />
+      ) : null}
       <div className="muted" style={{ fontSize: 12 }}>
         Name and email below are the case snapshot; they can be pushed to the global card only when linked.
       </div>
@@ -511,7 +611,29 @@ export function CaseContactsEditDocForm({
         busy={busy}
         organisationOnly={(editSnapshot.matter_contact_type || '').trim().toLowerCase() === LAWYERS_TYPE_SLUG}
         value={contactOutToFormFields(editSnapshot as unknown as ContactOut)}
-        onChange={(patch) => setEditSnapshot((prev) => (prev ? applyCaseContactFieldPatch(prev, patch) : prev))}
+        onChange={(patch) =>
+          setEditSnapshot((prev) => {
+            if (!prev) return prev
+            const next = applyCaseContactFieldPatch(prev, patch)
+            if (patch.type !== undefined) {
+              const contactType =
+                (prev.matter_contact_type || '').trim().toLowerCase() === LAWYERS_TYPE_SLUG
+                  ? 'organisation'
+                  : patch.type
+              const salutation = coerceLetterSalutation(
+                prev.letter_salutation,
+                prev.matter_contact_type || '',
+                contactType,
+              )
+              return {
+                ...next,
+                letter_salutation: salutation,
+                letter_salutation_custom: salutation === 'custom' ? prev.letter_salutation_custom : null,
+              }
+            }
+            return next
+          })
+        }
       />
       {editSnapshot.contact_id ? (
         <label className="row" style={{ alignItems: 'center' }}>
@@ -598,6 +720,11 @@ export function CaseContactsEditDocForm({
                 setActionErr(msg)
                 return
               }
+              const resolvedSalutation = coerceLetterSalutation(
+                editSnapshot.letter_salutation,
+                editSnapshot.matter_contact_type ?? '',
+                editSnapshot.type,
+              )
               const patchBody: Record<string, unknown> = {
                 type: payload.type,
                 name: payload.name,
@@ -617,6 +744,11 @@ export function CaseContactsEditDocForm({
                 country: payload.country,
                 matter_contact_type: editSnapshot.matter_contact_type!.trim(),
                 matter_contact_reference: (editSnapshot.matter_contact_reference ?? '').trim() || null,
+                letter_salutation: resolvedSalutation,
+                letter_salutation_custom:
+                  resolvedSalutation === 'custom'
+                    ? (editSnapshot.letter_salutation_custom ?? '').trim() || null
+                    : null,
                 push_to_global: pushToGlobal,
               }
               if ((editSnapshot.matter_contact_type || '').trim().toLowerCase() === LAWYERS_TYPE_SLUG) {

@@ -4,7 +4,7 @@ Produces the full universal letter shell: recipient names + org/address block, d
 salutation, ``Re:`` subject line, the ``[PRECEDENT_BODY]`` insertion-point marker (where the
 chosen precedent's body is spliced in at compose time — see
 :func:`app.docx_util.splice_precedent_into_blank_letter`), and the signature block
-(``Yours sincerely,`` / ``[FEE_EARNER]`` / ``[FIRM_TRADING_NAME]``).
+(``[CONTACT_LETTER_SIGN_OFF]`` / ``[FEE_EARNER]`` / ``[FIRM_TRADING_NAME]``).
 
 Run manually; not invoked by the running app. The canonical seed copy lives at
 ``backend/precedents_seed/bundle/g0_blank_letter.docx`` — exact vertical spacing in the
@@ -39,13 +39,15 @@ def main() -> None:
         "Your Ref: [CONTACT_REF]",
         "Our Ref: [FEE_EARNER_INITIALS]/[CASE_REF]",
         "",
-        "[PRIMARY_CLIENT_LETTER_DEAR]",
+        "[CONTACT_LETTER_DEAR]",
         "",
         "Re: [MATTER_DESCRIPTION]",
+        "[SOLICITOR_OUR_CLIENT_LINE]",
+        "[SOLICITOR_YOUR_CLIENT_LINE]",
         "",
         "[PRECEDENT_BODY]",
         "",
-        "Yours sincerely,",
+        "[CONTACT_LETTER_SIGN_OFF]",
         "",
         "",
         "[FEE_EARNER]",

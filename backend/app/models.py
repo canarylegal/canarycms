@@ -879,6 +879,8 @@ class CaseContact(Base):
     matter_contact_reference: Mapped[str | None] = mapped_column(String(500), nullable=True)
     # For matter_contact_type == "lawyers": up to four linked Client matter contacts (UUID strings in JSON).
     lawyer_client_ids: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    letter_salutation: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    letter_salutation_custom: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)

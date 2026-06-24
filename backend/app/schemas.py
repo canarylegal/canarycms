@@ -1268,6 +1268,8 @@ class CaseContactCreateFromGlobal(BaseModel):
     matter_contact_type: str = Field(min_length=1, max_length=200)
     matter_contact_reference: str | None = Field(default=None, max_length=500)
     lawyer_client_ids: list[uuid.UUID] | None = None
+    letter_salutation: str | None = Field(default=None, max_length=64)
+    letter_salutation_custom: str | None = Field(default=None, max_length=500)
 
 
 class CaseContactUpdate(BaseModel):
@@ -1290,6 +1292,8 @@ class CaseContactUpdate(BaseModel):
     matter_contact_type: str | None = Field(default=None, min_length=1, max_length=200)
     matter_contact_reference: str | None = Field(default=None, max_length=500)
     lawyer_client_ids: list[uuid.UUID] | None = None
+    letter_salutation: str | None = Field(default=None, max_length=64)
+    letter_salutation_custom: str | None = Field(default=None, max_length=500)
     push_to_global: bool = False
 
 
@@ -1317,6 +1321,8 @@ class CaseContactOut(BaseModel):
     matter_contact_type: str | None = None
     matter_contact_reference: str | None = None
     lawyer_client_ids: list[uuid.UUID] = Field(default_factory=list)
+    letter_salutation: str | None = None
+    letter_salutation_custom: str | None = None
     created_at: datetime
     updated_at: datetime
 

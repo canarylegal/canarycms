@@ -1056,6 +1056,9 @@ export type CaseContactOut = {
   matter_contact_reference?: string | null
   /** When matter contact type is Lawyers: linked matter contacts (max 4). */
   lawyer_client_ids?: string[]
+  /** Letter opening salutation for precedents (matter snapshot only). */
+  letter_salutation?: string | null
+  letter_salutation_custom?: string | null
   created_at: string
   updated_at: string
 }

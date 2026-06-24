@@ -8,6 +8,16 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Mapping
 
+from app.letter_salutation import (
+    LetterSalutation,
+    effective_letter_salutation,
+    letter_salutation_body,
+    primary_client_letter_dear_line,
+    primary_client_letter_sign_off,
+    resolve_letter_dear_line,
+    resolve_letter_sign_off,
+)
+
 # ---------------------------------------------------------------------------
 # Precedent merge codes
 # ---------------------------------------------------------------------------
@@ -162,8 +172,26 @@ for _ck, _desc in _CONTACT_COMPOSE_STATIC:
     )
 
 PRECEDENT_CODES["[CONTACT_LETTER_DEAR]"] = (
-    "Selected compose contact: opening “Dear …,” using the card display name (empty if none chosen). "
-    "Prefer this over a manual Dear line so person vs organisation stays correct."
+    "Selected compose contact: opening “Dear …,” from the contact’s letter salutation setting "
+    "(informal first names, formal title+surname, Sir / Madam, Sirs, firm name, or custom). "
+    "Empty if no contact was chosen in the dialogue."
+)
+PRECEDENT_CODES["[CONTACT_SALUTATION_BODY]"] = (
+    "Selected compose contact: salutation text only (the part after “Dear ” before the comma), "
+    "from the same salutation setting as [CONTACT_LETTER_DEAR]."
+)
+PRECEDENT_CODES["[CONTACT_LETTER_SIGN_OFF]"] = (
+    "Selected compose contact: closing line (“Yours sincerely,” or “Yours faithfully,”) derived from "
+    "the letter salutation — faithfully for Sir / Madam, Sir or Madam, and Sirs; sincerely for named "
+    "addressees, firm name, and custom."
+)
+PRECEDENT_CODES["[SOLICITOR_OUR_CLIENT_LINE]"] = (
+    "When the compose contact is a Lawyers matter contact: full line “Our Client: …” naming the firm’s "
+    "client(s) on the matter. Empty when the letter is not to a lawyer (paragraph removed on merge)."
+)
+PRECEDENT_CODES["[SOLICITOR_YOUR_CLIENT_LINE]"] = (
+    "When the compose contact is a Lawyers matter contact: full line “Your Client: …” naming the linked "
+    "client on that lawyer row. Empty when the letter is not to a lawyer (paragraph removed on merge)."
 )
 PRECEDENT_CODES["[CONTACT_ORG_LINES]"] = (
     "Selected compose contact: trading name and registered company name with line breaks between non-empty "
@@ -179,8 +207,16 @@ PRECEDENT_CODES["[CONTACT_ORG_AND_ADDRESS_BLOCK]"] = (
 )
 
 PRECEDENT_CODES["[PRIMARY_CLIENT_LETTER_DEAR]"] = (
-    "Primary letter addressee: opening “Dear …,” using the card display name "
-    "(same contact as unsuffixed [ADDR1] / [ADDRESS_BLOCK])."
+    "Primary letter addressee: opening “Dear …,” from the contact’s letter salutation setting "
+    "(same contact as unsuffixed [ADDR1] / [ADDRESS_BLOCK]). "
+    "When merge-all clients use informal salutation, first names are combined (e.g. Sarah and John)."
+)
+PRECEDENT_CODES["[PRIMARY_CLIENT_SALUTATION_BODY]"] = (
+    "Primary addressee: salutation text only (after “Dear ”, before the comma), "
+    "from the same setting as [PRIMARY_CLIENT_LETTER_DEAR]."
+)
+PRECEDENT_CODES["[PRIMARY_CLIENT_LETTER_SIGN_OFF]"] = (
+    "Primary addressee: closing line from the same salutation rules as [CONTACT_LETTER_SIGN_OFF]."
 )
 PRECEDENT_CODES["[ORG_LINES]"] = (
     "Primary addressee (slot 1 Client): organisation trading + registered lines with breaks; "
@@ -211,8 +247,14 @@ for _slot_num, _slot_label in ((2, "2nd"), (3, "3rd"), (4, "4th")):
 
 for _cn in range(1, 5):
     PRECEDENT_CODES[f"[CLIENT_{_cn}_LETTER_DEAR]"] = (
-        f"Dear line for Client matter contact {_cn} (by client order on the matter). "
-        "Use with merge-all or when listing multiple clients."
+        f"Dear line for Client matter contact {_cn} (by client order on the matter), "
+        "from that contact’s letter salutation setting. Use with merge-all or when listing multiple clients."
+    )
+    PRECEDENT_CODES[f"[CLIENT_{_cn}_SALUTATION_BODY]"] = (
+        f"Salutation text only for Client matter contact {_cn} (same rules as [CLIENT_{_cn}_LETTER_DEAR])."
+    )
+    PRECEDENT_CODES[f"[CLIENT_{_cn}_LETTER_SIGN_OFF]"] = (
+        f"Closing line for Client matter contact {_cn} (same rules as [CONTACT_LETTER_SIGN_OFF])."
     )
 
 for _base_key in _ADDITIONAL_CLIENT_NAME_CODES:
@@ -403,11 +445,16 @@ def _contact_type_str(contact: Any) -> str:
     return str(t)
 
 
-def _letter_dear_line(contact: Any | None) -> str:
-    if not contact:
-        return ""
-    name = _s_str(getattr(contact, "name", None))
-    return f"Dear {name}," if name else ""
+def _letter_dear_line(contact: Any | None, *, informal_name_contacts: list[Any] | None = None) -> str:
+    return resolve_letter_dear_line(contact, informal_name_contacts=informal_name_contacts)
+
+
+def _salutation_body_line(contact: Any | None, *, informal_name_contacts: list[Any] | None = None) -> str:
+    return letter_salutation_body(contact, informal_name_contacts=informal_name_contacts)
+
+
+def _letter_sign_off_line(contact: Any | None) -> str:
+    return resolve_letter_sign_off(contact)
 
 
 def _org_lines_block(contact: Any | None) -> str:
@@ -455,12 +502,28 @@ def _fill_full_client_composite_slots(out: dict[str, str], oc: list[Any]) -> Non
         org_b = _org_lines_block(cc)
         addr_b = _address_block_lines(cc)
         dear = _letter_dear_line(cc)
+        sal_body = _salutation_body_line(cc)
+        sign_off = _letter_sign_off_line(cc)
         out[f"[CLIENT_{slot}_LETTER_DEAR]"] = dear
+        out[f"[CLIENT_{slot}_SALUTATION_BODY]"] = sal_body
+        out[f"[CLIENT_{slot}_LETTER_SIGN_OFF]"] = sign_off
         if slot == 1:
             out["[ORG_LINES]"] = org_b
             out["[ADDRESS_BLOCK]"] = addr_b
             out["[ORG_AND_ADDRESS_BLOCK]"] = _org_and_address_block(cc)
-            out["[PRIMARY_CLIENT_LETTER_DEAR]"] = dear
+            primary_dear = primary_client_letter_dear_line(oc)
+            out["[PRIMARY_CLIENT_LETTER_DEAR]"] = primary_dear
+            out["[PRIMARY_CLIENT_LETTER_SIGN_OFF]"] = primary_client_letter_sign_off(oc)
+            informal_contacts = (
+                oc
+                if len(oc) > 1
+                and effective_letter_salutation(cc) == LetterSalutation.dear_first_name_informal.value
+                else None
+            )
+            out["[PRIMARY_CLIENT_SALUTATION_BODY]"] = _salutation_body_line(
+                cc,
+                informal_name_contacts=informal_contacts,
+            )
         else:
             out[_merge_key_with_suffix("[ORG_LINES]", slot)] = org_b
             out[_merge_key_with_suffix("[ADDRESS_BLOCK]", slot)] = addr_b
@@ -476,6 +539,8 @@ def _set_primary_addressee_composites(out: dict[str, str], contact: Any | None) 
     out["[ADDRESS_BLOCK]"] = _address_block_lines(contact)
     out["[ORG_AND_ADDRESS_BLOCK]"] = _org_and_address_block(contact)
     out["[PRIMARY_CLIENT_LETTER_DEAR]"] = _letter_dear_line(contact)
+    out["[PRIMARY_CLIENT_SALUTATION_BODY]"] = _salutation_body_line(contact)
+    out["[PRIMARY_CLIENT_LETTER_SIGN_OFF]"] = _letter_sign_off_line(contact)
 
 
 def _fill_client_dear_lines_and_secondary_composites(out: dict[str, str], oc: list[Any]) -> None:
@@ -484,6 +549,8 @@ def _fill_client_dear_lines_and_secondary_composites(out: dict[str, str], oc: li
     for i, cc in enumerate(oc[:4]):
         slot = i + 1
         out[f"[CLIENT_{slot}_LETTER_DEAR]"] = _letter_dear_line(cc)
+        out[f"[CLIENT_{slot}_SALUTATION_BODY]"] = _salutation_body_line(cc)
+        out[f"[CLIENT_{slot}_LETTER_SIGN_OFF]"] = _letter_sign_off_line(cc)
         if slot >= 2:
             out[_merge_key_with_suffix("[ORG_LINES]", slot)] = _org_lines_block(cc)
             out[_merge_key_with_suffix("[ADDRESS_BLOCK]", slot)] = _address_block_lines(cc)
@@ -548,6 +615,78 @@ def _apply_lawyer_merge_slots(
                     out[f"[LAWYER_CONTACT_CLIENT_{cj}_{inner}]"] = val
 
 
+def _our_clients_display_for_solicitor_letter(
+    ordered_client_contacts: list[Any] | None,
+    *,
+    merge_all_clients: bool,
+) -> str:
+    names = [
+        _s_str(getattr(cc, "name", None))
+        for cc in (ordered_client_contacts or [])[:4]
+        if _s_str(getattr(cc, "name", None))
+    ]
+    if not names:
+        return ""
+    if merge_all_clients and len(names) > 1:
+        if len(names) == 2:
+            return f"{names[0]} and {names[1]}"
+        return ", ".join(names[:-1]) + f" and {names[-1]}"
+    return names[0]
+
+
+def _your_client_display_for_solicitor_letter(
+    compose_contact: Any | None,
+    lawyer_slots: list[tuple[Any, list[Any]] | None] | None,
+) -> str:
+    from app.matter_contact_constants import LAWYERS_SLUG, normalize_matter_contact_type_slug
+
+    if compose_contact is None:
+        return ""
+    if normalize_matter_contact_type_slug(getattr(compose_contact, "matter_contact_type", None)) != LAWYERS_SLUG:
+        return ""
+    target_id = getattr(compose_contact, "id", None)
+    for slot in lawyer_slots or []:
+        if not slot:
+            continue
+        law_cc, clients = slot
+        if getattr(law_cc, "id", None) != target_id:
+            continue
+        for cli in (clients or [])[:1]:
+            name = _s_str(getattr(cli, "name", None))
+            if name:
+                return name
+        return ""
+    return ""
+
+
+def _fill_solicitor_correspondence_lines(
+    out: dict[str, str],
+    *,
+    compose_contact: Any | None,
+    ordered_client_contacts: list[Any] | None,
+    lawyer_slots: list[tuple[Any, list[Any]] | None] | None,
+    merge_all_clients: bool,
+) -> None:
+    from app.matter_contact_constants import LAWYERS_SLUG, normalize_matter_contact_type_slug
+
+    is_solicitor_letter = (
+        compose_contact is not None
+        and normalize_matter_contact_type_slug(getattr(compose_contact, "matter_contact_type", None))
+        == LAWYERS_SLUG
+    )
+    if not is_solicitor_letter:
+        out["[SOLICITOR_OUR_CLIENT_LINE]"] = ""
+        out["[SOLICITOR_YOUR_CLIENT_LINE]"] = ""
+        return
+    our = _our_clients_display_for_solicitor_letter(
+        ordered_client_contacts,
+        merge_all_clients=merge_all_clients,
+    )
+    your = _your_client_display_for_solicitor_letter(compose_contact, lawyer_slots)
+    out["[SOLICITOR_OUR_CLIENT_LINE]"] = f"Our Client: {our}" if our else ""
+    out["[SOLICITOR_YOUR_CLIENT_LINE]"] = f"Your Client: {your}" if your else ""
+
+
 def _fill_compose_selected_contact_codes(out: dict[str, str], contact: Any | None) -> None:
     """Fill ``[CONTACT_*]`` keys from the contact chosen in the compose dialogue (if any)."""
 
@@ -570,9 +709,31 @@ def _fill_compose_selected_contact_codes(out: dict[str, str], contact: Any | Non
     out["[CONTACT_MATTER_REFERENCE]"] = _s_str(getattr(contact, "matter_contact_reference", None))
     out["[CONTACT_MATTER_CONTACT_TYPE]"] = _s_str(getattr(contact, "matter_contact_type", None))
     out["[CONTACT_LETTER_DEAR]"] = _letter_dear_line(contact)
+    out["[CONTACT_SALUTATION_BODY]"] = _salutation_body_line(contact)
+    out["[CONTACT_LETTER_SIGN_OFF]"] = _letter_sign_off_line(contact)
     out["[CONTACT_ORG_LINES]"] = _org_lines_block(contact)
     out["[CONTACT_ADDRESS_BLOCK]"] = _address_block_lines(contact)
     out["[CONTACT_ORG_AND_ADDRESS_BLOCK]"] = _org_and_address_block(contact)
+
+
+def _fill_merge_all_clients_contact_letter_codes(out: dict[str, str], oc: list[Any]) -> None:
+    """Fill ``[CONTACT_LETTER_*]`` when merging all clients (no single compose contact)."""
+
+    if not oc:
+        return
+    first = oc[0]
+    out["[CONTACT_LETTER_DEAR]"] = primary_client_letter_dear_line(oc)
+    out["[CONTACT_LETTER_SIGN_OFF]"] = primary_client_letter_sign_off(oc)
+    informal_contacts = (
+        oc
+        if len(oc) > 1
+        and effective_letter_salutation(first) == LetterSalutation.dear_first_name_informal.value
+        else None
+    )
+    out["[CONTACT_SALUTATION_BODY]"] = _salutation_body_line(
+        first,
+        informal_name_contacts=informal_contacts,
+    )
 
 
 def build_merge_fields(
@@ -618,8 +779,19 @@ def build_merge_fields(
     out = _empty_precedent_field_map()
 
     def finalize(m: dict[str, str]) -> dict[str, str]:
+        if merge_all_clients:
+            oc_local = [c for c in (ordered_client_contacts or [])][:4]
+            if oc_local:
+                _fill_merge_all_clients_contact_letter_codes(m, oc_local)
         _apply_lawyer_merge_slots(m, lawyer_slots)
         _fill_compose_selected_contact_codes(m, compose_selected_contact)
+        _fill_solicitor_correspondence_lines(
+            m,
+            compose_contact=compose_selected_contact,
+            ordered_client_contacts=ordered_client_contacts,
+            lawyer_slots=lawyer_slots,
+            merge_all_clients=merge_all_clients,
+        )
         return m
 
     matter_desc = _s_str(getattr(case, "title", None)) if case else ""
@@ -684,6 +856,7 @@ def build_merge_fields(
             _fill_client_dear_lines_and_secondary_composites(out, oc)
         else:
             out["[CLIENT_1_LETTER_DEAR]"] = _letter_dear_line(selected_contact)
+            out["[CLIENT_1_LETTER_SIGN_OFF]"] = _letter_sign_off_line(selected_contact)
         return finalize(out)
 
     idx = selected_client_slot - 1
@@ -695,6 +868,7 @@ def build_merge_fields(
             _fill_client_dear_lines_and_secondary_composites(out, oc)
         else:
             out["[CLIENT_1_LETTER_DEAR]"] = _letter_dear_line(selected_contact)
+            out["[CLIENT_1_LETTER_SIGN_OFF]"] = _letter_sign_off_line(selected_contact)
         return finalize(out)
 
     core = _core_name_company_for_contact(cc)
@@ -711,6 +885,7 @@ def build_merge_fields(
         _fill_client_dear_lines_and_secondary_composites(out, oc)
     else:
         out["[CLIENT_1_LETTER_DEAR]"] = _letter_dear_line(selected_contact)
+        out["[CLIENT_1_LETTER_SIGN_OFF]"] = _letter_sign_off_line(selected_contact)
     return finalize(out)
 
 
@@ -1092,6 +1267,277 @@ def _ooxml_part_path_matches(name: str) -> bool:
     return False
 
 
+_MERGE_FIELD_NAME_RE = re.compile(r"MERGEFIELD\s+([A-Za-z0-9_]+)")
+
+
+def _mergefield_name_from_instr(instr: str) -> str | None:
+    m = _MERGE_FIELD_NAME_RE.search(instr or "")
+    return m.group(1) if m else None
+
+
+def _make_plain_text_run_element(parent_el: Any, text: str) -> Any:
+    from docx.oxml.ns import qn
+
+    r_tag = qn("w:r")
+    t_tag = qn("w:t")
+    r = parent_el.makeelement(r_tag, {})
+    attrs = {qn("xml:space"): "preserve"} if text.strip() != text else {}
+    t = parent_el.makeelement(t_tag, attrs)
+    t.text = text
+    r.append(t)
+    return r
+
+
+def _canary_code_for_mergefield(name: str, field_map: Mapping[str, str]) -> str:
+    return field_map.get(name, f"[{name.upper()}]")
+
+
+def _replace_mergefields_in_paragraph_element(p_el: Any, field_map: Mapping[str, str]) -> bool:
+    from docx.oxml.ns import qn
+
+    changed = False
+    fld_simple_tag = qn("w:fldSimple")
+    instr_attr = qn("w:instr")
+    for fld in list(p_el.findall(fld_simple_tag)):
+        name = _mergefield_name_from_instr(fld.get(instr_attr) or "")
+        if not name:
+            continue
+        code = _canary_code_for_mergefield(name, field_map)
+        new_r = _make_plain_text_run_element(p_el, code)
+        idx = list(p_el).index(fld)
+        p_el.remove(fld)
+        p_el.insert(idx, new_r)
+        changed = True
+
+    r_tag = qn("w:r")
+    fld_char_tag = qn("w:fldChar")
+    instr_tag = qn("w:instrText")
+    t_tag = qn("w:t")
+    fld_type_attr = qn("w:fldCharType")
+
+    while True:
+        children = list(p_el)
+        replaced = False
+        for i, child in enumerate(children):
+            if child.tag != r_tag:
+                continue
+            fc = child.find(fld_char_tag)
+            if fc is None or fc.get(fld_type_attr) != "begin":
+                continue
+            field_name: str | None = None
+            instr_texts: list[str] = []
+            end_j: int | None = None
+            separate_j: int | None = None
+            for j in range(i + 1, len(children)):
+                cj = children[j]
+                if cj.tag != r_tag:
+                    continue
+                instr = cj.find(instr_tag)
+                if instr is not None and (instr.text or "").strip():
+                    txt = (instr.text or "").strip()
+                    instr_texts.append(txt)
+                    field_name = _mergefield_name_from_instr(txt) or field_name
+                fcj = cj.find(fld_char_tag)
+                if fcj is not None:
+                    if fcj.get(fld_type_attr) == "separate":
+                        separate_j = j
+                    if fcj.get(fld_type_attr) == "end":
+                        end_j = j
+                        break
+            if field_name is None or end_j is None:
+                continue
+            if any(t.upper().startswith("IF") for t in instr_texts):
+                continue
+            code = _canary_code_for_mergefield(field_name, field_map)
+            new_r = _make_plain_text_run_element(p_el, code)
+            for k in range(end_j, i - 1, -1):
+                p_el.remove(children[k])
+            p_el.insert(i, new_r)
+            changed = True
+            replaced = True
+            break
+        if not replaced:
+            break
+    return changed
+
+
+def _cleanup_word_if_fields_in_paragraph_element(p_el: Any) -> bool:
+    """Remove Word IF field markup, mapping conditional job-title fields to ``[FEE_EARNER_JOB_TITLE]``."""
+    from docx.oxml.ns import qn
+
+    changed = False
+    r_tag = qn("w:r")
+    fld_char_tag = qn("w:fldChar")
+    instr_tag = qn("w:instrText")
+    t_tag = qn("w:t")
+    fld_type_attr = qn("w:fldCharType")
+
+    while True:
+        children = list(p_el)
+        replaced = False
+        for i, child in enumerate(children):
+            if child.tag != r_tag:
+                continue
+            fc = child.find(fld_char_tag)
+            if fc is None or fc.get(fld_type_attr) != "begin":
+                continue
+            instr_texts: list[str] = []
+            end_j: int | None = None
+            for j in range(i + 1, len(children)):
+                cj = children[j]
+                if cj.tag != r_tag:
+                    continue
+                instr = cj.find(instr_tag)
+                if instr is not None and (instr.text or "").strip():
+                    instr_texts.append((instr.text or "").strip())
+                fcj = cj.find(fld_char_tag)
+                if fcj is not None and fcj.get(fld_type_attr) == "end":
+                    end_j = j
+                    break
+            if end_j is None:
+                continue
+            if not any(t.upper().startswith("IF") for t in instr_texts):
+                continue
+            replacement = "[FEE_EARNER_JOB_TITLE]"
+            new_r = _make_plain_text_run_element(p_el, replacement)
+            for k in range(end_j, i - 1, -1):
+                p_el.remove(children[k])
+            p_el.insert(i, new_r)
+            changed = True
+            replaced = True
+            break
+        if not replaced:
+            break
+    return changed
+
+
+def _cleanup_word_field_markup_in_paragraph_element(p_el: Any) -> bool:
+    """Remove leftover Word field markup after MERGEFIELD conversion."""
+    from docx.oxml.ns import qn
+
+    changed = False
+    r_tag = qn("w:r")
+    fld_char_tag = qn("w:fldChar")
+    instr_tag = qn("w:instrText")
+    t_tag = qn("w:t")
+    fld_type_attr = qn("w:fldCharType")
+
+    while True:
+        children = list(p_el)
+        replaced = False
+        for i, child in enumerate(children):
+            if child.tag != r_tag:
+                continue
+            fc = child.find(fld_char_tag)
+            if fc is None or fc.get(fld_type_attr) != "begin":
+                continue
+            instr_texts: list[str] = []
+            end_j: int | None = None
+            separate_j: int | None = None
+            display_text = ""
+            for j in range(i + 1, len(children)):
+                cj = children[j]
+                if cj.tag != r_tag:
+                    continue
+                instr = cj.find(instr_tag)
+                if instr is not None and (instr.text or "").strip():
+                    instr_texts.append((instr.text or "").strip())
+                fcj = cj.find(fld_char_tag)
+                if fcj is not None:
+                    if fcj.get(fld_type_attr) == "separate":
+                        separate_j = j
+                    if fcj.get(fld_type_attr) == "end":
+                        end_j = j
+                        break
+                if separate_j is not None and cj.find(t_tag) is not None:
+                    display_text = "".join((t.text or "") for t in cj.iter(t_tag))
+            if end_j is None:
+                continue
+            replacement = display_text.strip()
+            if not replacement:
+                for txt in instr_texts:
+                    quoted = re.findall(r'"([^"]+)"', txt)
+                    for q in reversed(quoted):
+                        if q.strip():
+                            replacement = q.strip()
+                            break
+                    if replacement:
+                        break
+            if not replacement:
+                for k in range(end_j, i - 1, -1):
+                    p_el.remove(children[k])
+                changed = True
+                replaced = True
+                break
+            new_r = _make_plain_text_run_element(p_el, replacement)
+            for k in range(end_j, i - 1, -1):
+                p_el.remove(children[k])
+            p_el.insert(i, new_r)
+            changed = True
+            replaced = True
+            break
+        if not replaced:
+            break
+    return changed
+
+
+def _normalize_merge_code_paragraph_element(p_el: Any) -> bool:
+    """Collapse repeated ``[CODE]`` tokens and rewrite the paragraph as plain runs."""
+    from docx.oxml.ns import qn
+
+    t_tag = qn("w:t")
+    text = "".join((t.text or "") for t in p_el.iter(t_tag))
+    if "[" not in text:
+        return False
+    normalized = re.sub(r"(\[[A-Z0-9_]+\])(?:\1)+", r"\1", text)
+    normalized = re.sub(r"(\[[A-Z0-9_]+\])(?:\s+\1)+", r"\1", normalized)
+    if normalized == text:
+        return False
+    r_tag = qn("w:r")
+    for child in list(p_el):
+        if child.tag == r_tag:
+            p_el.remove(child)
+    p_el.append(_make_plain_text_run_element(p_el, normalized))
+    return True
+
+
+def replace_word_mergefields_in_docx_bytes(
+    src_bytes: bytes,
+    field_map: Mapping[str, str],
+) -> bytes:
+    """Replace Word ``MERGEFIELD`` structures with Canary ``[CODE]`` placeholder text."""
+    import io
+
+    from docx import Document
+    from docx.oxml.ns import qn
+
+    doc = Document(io.BytesIO(src_bytes))
+    p_tag = qn("w:p")
+
+    def _walk(container: Any) -> None:
+        for p_el in container.iter(p_tag):
+            _cleanup_word_if_fields_in_paragraph_element(p_el)
+            _replace_mergefields_in_paragraph_element(p_el, field_map)
+            _cleanup_word_field_markup_in_paragraph_element(p_el)
+            _normalize_merge_code_paragraph_element(p_el)
+
+    _walk(doc.element.body)
+    for section in doc.sections:
+        for hf in (
+            section.header,
+            section.footer,
+            section.even_page_header,
+            section.even_page_footer,
+            section.first_page_header,
+            section.first_page_footer,
+        ):
+            _walk(hf._element)
+
+    out = io.BytesIO()
+    doc.save(out)
+    return out.getvalue()
+
+
 def _merge_precedent_codes_in_ooxml_zip(src_bytes: bytes, fields: dict[str, str]) -> bytes:
     """Replace ``[CODE]`` substrings in raw OOXML parts (one pass per file).
 
@@ -1431,6 +1877,39 @@ def strip_precedent_body_marker(doc_bytes: bytes) -> bytes:
     return out.getvalue()
 
 
+_LETTER_SCAFFOLD_PREFIX_TEXT_RE = (
+    re.compile(r"^\s*Re:\s*\[MATTER_DESCRIPTION\]\s*$", re.I),
+    re.compile(r"^\s*\[SOLICITOR_OUR_CLIENT_LINE\]\s*$", re.I),
+    re.compile(r"^\s*\[SOLICITOR_YOUR_CLIENT_LINE\]\s*$", re.I),
+)
+
+
+def precedent_is_standalone_letter(src_bytes: bytes) -> bool:
+    """True when a letter precedent already includes its own shell (date, refs, etc.)."""
+    return b"[DATE]" in src_bytes and PRECEDENT_BODY_MARKER.encode() not in src_bytes
+
+
+def _strip_letter_scaffold_prefix_from_body_elements(
+    src_elements: list[Any],
+    *,
+    p_tag: str,
+    t_tag: str,
+) -> list[Any]:
+    elements = list(src_elements)
+    while elements:
+        if elements[0].tag != p_tag:
+            break
+        text = "".join((t.text or "") for t in elements[0].iter(t_tag)).strip()
+        if not text:
+            elements.pop(0)
+            continue
+        if any(pat.match(text) for pat in _LETTER_SCAFFOLD_PREFIX_TEXT_RE):
+            elements.pop(0)
+            continue
+        break
+    return elements
+
+
 def splice_precedent_into_blank_letter(blank_letter_bytes: bytes, precedent_bytes: bytes) -> bytes:
     """Use BLANK_LETTER as the scaffold and inject the chosen precedent's body content into it.
 
@@ -1447,6 +1926,9 @@ def splice_precedent_into_blank_letter(blank_letter_bytes: bytes, precedent_byte
       - Otherwise the precedent body is appended at the **end of BLANK_LETTER's body**, just before
         the trailing ``w:sectPr`` page-setup element. For a typical scaffold that ends with
         ``Re: …``, this puts the chosen precedent's content immediately after the subject line.
+
+    Leading ``Re:`` / solicitor client lines duplicated in the precedent file (for upload review) are
+    stripped before insertion when the blank letter scaffold already supplies them.
 
     Caveats:
       - Style references in the precedent body (e.g. ``Heading 1``) resolve against BLANK_LETTER's
@@ -1475,6 +1957,11 @@ def splice_precedent_into_blank_letter(blank_letter_bytes: bytes, precedent_byte
     src_body = src.element.body
 
     src_elements = [deepcopy(el) for el in src_body if el.tag in (p_tag, tbl_tag)]
+    src_elements = _strip_letter_scaffold_prefix_from_body_elements(
+        src_elements,
+        p_tag=p_tag,
+        t_tag=t_tag,
+    )
     if not src_elements:
         out_empty = io.BytesIO()
         base.save(out_empty)
@@ -1513,6 +2000,76 @@ def splice_precedent_into_blank_letter(blank_letter_bytes: bytes, precedent_byte
 _OD_REL_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
 _W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 _HF_PART_RE = re.compile(r"^word/(header|footer)\d+\.xml$")
+_REL_ID_REF_RE = re.compile(r'(?:r:embed|r:id|r:link)="([^"]+)"')
+_LETTERHEAD_DATE_LINE_RE = re.compile(
+    r"^\s*\d{1,2}\s+(?:january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{4}\s*$",
+    re.I,
+)
+_LETTERHEAD_RE_LINE_RE = re.compile(r"^\s*re\s*:", re.I)
+_LETTERHEAD_SUBJECT_LINE_RE = re.compile(
+    r"^\s*(your\s+(purchase|sale)|purchase\s+of|sale\s+of|your\s+remortgage|re:\s*)",
+    re.I,
+)
+_LETTERHEAD_ADDRESS_PLACEHOLDER_RE = re.compile(
+    r"(solicitor.?s?\s+address|buyer.?s\s+solicitors?\s+address|seller.?s\s+solicitor)",
+    re.I,
+)
+
+
+def _ooxml_element_plain_text(el: Any) -> str:
+    from docx.oxml.ns import qn
+
+    t_tag = qn("w:t")
+    return "".join((t.text or "") for t in el.iter(t_tag)).strip()
+
+
+def _ooxml_element_has_image(el: Any) -> bool:
+    xml = el.xml if hasattr(el, "xml") else ""
+    return "imagedata" in xml or "}drawing" in xml or "v:imagedata" in xml
+
+
+def _is_letterhead_masthead_boundary_element(el: Any) -> bool:
+    """True when a body paragraph/table starts letter content (not masthead branding)."""
+    xml = el.xml if hasattr(el, "xml") else ""
+    if "MERGEFIELD" in xml or "FORMTEXT" in xml:
+        return True
+    text = _ooxml_element_plain_text(el)
+    if not text:
+        return False
+    if _LETTERHEAD_DATE_LINE_RE.match(text):
+        return True
+    low = text.lower()
+    if low.startswith("your ref") or low.startswith("our ref"):
+        return True
+    if low.startswith("dear "):
+        return True
+    if _LETTERHEAD_RE_LINE_RE.match(text) or _LETTERHEAD_SUBJECT_LINE_RE.match(text):
+        return True
+    if _LETTERHEAD_ADDRESS_PLACEHOLDER_RE.search(text):
+        return True
+    return False
+
+
+def extract_letterhead_body_masthead_elements(body_element: Any) -> list[Any]:
+    """Body paragraphs/tables before the letter content block (e.g. floating logo masthead)."""
+    from docx.oxml.ns import qn
+
+    p_tag = qn("w:p")
+    tbl_tag = qn("w:tbl")
+    masthead: list[Any] = []
+    for child in body_element:
+        if child.tag not in (p_tag, tbl_tag):
+            continue
+        if masthead and _is_letterhead_masthead_boundary_element(child):
+            break
+        if not masthead and _is_letterhead_masthead_boundary_element(child):
+            break
+        masthead.append(child)
+    return masthead
+
+
+def extract_letterhead_body_masthead_elements_for_document(doc: Any) -> list[Any]:
+    return extract_letterhead_body_masthead_elements(doc.element.body)
 
 
 def _read_docx_zip_parts(raw: bytes) -> dict[str, bytes]:
@@ -1559,6 +2116,37 @@ def _resolve_word_part_path(target: str) -> str:
     if not path.startswith("word/"):
         path = f"word/{path}"
     return path
+
+
+def _hf_parts_by_reference(parts: dict[str, bytes]) -> dict[tuple[str, str], str]:
+    """Map ``(header|footer, default|first|even)`` → ``word/headerN.xml`` / ``word/footerN.xml`` path."""
+    import xml.etree.ElementTree as ET
+
+    result: dict[tuple[str, str], str] = {}
+    doc_rels_path = "word/_rels/document.xml.rels"
+    if "word/document.xml" not in parts:
+        return result
+
+    rid_to_target: dict[str, str] = {}
+    if doc_rels_path in parts:
+        for rid, _typ, target in _parse_ooxml_relationships(parts[doc_rels_path]):
+            rid_to_target[rid] = _resolve_word_part_path(target)
+
+    try:
+        root = ET.fromstring(parts["word/document.xml"])
+    except ET.ParseError:
+        return result
+
+    for sect in root.iter(f"{{{_W_NS}}}sectPr"):
+        for tag, kind in (("headerReference", "header"), ("footerReference", "footer")):
+            for el in sect.iter(f"{{{_W_NS}}}{tag}"):
+                ref_type = el.get(f"{{{_W_NS}}}type") or "default"
+                rid = el.get(f"{{{_OD_REL_NS}}}id")
+                if rid and rid in rid_to_target:
+                    result[(kind, ref_type)] = rid_to_target[rid]
+        break
+
+    return result
 
 
 def _letterhead_default_hf_rels_paths(lh_parts: dict[str, bytes]) -> tuple[str | None, str | None]:
@@ -1639,50 +2227,170 @@ def _merge_content_types_for_media(content_types_bytes: bytes, lh_content_types_
     return ET.tostring(root, encoding="utf-8", xml_declaration=True)
 
 
+def _copy_letterhead_media_for_rels(
+    rels_bytes: bytes | None,
+    *,
+    lh_parts: dict[str, bytes],
+    prec_parts: dict[str, bytes],
+) -> bytes | None:
+    if not rels_bytes:
+        return rels_bytes
+    updated = rels_bytes
+    for media_path in _media_paths_from_hf_rels(rels_bytes):
+        if media_path not in lh_parts:
+            continue
+        dest_path = media_path
+        if dest_path in prec_parts and prec_parts[dest_path] != lh_parts[media_path]:
+            base = dest_path.rsplit("/", 1)[-1]
+            dest_path = f"word/media/lh_{base}"
+            n = 0
+            while dest_path in prec_parts:
+                n += 1
+                dest_path = f"word/media/lh_{n}_{base}"
+            old_target = media_path.removeprefix("word/")
+            new_target = dest_path.removeprefix("word/")
+            updated = updated.replace(
+                f'Target="{old_target}"'.encode(),
+                f'Target="{new_target}"'.encode(),
+            )
+        prec_parts[dest_path] = lh_parts[media_path]
+    return updated
+
+
+def _append_ooxml_relationship(rels_bytes: bytes, rid: str, typ: str, target: str) -> bytes:
+    import xml.etree.ElementTree as ET
+
+    root = ET.fromstring(rels_bytes)
+    ns = "http://schemas.openxmlformats.org/package/2006/relationships"
+    el = ET.Element(f"{{{ns}}}Relationship")
+    el.set("Id", rid)
+    el.set("Type", typ)
+    el.set("Target", target)
+    root.append(el)
+    return ET.tostring(root, encoding="utf-8", xml_declaration=True)
+
+
+def _next_ooxml_rel_id(existing: set[str]) -> str:
+    n = 1
+    while True:
+        rid = f"rId{n}"
+        if rid not in existing:
+            return rid
+        n += 1
+
+
+def _merge_letterhead_document_body_media_rels(
+    prec_parts: dict[str, bytes],
+    lh_parts: dict[str, bytes],
+) -> None:
+    """Copy document-body image rels/media referenced in the composed story but missing from the package."""
+    doc_xml_path = "word/document.xml"
+    doc_rels_path = "word/_rels/document.xml.rels"
+    prec_xml = prec_parts.get(doc_xml_path)
+    lh_rels = lh_parts.get(doc_rels_path)
+    prec_rels = prec_parts.get(doc_rels_path)
+    if not prec_xml or not lh_rels or not prec_rels:
+        return
+
+    try:
+        prec_xml_text = prec_xml.decode("utf-8")
+    except UnicodeDecodeError:
+        return
+
+    lh_rid_to_rel = {
+        rid: (typ, target) for rid, typ, target in _parse_ooxml_relationships(lh_rels) if rid
+    }
+    prec_rid_to_rel = {
+        rid: (typ, target) for rid, typ, target in _parse_ooxml_relationships(prec_rels) if rid
+    }
+    used_rids = set(prec_rid_to_rel)
+
+    def _add_image_rel(old_rid: str) -> None:
+        nonlocal prec_xml_text, prec_rels, used_rids
+        lh_rel = lh_rid_to_rel.get(old_rid)
+        if not lh_rel:
+            return
+        typ, target = lh_rel
+        if not typ or "image" not in typ.lower():
+            return
+        media_path = _resolve_word_part_path(target)
+        if media_path not in lh_parts:
+            return
+        new_rid = _next_ooxml_rel_id(used_rids)
+        used_rids.add(new_rid)
+        dest_path = media_path
+        rel_target = target.lstrip("/")
+        if dest_path in prec_parts and prec_parts[dest_path] != lh_parts[media_path]:
+            base = dest_path.rsplit("/", 1)[-1]
+            dest_path = f"word/media/lh_{base}"
+            n = 0
+            while dest_path in prec_parts:
+                n += 1
+                dest_path = f"word/media/lh_{n}_{base}"
+            rel_target = dest_path.removeprefix("word/")
+        prec_parts[dest_path] = lh_parts[media_path]
+        prec_rels = _append_ooxml_relationship(prec_rels, new_rid, typ, rel_target)
+        prec_rid_to_rel[new_rid] = (typ, rel_target)
+        return new_rid
+
+    for rid in set(re.findall(r'r:embed="([^"]+)"', prec_xml_text)):
+        prec_rel = prec_rid_to_rel.get(rid)
+        if prec_rel and "image" in prec_rel[0].lower():
+            continue
+        new_rid = _add_image_rel(rid)
+        if new_rid:
+            prec_xml_text = prec_xml_text.replace(f'r:embed="{rid}"', f'r:embed="{new_rid}"')
+
+    for rid, (typ, _target) in lh_rid_to_rel.items():
+        if "image" not in typ.lower():
+            continue
+        if f'r:id="{rid}"' not in prec_xml_text:
+            continue
+        prec_rel = prec_rid_to_rel.get(rid)
+        if prec_rel and "image" in prec_rel[0].lower():
+            continue
+        new_rid = _add_image_rel(rid)
+        if new_rid:
+            prec_xml_text = re.sub(
+                rf'(<v:imagedata[^>]*r:id="){re.escape(rid)}(")',
+                rf"\g<1>{new_rid}\2",
+                prec_xml_text,
+            )
+
+    prec_parts[doc_xml_path] = prec_xml_text.encode("utf-8")
+    prec_parts[doc_rels_path] = prec_rels
+
+
 def _merge_letterhead_package_assets(precedent_bytes: bytes, letterhead_bytes: bytes) -> bytes:
-    """Copy letterhead ``word/media`` parts and header/footer ``.rels`` into a composed document."""
+    """Copy letterhead ``word/media`` parts and header/footer parts into a composed document."""
     lh_parts = _read_docx_zip_parts(letterhead_bytes)
     prec_parts = _read_docx_zip_parts(precedent_bytes)
 
-    lh_hdr_rels_path, lh_ftr_rels_path = _letterhead_default_hf_rels_paths(lh_parts)
-    lh_hdr_rels = lh_parts.get(lh_hdr_rels_path) if lh_hdr_rels_path else None
-    lh_ftr_rels = lh_parts.get(lh_ftr_rels_path) if lh_ftr_rels_path else None
+    lh_refs = _hf_parts_by_reference(lh_parts)
+    prec_refs = _hf_parts_by_reference(prec_parts)
 
-    def _copy_media(rels_bytes: bytes | None) -> bytes | None:
-        if not rels_bytes:
-            return rels_bytes
-        updated = rels_bytes
-        for media_path in _media_paths_from_hf_rels(rels_bytes):
-            if media_path not in lh_parts:
-                continue
-            dest_path = media_path
-            if dest_path in prec_parts and prec_parts[dest_path] != lh_parts[media_path]:
-                base = dest_path.rsplit("/", 1)[-1]
-                dest_path = f"word/media/lh_{base}"
-                n = 0
-                while dest_path in prec_parts:
-                    n += 1
-                    dest_path = f"word/media/lh_{n}_{base}"
-                old_target = media_path.removeprefix("word/")
-                new_target = dest_path.removeprefix("word/")
-                updated = updated.replace(
-                    f'Target="{old_target}"'.encode(),
-                    f'Target="{new_target}"'.encode(),
-                )
-            prec_parts[dest_path] = lh_parts[media_path]
-        return updated
-
-    lh_hdr_rels = _copy_media(lh_hdr_rels)
-    lh_ftr_rels = _copy_media(lh_ftr_rels)
-
-    for part_path in list(prec_parts):
-        if not _HF_PART_RE.match(part_path):
+    for role, lh_path in lh_refs.items():
+        prec_path = prec_refs.get(role)
+        if not prec_path or lh_path not in lh_parts:
             continue
-        rels_path = _ooxml_rels_part_path(part_path)
-        if part_path.startswith("word/header") and lh_hdr_rels:
-            prec_parts[rels_path] = lh_hdr_rels
-        elif part_path.startswith("word/footer") and lh_ftr_rels:
-            prec_parts[rels_path] = lh_ftr_rels
+        prec_parts[prec_path] = lh_parts[lh_path]
+        lh_rels_path = _ooxml_rels_part_path(lh_path)
+        prec_rels_path = _ooxml_rels_part_path(prec_path)
+        if lh_rels_path not in lh_parts:
+            continue
+        merged_rels = _copy_letterhead_media_for_rels(
+            lh_parts[lh_rels_path],
+            lh_parts=lh_parts,
+            prec_parts=prec_parts,
+        )
+        if merged_rels is not None:
+            prec_parts[prec_rels_path] = merged_rels
+
+    _merge_letterhead_document_body_media_rels(prec_parts, lh_parts)
+
+    for path, data in lh_parts.items():
+        if path.startswith("word/media/") and path not in prec_parts:
+            prec_parts[path] = data
 
     if "[Content_Types].xml" in prec_parts and "[Content_Types].xml" in lh_parts:
         prec_parts["[Content_Types].xml"] = _merge_content_types_for_media(
@@ -1697,9 +2405,10 @@ def apply_digital_letterhead_headers_footers(precedent_bytes: bytes, letterhead_
     """Copy header and footer XML from the letterhead .docx onto every section of the precedent .docx.
 
     Intended for “typical” letterhead: logos and firm lines live in headers/footers; precedent body
-    stays in the document story so page 1 shows letterhead + letter content together. Embedded
-    images in the letterhead are copied from ``word/media`` and header/footer relationship parts
-    are merged into the composed package.
+    stays in the document story so page 1 shows letterhead + letter content together. Some firm
+    templates (e.g. Ashbourne and Finch) also place the logo in the **document body** as a floating masthead;
+    those elements are prepended before the precedent story. Embedded images are copied from
+    ``word/media`` and relationship parts are merged into the composed package.
 
     Also copies **section page geometry** (margins, header/footer offsets, page size) from the
     letterhead's first section onto every precedent section so padding matches the uploaded template.
@@ -1712,19 +2421,37 @@ def apply_digital_letterhead_headers_footers(precedent_bytes: bytes, letterhead_
     lh = Document(io.BytesIO(letterhead_bytes))
     prec = Document(io.BytesIO(precedent_bytes))
 
-    def _copy_hf(src_section: Any, tgt_section: Any, *, header: bool) -> None:
-        src_el = (src_section.header if header else src_section.footer)._element
-        tgt_el = (tgt_section.header if header else tgt_section.footer)._element
+    def _copy_hf_elements(src_hf: Any, tgt_hf: Any) -> None:
+        src_el = src_hf._element
+        tgt_el = tgt_hf._element
         for child in list(tgt_el):
             tgt_el.remove(child)
         for child in src_el:
             tgt_el.append(deepcopy(child))
 
+    _HF_ATTRS = (
+        "header",
+        "footer",
+        "first_page_header",
+        "first_page_footer",
+        "even_page_header",
+        "even_page_footer",
+    )
+
     src_sec = lh.sections[0]
     for tgt_sec in prec.sections:
         _copy_section_page_geometry(src_sec, tgt_sec)
-        _copy_hf(src_sec, tgt_sec, header=True)
-        _copy_hf(src_sec, tgt_sec, header=False)
+        tgt_sec.different_first_page_header_footer = src_sec.different_first_page_header_footer
+        for attr in _HF_ATTRS:
+            _copy_hf_elements(getattr(src_sec, attr), getattr(tgt_sec, attr))
+
+    masthead = [
+        deepcopy(el) for el in extract_letterhead_body_masthead_elements_for_document(lh)
+    ]
+    if masthead:
+        prec_body = prec.element.body
+        for offset, el in enumerate(masthead):
+            prec_body.insert(offset, el)
 
     out = io.BytesIO()
     prec.save(out)

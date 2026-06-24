@@ -336,6 +336,7 @@ type Props = {
   intro?: ReactNode
   onSubmit: (payload: GlobalContactCreatePayload) => Promise<void>
   organisationOnly?: boolean
+  onFieldsChange?: (fields: ContactFormFieldsModel) => void
 }
 
 export function GlobalContactCreateForm({
@@ -348,6 +349,7 @@ export function GlobalContactCreateForm({
   intro,
   onSubmit,
   organisationOnly = false,
+  onFieldsChange,
 }: Props) {
   const [s, setS] = useState<ContactFormFieldsModel>(() => ({
     ...emptyContactFormFields(),
@@ -356,8 +358,21 @@ export function GlobalContactCreateForm({
 
   useEffect(() => {
     if (!organisationOnly) return
-    setS((prev) => (prev.type === 'organisation' ? prev : { ...prev, type: 'organisation' }))
-  }, [organisationOnly])
+    setS((prev) => {
+      if (prev.type === 'organisation') return prev
+      const next = { ...prev, type: 'organisation' as const }
+      onFieldsChange?.(next)
+      return next
+    })
+  }, [organisationOnly, onFieldsChange])
+
+  function applyFieldsPatch(patch: Partial<ContactFormFieldsModel>) {
+    setS((prev) => {
+      const next = { ...prev, ...patch }
+      onFieldsChange?.(next)
+      return next
+    })
+  }
 
   const resolvedName = useMemo(
     () =>
@@ -394,7 +409,7 @@ export function GlobalContactCreateForm({
       {intro}
       <ContactPersonOrgAddressFields
         value={s}
-        onChange={(patch) => setS((prev) => ({ ...prev, ...patch }))}
+        onChange={applyFieldsPatch}
         busy={busy}
         organisationOnly={organisationOnly}
       />
