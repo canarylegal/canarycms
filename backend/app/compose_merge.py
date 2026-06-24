@@ -21,6 +21,7 @@ from app.docx_util import (
     invoice_line_merge_fields,
     is_invalid_ooxml_merge_exception,
     merge_precedent_codes,
+    precedent_is_standalone_letter,
     splice_precedent_into_blank_letter,
     strip_empty_completion_table_rows,
     strip_precedent_body_marker,
@@ -224,7 +225,11 @@ def merge_compose_docx_bytes(
         # precedent's body block elements into it. Merge-code substitution then resolves every token
         # in the combined document in one pass. Skipped when the chosen precedent IS the blank letter
         # (no-op) or when no blank-letter template exists. Document/email composes are unaffected.
-        if prec.kind == PrecedentKind.letter and prec.reference != BLANK_LETTER_PRECEDENT_REFERENCE:
+        if (
+            prec.kind == PrecedentKind.letter
+            and prec.reference != BLANK_LETTER_PRECEDENT_REFERENCE
+            and not precedent_is_standalone_letter(src_bytes)
+        ):
             blank_bytes = _load_blank_letter_bytes(db)
             if blank_bytes is not None:
                 try:

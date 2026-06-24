@@ -10,6 +10,7 @@ from app.case_client_sync import sync_case_client_name
 from app.contact_validation import ensure_organisation_trading_name
 from app.db import get_db
 from app.deps import get_current_user, require_case_access
+from app.letter_salutation import coerce_letter_salutation
 from app.matter_contact_validation import (
     ensure_lawyer_contact_is_organisation,
     normalize_and_validate_lawyer_client_ids,
@@ -58,6 +59,17 @@ def add_contact_snapshot_from_global(
 
     ensure_lawyer_contact_is_organisation(payload.matter_contact_type.strip(), contact.type)
 
+    matter_type = payload.matter_contact_type.strip()
+    contact_type = contact.type.value if hasattr(contact.type, "value") else str(contact.type)
+    letter_salutation = coerce_letter_salutation(
+        payload.letter_salutation,
+        matter_contact_type=matter_type,
+        contact_type=contact_type,
+    )
+    letter_salutation_custom = (payload.letter_salutation_custom or "").strip() or None
+    if letter_salutation != "custom":
+        letter_salutation_custom = None
+
     cc = CaseContact(
         case_id=case_id,
         contact_id=contact.id,
@@ -83,9 +95,11 @@ def add_contact_snapshot_from_global(
         lawyer_client_ids=normalize_and_validate_lawyer_client_ids(
             db,
             case_id,
-            payload.matter_contact_type.strip(),
+            matter_type,
             payload.lawyer_client_ids,
         ),
+        letter_salutation=letter_salutation,
+        letter_salutation_custom=letter_salutation_custom,
     )
     db.add(cc)
     db.commit()
@@ -138,6 +152,19 @@ def update_case_contact(
     )
     ensure_lawyer_contact_is_organisation(next_matter_type, cc.type)
     ensure_organisation_trading_name(cc.type, cc.trading_name)
+
+    contact_type = cc.type.value if hasattr(cc.type, "value") else str(cc.type)
+    if "letter_salutation" in data or "matter_contact_type" in data or "type" in data:
+        cc.letter_salutation = coerce_letter_salutation(
+            data.get("letter_salutation", cc.letter_salutation),
+            matter_contact_type=next_matter_type,
+            contact_type=contact_type,
+        )
+    if "letter_salutation_custom" in data:
+        cc.letter_salutation_custom = (data.get("letter_salutation_custom") or "").strip() or None
+    if cc.letter_salutation != "custom":
+        cc.letter_salutation_custom = None
+
     cc.updated_at = datetime.utcnow()
 
     if push_to_global and cc.contact_id:
