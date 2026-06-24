@@ -592,7 +592,13 @@ export function CaseContactsEditDocForm({
               ? 'organisation'
               : editSnapshot.type
           }
-          value={editSnapshot.letter_salutation}
+          value={coerceLetterSalutation(
+            editSnapshot.letter_salutation,
+            editSnapshot.matter_contact_type ?? '',
+            (editSnapshot.matter_contact_type || '').trim().toLowerCase() === LAWYERS_TYPE_SLUG
+              ? 'organisation'
+              : editSnapshot.type,
+          )}
           customValue={editSnapshot.letter_salutation_custom}
           busy={busy}
           onChange={({ letterSalutation, letterSalutationCustom }) =>
