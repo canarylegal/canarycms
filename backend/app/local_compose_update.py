@@ -389,6 +389,31 @@ def _git_sync_error_detail(exc: subprocess.CalledProcessError) -> str:
     return ((exc.stderr or "") + (exc.stdout or "")).strip()[-4000:]
 
 
+def _subprocess_failure_message(step_label: str, exc: subprocess.CalledProcessError) -> str:
+    """Prefer compile/build error lines over a wall of pip/npm download output."""
+    combined = ((exc.stderr or "") + "\n" + (exc.stdout or "")).strip()
+    highlights: list[str] = []
+    for line in combined.splitlines():
+        s = line.strip()
+        if not s:
+            continue
+        lower = s.lower()
+        if (
+            "error ts" in lower
+            or s.startswith("ERROR:")
+            or "npm err!" in lower
+            or "error:" in lower
+            or "failed to solve" in lower
+            or "did not complete successfully" in lower
+        ):
+            highlights.append(s)
+    if highlights:
+        body = "\n".join(highlights[-12:])
+        return f"{step_label} failed (exit {exc.returncode}):\n{body}"
+    tail = combined[-2500:] if combined else ""
+    return f"{step_label} failed (exit {exc.returncode}): {tail or 'no output captured'}"
+
+
 def _run_git_sync(cfg: ComposeUpdateConfig, journal: MutableSequence[str] | None, strategy: GitSyncStrategy) -> None:
     if strategy == "none":
         return
@@ -477,8 +502,12 @@ def run_compose_update(
                 text=True,
             )
         except subprocess.CalledProcessError as e:
-            err = ((e.stderr or "") + (e.stdout or "")).strip()[-8000:]
-            raise RuntimeError(f"docker-compose {' '.join(step)} failed: {err or e.returncode}") from e
+            msg = _subprocess_failure_message(f"docker-compose {' '.join(step)}", e)
+            _journal(journal, msg.splitlines()[0])
+            for line in msg.splitlines()[1:]:
+                if line.strip():
+                    _journal(journal, line.strip())
+            raise RuntimeError(msg) from e
         _journal(journal, f"docker-compose: {' '.join(step)} (finished)")
 
     _run(["build", "--pull"], 3600)

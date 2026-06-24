@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from app.local_compose_update import ComposeUpdateConfig, _run_git_sync, run_compose_update
+from app.local_compose_update import ComposeUpdateConfig, _run_git_sync, _subprocess_failure_message, run_compose_update
 
 
 @pytest.fixture
@@ -49,6 +50,17 @@ def test_run_git_sync_reset(compose_cfg: ComposeUpdateConfig) -> None:
     assert "fetch" in fetch_args and "origin" in fetch_args and "main" in fetch_args
     assert "reset" in reset_args and "FETCH_HEAD" in reset_args
     assert any("reset finished" in line for line in journal)
+
+
+def test_subprocess_failure_message_prefers_build_errors() -> None:
+    exc = subprocess.CalledProcessError(
+        2,
+        ["docker", "compose", "build"],
+        output="Downloading websockets\n#27 ERROR: npm run build failed\nsrc/foo.ts(1,1): error TS2322: bad type\n",
+    )
+    msg = _subprocess_failure_message("docker-compose build --pull", exc)
+    assert "error TS2322" in msg
+    assert "Downloading websockets" not in msg
 
 
 def test_run_compose_update_reset_requires_flag(compose_cfg: ComposeUpdateConfig, monkeypatch: pytest.MonkeyPatch) -> None:
