@@ -2459,8 +2459,13 @@ def apply_digital_letterhead_headers_footers(precedent_bytes: bytes, letterhead_
 
 
 def _coalesce_split_merge_tokens_in_docx(doc_bytes: bytes) -> bytes:
-    """Join ``w:r`` text when ONLYOFFICE/Word split a merge token across runs inside one paragraph."""
+    """Join ``w:r`` text when ONLYOFFICE/Word split a merge token across runs inside one paragraph.
+
+    Only the runs that participate in a split token are merged into one run; other runs (e.g. a bold
+    ``Re:`` prefix) are left intact so formatting survives into :func:`merge_precedent_codes`.
+    """
     import io
+    from copy import deepcopy
 
     from docx import Document
     from docx.oxml.ns import qn
@@ -2470,30 +2475,95 @@ def _coalesce_split_merge_tokens_in_docx(doc_bytes: bytes) -> bytes:
     r_tag = qn("w:r")
     changed = False
 
-    def _needs_coalesce(p_el: Any) -> bool:
-        texts = [t.text or "" for t in p_el.iter(t_tag)]
-        combined = "".join(texts)
-        if not _MERGE_TOKEN_RE.search(combined):
-            return False
+    def _run_plain_text(r_el: Any) -> str:
+        return "".join(t.text or "" for t in r_el.iter(t_tag))
+
+    def _make_plain_text_run(p_el: Any, text: str) -> Any:
+        r = p_el.makeelement(r_tag, {})
+        attrs = {qn("xml:space"): "preserve"} if text.strip() != text else {}
+        t = p_el.makeelement(t_tag, attrs)
+        t.text = text
+        r.append(t)
+        return r
+
+    def _clone_run_with_text(p_el: Any, template_el: Any, text: str) -> Any:
+        if not text:
+            return None
+        r = deepcopy(template_el)
+        for child in list(r):
+            r.remove(child)
+        attrs = {qn("xml:space"): "preserve"} if text.strip() != text else {}
+        t = p_el.makeelement(t_tag, attrs)
+        t.text = text
+        r.append(t)
+        return r
+
+    def _run_infos(p_el: Any) -> list[dict[str, Any]]:
+        infos: list[dict[str, Any]] = []
+        pos = 0
+        for r_el in p_el.findall(r_tag):
+            text = _run_plain_text(r_el)
+            infos.append({"el": r_el, "text": text, "start": pos, "end": pos + len(text)})
+            pos += len(text)
+        return infos
+
+    def _split_tokens_in_paragraph(infos: list[dict[str, Any]]) -> list[tuple[int, int, str]]:
+        combined = "".join(ri["text"] for ri in infos)
+        if not combined or not _MERGE_TOKEN_RE.search(combined):
+            return []
+        out: list[tuple[int, int, str]] = []
         for m in _MERGE_TOKEN_RE.finditer(combined):
             token = m.group(0)
-            if not any(token in (t.text or "") for t in p_el.iter(t_tag)):
-                return True
-        return False
+            if not any(token in ri["text"] for ri in infos if ri["text"]):
+                out.append((m.start(), m.end(), token))
+        return out
 
     def _coalesce_p(p_el: Any) -> None:
         nonlocal changed
-        if not _needs_coalesce(p_el):
+        infos = _run_infos(p_el)
+        if not infos:
             return
-        combined = "".join(t.text or "" for t in p_el.iter(t_tag))
+        split_tokens = _split_tokens_in_paragraph(infos)
+        if not split_tokens:
+            return
+
+        out_runs: list[Any] = []
+        pending = list(infos)
+        combined = "".join(ri["text"] for ri in infos)
+        for ts, te, _token in split_tokens:
+            next_pending: list[dict[str, Any]] = []
+            token_emitted = False
+            carry_suffix: list[dict[str, Any]] = []
+            for ri in pending:
+                if ri["end"] <= ts:
+                    out_runs.append(deepcopy(ri["el"]))
+                elif ri["start"] >= te:
+                    next_pending.append(ri)
+                else:
+                    if ri["start"] < ts:
+                        prefix = _clone_run_with_text(p_el, ri["el"], combined[ri["start"] : ts])
+                        if prefix is not None:
+                            out_runs.append(prefix)
+                    if not token_emitted:
+                        out_runs.append(_make_plain_text_run(p_el, combined[ts:te]))
+                        token_emitted = True
+                    if ri["end"] > te:
+                        carry_suffix.append(
+                            {
+                                "el": ri["el"],
+                                "text": combined[te : ri["end"]],
+                                "start": te,
+                                "end": ri["end"],
+                            }
+                        )
+            pending = carry_suffix + next_pending
+
+        for ri in pending:
+            out_runs.append(deepcopy(ri["el"]))
+
         for r in list(p_el.findall(r_tag)):
             p_el.remove(r)
-        if combined:
-            r = p_el.makeelement(r_tag, {})
-            attrs = {qn("xml:space"): "preserve"} if combined.strip() != combined else {}
-            t = p_el.makeelement(t_tag, attrs)
-            t.text = combined
-            r.append(t)
+        for r in out_runs:
             p_el.append(r)
         changed = True
 
