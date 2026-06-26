@@ -287,6 +287,10 @@ PRECEDENT_CODES["[EXISTING_LENDER_COMPANY_NAME]"] = "Existing lender registered 
 PRECEDENT_CODES["[EXISTING_LENDER_TRADING_NAME]"] = "Existing lender trading name."
 PRECEDENT_CODES["[EXISTING_LENDER_ADDRESS_BLOCK]"] = "Existing lender address block (organisation lines + address)."
 PRECEDENT_CODES["[FEE_EARNER_SIGNATURE]"] = "Fee earner signature image uploaded in User settings."
+
+# Image placeholders are resolved after text merge via inject_merge_code_images().
+IMAGE_PRECEDENT_CODES: frozenset[str] = frozenset({"[FEE_EARNER_SIGNATURE]"})
+
 for _qi in range(1, 26):
     _qtag = f"{_qi:02d}"
     PRECEDENT_CODES[f"[QUOTE_{_qtag}_LABEL]"] = f"Quote table row {_qi}: description."
@@ -2831,11 +2835,15 @@ def merge_precedent_codes(
     2. **Zip / OOXML pass** — replaces any remaining contiguous ``[CODE]`` or
        ``[modifiers:CODE]`` substrings in document parts (including split tokens not fixed
        in step 1; formatting modifiers may be lost when a token was split across XML nodes).
+
+    Image merge codes (``IMAGE_PRECEDENT_CODES``) are left in the document for
+    ``inject_merge_code_images`` to replace with inline pictures.
     """
+    text_fields = {k: v for k, v in fields.items() if k not in IMAGE_PRECEDENT_CODES}
     sep_flags = _inter_client_sep_flags(ordered_clients) if merge_all_clients else {}
     prepared = _coalesce_split_merge_tokens_in_docx(src_bytes)
-    merged = _merge_precedent_codes_via_python_docx(prepared, fields, sep_flags)
-    return _merge_precedent_codes_in_ooxml_zip(merged, fields)
+    merged = _merge_precedent_codes_via_python_docx(prepared, text_fields, sep_flags)
+    return _merge_precedent_codes_in_ooxml_zip(merged, text_fields)
 
 
 def _property_payload_address_lines(payload: dict[str, Any]) -> list[str]:
@@ -2920,6 +2928,10 @@ def fee_earner_signature_image_path(db: Session, user_id: uuid.UUID | None) -> P
     return abs_path if abs_path.is_file() else None
 
 
+def _normalized_merge_paragraph_text(text: str | None) -> str:
+    return (text or "").replace("\u200b", "").replace("\xa0", " ").strip()
+
+
 def inject_merge_code_images(src_bytes: bytes, images: dict[str, Path]) -> bytes:
     """Replace image merge-code paragraphs with inline pictures (paragraph must contain only the code)."""
     if not images:
@@ -2928,12 +2940,13 @@ def inject_merge_code_images(src_bytes: bytes, images: dict[str, Path]) -> bytes
     from docx import Document
     from docx.shared import Inches
 
+    src_bytes = _coalesce_split_merge_tokens_in_docx(src_bytes)
     doc = Document(io.BytesIO(src_bytes))
     changed = False
 
     def _walk_paragraph(para: Any) -> None:
         nonlocal changed
-        text = (para.text or "").strip()
+        text = _normalized_merge_paragraph_text(para.text)
         for code, img_path in images.items():
             if text != code or not img_path.is_file():
                 continue
