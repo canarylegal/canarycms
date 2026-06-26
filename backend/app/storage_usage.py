@@ -67,6 +67,7 @@ _CATEGORY_LABELS: dict[FileCategory, str] = {
     FileCategory.firm_letterhead: "Firm letterhead",
     FileCategory.fee_scale: "Fee scales",
     FileCategory.system: "System",
+    FileCategory.user_signature: "User signatures",
 }
 
 
