@@ -91,6 +91,8 @@ class User(Base):
     signature_file_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("file.id", ondelete="SET NULL"), nullable=True
     )
+    # Composed signature image width: 1–10 (7 = 2 inches wide, the historical default).
+    signature_scale: Mapped[int] = mapped_column(Integer, nullable=False, default=7)
 
     # Next Outlook send (add-in OnMessageSend): matter chosen from Canary web before composing.
     outlook_pending_send_case_id: Mapped[uuid.UUID | None] = mapped_column(

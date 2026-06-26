@@ -286,7 +286,9 @@ PRECEDENT_CODES["[EXISTING_LENDER_NAME]"] = "Existing lender matter contact disp
 PRECEDENT_CODES["[EXISTING_LENDER_COMPANY_NAME]"] = "Existing lender registered company name."
 PRECEDENT_CODES["[EXISTING_LENDER_TRADING_NAME]"] = "Existing lender trading name."
 PRECEDENT_CODES["[EXISTING_LENDER_ADDRESS_BLOCK]"] = "Existing lender address block (organisation lines + address)."
-PRECEDENT_CODES["[FEE_EARNER_SIGNATURE]"] = "Fee earner signature image uploaded in User settings."
+PRECEDENT_CODES["[FEE_EARNER_SIGNATURE]"] = (
+    "Fee earner signature image uploaded in User settings (size from signature scale, default 7 ≈ 2 in wide)."
+)
 
 # Image placeholders are resolved after text merge via inject_merge_code_images().
 IMAGE_PRECEDENT_CODES: frozenset[str] = frozenset({"[FEE_EARNER_SIGNATURE]"})
@@ -2913,6 +2915,24 @@ def property_merge_fields(db: Session, case_id: uuid.UUID) -> dict[str, str]:
 
 
 def fee_earner_signature_image_path(db: Session, user_id: uuid.UUID | None) -> Path | None:
+    info = fee_earner_signature_for_merge(db, user_id)
+    return info[0] if info else None
+
+
+SIGNATURE_SCALE_DEFAULT = 7
+SIGNATURE_WIDTH_INCHES_AT_DEFAULT_SCALE = 2.0
+
+
+def signature_width_inches_from_scale(scale: int | None) -> float:
+    """Map user signature scale 1–10 to width in inches (7 → 2.0 in)."""
+    s = SIGNATURE_SCALE_DEFAULT if scale is None else max(1, min(10, int(scale)))
+    return SIGNATURE_WIDTH_INCHES_AT_DEFAULT_SCALE * s / SIGNATURE_SCALE_DEFAULT
+
+
+def fee_earner_signature_for_merge(
+    db: Session,
+    user_id: uuid.UUID | None,
+) -> tuple[Path, float] | None:
     from app.file_storage import FILES_ROOT
     from app.models import File, User
 
@@ -2925,14 +2945,22 @@ def fee_earner_signature_image_path(db: Session, user_id: uuid.UUID | None) -> P
     if not row:
         return None
     abs_path = (FILES_ROOT / row.storage_path).resolve()
-    return abs_path if abs_path.is_file() else None
+    if not abs_path.is_file():
+        return None
+    width = signature_width_inches_from_scale(getattr(user, "signature_scale", SIGNATURE_SCALE_DEFAULT))
+    return abs_path, width
 
 
 def _normalized_merge_paragraph_text(text: str | None) -> str:
     return (text or "").replace("\u200b", "").replace("\xa0", " ").strip()
 
 
-def inject_merge_code_images(src_bytes: bytes, images: dict[str, Path]) -> bytes:
+def inject_merge_code_images(
+    src_bytes: bytes,
+    images: dict[str, Path],
+    *,
+    width_inches: Mapping[str, float] | None = None,
+) -> bytes:
     """Replace image merge-code paragraphs with inline pictures (paragraph must contain only the code)."""
     if not images:
         return src_bytes
@@ -2940,6 +2968,7 @@ def inject_merge_code_images(src_bytes: bytes, images: dict[str, Path]) -> bytes
     from docx import Document
     from docx.shared import Inches
 
+    widths = width_inches or {}
     src_bytes = _coalesce_split_merge_tokens_in_docx(src_bytes)
     doc = Document(io.BytesIO(src_bytes))
     changed = False
@@ -2952,7 +2981,8 @@ def inject_merge_code_images(src_bytes: bytes, images: dict[str, Path]) -> bytes
                 continue
             para.clear()
             run = para.add_run()
-            run.add_picture(str(img_path), width=Inches(2.0))
+            w = widths.get(code, SIGNATURE_WIDTH_INCHES_AT_DEFAULT_SCALE)
+            run.add_picture(str(img_path), width=Inches(w))
             changed = True
             return
 

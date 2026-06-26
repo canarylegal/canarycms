@@ -3179,6 +3179,7 @@ function UserSettingsPage({
   const [signatureBusy, setSignatureBusy] = useState(false)
   const [signatureErr, setSignatureErr] = useState<string | null>(null)
   const [signatureFileKey, setSignatureFileKey] = useState(0)
+  const [signatureScale, setSignatureScale] = useState(7)
 
   async function load() {
     setBusy(true)
@@ -3231,6 +3232,7 @@ function UserSettingsPage({
     setEmailPref(account.email_launch_preference ?? 'desktop')
     setEmailDesktopClient(account.email_desktop_client === 'other' ? 'other' : 'outlook')
     setOutlookUrl((account.email_outlook_web_url ?? '').trim() || DEFAULT_OUTLOOK_WEB_MAIL_URL)
+    setSignatureScale(account.signature_scale ?? 7)
   }, [account])
 
   async function confirmOutlookWebWithoutGraph(): Promise<boolean> {
@@ -3241,6 +3243,24 @@ function UserSettingsPage({
       confirmLabel: 'Yes',
       cancelLabel: 'Nevermind',
     })
+  }
+
+  async function saveSignatureScale(scale: number) {
+    setSignatureBusy(true)
+    setSignatureErr(null)
+    try {
+      const me = await apiFetch<UserPublic>('/users/me/signature-settings', {
+        token,
+        method: 'PUT',
+        json: { signature_scale: scale },
+      })
+      setAccount(me)
+      await refreshMe()
+    } catch (e: unknown) {
+      setSignatureErr((e as ApiError).message ?? 'Could not save signature scale')
+    } finally {
+      setSignatureBusy(false)
+    }
   }
 
   async function saveEmailHandling() {
@@ -3459,9 +3479,32 @@ function UserSettingsPage({
           <p className="muted" style={{ marginTop: 0 }}>
             Upload a PNG, JPEG, GIF, or WebP image of your signature. Use merge code{' '}
             <code>[FEE_EARNER_SIGNATURE]</code> on its own line in letter precedents — Canary replaces it with your
-            image when composing documents (fee earner on the matter).
+            image when composing documents (fee earner on the matter). Scale controls width (7 ≈ 2 inches).
           </p>
           {signatureErr ? <div className="error">{signatureErr}</div> : null}
+          <label className="field" style={{ maxWidth: 420, marginBottom: 12 }}>
+            <span>Scale</span>
+            <div className="row" style={{ gap: 12, alignItems: 'center' }}>
+              <input
+                type="range"
+                min={1}
+                max={10}
+                step={1}
+                value={signatureScale}
+                disabled={signatureBusy}
+                style={{ flex: 1 }}
+                onChange={(ev) => {
+                  const v = Number(ev.target.value)
+                  setSignatureScale(v)
+                  void saveSignatureScale(v)
+                }}
+              />
+              <span style={{ minWidth: 88, textAlign: 'right' }}>{signatureScale} / 10</span>
+            </div>
+            <span className="muted">
+              About {((2 * signatureScale) / 7).toFixed(2)} inches wide in composed documents
+            </span>
+          </label>
           <div className="muted" style={{ marginBottom: 8 }}>
             {account?.has_signature
               ? `Current file: ${account.signature_original_filename ?? 'signature image'}`

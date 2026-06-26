@@ -6,9 +6,16 @@ import io
 import zipfile
 from pathlib import Path
 
+import pytest
 from docx import Document
 
-from app.docx_util import _empty_precedent_field_map, inject_merge_code_images, merge_precedent_codes
+from app.docx_util import (
+    SIGNATURE_WIDTH_INCHES_AT_DEFAULT_SCALE,
+    _empty_precedent_field_map,
+    inject_merge_code_images,
+    merge_precedent_codes,
+    signature_width_inches_from_scale,
+)
 
 # Minimal valid 1x1 PNG.
 _TINY_PNG = (
@@ -37,11 +44,22 @@ def test_merge_precedent_codes_preserves_signature_placeholder() -> None:
     assert doc.paragraphs[0].text.strip() == "[FEE_EARNER_SIGNATURE]"
 
 
-def test_inject_merge_code_images_inserts_picture(tmp_path: Path) -> None:
+def test_signature_width_inches_from_scale() -> None:
+    assert signature_width_inches_from_scale(7) == SIGNATURE_WIDTH_INCHES_AT_DEFAULT_SCALE
+    assert signature_width_inches_from_scale(1) == pytest.approx(2.0 / 7.0)
+    assert signature_width_inches_from_scale(10) == pytest.approx(20.0 / 7.0)
+    assert signature_width_inches_from_scale(99) == pytest.approx(20.0 / 7.0)
+
+
+def test_inject_merge_code_images_respects_width(tmp_path: Path) -> None:
     img = tmp_path / "sig.png"
     img.write_bytes(_TINY_PNG)
     merged = merge_precedent_codes(_docx_with_signature_code(trailing_nbsp=True), _empty_precedent_field_map())
-    out = inject_merge_code_images(merged, {"[FEE_EARNER_SIGNATURE]": img})
+    out = inject_merge_code_images(
+        merged,
+        {"[FEE_EARNER_SIGNATURE]": img},
+        width_inches={"[FEE_EARNER_SIGNATURE]": 1.5},
+    )
 
     doc = Document(io.BytesIO(out))
     assert doc.paragraphs[0].text.strip() == ""
