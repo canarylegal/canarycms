@@ -6,7 +6,7 @@ import re
 from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Iterable, Mapping
 
 from app.letter_salutation import (
     LetterSalutation,
@@ -2227,6 +2227,84 @@ def _merge_content_types_for_media(content_types_bytes: bytes, lh_content_types_
     return ET.tostring(root, encoding="utf-8", xml_declaration=True)
 
 
+def _fonts_in_ooxml_bytes(data: bytes) -> set[str]:
+    """Return ``w:rFonts`` face names referenced in an OOXML part."""
+    try:
+        text = data.decode("utf-8")
+    except UnicodeDecodeError:
+        return set()
+    return {
+        name
+        for name in re.findall(r'w:(?:ascii|hAnsi|cs|eastAsia)="([^"]+)"', text)
+        if name
+    }
+
+
+def _merge_letterhead_font_table(
+    prec_parts: dict[str, bytes],
+    lh_parts: dict[str, bytes],
+    *,
+    ooxml_blobs: Iterable[bytes],
+) -> None:
+    """Add letterhead ``word/fontTable.xml`` entries for fonts used in copied header/footer parts."""
+    import xml.etree.ElementTree as ET
+    from copy import deepcopy
+
+    lh_ft = lh_parts.get("word/fontTable.xml")
+    prec_ft = prec_parts.get("word/fontTable.xml")
+    if not lh_ft or not prec_ft:
+        return
+
+    needed: set[str] = set()
+    for blob in ooxml_blobs:
+        needed |= _fonts_in_ooxml_bytes(blob)
+    if not needed:
+        return
+
+    lh_root = ET.fromstring(lh_ft)
+    prec_root = ET.fromstring(prec_ft)
+    have = {
+        (el.get(f"{{{_W_NS}}}name") or "").strip()
+        for el in prec_root
+        if el.tag == f"{{{_W_NS}}}font"
+    }
+    for el in lh_root:
+        if el.tag != f"{{{_W_NS}}}font":
+            continue
+        name = (el.get(f"{{{_W_NS}}}name") or "").strip()
+        if name and name in needed and name not in have:
+            prec_root.append(deepcopy(el))
+            have.add(name)
+    prec_parts["word/fontTable.xml"] = ET.tostring(prec_root, encoding="utf-8", xml_declaration=True)
+
+
+def _merge_letterhead_layout_settings(prec_parts: dict[str, bytes], lh_parts: dict[str, bytes]) -> None:
+    """Apply letterhead Word compatibility settings so header/footer spacing matches the template.
+
+    Precedent scaffolds often ship with a newer ``w:compatSetting`` ``compatibilityMode`` than the
+    uploaded letterhead. Footer paragraphs with empty ``w:spacing`` then pick up different default
+    line gaps in Word / ONLYOFFICE, making the composed footer visibly taller than the letterhead file.
+    """
+    import xml.etree.ElementTree as ET
+    from copy import deepcopy
+
+    lh_settings = lh_parts.get("word/settings.xml")
+    prec_settings_path = "word/settings.xml"
+    if not lh_settings or prec_settings_path not in prec_parts:
+        return
+
+    lh_root = ET.fromstring(lh_settings)
+    prec_root = ET.fromstring(prec_parts[prec_settings_path])
+    lh_compat = lh_root.find(f"{{{_W_NS}}}compat")
+    if lh_compat is None:
+        return
+    prec_compat = prec_root.find(f"{{{_W_NS}}}compat")
+    if prec_compat is not None:
+        prec_root.remove(prec_compat)
+    prec_root.append(deepcopy(lh_compat))
+    prec_parts[prec_settings_path] = ET.tostring(prec_root, encoding="utf-8", xml_declaration=True)
+
+
 def _copy_letterhead_media_for_rels(
     rels_bytes: bytes | None,
     *,
@@ -2369,11 +2447,13 @@ def _merge_letterhead_package_assets(precedent_bytes: bytes, letterhead_bytes: b
     lh_refs = _hf_parts_by_reference(lh_parts)
     prec_refs = _hf_parts_by_reference(prec_parts)
 
+    copied_hf_xml: list[bytes] = []
     for role, lh_path in lh_refs.items():
         prec_path = prec_refs.get(role)
         if not prec_path or lh_path not in lh_parts:
             continue
         prec_parts[prec_path] = lh_parts[lh_path]
+        copied_hf_xml.append(lh_parts[lh_path])
         lh_rels_path = _ooxml_rels_part_path(lh_path)
         prec_rels_path = _ooxml_rels_part_path(prec_path)
         if lh_rels_path not in lh_parts:
@@ -2397,6 +2477,9 @@ def _merge_letterhead_package_assets(precedent_bytes: bytes, letterhead_bytes: b
             prec_parts["[Content_Types].xml"],
             lh_parts["[Content_Types].xml"],
         )
+
+    _merge_letterhead_layout_settings(prec_parts, lh_parts)
+    _merge_letterhead_font_table(prec_parts, lh_parts, ooxml_blobs=copied_hf_xml)
 
     return _write_docx_zip_parts(prec_parts)
 
