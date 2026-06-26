@@ -33,8 +33,9 @@ def test_apply_quote_digital_letterhead_skips_when_preprinted() -> None:
         quote_letterhead_style=LetterheadStyle.preprinted,
         quote_letterhead_file_id=None,
     )
-    out = apply_quote_digital_letterhead_from_settings(None, firm_row=firm, src_bytes=b"plain")  # type: ignore[arg-type]
+    out, lh_bytes = apply_quote_digital_letterhead_from_settings(None, firm_row=firm, src_bytes=b"plain")  # type: ignore[arg-type]
     assert out == b"plain"
+    assert lh_bytes is None
 
 
 def test_compose_quote_applies_digital_letterhead_when_configured(db) -> None:

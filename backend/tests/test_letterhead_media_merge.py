@@ -143,3 +143,16 @@ def test_letterhead_merge_applies_letterhead_compatibility_mode() -> None:
     prec = _letterhead_with_compat_mode(mode="14")
     merged = apply_digital_letterhead_headers_footers(prec, lh)
     assert _compat_mode_from_docx(merged) == "11"
+
+
+def test_letterhead_merge_tightens_footer_paragraph_spacing() -> None:
+    lh = _letterhead_with_first_page_footer()
+    prec = _blank_precedent()
+    merged = apply_digital_letterhead_headers_footers(prec, lh)
+    with zipfile.ZipFile(io.BytesIO(merged)) as z:
+        footer_name = next(
+            n for n in z.namelist() if n.startswith("word/footer") and b"Bell Street" in z.read(n)
+        )
+        footer_xml = z.read(footer_name).decode()
+    assert 'after="0"' in footer_xml
+    assert 'line="240"' in footer_xml

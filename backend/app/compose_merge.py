@@ -22,6 +22,7 @@ from app.docx_util import (
     is_invalid_ooxml_merge_exception,
     merge_precedent_codes,
     precedent_is_standalone_letter,
+    reapply_letterhead_layout_package_bytes,
     splice_precedent_into_blank_letter,
     strip_empty_completion_table_rows,
     strip_precedent_body_marker,
@@ -90,25 +91,33 @@ def _read_firm_letterhead_file_bytes(db: Session, file_id: uuid.UUID | None) -> 
         return None
 
 
+def finalize_digital_letterhead_docx(src_bytes: bytes, lh_bytes: bytes | None) -> bytes:
+    """Apply en-GB proofing, then restore letterhead layout metadata proofing may override."""
+    src_bytes = ensure_docx_proofing_language_en_gb_bytes(src_bytes)
+    if lh_bytes is not None:
+        src_bytes = reapply_letterhead_layout_package_bytes(src_bytes, lh_bytes)
+    return src_bytes
+
+
 def apply_quote_digital_letterhead_from_settings(
     db: Session,
     *,
     firm_row: FirmSettings | None,
     src_bytes: bytes,
-) -> bytes:
+) -> tuple[bytes, bytes | None]:
     """Overlay quote letterhead headers/footers onto the quote document body (fee-scale compose)."""
     if firm_row is None:
-        return src_bytes
+        return src_bytes, None
     if firm_row.quote_letterhead_style != LetterheadStyle.digital:
-        return src_bytes
+        return src_bytes, None
     lh_bytes = _read_firm_letterhead_file_bytes(db, firm_row.quote_letterhead_file_id)
     if lh_bytes is None:
-        return src_bytes
+        return src_bytes, None
     try:
-        return apply_digital_letterhead_headers_footers(src_bytes, lh_bytes)
+        return apply_digital_letterhead_headers_footers(src_bytes, lh_bytes), lh_bytes
     except Exception as lh_exc:
         log.warning("quote digital letterhead merge failed: %s", lh_exc)
-        return src_bytes
+        return src_bytes, None
 
 
 def _apply_configured_digital_letterhead(
@@ -118,27 +127,27 @@ def _apply_configured_digital_letterhead(
     src_bytes: bytes,
     firm_row: FirmSettings | None,
     prec_kind: PrecedentKind | None = None,
-) -> bytes:
+) -> tuple[bytes, bytes | None]:
     """Overlay firm letterhead headers/footers when digital mode is enabled."""
     if firm_row is None:
-        return src_bytes
+        return src_bytes, None
     if prec_kind is not None and prec_kind != PrecedentKind.letter:
-        return src_bytes
+        return src_bytes, None
     role = _effective_compose_office_role(body)
     if not _is_letter_compose_role(role):
-        return src_bytes
+        return src_bytes, None
     lh_style = firm_row.letterhead_style
     lh_file_id = firm_row.letterhead_file_id
     if lh_style != LetterheadStyle.digital or lh_file_id is None:
-        return src_bytes
+        return src_bytes, None
     lh_bytes = _read_firm_letterhead_file_bytes(db, lh_file_id)
     if lh_bytes is None:
-        return src_bytes
+        return src_bytes, None
     try:
-        return apply_digital_letterhead_headers_footers(src_bytes, lh_bytes)
+        return apply_digital_letterhead_headers_footers(src_bytes, lh_bytes), lh_bytes
     except Exception as lh_exc:
         log.warning("digital letterhead merge failed: %s", lh_exc)
-        return src_bytes
+        return src_bytes, None
 
 
 def _resolve_blank_letter_precedent_body(db: Session, body: ComposeOfficeDocumentIn) -> ComposeOfficeDocumentIn:
@@ -401,7 +410,7 @@ def merge_compose_docx_bytes(
                     ),
                 )
 
-        src_bytes = _apply_configured_digital_letterhead(
+        src_bytes, lh_bytes = _apply_configured_digital_letterhead(
             db,
             body=body,
             src_bytes=src_bytes,
@@ -409,7 +418,7 @@ def merge_compose_docx_bytes(
             prec_kind=prec.kind,
         )
 
-        src_bytes = ensure_docx_proofing_language_en_gb_bytes(src_bytes)
+        src_bytes = finalize_digital_letterhead_docx(src_bytes, lh_bytes)
         return src_bytes, mime
 
     fd, tmp_name = tempfile.mkstemp(suffix=".docx")
@@ -421,13 +430,13 @@ def merge_compose_docx_bytes(
     finally:
         tmp.unlink(missing_ok=True)
     firm_row = db.execute(select(FirmSettings).where(FirmSettings.id == 1)).scalar_one_or_none()
-    src_bytes = _apply_configured_digital_letterhead(
+    src_bytes, lh_bytes = _apply_configured_digital_letterhead(
         db,
         body=body,
         src_bytes=src_bytes,
         firm_row=firm_row,
         prec_kind=PrecedentKind.letter if _is_letter_compose_role(_effective_compose_office_role(body)) else None,
     )
-    src_bytes = ensure_docx_proofing_language_en_gb_bytes(src_bytes)
+    src_bytes = _finalize_digital_letterhead_docx(src_bytes, lh_bytes)
     mime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     return src_bytes, mime

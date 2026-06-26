@@ -2305,6 +2305,98 @@ def _merge_letterhead_layout_settings(prec_parts: dict[str, bytes], lh_parts: di
     prec_parts[prec_settings_path] = ET.tostring(prec_root, encoding="utf-8", xml_declaration=True)
 
 
+def _merge_letterhead_style_doc_defaults(prec_parts: dict[str, bytes], lh_parts: dict[str, bytes]) -> None:
+    """Copy letterhead ``w:docDefaults`` so header/footer empty ``w:spacing`` resolves like the template.
+
+    Letter precedents often ship with an empty ``w:pPrDefault`` while firm letterheads include the
+  ``pBdr`` / ``spacing`` / ``ind`` scaffold Word expects. Without copying it, footer lines in
+    composed letters pick up taller default paragraph gaps.
+    """
+    lh_styles = lh_parts.get("word/styles.xml")
+    prec_path = "word/styles.xml"
+    if not lh_styles or prec_path not in prec_parts:
+        return
+    try:
+        lh_text = lh_styles.decode("utf-8")
+        prec_text = prec_parts[prec_path].decode("utf-8")
+    except UnicodeDecodeError:
+        return
+    match = _DOC_DEFAULTS_BLOCK_RE.search(lh_text)
+    if not match:
+        return
+    lh_doc_defaults = match.group(0)
+    if _DOC_DEFAULTS_BLOCK_RE.search(prec_text):
+        prec_text = _DOC_DEFAULTS_BLOCK_RE.sub(lh_doc_defaults, prec_text, count=1)
+    else:
+        prec_text = _STYLES_OPEN_RE.sub(lambda m: m.group(0) + lh_doc_defaults, prec_text, count=1)
+    prec_parts[prec_path] = prec_text.encode("utf-8")
+
+
+def _normalize_hf_paragraph_spacing(hf_xml: bytes, *, part_path: str = "") -> bytes:
+    """Pin single-line spacing on header/footer paragraphs that leave ``w:spacing`` empty."""
+    try:
+        text = hf_xml.decode("utf-8")
+    except UnicodeDecodeError:
+        return hf_xml
+
+    def _repl_empty_spacing(match: re.Match[str]) -> str:
+        attrs = match.group(1) or ""
+        if re.search(r"(?:(?:w):)?(?:after|before|line|lineRule)=", attrs, re.IGNORECASE):
+            return match.group(0)
+        return '<w:spacing w:after="0" w:before="0" w:line="240" w:lineRule="auto"/>'
+
+    patched = re.sub(
+        r"<(?:(?:w):)?spacing\b([^/>]*)/>",
+        _repl_empty_spacing,
+        text,
+        flags=re.IGNORECASE,
+    )
+    if "footer" not in part_path.lower() or re.search(r"<(?:(?:w):)?spacing\b", patched, re.IGNORECASE):
+        if patched == text:
+            return hf_xml
+        return patched.encode("utf-8")
+
+    # Footers with no ``w:spacing`` at all (e.g. python-docx default Footer style): add explicitly.
+    import xml.etree.ElementTree as ET
+
+    try:
+        root = ET.fromstring(patched.encode("utf-8"))
+    except ET.ParseError:
+        return patched.encode("utf-8") if patched != text else hf_xml
+
+    p_tag = f"{{{_W_NS}}}p"
+    ppr_tag = f"{{{_W_NS}}}pPr"
+    sp_tag = f"{{{_W_NS}}}spacing"
+    changed = False
+    for p_el in root.findall(f".//{p_tag}"):
+        p_pr = p_el.find(ppr_tag)
+        if p_pr is None:
+            continue
+        if p_pr.find(sp_tag) is not None:
+            continue
+        spacing = ET.SubElement(p_pr, sp_tag)
+        spacing.set(f"{{{_W_NS}}}after", "0")
+        spacing.set(f"{{{_W_NS}}}before", "0")
+        spacing.set(f"{{{_W_NS}}}line", "240")
+        spacing.set(f"{{{_W_NS}}}lineRule", "auto")
+        changed = True
+    if not changed:
+        return hf_xml
+    return ET.tostring(root, encoding="utf-8", xml_declaration=True)
+
+
+def reapply_letterhead_layout_package_bytes(doc_bytes: bytes, letterhead_bytes: bytes) -> bytes:
+    """Re-apply letterhead layout metadata after other .docx normalisation (e.g. en-GB proofing)."""
+    lh_parts = _read_docx_zip_parts(letterhead_bytes)
+    prec_parts = _read_docx_zip_parts(doc_bytes)
+    _merge_letterhead_layout_settings(prec_parts, lh_parts)
+    _merge_letterhead_style_doc_defaults(prec_parts, lh_parts)
+    for path in list(prec_parts):
+        if _HF_PART_RE.match(path):
+            prec_parts[path] = _normalize_hf_paragraph_spacing(prec_parts[path], part_path=path)
+    return _write_docx_zip_parts(prec_parts)
+
+
 def _copy_letterhead_media_for_rels(
     rels_bytes: bytes | None,
     *,
@@ -2452,7 +2544,7 @@ def _merge_letterhead_package_assets(precedent_bytes: bytes, letterhead_bytes: b
         prec_path = prec_refs.get(role)
         if not prec_path or lh_path not in lh_parts:
             continue
-        prec_parts[prec_path] = lh_parts[lh_path]
+        prec_parts[prec_path] = _normalize_hf_paragraph_spacing(lh_parts[lh_path], part_path=prec_path)
         copied_hf_xml.append(lh_parts[lh_path])
         lh_rels_path = _ooxml_rels_part_path(lh_path)
         prec_rels_path = _ooxml_rels_part_path(prec_path)
@@ -2479,6 +2571,7 @@ def _merge_letterhead_package_assets(precedent_bytes: bytes, letterhead_bytes: b
         )
 
     _merge_letterhead_layout_settings(prec_parts, lh_parts)
+    _merge_letterhead_style_doc_defaults(prec_parts, lh_parts)
     _merge_letterhead_font_table(prec_parts, lh_parts, ooxml_blobs=copied_hf_xml)
 
     return _write_docx_zip_parts(prec_parts)
@@ -3342,6 +3435,10 @@ _LANG_ATTR_RE = re.compile(
 )
 _STYLES_OPEN_RE = re.compile(r"(<(?:(?:w):)?styles\b[^>]*>)", re.IGNORECASE)
 _SETTINGS_OPEN_RE = re.compile(r"(<(?:(?:w):)?settings\b[^>]*>)", re.IGNORECASE)
+_DOC_DEFAULTS_BLOCK_RE = re.compile(
+    r"<(?:(?:w):)?docDefaults\b[^>]*>.*?</(?:(?:w):)?docDefaults>",
+    re.IGNORECASE | re.DOTALL,
+)
 _DOC_DEFAULTS_BLOCK = (
     "<w:docDefaults><w:rPrDefault><w:rPr>"
     '<w:lang w:val="en-GB" w:eastAsia="en-GB" w:bidi="en-GB"/>'
