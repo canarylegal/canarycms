@@ -88,6 +88,10 @@ class User(Base):
     # Billing: charge-out rate for time / WIP (pence per hour); set in Admin → Users.
     charge_rate_pence_per_hour: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
+    signature_file_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("file.id", ondelete="SET NULL"), nullable=True
+    )
+
     # Next Outlook send (add-in OnMessageSend): matter chosen from Canary web before composing.
     outlook_pending_send_case_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("case.id", ondelete="SET NULL"), nullable=True
@@ -404,6 +408,7 @@ class FirmSettings(Base):
     client_bank_account_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
     client_bank_sort_code: Mapped[str | None] = mapped_column(String(16), nullable=True)
     client_bank_account_number_last4: Mapped[str | None] = mapped_column(String(4), nullable=True)
+    client_bank_account_number: Mapped[str | None] = mapped_column(String(20), nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
 
 
@@ -892,6 +897,7 @@ class FileCategory(str, enum.Enum):
     fee_scale = "fee_scale"
     system = "system"
     firm_letterhead = "firm_letterhead"
+    user_signature = "user_signature"
 
 
 class File(Base):

@@ -27,6 +27,8 @@ export type UserPublic = {
   m365_graph_drafts_configured?: boolean
   /** From GET /auth/me — category Admin or built-in admin role. */
   admin_console_access?: boolean
+  has_signature?: boolean
+  signature_original_filename?: string | null
   /** From GET /auth/me — firm-wide Accounts desk (admin or cashier approve permissions). */
   accounts_workspace_access?: boolean
   /**
@@ -150,6 +152,7 @@ export type FirmSettingsOut = {
   client_bank_account_name?: string | null
   client_bank_sort_code?: string | null
   client_bank_account_number_last4?: string | null
+  client_bank_account_number?: string | null
 }
 
 export type ClientAccountReconciliationOut = {
@@ -481,6 +484,8 @@ export type CasePropertyPayload = {
   free_lines: string[]
   title_numbers: string[]
   tenure?: CasePropertyTenure | null
+  existing_lender_case_contact_id?: string | null
+  charge_date?: string | null
 }
 
 export type CasePropertyDetailsOut = {

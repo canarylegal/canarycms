@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import re
+import uuid
 from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Iterable, Mapping
+
+from sqlalchemy.orm import Session
 
 from app.letter_salutation import (
     LetterSalutation,
@@ -266,6 +269,24 @@ for _base_key in _ADDITIONAL_CLIENT_NAME_CODES:
     )
 
 PRECEDENT_CODES["[QUOTE_PROPERTY_VALUE]"] = "Property value used for banded fee scales (formatted GBP)."
+PRECEDENT_CODES["[PROPERTY_ADDRESS_BLOCK]"] = (
+    "Property address from the Property sub-menu (line breaks between parts)."
+)
+PRECEDENT_CODES["[PROPERTY_CHARGE_DATE]"] = "Charge / mortgage charge date from the Property sub-menu (dd/mm/yyyy)."
+PRECEDENT_CODES["[PRIMARY_CLIENT_NAME]"] = (
+    "Display name of the first Client matter contact on the case (by date added)."
+)
+PRECEDENT_CODES["[FIRM_ADDRESS_BLOCK]"] = "Firm address block (Admin → Firm details)."
+PRECEDENT_CODES["[FIRM_CLIENT_BANK_ACCOUNT_NAME]"] = "Client bank account name (Admin → Firm details)."
+PRECEDENT_CODES["[FIRM_CLIENT_BANK_SORT_CODE]"] = "Client bank sort code (Admin → Firm details)."
+PRECEDENT_CODES["[FIRM_CLIENT_BANK_ACCOUNT_NUMBER]"] = (
+    "Client bank account number (full number when stored, otherwise masked last four)."
+)
+PRECEDENT_CODES["[EXISTING_LENDER_NAME]"] = "Existing lender matter contact display name."
+PRECEDENT_CODES["[EXISTING_LENDER_COMPANY_NAME]"] = "Existing lender registered company name."
+PRECEDENT_CODES["[EXISTING_LENDER_TRADING_NAME]"] = "Existing lender trading name."
+PRECEDENT_CODES["[EXISTING_LENDER_ADDRESS_BLOCK]"] = "Existing lender address block (organisation lines + address)."
+PRECEDENT_CODES["[FEE_EARNER_SIGNATURE]"] = "Fee earner signature image uploaded in User settings."
 for _qi in range(1, 26):
     _qtag = f"{_qi:02d}"
     PRECEDENT_CODES[f"[QUOTE_{_qtag}_LABEL]"] = f"Quote table row {_qi}: description."
@@ -814,8 +835,26 @@ def build_merge_fields(
         out["[FIRM_TOWN_CITY]"] = _s_str(getattr(firm, "town_city", None))
         out["[FIRM_COUNTY]"] = _s_str(getattr(firm, "county", None))
         out["[FIRM_POSTCODE]"] = _s_str(getattr(firm, "postcode", None))
+        firm_addr_parts = (
+            out["[FIRM_ADDR1]"],
+            out["[FIRM_ADDR2]"],
+            out["[FIRM_TOWN_CITY]"],
+            out["[FIRM_COUNTY]"],
+            out["[FIRM_POSTCODE]"],
+        )
+        out["[FIRM_ADDRESS_BLOCK]"] = "\n".join(p for p in firm_addr_parts if p)
+        out["[FIRM_CLIENT_BANK_ACCOUNT_NAME]"] = _s_str(getattr(firm, "client_bank_account_name", None))
+        out["[FIRM_CLIENT_BANK_SORT_CODE]"] = _s_str(getattr(firm, "client_bank_sort_code", None))
+        acct_full = _s_str(getattr(firm, "client_bank_account_number", None))
+        if acct_full:
+            out["[FIRM_CLIENT_BANK_ACCOUNT_NUMBER]"] = acct_full
+        else:
+            last4 = _s_str(getattr(firm, "client_bank_account_number_last4", None))
+            out["[FIRM_CLIENT_BANK_ACCOUNT_NUMBER]"] = f"•••• {last4}" if last4 else ""
 
     oc = [c for c in (ordered_client_contacts or [])][:4]
+    if oc:
+        out["[PRIMARY_CLIENT_NAME]"] = _s_str(getattr(oc[0], "name", None))
 
     if merge_all_clients:
         for i, cc in enumerate(oc):
@@ -2799,6 +2838,136 @@ def merge_precedent_codes(
     return _merge_precedent_codes_in_ooxml_zip(merged, fields)
 
 
+def _property_payload_address_lines(payload: dict[str, Any]) -> list[str]:
+    if payload.get("is_non_postal"):
+        raw = payload.get("free_lines") or []
+        if not isinstance(raw, list):
+            return []
+        return [_s_str(x) for x in raw if _s_str(x)]
+    uk = payload.get("uk") or {}
+    if not isinstance(uk, dict):
+        uk = {}
+    parts = (
+        _s_str(uk.get("line1")),
+        _s_str(uk.get("line2")),
+        _s_str(uk.get("town")),
+        _s_str(uk.get("county")),
+        _s_str(uk.get("postcode")),
+        _s_str(uk.get("country")),
+    )
+    return [p for p in parts if p]
+
+
+def property_merge_fields(db: Session, case_id: uuid.UUID) -> dict[str, str]:
+    """Merge codes from Property sub-menu (address, existing lender + charge date)."""
+    from app.models import CaseContact, CasePropertyDetails
+
+    out: dict[str, str] = {
+        "[PROPERTY_ADDRESS_BLOCK]": "",
+        "[PROPERTY_CHARGE_DATE]": "",
+        "[EXISTING_LENDER_NAME]": "",
+        "[EXISTING_LENDER_COMPANY_NAME]": "",
+        "[EXISTING_LENDER_TRADING_NAME]": "",
+        "[EXISTING_LENDER_ADDRESS_BLOCK]": "",
+    }
+    row = db.get(CasePropertyDetails, case_id)
+    if not row or not isinstance(row.payload, dict):
+        return out
+    payload = row.payload
+    addr_lines = _property_payload_address_lines(payload)
+    if addr_lines:
+        out["[PROPERTY_ADDRESS_BLOCK]"] = "\n".join(addr_lines)
+    charge_raw = _s_str(payload.get("charge_date"))
+    if charge_raw:
+        try:
+            from datetime import date as date_cls
+
+            d = date_cls.fromisoformat(charge_raw[:10])
+            out["[PROPERTY_CHARGE_DATE]"] = d.strftime("%d/%m/%Y")
+        except ValueError:
+            out["[PROPERTY_CHARGE_DATE]"] = charge_raw
+    lender_id = payload.get("existing_lender_case_contact_id")
+    if not lender_id:
+        return out
+    try:
+        lid = uuid.UUID(str(lender_id))
+    except ValueError:
+        return out
+    lender = db.get(CaseContact, lid)
+    if not lender or lender.case_id != case_id:
+        return out
+    core = _core_name_company_for_contact(lender)
+    out["[EXISTING_LENDER_NAME]"] = _s_str(getattr(lender, "name", None))
+    out["[EXISTING_LENDER_COMPANY_NAME]"] = core.get("[COMPANY_NAME]", "")
+    out["[EXISTING_LENDER_TRADING_NAME]"] = core.get("[TRADING_NAME]", "")
+    out["[EXISTING_LENDER_ADDRESS_BLOCK]"] = _org_and_address_block(lender)
+    return out
+
+
+def fee_earner_signature_image_path(db: Session, user_id: uuid.UUID | None) -> Path | None:
+    from app.file_storage import FILES_ROOT
+    from app.models import File, User
+
+    if not user_id:
+        return None
+    user = db.get(User, user_id)
+    if not user or not user.signature_file_id:
+        return None
+    row = db.get(File, user.signature_file_id)
+    if not row:
+        return None
+    abs_path = (FILES_ROOT / row.storage_path).resolve()
+    return abs_path if abs_path.is_file() else None
+
+
+def inject_merge_code_images(src_bytes: bytes, images: dict[str, Path]) -> bytes:
+    """Replace image merge-code paragraphs with inline pictures (paragraph must contain only the code)."""
+    if not images:
+        return src_bytes
+    import io
+    from docx import Document
+    from docx.shared import Inches
+
+    doc = Document(io.BytesIO(src_bytes))
+    changed = False
+
+    def _walk_paragraph(para: Any) -> None:
+        nonlocal changed
+        text = (para.text or "").strip()
+        for code, img_path in images.items():
+            if text != code or not img_path.is_file():
+                continue
+            para.clear()
+            run = para.add_run()
+            run.add_picture(str(img_path), width=Inches(2.0))
+            changed = True
+            return
+
+    for para in doc.paragraphs:
+        _walk_paragraph(para)
+    for section in doc.sections:
+        for hf in (
+            section.header,
+            section.footer,
+            section.first_page_header,
+            section.first_page_footer,
+            section.even_page_header,
+            section.even_page_footer,
+        ):
+            for para in hf.paragraphs:
+                _walk_paragraph(para)
+    for table in doc.tables:
+        for row in table.rows:
+            for cell in row.cells:
+                for para in cell.paragraphs:
+                    _walk_paragraph(para)
+    if not changed:
+        return src_bytes
+    out = io.BytesIO()
+    doc.save(out)
+    return out.getvalue()
+
+
 def _merge_precedent_codes_via_python_docx(
     src_bytes: bytes,
     fields: dict[str, str],
@@ -3926,6 +4095,7 @@ def write_client_account_reconcile_report_docx(
     client_bank_account_name: str | None,
     client_bank_sort_code: str | None,
     client_bank_account_number_last4: str | None,
+    client_bank_account_number: str | None = None,
     period_end_date: date,
     ledger_client_total_pence: int,
     ledger_office_total_pence: int,
@@ -3992,7 +4162,10 @@ def write_client_account_reconcile_report_docx(
         bank_bits.append(client_bank_account_name.strip())
     if client_bank_sort_code:
         bank_bits.append(f"Sort code {client_bank_sort_code.strip()}")
-    if client_bank_account_number_last4:
+    acct = (client_bank_account_number or "").strip()
+    if acct:
+        bank_bits.append(f"Account {acct}")
+    elif client_bank_account_number_last4:
         bank_bits.append(f"Account •••• {client_bank_account_number_last4.strip()}")
     if bank_bits:
         bank_para = doc.add_paragraph("Client bank account: " + " · ".join(bank_bits))

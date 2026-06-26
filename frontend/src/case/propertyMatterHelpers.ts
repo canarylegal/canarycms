@@ -12,6 +12,8 @@ export function blankPropertyPayload(): CasePropertyPayload {
     free_lines: ['', '', '', '', '', ''],
     title_numbers: [],
     tenure: null,
+    existing_lender_case_contact_id: null,
+    charge_date: null,
   }
 }
 

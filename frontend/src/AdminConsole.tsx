@@ -601,7 +601,16 @@ function AdminPrecedents({ token }: { token: string }) {
   const [mergeMsg, setMergeMsg] = useState<string | null>(null)
   const [nameEditId, setNameEditId] = useState<string | null>(null)
   const [nameDraft, setNameDraft] = useState('')
+  const [referenceEditId, setReferenceEditId] = useState<string | null>(null)
+  const [referenceDraft, setReferenceDraft] = useState('')
+  const [scopeEditId, setScopeEditId] = useState<string | null>(null)
+  const [scopeEditHead, setScopeEditHead] = useState('')
+  const [scopeEditSub, setScopeEditSub] = useState('')
+  const [scopeEditCat, setScopeEditCat] = useState(GLOBAL_PRECEDENT_SCOPE)
+  const [scopeEditCats, setScopeEditCats] = useState<PrecedentCategoryOut[]>([])
+  const [scopeEditCatsLoading, setScopeEditCatsLoading] = useState(false)
   const precedentNameInputRef = useRef<HTMLInputElement | null>(null)
+  const precedentReferenceInputRef = useRef<HTMLInputElement | null>(null)
   const [firmSettings, setFirmSettings] = useState<FirmSettingsOut | null>(null)
   const [lhBusy, setLhBusy] = useState(false)
   const [lhFileKey, setLhFileKey] = useState(0)
@@ -939,6 +948,121 @@ function AdminPrecedents({ token }: { token: string }) {
     })
     return () => cancelAnimationFrame(id)
   }, [nameEditId])
+
+  useEffect(() => {
+    if (!referenceEditId) return
+    const id = requestAnimationFrame(() => {
+      precedentReferenceInputRef.current?.focus()
+      precedentReferenceInputRef.current?.select()
+    })
+    return () => cancelAnimationFrame(id)
+  }, [referenceEditId])
+
+  useEffect(() => {
+    if (!scopeEditId || !scopeEditHead || scopeEditHead === GLOBAL_PRECEDENT_SCOPE) {
+      setScopeEditCats([])
+      return
+    }
+    if (!scopeEditSub || scopeEditSub === GLOBAL_PRECEDENT_SCOPE) {
+      setScopeEditCats([])
+      return
+    }
+    let cancelled = false
+    setScopeEditCatsLoading(true)
+    void apiFetch<PrecedentCategoryOut[]>(`/matter-types/sub-types/${scopeEditSub}/precedent-categories`, { token })
+      .then((rows) => {
+        if (!cancelled) setScopeEditCats(Array.isArray(rows) ? rows : [])
+      })
+      .catch(() => {
+        if (!cancelled) setScopeEditCats([])
+      })
+      .finally(() => {
+        if (!cancelled) setScopeEditCatsLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [scopeEditId, scopeEditHead, scopeEditSub, token])
+
+  function scopeIdToForm(id?: string | null) {
+    return id ?? GLOBAL_PRECEDENT_SCOPE
+  }
+
+  async function commitPrecedentReferenceEdit(p: PrecedentOut) {
+    const v = referenceDraft.trim()
+    if (!v) {
+      setErr('Reference cannot be empty.')
+      return
+    }
+    if (v === p.reference) {
+      setReferenceEditId(null)
+      return
+    }
+    setBusy(true)
+    setErr(null)
+    try {
+      await apiFetch(`/precedents/${p.id}`, { token, method: 'PATCH', json: { reference: v } })
+      setReferenceEditId(null)
+      await load()
+    } catch (e2: unknown) {
+      setErr((e2 as ApiError)?.message ?? 'Failed to update reference')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  function beginScopeEdit(p: PrecedentOut) {
+    setScopeEditId(p.id)
+    setScopeEditHead(scopeIdToForm(p.matter_head_type_id))
+    setScopeEditSub(scopeIdToForm(p.matter_sub_type_id))
+    setScopeEditCat(scopeIdToForm(p.category_id))
+  }
+
+  async function commitScopeEdit(p: PrecedentOut) {
+    setBusy(true)
+    setErr(null)
+    try {
+      let mh: string | null = GLOBAL_PRECEDENT_SCOPE
+      let ms: string | null = GLOBAL_PRECEDENT_SCOPE
+      let cat: string | null = GLOBAL_PRECEDENT_SCOPE
+      if (scopeEditHead && scopeEditHead !== GLOBAL_PRECEDENT_SCOPE) {
+        mh = scopeEditHead
+        if (scopeEditSub && scopeEditSub !== GLOBAL_PRECEDENT_SCOPE) {
+          ms = scopeEditSub
+          cat = scopeEditCat && scopeEditCat !== GLOBAL_PRECEDENT_SCOPE ? scopeEditCat : null
+        } else {
+          ms = null
+          cat = null
+        }
+      } else {
+        mh = null
+        ms = null
+        cat = null
+      }
+      await apiFetch(`/precedents/${p.id}`, {
+        token,
+        method: 'PATCH',
+        json: {
+          matter_head_type_id: mh === GLOBAL_PRECEDENT_SCOPE ? null : mh,
+          matter_sub_type_id: ms === GLOBAL_PRECEDENT_SCOPE ? null : ms,
+          category_id: cat === GLOBAL_PRECEDENT_SCOPE ? null : cat,
+        },
+      })
+      setScopeEditId(null)
+      await load()
+    } catch (e2: unknown) {
+      setErr((e2 as ApiError)?.message ?? 'Failed to update scope')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const scopeEditHeadIsGlobal = scopeEditHead === GLOBAL_PRECEDENT_SCOPE
+  const scopeEditSubOptions = useMemo(() => {
+    if (!scopeEditHead || scopeEditHead === GLOBAL_PRECEDENT_SCOPE) return []
+    const h = matterHeads.find((x) => x.id === scopeEditHead)
+    return (h?.sub_types ?? []).map((s) => ({ id: s.id, label: s.name }))
+  }, [matterHeads, scopeEditHead])
 
   async function commitPrecedentNameEdit(p: PrecedentOut) {
     const v = nameDraft.trim()
@@ -1630,13 +1754,133 @@ function AdminPrecedents({ token }: { token: string }) {
                 </div>
               )}
               <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>
-                <span className="mono">{p.reference}</span> · {p.kind}
+                {referenceEditId === p.id ? (
+                  <div className="row" style={{ gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                    <input
+                      ref={precedentReferenceInputRef}
+                      className="mono precedentAdminNameInput"
+                      value={referenceDraft}
+                      disabled={busy}
+                      maxLength={200}
+                      aria-label="Precedent reference"
+                      onChange={(e) => setReferenceDraft(e.target.value)}
+                      onBlur={() => void commitPrecedentReferenceEdit(p)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault()
+                          void commitPrecedentReferenceEdit(p)
+                        }
+                        if (e.key === 'Escape') {
+                          e.preventDefault()
+                          setReferenceEditId(null)
+                        }
+                      }}
+                    />
+                  </div>
+                ) : (
+                  <span className="row" style={{ gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+                    <span className="mono">{p.reference}</span>
+                    {!systemPrecedentReferences.has(p.reference) ? (
+                      <button
+                        type="button"
+                        className="btn precedentNameEditBtn"
+                        disabled={busy}
+                        title="Edit reference"
+                        aria-label="Edit precedent reference"
+                        onClick={() => {
+                          setReferenceEditId(p.id)
+                          setReferenceDraft(p.reference)
+                        }}
+                      >
+                        <PrecedentNamePencilIcon />
+                      </button>
+                    ) : null}
+                  </span>
+                )}{' '}
+                · {p.kind}
               </div>
               <div className="muted" style={{ fontSize: 12 }}>
                 {p.original_filename}
               </div>
               <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
-                {p.scope_summary || p.category_name || '—'}
+                {scopeEditId === p.id ? (
+                  <div className="stack" style={{ gap: 8, marginTop: 4 }}>
+                    <SingleSelectDropdown
+                      label="Matter type"
+                      options={uploadHeadTypeDropdownOptions}
+                      value={scopeEditHead}
+                      onChange={(v) => {
+                        setScopeEditHead(v)
+                        setScopeEditSub('')
+                        setScopeEditCat(GLOBAL_PRECEDENT_SCOPE)
+                      }}
+                      disabled={busy}
+                    />
+                    <SingleSelectDropdown
+                      label="Sub-type"
+                      options={
+                        !scopeEditHead
+                          ? [{ value: '', label: 'Select a matter type first' }]
+                          : scopeEditHeadIsGlobal
+                            ? [{ value: GLOBAL_PRECEDENT_SCOPE, label: 'Global' }]
+                            : [
+                                { value: '', label: '— select —' },
+                                { value: GLOBAL_PRECEDENT_SCOPE, label: 'Global (all sub-types under this matter type)' },
+                                ...scopeEditSubOptions.map((o) => ({ value: o.id, label: o.label })),
+                              ]
+                      }
+                      value={scopeEditSub}
+                      onChange={(v) => {
+                        setScopeEditSub(v)
+                        setScopeEditCat(GLOBAL_PRECEDENT_SCOPE)
+                      }}
+                      disabled={busy || !scopeEditHead || scopeEditHeadIsGlobal}
+                    />
+                    {scopeEditHead &&
+                    !scopeEditHeadIsGlobal &&
+                    scopeEditSub &&
+                    scopeEditSub !== GLOBAL_PRECEDENT_SCOPE ? (
+                      scopeEditCatsLoading ? (
+                        <div className="muted">Loading categories…</div>
+                      ) : (
+                        <SingleSelectDropdown
+                          label="Precedent category"
+                          options={[
+                            { value: GLOBAL_PRECEDENT_SCOPE, label: 'Global (all categories under this sub-type)' },
+                            ...scopeEditCats.map((c) => ({ value: c.id, label: c.name })),
+                          ]}
+                          value={scopeEditCat}
+                          onChange={setScopeEditCat}
+                          disabled={busy}
+                        />
+                      )
+                    ) : null}
+                    <div className="row" style={{ gap: 8 }}>
+                      <button type="button" className="btn primary" disabled={busy} onClick={() => void commitScopeEdit(p)}>
+                        Save scope
+                      </button>
+                      <button type="button" className="btn" disabled={busy} onClick={() => setScopeEditId(null)}>
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <span className="row" style={{ gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+                    <span>{p.scope_summary || p.category_name || '—'}</span>
+                    {!systemPrecedentReferences.has(p.reference) ? (
+                      <button
+                        type="button"
+                        className="btn precedentNameEditBtn"
+                        disabled={busy}
+                        title="Edit scope / category"
+                        aria-label="Edit precedent scope"
+                        onClick={() => beginScopeEdit(p)}
+                      >
+                        <PrecedentNamePencilIcon />
+                      </button>
+                    ) : null}
+                  </span>
+                )}
               </div>
             </div>
             <div className="row" style={{ gap: 8 }}>

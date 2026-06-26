@@ -18,9 +18,12 @@ from app.docx_util import (
     build_merge_fields,
     completion_line_merge_fields,
     ensure_docx_proofing_language_en_gb_bytes,
+    fee_earner_signature_image_path,
+    inject_merge_code_images,
     invoice_line_merge_fields,
     is_invalid_ooxml_merge_exception,
     merge_precedent_codes,
+    property_merge_fields,
     precedent_is_standalone_letter,
     reapply_letterhead_layout_package_bytes,
     splice_precedent_into_blank_letter,
@@ -370,6 +373,7 @@ def merge_compose_docx_bytes(
                         total_pence=0,
                     )
                 )
+            fields.update(property_merge_fields(db, case_id))
             template_has_org_addr = b"[ORG_AND_ADDRESS_BLOCK]" in src_bytes
             try:
                 src_bytes = merge_precedent_codes(
@@ -378,6 +382,9 @@ def merge_compose_docx_bytes(
                     ordered_clients=oc,
                     merge_all_clients=merge_all,
                 )
+                sig_path = fee_earner_signature_image_path(db, case_row.fee_earner_user_id if case_row else None)
+                if sig_path:
+                    src_bytes = inject_merge_code_images(src_bytes, {"[FEE_EARNER_SIGNATURE]": sig_path})
             except Exception as exc:
                 if is_invalid_ooxml_merge_exception(exc):
                     log.warning("merge_precedent_codes: invalid or unreadable .docx: %s", exc)

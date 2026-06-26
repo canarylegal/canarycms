@@ -3176,6 +3176,9 @@ function UserSettingsPage({
   const [emailSaveErr, setEmailSaveErr] = useState<string | null>(null)
   const [emailSaveOk, setEmailSaveOk] = useState(false)
   const [emailBusy, setEmailBusy] = useState(false)
+  const [signatureBusy, setSignatureBusy] = useState(false)
+  const [signatureErr, setSignatureErr] = useState<string | null>(null)
+  const [signatureFileKey, setSignatureFileKey] = useState(0)
 
   async function load() {
     setBusy(true)
@@ -3450,6 +3453,87 @@ function UserSettingsPage({
       </div>
       <div style={{ flex: 1, minHeight: 0, marginTop: 12, overflow: 'auto' }} className="stack">
         {accountLoadErr ? <div className="error">{accountLoadErr}</div> : null}
+        {!securitySetupOnly && !passwordChangeRequiredOnly ? (
+        <section className="card" style={{ padding: 16 }}>
+          <h3 style={{ marginTop: 0 }}>Signature image</h3>
+          <p className="muted" style={{ marginTop: 0 }}>
+            Upload a PNG, JPEG, GIF, or WebP image of your signature. Use merge code{' '}
+            <code>[FEE_EARNER_SIGNATURE]</code> on its own line in letter precedents — Canary replaces it with your
+            image when composing documents (fee earner on the matter).
+          </p>
+          {signatureErr ? <div className="error">{signatureErr}</div> : null}
+          <div className="muted" style={{ marginBottom: 8 }}>
+            {account?.has_signature
+              ? `Current file: ${account.signature_original_filename ?? 'signature image'}`
+              : 'No signature uploaded yet.'}
+          </div>
+          <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
+            <label className="btn" style={{ cursor: signatureBusy ? 'not-allowed' : 'pointer' }}>
+              Upload signature…
+              <input
+                key={signatureFileKey}
+                type="file"
+                accept="image/png,image/jpeg,image/gif,image/webp"
+                disabled={signatureBusy}
+                style={{ display: 'none' }}
+                onChange={(ev) => {
+                  const f = ev.target.files?.[0]
+                  ev.target.value = ''
+                  if (!f) return
+                  void (async () => {
+                    setSignatureBusy(true)
+                    setSignatureErr(null)
+                    try {
+                      const fd = new FormData()
+                      fd.append('upload', f)
+                      const me = await apiFetch<UserPublic>('/users/me/signature', {
+                        token,
+                        method: 'POST',
+                        body: fd,
+                      })
+                      setAccount(me)
+                      setSignatureFileKey((k) => k + 1)
+                      await refreshMe()
+                    } catch (e: unknown) {
+                      setSignatureErr((e as ApiError).message ?? 'Upload failed')
+                    } finally {
+                      setSignatureBusy(false)
+                    }
+                  })()
+                }}
+              />
+            </label>
+            {account?.has_signature ? (
+              <button
+                type="button"
+                className="btn danger"
+                disabled={signatureBusy}
+                onClick={() => {
+                  void (async () => {
+                    setSignatureBusy(true)
+                    setSignatureErr(null)
+                    try {
+                      const me = await apiFetch<UserPublic>('/users/me/signature', {
+                        token,
+                        method: 'DELETE',
+                      })
+                      setAccount(me)
+                      setSignatureFileKey((k) => k + 1)
+                      await refreshMe()
+                    } catch (e: unknown) {
+                      setSignatureErr((e as ApiError).message ?? 'Could not remove signature')
+                    } finally {
+                      setSignatureBusy(false)
+                    }
+                  })()
+                }}
+              >
+                Remove signature
+              </button>
+            ) : null}
+          </div>
+        </section>
+        ) : null}
         {!securitySetupOnly && !passwordChangeRequiredOnly ? (
         <section className="card" style={{ padding: 16 }}>
           <h3 style={{ marginTop: 0 }}>Appearance</h3>

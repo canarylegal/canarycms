@@ -13,7 +13,7 @@ from app.admin_access import user_effective_admin
 from app.permission_checks import user_may_access_accounts_workspace
 from app.email_crypt import decrypt_password
 from app.master_admin import load_master_admin_config, master_recovery_public_email
-from app.models import EmailIntegrationSettings, User, UserRole
+from app.models import EmailIntegrationSettings, File as DbFile, User, UserRole
 from app.org_security import firm_mandates_second_factor, firm_password_rotation_policy, user_has_any_passkey
 from app.schemas import UserPublic
 from app.user_appearance import user_appearance_out
@@ -110,6 +110,13 @@ def build_user_public(user: User, db: Session) -> UserPublic:
     base["appearance"] = user_appearance_out(user)
     base["ui_preferences"] = user_ui_preferences_out(user.ui_preferences)
     base.update(user_public_email_fields(db))
+    if user.signature_file_id:
+        sig = db.get(DbFile, user.signature_file_id)
+        base["has_signature"] = bool(sig)
+        base["signature_original_filename"] = sig.original_filename if sig else None
+    else:
+        base["has_signature"] = False
+        base["signature_original_filename"] = None
     return UserPublic(**base)
 
 

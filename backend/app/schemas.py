@@ -105,6 +105,8 @@ class UserPublic(BaseModel):
     )
     appearance: UserAppearanceOut = Field(default_factory=UserAppearanceOut)
     ui_preferences: UserUiPreferencesOut = Field(default_factory=UserUiPreferencesOut)
+    has_signature: bool = False
+    signature_original_filename: str | None = None
 
 
 class UserUiPreferencesUpdate(BaseModel):
@@ -451,6 +453,7 @@ class FirmSettingsOut(BaseModel):
     client_bank_account_name: str | None = None
     client_bank_sort_code: str | None = None
     client_bank_account_number_last4: str | None = None
+    client_bank_account_number: str | None = None
 
 
 class MergeCodeCatalogOut(BaseModel):
@@ -491,6 +494,7 @@ class FirmSettingsUpdate(BaseModel):
     client_bank_account_name: str | None = Field(default=None, max_length=200)
     client_bank_sort_code: str | None = Field(default=None, max_length=16)
     client_bank_account_number_last4: str | None = Field(default=None, max_length=4)
+    client_bank_account_number: str | None = Field(default=None, max_length=20)
 
 
 class MatterHeadTypeVisibilityUpdate(BaseModel):
@@ -649,6 +653,8 @@ class CasePropertyPayload(BaseModel):
     free_lines: list[str] = Field(default_factory=lambda: ["", "", "", "", "", ""])
     title_numbers: list[str] = Field(default_factory=list)
     tenure: Literal["freehold", "leasehold", "commonhold"] | None = None
+    existing_lender_case_contact_id: uuid.UUID | None = None
+    charge_date: str | None = Field(default=None, max_length=10)
 
 
 class CasePropertyDetailsOut(BaseModel):

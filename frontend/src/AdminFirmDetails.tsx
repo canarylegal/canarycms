@@ -18,6 +18,7 @@ export function AdminFirmDetails({ token }: { token: string }) {
   const [postcode, setPostcode] = useState('')
   const [clientBankName, setClientBankName] = useState('')
   const [clientBankSort, setClientBankSort] = useState('')
+  const [clientBankAccountNumber, setClientBankAccountNumber] = useState('')
   const [clientBankLast4, setClientBankLast4] = useState('')
 
   async function load() {
@@ -35,6 +36,7 @@ export function AdminFirmDetails({ token }: { token: string }) {
       setPostcode(data.postcode ?? '')
       setClientBankName(data.client_bank_account_name ?? '')
       setClientBankSort(data.client_bank_sort_code ?? '')
+      setClientBankAccountNumber(data.client_bank_account_number ?? '')
       setClientBankLast4(data.client_bank_account_number_last4 ?? '')
     } catch (e) {
       setErr((e as ApiError).message ?? 'Failed to load firm details')
@@ -63,6 +65,7 @@ export function AdminFirmDetails({ token }: { token: string }) {
           postcode: postcode.trim() || null,
           client_bank_account_name: clientBankName.trim() || null,
           client_bank_sort_code: clientBankSort.trim() || null,
+          client_bank_account_number: clientBankAccountNumber.trim() || null,
           client_bank_account_number_last4: clientBankLast4.trim() || null,
         },
       })
@@ -126,7 +129,7 @@ export function AdminFirmDetails({ token }: { token: string }) {
             </label>
             <div style={{ fontWeight: 600, marginTop: 8 }}>Client bank account (for reconcile report)</div>
             <div className="muted" style={{ fontSize: 13, marginBottom: 4 }}>
-              Display only — used on the client account reconcile report. Do not enter the full account number.
+              Used on the client account reconcile report.
             </div>
             <label className="field">
               <span>Account name</span>
@@ -137,7 +140,21 @@ export function AdminFirmDetails({ token }: { token: string }) {
               <input value={clientBankSort} onChange={(e) => setClientBankSort(e.target.value)} disabled={busy} placeholder="12-34-56" />
             </label>
             <label className="field">
-              <span>Account number (last 4 digits)</span>
+              <span>Account number</span>
+              <input
+                value={clientBankAccountNumber}
+                onChange={(e) => {
+                  const digits = e.target.value.replace(/\D/g, '').slice(0, 20)
+                  setClientBankAccountNumber(digits)
+                  setClientBankLast4(digits.slice(-4))
+                }}
+                disabled={busy}
+                inputMode="numeric"
+                autoComplete="off"
+              />
+            </label>
+            <label className="field">
+              <span>Account number (last 4 digits, optional override)</span>
               <input
                 value={clientBankLast4}
                 onChange={(e) => setClientBankLast4(e.target.value.replace(/\D/g, '').slice(0, 4))}
