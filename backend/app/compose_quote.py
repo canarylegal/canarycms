@@ -7,13 +7,12 @@ import uuid
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.compose_merge import apply_quote_digital_letterhead_from_settings
+from app.compose_merge import apply_quote_digital_letterhead_from_settings, finalize_digital_letterhead_docx
 from app.global_precedent_loader import load_global_precedent_docx_bytes
 from app.docx_util import (
     QUOTE_MERGE_SLOT_COUNT,
     apply_quote_table_presentation,
     build_merge_fields,
-    ensure_docx_proofing_language_en_gb_bytes,
     format_gbp_pence,
     merge_precedent_codes,
     strip_empty_quote_table_rows,
@@ -316,6 +315,6 @@ def merge_compose_quote_docx_bytes(
     )
     docx_bytes = strip_empty_quote_table_rows(docx_bytes)
     docx_bytes = apply_quote_table_presentation(docx_bytes, computed)
-    docx_bytes = apply_quote_digital_letterhead_from_settings(db, firm_row=firm_row, src_bytes=docx_bytes)
-    docx_bytes = ensure_docx_proofing_language_en_gb_bytes(docx_bytes)
+    docx_bytes, qlh_bytes = apply_quote_digital_letterhead_from_settings(db, firm_row=firm_row, src_bytes=docx_bytes)
+    docx_bytes = finalize_digital_letterhead_docx(docx_bytes, qlh_bytes)
     return docx_bytes, mime
