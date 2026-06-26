@@ -2,9 +2,11 @@ import os
 import secrets
 import uuid
 from datetime import datetime, timezone
+from pathlib import Path
 from urllib.parse import urlparse
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+import mimetypes
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from pydantic import BaseModel, EmailStr
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
@@ -15,7 +17,9 @@ from app.db import get_db
 from app.deps import get_current_user
 from app.email_crypt import encrypt_password
 from app.email_integration_settings import build_user_public
-from app.models import User
+from app.file_storage import FILES_ROOT, ensure_files_root, user_signature_file_paths
+from app.models import File as DbFile
+from app.models import FileCategory, User
 from app.permission_checks import (
     user_may_access_accounts_workspace,
     user_may_approve_invoice,
@@ -291,6 +295,109 @@ def put_my_ui_preferences(
     """Persist UI layout preferences for this user account (calendar view, task layout, sort order)."""
     patch = UserUiPreferencesPatch.model_validate(body.model_dump(exclude_unset=True))
     user.ui_preferences = merge_ui_preferences_patch(user.ui_preferences, patch)
+    user.updated_at = datetime.now(timezone.utc)
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return build_user_public(user, db)
+
+
+_ALLOWED_SIGNATURE_SUFFIX = frozenset({".png", ".jpg", ".jpeg", ".gif", ".webp"})
+_ALLOWED_SIGNATURE_MIME = frozenset({"image/png", "image/jpeg", "image/gif", "image/webp"})
+_MAX_SIGNATURE_BYTES = 2 * 1024 * 1024
+
+
+def _delete_user_signature_file(db: Session, user: User) -> None:
+    fid = user.signature_file_id
+    if not fid:
+        return
+    row = db.get(DbFile, fid)
+    user.signature_file_id = None
+    if row:
+        abs_path = (FILES_ROOT / row.storage_path).resolve()
+        try:
+            if abs_path.is_file():
+                abs_path.unlink()
+        except OSError:
+            pass
+        db.delete(row)
+
+
+def _validate_signature_upload(filename: str, content_type: str | None) -> None:
+    suf = Path(filename or "").suffix.lower()
+    if suf not in _ALLOWED_SIGNATURE_SUFFIX:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Signature must be a PNG, JPEG, GIF, or WebP image.",
+        )
+    mime = (content_type or "").split(";", 1)[0].strip().lower()
+    if mime and mime not in _ALLOWED_SIGNATURE_MIME:
+        guess = mimetypes.guess_type(filename)[0]
+        if guess not in _ALLOWED_SIGNATURE_MIME:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Signature must be a PNG, JPEG, GIF, or WebP image.",
+            )
+
+
+@router.post("/me/signature", response_model=UserPublic)
+async def upload_my_signature(
+    upload: UploadFile = File(...),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> UserPublic:
+    original = upload.filename or "signature.png"
+    _validate_signature_upload(original, upload.content_type)
+    ensure_files_root()
+    _delete_user_signature_file(db, user)
+
+    file_id = uuid.uuid4()
+    paths = user_signature_file_paths(user_id=user.id, file_id=file_id, original_filename=original)
+    size = 0
+    with paths.abs_path.open("wb") as fh:
+        while True:
+            chunk = await upload.read(1024 * 64)
+            if not chunk:
+                break
+            size += len(chunk)
+            if size > _MAX_SIGNATURE_BYTES:
+                fh.close()
+                paths.abs_path.unlink(missing_ok=True)
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Signature image must be 2 MB or smaller.",
+                )
+            fh.write(chunk)
+
+    mime = upload.content_type or mimetypes.guess_type(original)[0] or "image/png"
+    row = DbFile(
+        id=file_id,
+        case_id=None,
+        owner_id=user.id,
+        category=FileCategory.user_signature,
+        storage_path=paths.rel_path,
+        folder_path="",
+        is_pinned=False,
+        original_filename=Path(original).name,
+        mime_type=mime,
+        size_bytes=size,
+        version=1,
+        checksum=None,
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+    )
+    db.add(row)
+    user.signature_file_id = file_id
+    user.updated_at = datetime.now(timezone.utc)
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return build_user_public(user, db)
+
+
+@router.delete("/me/signature", response_model=UserPublic)
+def delete_my_signature(user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> UserPublic:
+    _delete_user_signature_file(db, user)
     user.updated_at = datetime.now(timezone.utc)
     db.add(user)
     db.commit()

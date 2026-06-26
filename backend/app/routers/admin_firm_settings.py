@@ -99,6 +99,7 @@ def _to_out(db: Session, row: FirmSettings) -> FirmSettingsOut:
         client_bank_account_name=row.client_bank_account_name,
         client_bank_sort_code=row.client_bank_sort_code,
         client_bank_account_number_last4=row.client_bank_account_number_last4,
+        client_bank_account_number=row.client_bank_account_number,
     )
 
 
@@ -184,6 +185,11 @@ def patch_firm_settings(
             )
     if data.get("mandate_password_rotation") is False:
         data["password_rotation_days"] = None
+    if "client_bank_account_number" in data:
+        raw = (data.get("client_bank_account_number") or "").strip()
+        digits = "".join(ch for ch in raw if ch.isdigit())
+        data["client_bank_account_number"] = digits or None
+        data["client_bank_account_number_last4"] = digits[-4:] if digits else None
     for k, v in data.items():
         setattr(row, k, v)
     row.updated_at = datetime.utcnow()

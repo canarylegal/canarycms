@@ -2360,6 +2360,23 @@ export function CaseDetail({
                           {propertyTenureLabel(propertyDetails.payload.tenure ?? undefined) ? (
                             <div>{propertyTenureLabel(propertyDetails.payload.tenure ?? undefined)}</div>
                           ) : null}
+                          {propertyDetails.payload.existing_lender_case_contact_id ? (
+                            <div>
+                              Existing lender:{' '}
+                              {caseContacts.find((c) => c.id === propertyDetails.payload.existing_lender_case_contact_id)
+                                ?.name ?? '—'}
+                            </div>
+                          ) : null}
+                          {propertyDetails.payload.charge_date ? (
+                            <div>
+                              Charge date:{' '}
+                              {(() => {
+                                const raw = propertyDetails.payload.charge_date ?? ''
+                                const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(raw)
+                                return m ? `${m[3]}/${m[2]}/${m[1]}` : raw
+                              })()}
+                            </div>
+                          ) : null}
                           {(propertyDetails.payload.is_non_postal
                             ? propertyDetails.payload.free_lines
                             : [
@@ -3381,6 +3398,10 @@ export function CaseDetail({
                       draft={propertyDraft}
                       onChange={setPropertyDraft}
                       disabled={busy}
+                      token={token}
+                      caseId={caseId}
+                      caseContacts={caseContacts}
+                      onCaseContactsChange={onRefresh}
                     />
                   </div>
                   </CaseDocPanelZoomFit>

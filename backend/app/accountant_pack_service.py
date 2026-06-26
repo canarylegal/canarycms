@@ -551,6 +551,7 @@ def _write_reconcile_docx(rec: ClientAccountReconciliation, db: Session) -> byte
             client_bank_account_name=firm.client_bank_account_name,
             client_bank_sort_code=firm.client_bank_sort_code,
             client_bank_account_number_last4=firm.client_bank_account_number_last4,
+            client_bank_account_number=firm.client_bank_account_number,
             period_end_date=rec.period_end_date,
             ledger_client_total_pence=rec.ledger_client_total_pence,
             ledger_office_total_pence=rec.ledger_office_total_pence,
