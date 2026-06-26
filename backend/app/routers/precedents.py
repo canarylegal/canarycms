@@ -30,6 +30,7 @@ from app.onlyoffice_force_save import (
     oo_force_save_wait,
 )
 from app.precedent_constants import (
+    BLANK_EMAIL_PRECEDENT_REFERENCE,
     BLANK_LETTER_PRECEDENT_REFERENCE,
     is_reserved_precedent_reference,
 )
@@ -302,8 +303,11 @@ def list_precedents(
 
     if kind is not None:
         q = q.where(Precedent.kind == kind)
-        # BLANK_LETTER is the server-side default for letter compose; hide from pickers only.
-        q = q.where(Precedent.reference != BLANK_LETTER_PRECEDENT_REFERENCE)
+        # Reserved blank templates are server-side defaults; hide from pickers only.
+        if kind == PrecedentKind.letter:
+            q = q.where(Precedent.reference != BLANK_LETTER_PRECEDENT_REFERENCE)
+        elif kind == PrecedentKind.email:
+            q = q.where(Precedent.reference != BLANK_EMAIL_PRECEDENT_REFERENCE)
     q = q.order_by(Precedent.created_at.desc())
     rows = db.execute(q).scalars().all()
     out: list[PrecedentOut] = []

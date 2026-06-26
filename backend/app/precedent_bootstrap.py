@@ -25,8 +25,10 @@ from typing import Any
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.admin_access import user_effective_admin
 from app.file_storage import ensure_files_root, precedent_file_paths
 from app.precedent_constants import (
+    BLANK_EMAIL_PRECEDENT_REFERENCE,
     BLANK_LETTER_PRECEDENT_REFERENCE,
     COMPLETION_STATEMENT_PRECEDENT_REFERENCE,
     INVOICE_TEMPLATE_PRECEDENT_REFERENCE,
@@ -42,7 +44,6 @@ from app.models import (
     PrecedentCategory,
     PrecedentKind,
     User,
-    UserRole,
 )
 
 log = logging.getLogger(__name__)
@@ -71,8 +72,10 @@ def _resolve_sub_type_id(
 
 
 def _first_admin_id(db: Session) -> uuid.UUID | None:
-    row = db.execute(select(User).where(User.role == UserRole.admin)).scalars().first()
-    return row.id if row else None
+    for row in db.execute(select(User).order_by(User.created_at.asc())).scalars().all():
+        if user_effective_admin(row, db):
+            return row.id
+    return None
 
 
 def _load_seed_manifest() -> dict[str, Any] | None:
@@ -113,6 +116,10 @@ def _validate_seed_precedent_kind(reference: str, kind: PrecedentKind) -> bool:
             log.warning("Precedent seed: %s must be kind=document — got %s", reference, kind)
             return False
     elif reference == QUOTE_EMAIL_PRECEDENT_REFERENCE:
+        if kind != PrecedentKind.email:
+            log.warning("Precedent seed: %s must be kind=email — got %s", reference, kind)
+            return False
+    elif reference == BLANK_EMAIL_PRECEDENT_REFERENCE:
         if kind != PrecedentKind.email:
             log.warning("Precedent seed: %s must be kind=email — got %s", reference, kind)
             return False

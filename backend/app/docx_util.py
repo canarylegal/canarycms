@@ -3831,6 +3831,35 @@ def write_blank_docx(path: Path) -> None:
     doc.save(str(path))
 
 
+def write_blank_email_precedent_docx(path: Path) -> None:
+    """Plain-text-friendly default e-mail body (reserved ``BLANK_EMAIL`` precedent)."""
+    from docx import Document
+
+    doc = Document()
+    _set_default_proofing_language_en_gb(doc)
+
+    lines = [
+        "[CONTACT_LETTER_DEAR]",
+        "",
+        "[PRECEDENT_BODY]",
+        "",
+        "[CONTACT_LETTER_SIGN_OFF]",
+        "",
+        "[FEE_EARNER]",
+        "[FEE_EARNER_JOB_TITLE]",
+        "[FIRM_TRADING_NAME]",
+        "",
+        "---",
+        "Our ref: [FEE_EARNER_INITIALS]/[CASE_REF]    Your ref: [CONTACT_REF]",
+        "[DATE]",
+    ]
+    for line in lines:
+        doc.add_paragraph(line)
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    doc.save(str(path))
+
+
 def write_quote_email_precedent_docx(path: Path) -> None:
     """Plain-text-friendly e-mail body for sending a quote (Thunderbird / mailto / Graph)."""
     from docx import Document
