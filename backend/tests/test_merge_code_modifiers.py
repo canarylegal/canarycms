@@ -102,6 +102,44 @@ def test_coalesce_split_modifier_token_across_runs() -> None:
     assert any(r.bold for r in out.paragraphs[0].runs if r.text)
 
 
+def test_coalesce_split_token_preserves_bold_prefix_run() -> None:
+    """ONLYOFFICE often splits ``[b:CODE]`` across runs; bold ``Re:`` prefix must survive."""
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+
+    doc = Document()
+    p = doc.add_paragraph()
+    for r in list(p._p.findall(qn("w:r"))):
+        p._p.remove(r)
+
+    def add_run(text: str, *, bold: bool = False) -> None:
+        r = OxmlElement("w:r")
+        if bold:
+            r_pr = OxmlElement("w:rPr")
+            r_pr.append(OxmlElement("w:b"))
+            r_pr.append(OxmlElement("w:bCs"))
+            r.append(r_pr)
+        t = OxmlElement("w:t")
+        t.set(qn("xml:space"), "preserve")
+        t.text = text
+        r.append(t)
+        p._p.append(r)
+
+    add_run("Re:", bold=True)
+    add_run(" [")
+    add_run("b:")
+    add_run("MATTER_DESCRIPTION]")
+    buf = io.BytesIO()
+    doc.save(buf)
+    merged = merge_precedent_codes(buf.getvalue(), {"[MATTER_DESCRIPTION]": "Sale of 1 High Street"})
+    out = Document(io.BytesIO(merged))
+    para = out.paragraphs[0]
+    assert para.text == "Re: Sale of 1 High Street"
+    bold_runs = [r for r in para.runs if r.text and r.bold]
+    assert any(r.text.startswith("Re:") for r in bold_runs)
+    assert any("Sale of 1 High Street" in r.text and r.bold for r in para.runs if r.text)
+
+
 def test_merge_precedent_codes_plain_code_unstyled() -> None:
     src = _docx_bytes_with_paragraph("[MATTER_DESCRIPTION]")
     merged = merge_precedent_codes(src, {"[MATTER_DESCRIPTION]": "Plain"})
