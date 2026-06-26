@@ -2559,7 +2559,12 @@ def _coalesce_split_merge_tokens_in_docx(doc_bytes: bytes) -> bytes:
             pending = carry_suffix + next_pending
 
         for ri in pending:
-            out_runs.append(deepcopy(ri["el"]))
+            if _run_plain_text(ri["el"]) == ri["text"]:
+                out_runs.append(deepcopy(ri["el"]))
+            else:
+                cloned = _clone_run_with_text(p_el, ri["el"], ri["text"])
+                if cloned is not None:
+                    out_runs.append(cloned)
 
         for r in list(p_el.findall(r_tag)):
             p_el.remove(r)
