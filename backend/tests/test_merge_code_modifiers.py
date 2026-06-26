@@ -140,6 +140,41 @@ def test_coalesce_split_token_preserves_bold_prefix_run() -> None:
     assert any("Sale of 1 High Street" in r.text and r.bold for r in para.runs if r.text)
 
 
+def test_coalesce_split_title_token_preserves_following_placeholders() -> None:
+    """A sample BLANK_LETTER splits ``[TITLE]`` as ``[TI`` + ``TLE] …`` — suffix must not keep ``TLE]``."""
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+
+    doc = Document()
+    p = doc.add_paragraph()
+    for r in list(p._p.findall(qn("w:r"))):
+        p._p.remove(r)
+
+    def add_run(text: str) -> None:
+        r = OxmlElement("w:r")
+        t = OxmlElement("w:t")
+        t.set(qn("xml:space"), "preserve")
+        t.text = text
+        r.append(t)
+        p._p.append(r)
+
+    add_run("[TI")
+    add_run("TLE] [FIRST_INITIAL] [MIDDLE_INITIAL] [LAST_NAME]")
+    buf = io.BytesIO()
+    doc.save(buf)
+    merged = merge_precedent_codes(
+        buf.getvalue(),
+        {
+            "[TITLE]": "Mr",
+            "[FIRST_INITIAL]": "C",
+            "[MIDDLE_INITIAL]": "",
+            "[LAST_NAME]": "McWilliams",
+        },
+    )
+    out = Document(io.BytesIO(merged))
+    assert out.paragraphs[0].text == "Mr C McWilliams"
+
+
 def test_merge_precedent_codes_plain_code_unstyled() -> None:
     src = _docx_bytes_with_paragraph("[MATTER_DESCRIPTION]")
     merged = merge_precedent_codes(src, {"[MATTER_DESCRIPTION]": "Plain"})
