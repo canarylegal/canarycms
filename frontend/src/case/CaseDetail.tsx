@@ -2029,7 +2029,7 @@ export function CaseDetail({
           caseContactIdForMerge,
           globalContactIdForMerge,
           mergeAllClients,
-          'letter',
+          null,
           contactPickModal.attachmentFileIds ?? [],
         )
         setContactPickModal(null)

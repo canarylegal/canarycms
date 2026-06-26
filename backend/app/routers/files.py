@@ -24,7 +24,7 @@ from starlette.background import BackgroundTask
 
 from app.db import get_db
 from app.deps import get_current_user, require_case_access
-from app.compose_merge import merge_compose_docx_bytes
+from app.compose_merge import merge_compose_docx_bytes, resolve_blank_email_compose_body
 from app.compose_quote import merge_compose_quote_docx_bytes, quote_lines_snapshot_payload, resolve_compose_quote_lines
 from app.finance_service import sync_finance_from_quote
 from app.docx_util import extract_plain_text_from_docx_bytes, write_blank_docx
@@ -750,9 +750,10 @@ def _case_email_compose_bundle(
         case_contact_id=body.case_contact_id,
         global_contact_id=body.global_contact_id,
         precedent_merge_all_clients=body.precedent_merge_all_clients,
-        compose_office_role=body.compose_office_role,
+        compose_office_role=None,
     )
-    kind_filter = PrecedentKind.email if body.precedent_id is not None else None
+    merge_in = resolve_blank_email_compose_body(db, merge_in)
+    kind_filter = PrecedentKind.email if merge_in.precedent_id is not None else None
     src_bytes, _mime = merge_compose_docx_bytes(db, case_id, merge_in, require_precedent_kind=kind_filter)
     body_text = extract_plain_text_from_docx_bytes(src_bytes)
     if not body_text.strip():
@@ -772,8 +773,8 @@ def _case_email_compose_bundle(
             contact_ref = (cc_subj.matter_contact_reference or "").strip()
     case_row = db.get(CaseRow, case_id)
     subject_bits: list[str] = []
-    if case_row and (case_row.case_number or "").strip():
-        subject_bits.append(case_row.case_number.strip())
+    if case_row and (case_row.title or "").strip():
+        subject_bits.append(case_row.title.strip())
     if contact_ref:
         subject_bits.append(contact_ref)
     elif prec_name:

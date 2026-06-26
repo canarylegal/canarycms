@@ -14,12 +14,16 @@ COMPLETION_STATEMENT_PRECEDENT_REFERENCE = "COMPLETION_STATEMENT"
 # Fee-scale quote .docx layout (global scope, kind=document).
 QUOTE_TEMPLATE_PRECEDENT_REFERENCE = "QUOTE_TEMPLATE"
 
+# E-mail compose with “Blank (no precedent)” resolves to this precedent row (global scope, kind=email).
+BLANK_EMAIL_PRECEDENT_REFERENCE = "BLANK_EMAIL"
+
 # E-mail body template for sending a quote with attachment (global scope, kind=email).
 QUOTE_EMAIL_PRECEDENT_REFERENCE = "QUOTE_EMAIL"
 
 RESERVED_PRECEDENT_REFERENCES: frozenset[str] = frozenset(
     {
         BLANK_LETTER_PRECEDENT_REFERENCE,
+        BLANK_EMAIL_PRECEDENT_REFERENCE,
         INVOICE_TEMPLATE_PRECEDENT_REFERENCE,
         COMPLETION_STATEMENT_PRECEDENT_REFERENCE,
         QUOTE_TEMPLATE_PRECEDENT_REFERENCE,

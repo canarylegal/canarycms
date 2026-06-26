@@ -11,7 +11,7 @@ without overwriting admin edits to existing rows.
 
 **Important:** the full seed runs only when the precedent table has **no rows**. Existing
 deployments that already have precedents are updated only for **missing** global references
-(`BLANK_LETTER`, `INVOICE_TEMPLATE`, `COMPLETION_STATEMENT`, `QUOTE_TEMPLATE`, `QUOTE_EMAIL`).
+(`BLANK_LETTER`, `BLANK_EMAIL`, `INVOICE_TEMPLATE`, `COMPLETION_STATEMENT`, `QUOTE_TEMPLATE`, `QUOTE_EMAIL`).
 
 Export from a running stack (inherits DATABASE_URL and FILES_ROOT from the container):
 
@@ -33,7 +33,11 @@ Regenerate universal templates:
   backend/.venv/bin/python backend/scripts/write_universal_quote_email_precedent.py \\
     backend/precedents_seed/bundle/g4_quote_email.docx
 
+  backend/.venv/bin/python backend/scripts/write_universal_blank_email_precedent.py \\
+    backend/precedents_seed/bundle/g5_blank_email.docx
+
 Precedent entries with `"global": true` are firm-wide (no category / matter sub-type): for example
-the reserved blank letter (`reference`: `BLANK_LETTER`, `kind`: `letter`), invoice template
+the reserved blank letter (`reference`: `BLANK_LETTER`, `kind`: `letter`), blank e-mail
+(`reference`: `BLANK_EMAIL`, `kind`: `email`), invoice template
 (`INVOICE_TEMPLATE`), completion statement template (`COMPLETION_STATEMENT`), quote template
 (`QUOTE_TEMPLATE`), and quote e-mail body (`QUOTE_EMAIL`, `kind`: `email`).

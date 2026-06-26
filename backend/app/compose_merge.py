@@ -33,6 +33,7 @@ from app.docx_util import (
     write_blank_docx,
 )
 from app.precedent_constants import (
+    BLANK_EMAIL_PRECEDENT_REFERENCE,
     BLANK_LETTER_PRECEDENT_REFERENCE,
     COMPLETION_STATEMENT_PRECEDENT_REFERENCE,
     INVOICE_TEMPLATE_PRECEDENT_REFERENCE,
@@ -180,6 +181,31 @@ def _load_blank_letter_precedent(db: Session) -> Precedent | None:
     ).scalars().first()
 
 
+def _load_blank_email_precedent(db: Session) -> Precedent | None:
+    """Return the reserved ``BLANK_EMAIL`` precedent row, or ``None`` if absent."""
+
+    return db.execute(
+        select(Precedent)
+        .where(
+            Precedent.reference == BLANK_EMAIL_PRECEDENT_REFERENCE,
+            Precedent.kind == PrecedentKind.email,
+        )
+        .order_by(Precedent.created_at.asc())
+        .limit(1)
+    ).scalars().first()
+
+
+def resolve_blank_email_compose_body(db: Session, body: ComposeOfficeDocumentIn) -> ComposeOfficeDocumentIn:
+    """If e-mail compose has no precedent id, use reserved ``BLANK_EMAIL`` when present."""
+
+    if body.precedent_id is not None:
+        return body
+    blank = _load_blank_email_precedent(db)
+    if blank is None:
+        return body
+    return body.model_copy(update={"precedent_id": blank.id})
+
+
 def _load_blank_letter_bytes(db: Session) -> bytes | None:
     """Read the reserved blank-letter .docx off disk, or ``None`` if missing/unreadable."""
 
@@ -256,7 +282,9 @@ def merge_compose_docx_bytes(
         # Defensive: ensure no literal [PRECEDENT_BODY] token survives into the composed letter. This
         # covers the "Blank (no precedent)" path (splice skipped) and any edge case where the splice
         # didn't find/replace the marker.
-        if prec.kind == PrecedentKind.letter:
+        if prec.kind == PrecedentKind.letter or (
+            prec.kind == PrecedentKind.email and prec.reference == BLANK_EMAIL_PRECEDENT_REFERENCE
+        ):
             try:
                 src_bytes = strip_precedent_body_marker(src_bytes)
             except Exception as strip_exc:
@@ -449,6 +477,6 @@ def merge_compose_docx_bytes(
         firm_row=firm_row,
         prec_kind=PrecedentKind.letter if _is_letter_compose_role(_effective_compose_office_role(body)) else None,
     )
-    src_bytes = _finalize_digital_letterhead_docx(src_bytes, lh_bytes)
+    src_bytes = finalize_digital_letterhead_docx(src_bytes, lh_bytes)
     mime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     return src_bytes, mime

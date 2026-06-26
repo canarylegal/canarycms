@@ -52,6 +52,16 @@
       "mime_type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
       "size_bytes": 36651,
       "bundle_file": "bundle/g4_quote_email.docx"
+    },
+    {
+      "name": "Blank e-mail (no precedent)",
+      "reference": "BLANK_EMAIL",
+      "kind": "email",
+      "global": true,
+      "original_filename": "Universal-blank-email.docx",
+      "mime_type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "size_bytes": 36451,
+      "bundle_file": "bundle/g5_blank_email.docx"
     }
   ]
 }

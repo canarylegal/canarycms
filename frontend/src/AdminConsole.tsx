@@ -575,7 +575,7 @@ function precedentDisplayNameFromFile(file: File): string {
 function AdminPrecedents({ token }: { token: string }) {
   const { askConfirm } = useDialogs()
   /** Reserved references — edit in OnlyOffice; do not delete from Admin. */
-  const systemPrecedentReferences = new Set(['BLANK_LETTER', 'INVOICE_TEMPLATE', 'COMPLETION_STATEMENT', 'QUOTE_TEMPLATE', 'QUOTE_EMAIL'])
+  const systemPrecedentReferences = new Set(['BLANK_LETTER', 'BLANK_EMAIL', 'INVOICE_TEMPLATE', 'COMPLETION_STATEMENT', 'QUOTE_TEMPLATE', 'QUOTE_EMAIL'])
   const [items, setItems] = useState<PrecedentOut[]>([])
   const [matterHeads, setMatterHeads] = useState<MatterHeadTypeOut[]>([])
   const [uploadHeadTypeId, setUploadHeadTypeId] = useState('')
@@ -1258,7 +1258,8 @@ function AdminPrecedents({ token }: { token: string }) {
 
       <div className="card" style={{ padding: 12 }}>
         <div className="muted" style={{ marginBottom: 8 }}>
-          Universal templates (e.g. <strong>Blank (no precedent)</strong>, <strong>Invoice template</strong>,{' '}
+          Universal templates (e.g. <strong>Blank (no precedent)</strong> for letters,{' '}
+          <strong>Blank e-mail (no precedent)</strong> for e-mails, <strong>Invoice template</strong>,{' '}
           <strong>Completion statement template</strong>) ship with Canary and appear in the precedent list below.
           Edit them in OnlyOffice like any other precedent. Firm-specific letterheads are configured in the cards above.
         </div>
