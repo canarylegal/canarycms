@@ -36,6 +36,7 @@ from app.schemas import (
     UserCalDAVStatusOut,
     UserEmailHandlingUpdate,
     UserPublic,
+    UserSignatureUpdate,
     UserUiPreferencesUpdate,
 )
 from app.user_appearance import normalize_appearance_update
@@ -295,6 +296,21 @@ def put_my_ui_preferences(
     """Persist UI layout preferences for this user account (calendar view, task layout, sort order)."""
     patch = UserUiPreferencesPatch.model_validate(body.model_dump(exclude_unset=True))
     user.ui_preferences = merge_ui_preferences_patch(user.ui_preferences, patch)
+    user.updated_at = datetime.now(timezone.utc)
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return build_user_public(user, db)
+
+
+@router.put("/me/signature-settings", response_model=UserPublic)
+def put_my_signature_settings(
+    body: UserSignatureUpdate,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> UserPublic:
+    """Persist signature image scale (1–10; 7 = 2 inches wide in composed documents)."""
+    user.signature_scale = body.signature_scale
     user.updated_at = datetime.now(timezone.utc)
     db.add(user)
     db.commit()

@@ -29,6 +29,8 @@ export type UserPublic = {
   admin_console_access?: boolean
   has_signature?: boolean
   signature_original_filename?: string | null
+  /** 1–10; 7 ≈ 2 inches wide in composed documents. */
+  signature_scale?: number
   /** From GET /auth/me — firm-wide Accounts desk (admin or cashier approve permissions). */
   accounts_workspace_access?: boolean
   /**

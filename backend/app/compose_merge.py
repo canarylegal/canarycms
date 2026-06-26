@@ -18,7 +18,7 @@ from app.docx_util import (
     build_merge_fields,
     completion_line_merge_fields,
     ensure_docx_proofing_language_en_gb_bytes,
-    fee_earner_signature_image_path,
+    fee_earner_signature_for_merge,
     inject_merge_code_images,
     invoice_line_merge_fields,
     is_invalid_ooxml_merge_exception,
@@ -382,9 +382,14 @@ def merge_compose_docx_bytes(
                     ordered_clients=oc,
                     merge_all_clients=merge_all,
                 )
-                sig_path = fee_earner_signature_image_path(db, case_row.fee_earner_user_id if case_row else None)
-                if sig_path:
-                    src_bytes = inject_merge_code_images(src_bytes, {"[FEE_EARNER_SIGNATURE]": sig_path})
+                sig = fee_earner_signature_for_merge(db, case_row.fee_earner_user_id if case_row else None)
+                if sig:
+                    sig_path, sig_width = sig
+                    src_bytes = inject_merge_code_images(
+                        src_bytes,
+                        {"[FEE_EARNER_SIGNATURE]": sig_path},
+                        width_inches={"[FEE_EARNER_SIGNATURE]": sig_width},
+                    )
             except Exception as exc:
                 if is_invalid_ooxml_merge_exception(exc):
                     log.warning("merge_precedent_codes: invalid or unreadable .docx: %s", exc)

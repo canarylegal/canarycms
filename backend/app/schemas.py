@@ -107,6 +107,11 @@ class UserPublic(BaseModel):
     ui_preferences: UserUiPreferencesOut = Field(default_factory=UserUiPreferencesOut)
     has_signature: bool = False
     signature_original_filename: str | None = None
+    signature_scale: int = Field(default=7, ge=1, le=10)
+
+
+class UserSignatureUpdate(BaseModel):
+    signature_scale: int = Field(ge=1, le=10)
 
 
 class UserUiPreferencesUpdate(BaseModel):
