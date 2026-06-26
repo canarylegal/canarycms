@@ -88,3 +88,58 @@ def test_letterhead_merge_copies_first_page_footer() -> None:
     assert sec.different_first_page_header_footer is True
     footer_text = "\n".join(p.text for p in sec.first_page_footer.paragraphs)
     assert "Bell Street" in footer_text
+
+
+def _letterhead_with_compat_mode(*, mode: str) -> bytes:
+    import xml.etree.ElementTree as ET
+
+    doc = Document()
+    doc.add_paragraph("")
+    sec = doc.sections[0]
+    sec.different_first_page_header_footer = True
+    sec.first_page_footer.paragraphs[0].add_run("Footer line one")
+    buf = io.BytesIO()
+    doc.save(buf)
+    parts: dict[str, bytes] = {}
+    with zipfile.ZipFile(io.BytesIO(buf.getvalue()), "r") as zin:
+        for info in zin.infolist():
+            parts[info.filename] = zin.read(info.filename)
+    W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+    root = ET.fromstring(parts["word/settings.xml"])
+    compat = root.find(f"{{{W}}}compat")
+    if compat is None:
+        compat = ET.SubElement(root, f"{{{W}}}compat")
+    for child in list(compat):
+        compat.remove(child)
+    cs = ET.SubElement(compat, f"{{{W}}}compatSetting")
+    cs.set(f"{{{W}}}name", "compatibilityMode")
+    cs.set(f"{{{W}}}val", mode)
+    parts["word/settings.xml"] = ET.tostring(root, encoding="utf-8", xml_declaration=True)
+    out = io.BytesIO()
+    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as zout:
+        for name, data in parts.items():
+            zout.writestr(name, data)
+    return out.getvalue()
+
+
+def _compat_mode_from_docx(data: bytes) -> str | None:
+    import xml.etree.ElementTree as ET
+
+    W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+    with zipfile.ZipFile(io.BytesIO(data)) as z:
+        root = ET.fromstring(z.read("word/settings.xml"))
+    compat = root.find(f"{{{W}}}compat")
+    if compat is None:
+        return None
+    for cs in compat.findall(f"{{{W}}}compatSetting"):
+        if cs.get(f"{{{W}}}name") == "compatibilityMode":
+            return cs.get(f"{{{W}}}val")
+    return None
+
+
+def test_letterhead_merge_applies_letterhead_compatibility_mode() -> None:
+    """Precedent scaffolds often use a newer Word compat mode than the uploaded letterhead."""
+    lh = _letterhead_with_compat_mode(mode="11")
+    prec = _letterhead_with_compat_mode(mode="14")
+    merged = apply_digital_letterhead_headers_footers(prec, lh)
+    assert _compat_mode_from_docx(merged) == "11"
