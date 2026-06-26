@@ -27,6 +27,19 @@ export function openOnlyOfficePrecedentEditor(precedentId: string): Window | nul
   )
 }
 
+export function onlyofficeFirmLetterheadEditorWindowTarget(kind: 'letterhead' | 'quote_letterhead'): string {
+  return kind === 'letterhead' ? 'canary-oo-firm-letterhead' : 'canary-oo-firm-quote-letterhead'
+}
+
+export function openOnlyOfficeFirmLetterheadEditor(kind: 'letterhead' | 'quote_letterhead'): Window | null {
+  const path = kind === 'letterhead' ? '/editor/firm-letterhead' : '/editor/firm-quote-letterhead'
+  return window.open(
+    path,
+    onlyofficeFirmLetterheadEditorWindowTarget(kind),
+    ONLYOFFICE_EDITOR_WINDOW_FEATURES,
+  )
+}
+
 export function onlyofficeFeeScaleEditorWindowTarget(feeScaleId: string): string {
   return `canary-oo-fee-scale-${feeScaleId}`
 }

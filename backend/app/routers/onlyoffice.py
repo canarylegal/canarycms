@@ -469,6 +469,7 @@ async def persist_onlyoffice_browser_url_to_file(
     browser_url: str,
     case_id: uuid.UUID | None,
     precedent_id: uuid.UUID | None,
+    firm_letterhead_kind: str | None = None,
 ) -> int:
     """Fetch a DS ``downloadAs`` / cache URL and write bytes to Canary file storage."""
 
@@ -522,18 +523,18 @@ async def persist_onlyoffice_browser_url_to_file(
         row.version,
         len(data),
     )
+    action, meta_extra = _oo_save_audit_action_meta(
+        precedent_id=precedent_id,
+        case_id=case_id,
+        firm_letterhead_kind=firm_letterhead_kind,
+    )
     log_event(
         db,
         actor_user_id=None,
-        action="precedent.onlyoffice_save" if precedent_id is not None else "case.file.onlyoffice_save",
+        action=action,
         entity_type="file",
         entity_id=str(row.id),
-        meta={
-            **({"precedent_id": str(precedent_id)} if precedent_id is not None else {"case_id": str(case_id)}),
-            "version": row.version,
-            "size_bytes": len(data),
-            "via": "downloadAs",
-        },
+        meta={**meta_extra, "version": row.version, "size_bytes": len(data), "via": "downloadAs"},
     )
     return int(row.version)
 
@@ -668,9 +669,14 @@ def _callback_resolve_file_row(
     file_id: uuid.UUID | None,
     precedent_id: uuid.UUID | None,
     fee_scale_id: uuid.UUID | None = None,
+    firm_letterhead_kind: str | None = None,
 ) -> DbFile | None:
     """Resolve the backing ``file`` row for a ONLYOFFICE callback (case file or precedent template)."""
 
+    from app.firm_letterhead_onlyoffice import resolve_firm_letterhead_file_row
+
+    if firm_letterhead_kind:
+        return resolve_firm_letterhead_file_row(db, firm_letterhead_kind)
     if fee_scale_id is not None:
         scale = db.get(FeeScale, fee_scale_id)
         if not scale:
@@ -689,12 +695,29 @@ def _callback_resolve_file_row(
     return row
 
 
+def _oo_save_audit_action_meta(
+    *,
+    precedent_id: uuid.UUID | None,
+    case_id: uuid.UUID | None,
+    firm_letterhead_kind: str | None,
+) -> tuple[str, dict[str, str]]:
+    if firm_letterhead_kind in ("letterhead", "quote_letterhead"):
+        return (
+            f"firm_settings.{firm_letterhead_kind}_onlyoffice_save",
+            {"firm_letterhead_kind": firm_letterhead_kind},
+        )
+    if precedent_id is not None:
+        return "precedent.onlyoffice_save", {"precedent_id": str(precedent_id)}
+    return "case.file.onlyoffice_save", {"case_id": str(case_id)}
+
+
 def _oo_ack_unchanged_force_save(
     db: Session,
     row: DbFile,
     *,
     precedent_id: uuid.UUID | None,
     case_id: uuid.UUID | None,
+    firm_letterhead_kind: str | None = None,
     status_code: int,
 ) -> None:
     """Complete /oo-force-save when DS omits ``url`` (document unchanged). Bump version only metadata-wise."""
@@ -714,19 +737,18 @@ def _oo_ack_unchanged_force_save(
         status_code,
         row.version,
     )
+    action, meta_extra = _oo_save_audit_action_meta(
+        precedent_id=precedent_id,
+        case_id=case_id,
+        firm_letterhead_kind=firm_letterhead_kind,
+    )
     log_event(
         db,
         actor_user_id=None,
-        action=(
-            "precedent.onlyoffice_save_unchanged" if precedent_id is not None else "case.file.onlyoffice_save_unchanged"
-        ),
+        action=f"{action}_unchanged",
         entity_type="file",
         entity_id=str(row.id),
-        meta={
-            **({"precedent_id": str(precedent_id)} if precedent_id is not None else {"case_id": str(case_id)}),
-            "callback_status": status_code,
-            "version": row.version,
-        },
+        meta={**meta_extra, "callback_status": status_code, "version": row.version},
     )
 
 
@@ -737,9 +759,15 @@ async def onlyoffice_callback(
     file_id: uuid.UUID | None = Query(None),
     precedent_id: uuid.UUID | None = Query(None),
     fee_scale_id: uuid.UUID | None = Query(None),
+    firm_letterhead_kind: str | None = Query(None),
     db: Session = Depends(get_db),
 ) -> dict[str, int]:
-    if precedent_id is None and fee_scale_id is None and (case_id is None or file_id is None):
+    if (
+        precedent_id is None
+        and fee_scale_id is None
+        and firm_letterhead_kind is None
+        and (case_id is None or file_id is None)
+    ):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Missing case_id or file_id")
 
     raw = await request.body()
@@ -770,7 +798,12 @@ async def onlyoffice_callback(
     # with a metadata version bump when the CommandService forcesave itself succeeded.
     if st == 7:
         row7 = _callback_resolve_file_row(
-            db, case_id=case_id, file_id=file_id, precedent_id=precedent_id, fee_scale_id=fee_scale_id
+            db,
+            case_id=case_id,
+            file_id=file_id,
+            precedent_id=precedent_id,
+            fee_scale_id=fee_scale_id,
+            firm_letterhead_kind=firm_letterhead_kind,
         )
         if row7 is not None:
             log.warning(
@@ -784,7 +817,12 @@ async def onlyoffice_callback(
     # 6 = force-save while editing.
     if st in (2, 4, 6) and download_url:
         row = _callback_resolve_file_row(
-            db, case_id=case_id, file_id=file_id, precedent_id=precedent_id, fee_scale_id=fee_scale_id
+            db,
+            case_id=case_id,
+            file_id=file_id,
+            precedent_id=precedent_id,
+            fee_scale_id=fee_scale_id,
+            firm_letterhead_kind=firm_letterhead_kind,
         )
         if row is None:
             return {"error": 1}
@@ -858,24 +896,30 @@ async def onlyoffice_callback(
         db.add(row)
         db.commit()
 
+        action, meta_extra = _oo_save_audit_action_meta(
+            precedent_id=precedent_id,
+            case_id=case_id,
+            firm_letterhead_kind=firm_letterhead_kind,
+        )
         log_event(
             db,
             actor_user_id=None,
-            action="precedent.onlyoffice_save" if precedent_id is not None else "case.file.onlyoffice_save",
+            action=action,
             entity_type="file",
             entity_id=str(row.id),
-            meta={
-                **({"precedent_id": str(precedent_id)} if precedent_id is not None else {"case_id": str(case_id)}),
-                "version": row.version,
-                "size_bytes": len(data),
-            },
+            meta={**meta_extra, "version": row.version, "size_bytes": len(data)},
         )
         return {"error": 0}
 
     # Force-save with no edits: DS may omit ``url`` (status 4 is “closed, no changes”; some builds also omit url on 2/6).
     if st in (2, 4, 6) and not download_url:
         row = _callback_resolve_file_row(
-            db, case_id=case_id, file_id=file_id, precedent_id=precedent_id, fee_scale_id=fee_scale_id
+            db,
+            case_id=case_id,
+            file_id=file_id,
+            precedent_id=precedent_id,
+            fee_scale_id=fee_scale_id,
+            firm_letterhead_kind=firm_letterhead_kind,
         )
         if row is None:
             return {"error": 1}
@@ -893,7 +937,14 @@ async def onlyoffice_callback(
                 "onlyoffice_callback: force-save pending but no session row for file %s — metadata-only ack",
                 row.id,
             )
-        _oo_ack_unchanged_force_save(db, row, precedent_id=precedent_id, case_id=case_id, status_code=st)
+        _oo_ack_unchanged_force_save(
+            db,
+            row,
+            precedent_id=precedent_id,
+            case_id=case_id,
+            firm_letterhead_kind=firm_letterhead_kind,
+            status_code=st,
+        )
         return {"error": 0}
 
     # 1 = editing; 3 = save error; 4 = closed with no changes (handled above when pending); etc.

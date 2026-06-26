@@ -13,7 +13,7 @@ import type { ApiError } from './api'
 import { CASE_MENU_OPTIONS } from './caseMenuOptions'
 import { useDialogs } from './DialogProvider'
 import { SingleSelectDropdown } from './SingleSelectDropdown'
-import { openOnlyOfficePrecedentEditor } from './onlyofficeEditorWindow'
+import { openOnlyOfficeFirmLetterheadEditor, openOnlyOfficePrecedentEditor } from './onlyofficeEditorWindow'
 import type {
   AdminSendPasswordResetResponse,
   AdminUserPublic,
@@ -1032,9 +1032,19 @@ function AdminPrecedents({ token }: { token: string }) {
                     : 'No .docx uploaded yet.'}
                 </span>
                 {firmSettings.letterhead_original_filename ? (
-                  <button type="button" className="btn danger" disabled={lhBusy} onClick={() => void clearLetterheadFile()}>
-                    Remove letterhead file
-                  </button>
+                  <>
+                    <button
+                      type="button"
+                      className="btn"
+                      disabled={lhBusy}
+                      onClick={() => openOnlyOfficeFirmLetterheadEditor('letterhead')}
+                    >
+                      Edit in OnlyOffice
+                    </button>
+                    <button type="button" className="btn danger" disabled={lhBusy} onClick={() => void clearLetterheadFile()}>
+                      Remove letterhead file
+                    </button>
+                  </>
                 ) : null}
               </div>
             ) : null}
@@ -1100,9 +1110,19 @@ function AdminPrecedents({ token }: { token: string }) {
                     : 'No .docx uploaded yet.'}
                 </span>
                 {firmSettings.quote_letterhead_original_filename ? (
-                  <button type="button" className="btn danger" disabled={qlhBusy} onClick={() => void clearQuoteLetterheadFile()}>
-                    Remove letterhead file
-                  </button>
+                  <>
+                    <button
+                      type="button"
+                      className="btn"
+                      disabled={qlhBusy}
+                      onClick={() => openOnlyOfficeFirmLetterheadEditor('quote_letterhead')}
+                    >
+                      Edit in OnlyOffice
+                    </button>
+                    <button type="button" className="btn danger" disabled={qlhBusy} onClick={() => void clearQuoteLetterheadFile()}>
+                      Remove letterhead file
+                    </button>
+                  </>
                 ) : null}
               </div>
             ) : null}

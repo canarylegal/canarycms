@@ -29,20 +29,36 @@ type EditorTarget =
   | { mode: 'case'; caseId: string; fileId: string }
   | { mode: 'precedent'; precedentId: string }
   | { mode: 'fee-scale'; feeScaleId: string }
+  | { mode: 'firm-letterhead'; kind: 'letterhead' | 'quote_letterhead' }
 
 function editorConfigUrl(params: EditorTarget): string {
+  if (params.mode === 'firm-letterhead') {
+    return params.kind === 'letterhead'
+      ? '/admin/firm-settings/letterhead/onlyoffice-config'
+      : '/admin/firm-settings/quote-letterhead/onlyoffice-config'
+  }
   if (params.mode === 'precedent') return `/precedents/${params.precedentId}/onlyoffice-config`
   if (params.mode === 'fee-scale') return `/fee-scales/${params.feeScaleId}/onlyoffice-config`
   return `/cases/${params.caseId}/files/${params.fileId}/onlyoffice-config`
 }
 
 function editorPersistPath(params: EditorTarget): string {
+  if (params.mode === 'firm-letterhead') {
+    return params.kind === 'letterhead'
+      ? '/admin/firm-settings/letterhead/oo-persist-download'
+      : '/admin/firm-settings/quote-letterhead/oo-persist-download'
+  }
   if (params.mode === 'precedent') return `/precedents/${params.precedentId}/oo-persist-download`
   if (params.mode === 'fee-scale') return `/fee-scales/${params.feeScaleId}/oo-persist-download`
   return `/cases/${params.caseId}/files/${params.fileId}/oo-persist-download`
 }
 
 function editorForceSaveBase(params: EditorTarget): string {
+  if (params.mode === 'firm-letterhead') {
+    return params.kind === 'letterhead'
+      ? '/admin/firm-settings/letterhead/oo-force-save'
+      : '/admin/firm-settings/quote-letterhead/oo-force-save'
+  }
   if (params.mode === 'precedent') return `/precedents/${params.precedentId}/oo-force-save`
   if (params.mode === 'fee-scale') return `/fee-scales/${params.feeScaleId}/oo-force-save`
   return `/cases/${params.caseId}/files/${params.fileId}/oo-force-save`
@@ -50,6 +66,13 @@ function editorForceSaveBase(params: EditorTarget): string {
 
 function parseEditorPath(): EditorTarget | null {
   const parts = window.location.pathname.split('/').filter(Boolean)
+  // /editor/firm-letterhead | /editor/firm-quote-letterhead
+  if (parts[0] === 'editor' && parts[1] === 'firm-letterhead') {
+    return { mode: 'firm-letterhead', kind: 'letterhead' }
+  }
+  if (parts[0] === 'editor' && parts[1] === 'firm-quote-letterhead') {
+    return { mode: 'firm-letterhead', kind: 'quote_letterhead' }
+  }
   // /editor/fee-scale/{feeScaleId}
   if (parts[0] === 'editor' && parts[1] === 'fee-scale' && parts[2]) {
     return { mode: 'fee-scale', feeScaleId: parts[2] }
@@ -328,7 +351,7 @@ export default function EditorPage() {
   // (React Strict Mode remount, fast tab switches) minting extra WebDAV sessions server-side.
   useEffect(() => {
     if (!params) {
-      setErr('Invalid editor URL — expected /editor/{caseId}/{fileId}, /editor/precedent/{precedentId}, or /editor/fee-scale/{feeScaleId}')
+      setErr('Invalid editor URL — expected /editor/{caseId}/{fileId}, /editor/precedent/{precedentId}, /editor/fee-scale/{feeScaleId}, /editor/firm-letterhead, or /editor/firm-quote-letterhead')
       return
     }
     const ac = new AbortController()

@@ -8,7 +8,8 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, Response, UploadFile, status
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
 from app.audit import log_event
@@ -21,9 +22,22 @@ from app.file_storage import (
     firm_letterhead_file_paths,
     firm_quote_letterhead_file_paths,
 )
+from app.firm_letterhead_onlyoffice import (
+    FirmLetterheadKind,
+    build_firm_letterhead_onlyoffice_config,
+    firm_letterhead_file_row,
+)
 from app.models import File as DbFile
 from app.models import FileCategory, FirmSettings, LetterheadStyle, User
-from app.schemas import FirmSettingsOut, FirmSettingsUpdate
+from app.onlyoffice_force_save import (
+    OoForceSavePhase,
+    oo_force_save_arm,
+    oo_force_save_command_service,
+    oo_force_save_issue_command,
+    oo_force_save_wait,
+)
+from app.routers.onlyoffice import persist_onlyoffice_browser_url_to_file
+from app.schemas import FirmSettingsOut, FirmSettingsUpdate, OnlyofficeEditorConfigOut, OoPersistDownloadIn
 
 router = APIRouter(prefix="/admin/firm-settings", tags=["admin-firm-settings"])
 
@@ -361,3 +375,153 @@ def delete_quote_letterhead(admin: User = Depends(require_firm_admin), db: Sessi
         meta={},
     )
     return _to_out(db, row)
+
+
+def _firm_letterhead_onlyoffice_config(
+    kind: FirmLetterheadKind,
+    request: Request,
+    response: Response,
+    admin: User,
+    db: Session,
+) -> OnlyofficeEditorConfigOut:
+    return build_firm_letterhead_onlyoffice_config(
+        request=request,
+        response=response,
+        db=db,
+        user=admin,
+        kind=kind,
+    )
+
+
+async def _firm_letterhead_oo_force_save(
+    kind: FirmLetterheadKind,
+    doc_key: str,
+    phase: OoForceSavePhase,
+    base_version: int | None,
+    admin: User,
+    db: Session,
+):
+    row = firm_letterhead_file_row(db, kind)
+    if phase == "arm":
+        return JSONResponse({"base_version": oo_force_save_arm(db, row)})
+    if phase == "wait":
+        if base_version is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="base_version is required when phase=wait",
+            )
+        await oo_force_save_wait(db, row, base_version=base_version)
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+    if phase == "command":
+        await oo_force_save_issue_command(db, row, doc_key=doc_key, file_id=row.id)
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+    if phase == "command_wait":
+        await oo_force_save_command_service(db, row, doc_key=doc_key, file_id=row.id)
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Unknown phase: {phase}")
+
+
+async def _firm_letterhead_oo_persist_download(
+    kind: FirmLetterheadKind,
+    body: OoPersistDownloadIn,
+    admin: User,
+    db: Session,
+) -> None:
+    row = firm_letterhead_file_row(db, kind)
+    await persist_onlyoffice_browser_url_to_file(
+        db,
+        row,
+        browser_url=body.browser_url,
+        case_id=None,
+        precedent_id=None,
+        firm_letterhead_kind=kind,
+    )
+
+
+def _firm_letterhead_oo_save_status(
+    kind: FirmLetterheadKind,
+    base_version: int,
+    admin: User,
+    db: Session,
+) -> dict[str, int | bool]:
+    row = firm_letterhead_file_row(db, kind)
+    version = row.version or 1
+    return {"saved": version > base_version, "version": version}
+
+
+@router.get("/letterhead/onlyoffice-config", response_model=OnlyofficeEditorConfigOut)
+def get_letterhead_onlyoffice_config(
+    request: Request,
+    response: Response,
+    admin: User = Depends(require_firm_admin),
+    db: Session = Depends(get_db),
+) -> OnlyofficeEditorConfigOut:
+    return _firm_letterhead_onlyoffice_config("letterhead", request, response, admin, db)
+
+
+@router.get("/quote-letterhead/onlyoffice-config", response_model=OnlyofficeEditorConfigOut)
+def get_quote_letterhead_onlyoffice_config(
+    request: Request,
+    response: Response,
+    admin: User = Depends(require_firm_admin),
+    db: Session = Depends(get_db),
+) -> OnlyofficeEditorConfigOut:
+    return _firm_letterhead_onlyoffice_config("quote_letterhead", request, response, admin, db)
+
+
+@router.post("/letterhead/oo-force-save")
+async def oo_force_save_letterhead(
+    doc_key: str,
+    phase: OoForceSavePhase = Query("command"),
+    base_version: int | None = Query(None),
+    admin: User = Depends(require_firm_admin),
+    db: Session = Depends(get_db),
+):
+    return await _firm_letterhead_oo_force_save("letterhead", doc_key, phase, base_version, admin, db)
+
+
+@router.post("/quote-letterhead/oo-force-save")
+async def oo_force_save_quote_letterhead(
+    doc_key: str,
+    phase: OoForceSavePhase = Query("command"),
+    base_version: int | None = Query(None),
+    admin: User = Depends(require_firm_admin),
+    db: Session = Depends(get_db),
+):
+    return await _firm_letterhead_oo_force_save("quote_letterhead", doc_key, phase, base_version, admin, db)
+
+
+@router.post("/letterhead/oo-persist-download", status_code=status.HTTP_204_NO_CONTENT)
+async def oo_persist_download_letterhead(
+    body: OoPersistDownloadIn,
+    admin: User = Depends(require_firm_admin),
+    db: Session = Depends(get_db),
+) -> None:
+    await _firm_letterhead_oo_persist_download("letterhead", body, admin, db)
+
+
+@router.post("/quote-letterhead/oo-persist-download", status_code=status.HTTP_204_NO_CONTENT)
+async def oo_persist_download_quote_letterhead(
+    body: OoPersistDownloadIn,
+    admin: User = Depends(require_firm_admin),
+    db: Session = Depends(get_db),
+) -> None:
+    await _firm_letterhead_oo_persist_download("quote_letterhead", body, admin, db)
+
+
+@router.get("/letterhead/oo-save-status")
+def oo_save_status_letterhead(
+    base_version: int = Query(...),
+    admin: User = Depends(require_firm_admin),
+    db: Session = Depends(get_db),
+) -> dict[str, int | bool]:
+    return _firm_letterhead_oo_save_status("letterhead", base_version, admin, db)
+
+
+@router.get("/quote-letterhead/oo-save-status")
+def oo_save_status_quote_letterhead(
+    base_version: int = Query(...),
+    admin: User = Depends(require_firm_admin),
+    db: Session = Depends(get_db),
+) -> dict[str, int | bool]:
+    return _firm_letterhead_oo_save_status("quote_letterhead", base_version, admin, db)
