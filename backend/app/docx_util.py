@@ -3178,10 +3178,94 @@ def _docx_set_table_width_pct(table: Any, pct: int = 5000) -> None:
     if tbl_pr is None:
         tbl_pr = OxmlElement("w:tblPr")
         tbl.insert(0, tbl_pr)
+    for existing in tbl_pr.findall(qn("w:tblW")):
+        tbl_pr.remove(existing)
     tbl_w = OxmlElement("w:tblW")
     tbl_w.set(qn("w:w"), str(pct))
     tbl_w.set(qn("w:type"), "pct")
     tbl_pr.append(tbl_w)
+
+
+def _docx_normalize_table_width(table: Any) -> None:
+    """Ensure a table has a single ``w:tblW`` (Word uses the first when duplicates exist)."""
+    from copy import deepcopy
+
+    from docx.oxml.ns import qn
+
+    tbl_pr = table._tbl.tblPr
+    if tbl_pr is None:
+        return
+    widths = tbl_pr.findall(qn("w:tblW"))
+    if len(widths) <= 1:
+        return
+    chosen = None
+    for width in widths:
+        if width.get(qn("w:type")) == "pct":
+            chosen = width
+            break
+    if chosen is None:
+        for width in reversed(widths):
+            if width.get(qn("w:w")) not in (None, "0"):
+                chosen = width
+                break
+    if chosen is None:
+        chosen = widths[-1]
+    for width in widths:
+        tbl_pr.remove(width)
+    tbl_pr.append(deepcopy(chosen))
+
+
+def _docx_set_table_layout_fixed(table: Any) -> None:
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+
+    tbl = table._tbl
+    tbl_pr = tbl.tblPr
+    if tbl_pr is None:
+        tbl_pr = OxmlElement("w:tblPr")
+        tbl.insert(0, tbl_pr)
+    layout = tbl_pr.find(qn("w:tblLayout"))
+    if layout is None:
+        layout = OxmlElement("w:tblLayout")
+        tbl_pr.append(layout)
+    layout.set(qn("w:type"), "fixed")
+
+
+def _docx_table_grid_col_widths(table: Any) -> list[int]:
+    from docx.oxml.ns import qn
+
+    grid = table._tbl.find(qn("w:tblGrid"))
+    if grid is None:
+        return []
+    out: list[int] = []
+    for col in grid.findall(qn("w:gridCol")):
+        raw = col.get(qn("w:w"))
+        if raw is not None:
+            out.append(int(raw))
+    return out
+
+
+def _docx_set_table_grid_col_widths(table: Any, widths: list[int]) -> None:
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+
+    tbl = table._tbl
+    grid = tbl.find(qn("w:tblGrid"))
+    if grid is None:
+        grid = OxmlElement("w:tblGrid")
+        tbl_pr = tbl.tblPr
+        insert_at = list(tbl).index(tbl_pr) + 1 if tbl_pr is not None else 0
+        tbl.insert(insert_at, grid)
+    for col in list(grid.findall(qn("w:gridCol"))):
+        grid.remove(col)
+    for width in widths:
+        col = OxmlElement("w:gridCol")
+        col.set(qn("w:w"), str(width))
+        grid.append(col)
+
+
+# Default fee-table column widths (3.85", 1.35", 1.35") when the template omits ``w:tblGrid``.
+_QUOTE_FEE_TABLE_GRID_DXA = (5544, 1944, 1944)
 
 
 def _docx_style_table_paragraph(
@@ -3221,7 +3305,90 @@ def _find_quote_fee_table(doc: Any) -> Any | None:
     return None
 
 
-def _style_quote_fee_table_header_row(table: Any) -> None:
+def _docx_copy_table_width(from_table: Any, to_table: Any) -> None:
+    """Copy ``w:tblW`` from one table to another so layout matches the template."""
+    from copy import deepcopy
+
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+
+    _docx_normalize_table_width(from_table)
+    src_pr = from_table._tbl.tblPr
+    if src_pr is None:
+        return
+    src_w = src_pr.find(qn("w:tblW"))
+    if src_w is None:
+        return
+    dst_tbl = to_table._tbl
+    dst_pr = dst_tbl.tblPr
+    if dst_pr is None:
+        dst_pr = OxmlElement("w:tblPr")
+        dst_tbl.insert(0, dst_pr)
+    for existing in dst_pr.findall(qn("w:tblW")):
+        dst_pr.remove(existing)
+    dst_pr.append(deepcopy(src_w))
+
+
+def _docx_lock_quote_fee_table_layout(table: Any) -> list[int]:
+    """Preserve template column widths so merged content cannot expand the fee table."""
+    _docx_normalize_table_width(table)
+    _docx_set_table_layout_fixed(table)
+    ncols = len(table.rows[0].cells) if table.rows else 0
+    grid = _docx_table_grid_col_widths(table)
+    if len(grid) != ncols:
+        if ncols == 3:
+            grid = list(_QUOTE_FEE_TABLE_GRID_DXA)
+        elif ncols == 2:
+            grid = [_QUOTE_FEE_TABLE_GRID_DXA[0], sum(_QUOTE_FEE_TABLE_GRID_DXA[1:])]
+        else:
+            grid = []
+        if grid:
+            _docx_set_table_grid_col_widths(table, grid)
+    return grid
+
+
+def _docx_summary_grid_from_fee_grid(fee_grid: list[int], summary_cols: int) -> list[int]:
+    if summary_cols <= 0 or not fee_grid:
+        return []
+    if summary_cols == len(fee_grid):
+        return list(fee_grid)
+    if summary_cols == 2 and len(fee_grid) >= 3:
+        return [fee_grid[0], sum(fee_grid[1:3])]
+    if summary_cols == 2 and len(fee_grid) == 2:
+        return list(fee_grid)
+    total = sum(fee_grid)
+    if summary_cols == 1:
+        return [total]
+    per = max(total // summary_cols, 1)
+    return [per] * (summary_cols - 1) + [total - per * (summary_cols - 1)]
+
+
+def _find_quote_summary_tables(doc: Any, *, exclude: Any | None = None) -> list[Any]:
+    """Tables for quote totals (e.g. grand total) below the main fee table."""
+    tables: list[Any] = []
+    for table in doc.tables:
+        if table is exclude or not table.rows:
+            continue
+        ncols = len(table.rows[0].cells)
+        if ncols not in (2, 3):
+            continue
+        blob = " ".join((cell.text or "") for row in table.rows for cell in row.cells).lower()
+        if "grand total" in blob or "quote_grand_total" in blob:
+            tables.append(table)
+    return tables
+
+
+def _sync_quote_summary_table_widths(doc: Any, fee_table: Any, *, fee_grid: list[int]) -> None:
+    for summary in _find_quote_summary_tables(doc, exclude=fee_table):
+        _docx_copy_table_width(fee_table, summary)
+        _docx_set_table_layout_fixed(summary)
+        summary_cols = len(summary.rows[0].cells) if summary.rows else 0
+        grid = _docx_summary_grid_from_fee_grid(fee_grid, summary_cols)
+        if grid:
+            _docx_set_table_grid_col_widths(summary, grid)
+
+
+def _style_quote_fee_table_header_row(table: Any, *, preserve_layout: bool = False) -> None:
     from docx.enum.text import WD_ALIGN_PARAGRAPH
     from docx.shared import Inches
 
@@ -3246,9 +3413,10 @@ def _style_quote_fee_table_header_row(table: Any) -> None:
             left=_docx_quote_border() if i == 0 else None,
             right=_docx_quote_border() if i == 2 else None,
         )
-    for i, width in enumerate(col_widths):
-        for row in table.rows:
-            row.cells[i].width = width
+    if not preserve_layout:
+        for i, width in enumerate(col_widths):
+            for row in table.rows:
+                row.cells[i].width = width
 
 
 def _style_quote_fee_table_data_row(
@@ -3312,12 +3480,9 @@ def apply_quote_table_presentation(doc_bytes: bytes, lines: list[Any]) -> bytes:
     if table is None:
         return doc_bytes
 
-    _docx_set_table_width_pct(table)
-    try:
-        table.style = "Table Grid"
-    except Exception:
-        pass
-    _style_quote_fee_table_header_row(table)
+    fee_grid = _docx_lock_quote_fee_table_layout(table)
+
+    _style_quote_fee_table_header_row(table, preserve_layout=True)
 
     for ri, line in enumerate(lines, start=1):
         if ri >= len(table.rows):
@@ -3327,6 +3492,9 @@ def apply_quote_table_presentation(doc_bytes: bytes, lines: list[Any]) -> bytes:
             table.rows[ri],
             line_kind=kind,
         )
+
+    _sync_quote_summary_table_widths(doc, table, fee_grid=fee_grid)
+    _docx_lock_quote_fee_table_layout(table)
 
     out = io.BytesIO()
     doc.save(out)

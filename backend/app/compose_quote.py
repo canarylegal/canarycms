@@ -13,7 +13,9 @@ from app.docx_util import (
     QUOTE_MERGE_SLOT_COUNT,
     apply_quote_table_presentation,
     build_merge_fields,
+    fee_earner_signature_for_merge,
     format_gbp_pence,
+    inject_merge_code_images,
     merge_precedent_codes,
     strip_empty_quote_table_rows,
     validate_docx_package_bytes,
@@ -313,6 +315,14 @@ def merge_compose_quote_docx_bytes(
         ordered_clients=[],
         merge_all_clients=body.precedent_merge_all_clients,
     )
+    sig = fee_earner_signature_for_merge(db, case_row.fee_earner_user_id if case_row else None)
+    if sig:
+        sig_path, sig_width = sig
+        docx_bytes = inject_merge_code_images(
+            docx_bytes,
+            {"[FEE_EARNER_SIGNATURE]": sig_path},
+            width_inches={"[FEE_EARNER_SIGNATURE]": sig_width},
+        )
     docx_bytes = strip_empty_quote_table_rows(docx_bytes)
     docx_bytes = apply_quote_table_presentation(docx_bytes, computed)
     docx_bytes, qlh_bytes = apply_quote_digital_letterhead_from_settings(db, firm_row=firm_row, src_bytes=docx_bytes)
