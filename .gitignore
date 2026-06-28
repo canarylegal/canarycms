@@ -17,8 +17,10 @@ data/
 .canary-compose-job-state.json
 .canary-compose-up-*.json
 
-# Firm-specific seed scripts (local deployments only; not for GitHub)
+# Firm-specific scripts (local deployments only; not for GitHub)
 backend/scripts/seed_mcwilliams_portal_forms.py
+backend/scripts/prepare_ashbourne_quote_precedent.py
+backend/scripts/prepare_ashbourne_quote_spreadsheet.py
 
 # Stray artifacts
 backend/=2.8.0
