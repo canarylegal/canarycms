@@ -148,6 +148,8 @@ export type FirmSettingsOut = {
   letterhead_original_filename?: string | null
   quote_letterhead_style?: LetterheadStyle
   quote_letterhead_original_filename?: string | null
+  portal_logo_configured?: boolean
+  portal_logo_original_filename?: string | null
   mandate_two_factor?: boolean
   mandate_password_rotation?: boolean
   password_rotation_days?: number | null
