@@ -1,0 +1,314 @@
+/*
+ * Canary theme for Betterbird / Thunderbird 128+
+ * Palette: navy chrome (#1e3a8a), accent (#2563eb), white content panels.
+ *
+ * Requires: toolkit.legacyUserProfileCustomizations.stylesheets = true
+ * Place in: <profile>/chrome/userChrome.css
+ */
+
+@namespace html url("http://www.w3.org/1999/xhtml");
+@namespace xul url("http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul");
+
+:root {
+  --canary-navy: #1e3a8a;
+  --canary-navy-deep: #1e40af;
+  --canary-navy-border: #172554;
+  --canary-accent: #2563eb;
+  --canary-accent-soft: #dbeafe;
+  --canary-accent-muted: #eff6ff;
+  --canary-panel: #ffffff;
+  --canary-panel-soft: #f8fafc;
+  --canary-text: #0f172a;
+  --canary-text-on-navy: #f8fafc;
+  --canary-muted: #64748b;
+  --canary-gold: #facc15;
+}
+
+/* ── Window + global chrome ───────────────────────────────────────── */
+
+#messengerWindow,
+#mail-toolbox,
+#navigation-toolbox,
+#tabs-toolbar,
+.tabmail-tabs,
+#titlebar {
+  background-color: var(--canary-navy) !important;
+  color: var(--canary-text-on-navy) !important;
+}
+
+/* Tab strip */
+.tabmail-tab .tab-content,
+.tabmail-tab .tab-background {
+  color: var(--canary-text-on-navy) !important;
+}
+
+.tabmail-tab:not([selected="true"]) .tab-background {
+  background-color: var(--canary-navy-deep) !important;
+}
+
+.tabmail-tab[selected="true"] .tab-background {
+  background-color: var(--canary-panel) !important;
+}
+
+.tabmail-tab[selected="true"] .tab-content {
+  color: var(--canary-text) !important;
+}
+
+.tabmail-tab[selected="true"] .tab-line {
+  background-color: var(--canary-accent) !important;
+  height: 3px !important;
+}
+
+/* Toolbar icons on navy */
+#mail-toolbox toolbarbutton,
+#navigation-toolbox toolbarbutton,
+.tabmail-tab:not([selected="true"]) .tab-icon-image,
+.tabmail-tab:not([selected="true"]) .tab-label-container {
+  color: var(--canary-text-on-navy) !important;
+  fill: var(--canary-text-on-navy) !important;
+}
+
+/* Search / unified toolbar fields on chrome */
+#mail-toolbox toolbartextbox,
+#mail-toolbox .textbox-input {
+  background-color: var(--canary-panel) !important;
+  color: var(--canary-text) !important;
+  border-radius: 6px !important;
+}
+
+#threadTree,
+#threadPaneBox,
+#threadPaneHeaderBar,
+#messageContainer,
+#messageHeaderView,
+#messagepane,
+.browserContainer {
+  background-color: var(--canary-panel) !important;
+  color: var(--canary-text) !important;
+}
+
+/* Spaces sidebar — inactive icons must be dark on the white bar */
+#spacesToolbar,
+#spacesToolbar > toolbar {
+  background-color: var(--canary-panel) !important;
+}
+
+#spacesToolbar toolbarbutton,
+#mailButton,
+#calendarButton,
+#addressBookButton,
+#tasksButton,
+#chatButton {
+  color: var(--canary-navy) !important;
+  fill: var(--canary-navy) !important;
+}
+
+#spacesToolbar toolbarbutton .toolbarbutton-icon,
+#mailButton .toolbarbutton-icon,
+#calendarButton .toolbarbutton-icon,
+#addressBookButton .toolbarbutton-icon,
+#tasksButton .toolbarbutton-icon,
+#chatButton .toolbarbutton-icon {
+  fill: var(--canary-navy) !important;
+}
+
+#spacesToolbar toolbarbutton[checked="true"],
+#spacesToolbar toolbarbutton[open="true"],
+#spacesToolbar toolbarbutton:checked {
+  color: var(--canary-accent) !important;
+  fill: var(--canary-accent) !important;
+  background-color: var(--canary-accent-soft) !important;
+}
+
+#spacesToolbar toolbarbutton[checked="true"] .toolbarbutton-icon,
+#spacesToolbar toolbarbutton[open="true"] .toolbarbutton-icon,
+#spacesToolbar toolbarbutton:checked .toolbarbutton-icon {
+  fill: var(--canary-accent) !important;
+}
+
+/* Reading pane watermark (logo in profile chrome/ folder) */
+#mailContentPane,
+#messagepaneboxwrapper,
+#messagepanebox {
+  position: relative !important;
+  background-color: var(--canary-panel-soft) !important;
+}
+
+#mailContentPane::before,
+#messagepaneboxwrapper::before,
+#messagepanebox::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: url("canary-logo.jpg") center center / min(320px, 48%) no-repeat;
+  opacity: 0.22;
+  pointer-events: none;
+  z-index: 0;
+}
+
+#mailContentPane > *,
+#messagepaneboxwrapper > *,
+#messagepanebox > * {
+  position: relative;
+  z-index: 1;
+}
+
+.message-header-container,
+#messageHeaderView {
+  background-color: rgba(255, 255, 255, 0.94) !important;
+}
+
+#messagepane,
+.browserContainer {
+  background-color: rgba(255, 255, 255, 0.82) !important;
+}
+
+/* ── Folder pane ──────────────────────────────────────────────────── */
+
+#folderTree,
+#folderPaneBox,
+#folderPaneHeaderBar {
+  background-color: var(--canary-panel-soft) !important;
+  color: var(--canary-text) !important;
+}
+
+#folderTree treechildren::-moz-tree-row(selected) {
+  background-color: var(--canary-accent-soft) !important;
+}
+
+#folderTree treechildren::-moz-tree-row(hover) {
+  background-color: var(--canary-accent-muted) !important;
+}
+
+#folderTree treechildren::-moz-tree-cell-text(selected) {
+  color: var(--canary-navy) !important;
+  font-weight: 600;
+}
+
+/* ── Message list (cards + table) ─────────────────────────────────── */
+
+#threadTree,
+#threadPaneBox,
+#threadPaneHeaderBar {
+  background-color: var(--canary-panel) !important;
+  color: var(--canary-text) !important;
+}
+
+/* Card view — light rows (not dark) */
+tr[is="thread-card"] .card-container {
+  background-color: var(--canary-panel) !important;
+  border-color: rgba(15, 23, 42, 0.08) !important;
+  border-radius: 8px !important;
+}
+
+tr[is="thread-card"][data-properties~="unread"] .card-container {
+  background-color: var(--canary-accent-muted) !important;
+  border-left: 3px solid var(--canary-accent) !important;
+}
+
+tr[is="thread-card"][data-properties~="unread"] .subject,
+tr[is="thread-card"][data-properties~="unread"] .subject-container {
+  color: var(--canary-accent) !important;
+  font-weight: 600 !important;
+}
+
+tr[is="thread-card"].selected .card-container,
+tr[is="thread-card"][data-properties~="read"].selected .card-container {
+  background-color: var(--canary-accent-soft) !important;
+  outline: 1px solid rgba(37, 99, 235, 0.35) !important;
+}
+
+tr[is="thread-card"]:hover .card-container {
+  background-color: var(--canary-accent-muted) !important;
+}
+
+/* Classic table view */
+#threadTree treechildren::-moz-tree-row(unread) {
+  font-weight: 600 !important;
+}
+
+#threadTree treechildren::-moz-tree-cell-text(unread) {
+  color: var(--canary-accent) !important;
+}
+
+#threadTree treechildren::-moz-tree-row(selected) {
+  background-color: var(--canary-accent-soft) !important;
+}
+
+#threadTree treechildren::-moz-tree-row(hover) {
+  background-color: var(--canary-accent-muted) !important;
+}
+
+/* ── Reading pane ─────────────────────────────────────────────────── */
+
+/* (watermark on #mailContentPane / #messagepanebox — see top of file) */
+
+/* ── Primary buttons (OK, compose send bar, etc.) ─────────────────── */
+
+button[is="dialog-button"][default="true"],
+.toolbar-primary-button,
+button.primary {
+  background-color: var(--canary-accent) !important;
+  color: #ffffff !important;
+  border-color: var(--canary-accent) !important;
+  border-radius: 6px !important;
+}
+
+button[is="dialog-button"][default="true"]:hover,
+.toolbar-primary-button:hover {
+  background-color: var(--canary-navy-deep) !important;
+}
+
+/* Links */
+a,
+.link {
+  color: var(--canary-accent) !important;
+}
+
+/* ── Calendar ─────────────────────────────────────────────────────── */
+
+#calendar-tab-panel,
+.calendar-pane-grid-wrapper,
+#bottom-events-box,
+#calendar-toolbar {
+  background-color: var(--canary-panel) !important;
+  color: var(--canary-text) !important;
+}
+
+#calendar-toolbar {
+  border-bottom: 1px solid rgba(15, 23, 42, 0.08) !important;
+}
+
+.calendar-month-day-box-current-month {
+  background-color: var(--canary-panel) !important;
+}
+
+.calendar-month-day-box-day-label-today {
+  background-color: var(--canary-accent) !important;
+  color: #ffffff !important;
+  border-radius: 999px !important;
+}
+
+.calendar-event-box-container {
+  border-radius: 4px !important;
+}
+
+/* Full-width category colour bars (optional — matches Canary calendar labels) */
+.calendar-category-box {
+  width: 100% !important;
+  opacity: 0.85;
+}
+
+/* ── Dialogs / settings ─────────────────────────────────────────── */
+
+dialog,
+window[type="dialog"] {
+  background-color: var(--canary-panel) !important;
+  color: var(--canary-text) !important;
+}
+
+/* ── Scrollbars (subtle, on Linux) ────────────────────────────────── */
+
+* {
+  scrollbar-color: var(--canary-navy-deep) var(--canary-panel-soft);
+}

@@ -52,6 +52,16 @@ Optional: `CANARY_SYNC_CALDAV_EVENT_CATEGORIES=0` disables one-time startup sync
 
 After changing `.env`, restart the backend. Labels are created on each user calendar at startup; new events pick up `CATEGORIES` automatically.
 
+## Canary UI theme (optional)
+
+Navy/white Betterbird chrome matching the web app.
+
+**Install:** Settings → Add-ons and Themes → Install Add-on From File → `theme-extension/dist/canary-theme-1.2.0.xpi` (build: `node theme-extension/package.mjs`). Enable under **Themes**. v1.2 fixes spaces-sidebar icons and the reading-pane logo watermark.
+
+Optional deeper styling (recommended for logo + sidebar if the XPI alone is not enough): run `theme/install-theme.sh` — copies `userChrome.css` + logo and enables the legacy stylesheet pref (also set via `policies.json` when deployed).
+
+For enterprise force-install, whitelist `canary-theme@canarylegal.co.uk` in `ExtensionSettings` alongside the mail add-on.
+
 ## Updating the add-on URL
 
 When releasing a new signed `.xpi`, bump `install_url` in `policies.json` to match the version on `https://canarylegalsoftware.co.uk/thunderbird/`. Existing installs still auto-update via `updates.json` once the add-on is installed.

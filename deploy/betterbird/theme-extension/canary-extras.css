@@ -1,0 +1,108 @@
+/* Light content panels + reading-pane watermark (theme experiment). */
+@import "canary-logo-datauri.css";
+
+/* Force light mail/calendar content (TB 128+ auto-dark otherwise). */
+#threadPaneBox,
+#threadTree,
+#threadPaneHeaderBar,
+#messagepaneboxwrapper,
+#messagepanebox,
+#messageContainer,
+#messageHeaderView,
+#folderPaneBox,
+#calendar-tab-panel,
+.calendar-pane-grid-wrapper {
+  background-color: #ffffff !important;
+  color: #0f172a !important;
+}
+
+/* Spaces sidebar — theme "icons" colour is light (for navy chrome); bar is white. */
+#spacesToolbar,
+#spacesToolbar > toolbar {
+  background-color: #ffffff !important;
+}
+
+#spacesToolbar toolbarbutton,
+#mailButton,
+#calendarButton,
+#addressBookButton,
+#tasksButton,
+#chatButton {
+  color: #1e3a8a !important;
+  fill: #1e3a8a !important;
+}
+
+#spacesToolbar toolbarbutton .toolbarbutton-icon,
+#mailButton .toolbarbutton-icon,
+#calendarButton .toolbarbutton-icon,
+#addressBookButton .toolbarbutton-icon,
+#tasksButton .toolbarbutton-icon,
+#chatButton .toolbarbutton-icon {
+  fill: #1e3a8a !important;
+}
+
+#spacesToolbar toolbarbutton[checked="true"],
+#spacesToolbar toolbarbutton[open="true"],
+#spacesToolbar toolbarbutton:checked {
+  color: #2563eb !important;
+  fill: #2563eb !important;
+  background-color: #dbeafe !important;
+}
+
+#spacesToolbar toolbarbutton[checked="true"] .toolbarbutton-icon,
+#spacesToolbar toolbarbutton[open="true"] .toolbarbutton-icon,
+#spacesToolbar toolbarbutton:checked .toolbarbutton-icon {
+  fill: #2563eb !important;
+}
+
+/* Message list — card view */
+tr[is="thread-card"] .card-container {
+  background-color: #ffffff !important;
+  border-color: rgba(15, 23, 42, 0.08) !important;
+}
+
+tr[is="thread-card"][data-properties~="unread"] .card-container {
+  background-color: #eff6ff !important;
+}
+
+tr[is="thread-card"].selected .card-container {
+  background-color: #dbeafe !important;
+}
+
+/* Reading pane watermark — ::before so empty pane + message body don't cover it */
+#mailContentPane,
+#messagepaneboxwrapper,
+#messagepanebox {
+  position: relative !important;
+  background-color: #f8fafc !important;
+}
+
+#mailContentPane::before,
+#messagepaneboxwrapper::before,
+#messagepanebox::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--canary-logo-watermark) center center / min(320px, 48%) no-repeat;
+  opacity: 0.22;
+  pointer-events: none;
+  z-index: 0;
+}
+
+#mailContentPane > *,
+#messagepaneboxwrapper > *,
+#messagepanebox > * {
+  position: relative;
+  z-index: 1;
+}
+
+/* Slightly translucent body so watermark shows through when a message is open */
+.message-header-container,
+#messageHeaderView {
+  background-color: rgba(255, 255, 255, 0.94) !important;
+}
+
+#messagepane,
+.browserContainer {
+  background-color: rgba(255, 255, 255, 0.82) !important;
+}

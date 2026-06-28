@@ -1,0 +1,52 @@
+{
+  "manifest_version": 2,
+  "name": "Canary",
+  "description": "Light Canary UI — navy chrome, white panels, logo watermark in reading pane.",
+  "version": "1.2.0",
+  "author": "Canary Legal Software",
+  "applications": {
+    "gecko": {
+      "id": "canary-theme@canarylegal.co.uk",
+      "strict_min_version": "128.0"
+    }
+  },
+  "theme_experiment": {
+    "stylesheet": "canary-extras.css"
+  },
+  "theme": {
+    "properties": {
+      "color_scheme": "light",
+      "content_color_scheme": "light"
+    },
+    "colors": {
+      "frame": "#1e3a8a",
+      "frame_inactive": "#1e40af",
+      "toolbar": "#1e3a8a",
+      "toolbar_text": "#f8fafc",
+      "toolbar_bottom_separator": "#1e40af",
+      "toolbar_field": "#ffffff",
+      "toolbar_field_text": "#0f172a",
+      "toolbar_field_border": "#cbd5e1",
+      "toolbar_field_focus": "#2563eb",
+      "tab_background_text": "#e2e8f0",
+      "tab_text": "#0f172a",
+      "tab_line": "#2563eb",
+      "tab_selected": "#ffffff",
+      "icons": "#f8fafc",
+      "icons_attention": "#2563eb",
+      "popup": "#ffffff",
+      "popup_text": "#0f172a",
+      "popup_border": "#e2e8f0",
+      "sidebar": "#ffffff",
+      "sidebar_text": "#0f172a",
+      "sidebar_border": "#e2e8f0",
+      "sidebar_highlight": "#dbeafe",
+      "sidebar_highlight_text": "#1e3a8a",
+      "button_background_hover": "#2563eb",
+      "button_background_active": "#1e40af",
+      "bookmark_text": "#f8fafc",
+      "ntp_background": "#ffffff",
+      "ntp_text": "#0f172a"
+    }
+  }
+}
