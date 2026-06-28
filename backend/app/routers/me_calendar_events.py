@@ -95,12 +95,23 @@ def get_calendar_events(
     start: str = Query(..., description="ISO8601 window start"),
     end: str = Query(..., description="ISO8601 window end"),
     calendar_ids: str | None = Query(None, description="Comma-separated calendar UUIDs; omit for all accessible"),
+    include_caldav: bool = Query(
+        True,
+        description="When false, return Canary matter events only (no Radicale fetch). Use for fast first paint.",
+    ),
 ) -> list[CalendarEventOut]:
     _require_caldav(user)
     rs = _parse_range_param(start)
     re = _parse_range_param(end)
     ids = _parse_calendar_ids(calendar_ids)
-    raw = list_merged_events(db, user, range_start=rs, range_end=re, calendar_ids=ids)
+    raw = list_merged_events(
+        db,
+        user,
+        range_start=rs,
+        range_end=re,
+        calendar_ids=ids,
+        include_caldav=include_caldav,
+    )
     return [CalendarEventOut.model_validate(x) for x in raw]
 
 

@@ -177,7 +177,8 @@ def parse_caldav_event(
     *,
     calendar_id: str | None = None,
 ) -> dict[str, Any]:
-    ev.load()
+    if not getattr(ev, "data", None):
+        ev.load()
     ical = ICal.from_ical(ev.data)
     vevent = None
     for c in ical.walk("VEVENT"):
@@ -297,6 +298,11 @@ def list_events_for_multiple_slugs(
     """Fetch events for many calendars with one principal + one calendar listing (not N×)."""
     if not items:
         return []
+    from app.calendar_caldav_cache import get_cached_events, store_cached_events
+
+    cached = get_cached_events(dav_user.id, items, range_start, range_end)
+    if cached is not None:
+        return cached
     try:
         principal = _principal(dav_user)
         by_slug: dict[str, caldav.Calendar] = {}
@@ -314,7 +320,9 @@ def list_events_for_multiple_slugs(
 
         if len(work) == 1:
             cal, display_name, calendar_id = work[0]
-            return _events_for_calendar_slug(cal, display_name, calendar_id, range_start, range_end)
+            out = _events_for_calendar_slug(cal, display_name, calendar_id, range_start, range_end)
+            store_cached_events(dav_user.id, items, range_start, range_end, out)
+            return out
 
         out: list[dict[str, Any]] = []
         workers = min(4, len(work))
@@ -325,6 +333,7 @@ def list_events_for_multiple_slugs(
             ]
             for future in as_completed(futures):
                 out.extend(future.result())
+        store_cached_events(dav_user.id, items, range_start, range_end, out)
         return out
     except HTTPException:
         raise
@@ -415,6 +424,9 @@ def create_event_on_calendar(
         payload = raw.decode("utf-8") if isinstance(raw, bytes) else raw
         ev = cal.add_event(payload)
         ev.load()
+        from app.calendar_caldav_cache import invalidate_caldav_events_cache
+
+        invalidate_caldav_events_cache(dav_user_id=dav_user.id)
         return parse_caldav_event(ev, calendar_display_name, calendar_id=str(calendar_id))
     except HTTPException:
         raise
@@ -508,6 +520,9 @@ def update_event_on_principal(
         ev.data = raw_out.decode("utf-8") if isinstance(raw_out, bytes) else raw_out
         ev.save()
         ev.load()
+        from app.calendar_caldav_cache import invalidate_caldav_events_cache
+
+        invalidate_caldav_events_cache(dav_user_id=owner.id)
         cname = calendar_display_name
         if cname is None:
             try:
@@ -558,6 +573,9 @@ def delete_event_on_principal(owner: User, href: str) -> None:
     ev = load_event_on_principal(owner, href)
     try:
         ev.delete()
+        from app.calendar_caldav_cache import invalidate_caldav_events_cache
+
+        invalidate_caldav_events_cache(dav_user_id=owner.id)
     except HTTPException:
         raise
     except Exception as e:

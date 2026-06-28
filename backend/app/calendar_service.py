@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import uuid
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Literal
@@ -34,6 +35,11 @@ def sync_remote_calendars_into_db(db: Session, user: User) -> None:
     """Import Radicale collections missing from DB for this owner (by slug)."""
     if not user.caldav_password_enc:
         return
+    from app.calendar_caldav_cache import mark_remote_calendar_synced, should_skip_remote_calendar_sync
+
+    if should_skip_remote_calendar_sync(user.id):
+        return
+
     from app.radicale_calendar import list_calendar_slugs_remote
 
     remote = list_calendar_slugs_remote(user)
@@ -58,6 +64,7 @@ def sync_remote_calendars_into_db(db: Session, user: User) -> None:
         added = True
     if added:
         db.commit()
+    mark_remote_calendar_synced(user.id)
 
 
 def ensure_default_calendar(db: Session, user: User) -> UserCalendar:
@@ -194,31 +201,48 @@ def list_merged_events(
     range_start: datetime,
     range_end: datetime,
     calendar_ids: list[uuid.UUID] | None,
+    include_caldav: bool = True,
 ):
     from app.radicale_calendar import list_events_for_multiple_slugs
 
-    # Sync runs on GET /users/me/calendars; avoid a second Radicale list on every events fetch.
-    accesses = list_accessible_calendars(db, requesting, filter_ids=calendar_ids)
-    by_owner: dict[uuid.UUID, list[CalendarAccess]] = defaultdict(list)
-    for a in accesses:
-        if not a.dav_user.caldav_password_enc:
-            continue
-        by_owner[a.dav_user.id].append(a)
-
     out: list[dict] = []
-    for accs in by_owner.values():
-        dav_user = accs[0].dav_user
-        items = [(a.calendar.radicale_slug, a.calendar.name, str(a.calendar.id)) for a in accs]
-        can_edit = {str(a.calendar.id): a.permission != "read" for a in accs}
-        for item in list_events_for_multiple_slugs(dav_user, items, range_start, range_end):
-            cid = item.get("calendar_id")
-            item["can_edit"] = can_edit.get(str(cid), False) if cid is not None else False
-            out.append(item)
+    if include_caldav:
+        # Sync runs on GET /users/me/calendars; avoid a second Radicale list on every events fetch.
+        accesses = list_accessible_calendars(db, requesting, filter_ids=calendar_ids)
+        by_owner: dict[uuid.UUID, list[CalendarAccess]] = defaultdict(list)
+        for a in accesses:
+            if not a.dav_user.caldav_password_enc:
+                continue
+            by_owner[a.dav_user.id].append(a)
+
+        def _fetch_owner_events(accs: list[CalendarAccess]) -> list[dict]:
+            dav_user = accs[0].dav_user
+            items = [(a.calendar.radicale_slug, a.calendar.name, str(a.calendar.id)) for a in accs]
+            can_edit = {str(a.calendar.id): a.permission != "read" for a in accs}
+            rows: list[dict] = []
+            for item in list_events_for_multiple_slugs(dav_user, items, range_start, range_end):
+                cid = item.get("calendar_id")
+                item["can_edit"] = can_edit.get(str(cid), False) if cid is not None else False
+                rows.append(item)
+            return rows
+
+        owner_groups = list(by_owner.values())
+        if owner_groups:
+            if len(owner_groups) == 1:
+                out.extend(_fetch_owner_events(owner_groups[0]))
+            else:
+                workers = min(4, len(owner_groups))
+                with ThreadPoolExecutor(max_workers=workers) as pool:
+                    futures = [pool.submit(_fetch_owner_events, accs) for accs in owner_groups]
+                    for future in as_completed(futures):
+                        out.extend(future.result())
+
     from app.calendar_category import enrich_events_with_categories
     from app.event_service import enrich_caldav_events_with_linked_case_events, list_tracked_case_events_for_calendar_merge
 
-    enrich_events_with_categories(db, out)
-    enrich_caldav_events_with_linked_case_events(db, requesting, out)
+    if include_caldav:
+        enrich_events_with_categories(db, out)
+        enrich_caldav_events_with_linked_case_events(db, requesting, out)
     out.extend(list_tracked_case_events_for_calendar_merge(db, requesting, range_start, range_end))
     from app.calendar_email_alert_service import enrich_merged_calendar_events
 
