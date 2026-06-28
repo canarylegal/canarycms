@@ -22,7 +22,7 @@ class AppErrorBoundary extends Component<{ children: ReactNode }, { err: Error |
           style={{
             padding: 24,
             fontFamily: 'system-ui, sans-serif',
-            background: 'var(--page-bg)',
+            background: 'var(--page-gradient)',
             color: '#dc2626',
             minHeight: '100vh',
             whiteSpace: 'pre-wrap',
