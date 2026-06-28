@@ -22,6 +22,7 @@ import { SingleSelectDropdown } from './SingleSelectDropdown'
 import { useExclusiveDropdownOpen } from './useExclusiveDropdownOpen'
 import { CALENDAR_LIST_YEAR_VIEW, calendarListEventContent, calendarNoEventsContent } from './calendarListView'
 import { useUserUiPreferences, type CalendarView } from './useUserUiPreferences'
+import { defaultOwnedCalendarId, syncCaseEventToCalDav } from './calendarEventSync'
 import type {
   CalendarCategoryOut,
   CalendarDirectoryRow,
@@ -266,13 +267,46 @@ const DUR_HOUR_SELECT_OPTIONS = DUR_HOURS_0_24.map((h) => ({ value: String(h), l
 const DUR_MIN_SELECT_OPTIONS = DUR_MINS_1_60.map((m) => ({ value: String(m), label: String(m) }))
 
 type CalendarEventDropdownKey =
-  | 'createCat'
-  | 'editCat'
+  | 'createMatterType'
+  | 'createCalLabel'
+  | 'editCalLabel'
   | 'startH'
   | 'startM'
   | 'durD'
   | 'durH'
   | 'durM'
+
+function calendarLabelOptions(categories: CalendarCategoryOut[]) {
+  return [
+    { value: '', label: 'No label' },
+    ...categories.map((c) => ({ value: c.id, label: c.name })),
+  ]
+}
+
+function buildCalDavTimesFromDraft(d: {
+  allDay: boolean
+  start: Date
+  end: Date
+  startHour: number
+  startMinute: number
+  durDays: number
+  durHours: number
+  durMinutes: number
+}): { start: string; end: string; all_day: boolean } {
+  if (d.allDay) {
+    return { start: toBodyDate(d.start, true), end: toBodyDate(d.end, true), all_day: true }
+  }
+  const anchor = startOfLocalDay(d.start)
+  const { start, end } = buildTimedStartEnd(
+    anchor,
+    d.startHour,
+    d.startMinute,
+    d.durDays,
+    d.durHours,
+    d.durMinutes,
+  )
+  return { start: toBodyDate(start, false), end: toBodyDate(end, false), all_day: false }
+}
 
 function startOfLocalDay(d: Date): Date {
   const x = new Date(d)
@@ -474,6 +508,10 @@ export function CalendarPage({
         caseId: string
         /** Same as ``CaseEventCreateModal``: ``custom`` or existing case event row id. */
         eventCategory: 'custom' | string
+        /** Calendar colour label (Canary-only; Radicale event gets category on sync). */
+        categoryId: string | null
+        /** Owned calendar used for labels and personal CalDAV events. */
+        targetCalendarId: string
         trackInCalendar: boolean
         emailAlert: boolean
       }
@@ -497,8 +535,10 @@ export function CalendarPage({
         calendarId: string
         categoryId: string | null
         categoryLabel: string | null
+        targetCalendarId: string
         caseId?: string
         caseEventId?: string
+        calendarEventUid?: string | null
         trackInCalendar?: boolean
         emailAlert: boolean
         /** CalDAV: optional matter template UUID stored on the event (X-CANARY-TEMPLATE-ID). */
@@ -522,10 +562,12 @@ export function CalendarPage({
   )
 
   const editEventCategoryOptions = useMemo(
-    () => [
-      { value: '', label: 'Custom (no category)' },
-      ...eventCategories.map((c) => ({ value: c.id, label: c.name })),
-    ],
+    () => calendarLabelOptions(eventCategories),
+    [eventCategories],
+  )
+
+  const createCalendarLabelOptions = useMemo(
+    () => calendarLabelOptions(eventCategories),
     [eventCategories],
   )
 
@@ -616,11 +658,21 @@ export function CalendarPage({
   const selectionKey = selectedCalIds.join(',')
 
   useEffect(() => {
-    if (!draft || draft.kind !== 'edit' || draft.editSource !== 'caldav') {
+    if (!draft) {
       setEventCategories([])
       return
     }
-    const calId = draft.calendarId
+    let calId = ''
+    if (draft.kind === 'create') {
+      calId = draft.targetCalendarId || defaultOwnedCalendarId(calendars) || ''
+    } else if (draft.kind === 'edit' && draft.editSource === 'caldav') {
+      calId = draft.calendarId
+    } else if (draft.kind === 'edit' && draft.editSource === 'case') {
+      calId = draft.targetCalendarId || defaultOwnedCalendarId(calendars) || ''
+    } else {
+      setEventCategories([])
+      return
+    }
     if (!calId) {
       setEventCategories([])
       return
@@ -636,7 +688,82 @@ export function CalendarPage({
     return () => {
       cancel = true
     }
-  }, [draft, token])
+  }, [draft, calendars, token])
+
+  /** Load CalDAV category for a tracked case event being edited. */
+  useEffect(() => {
+    if (draft?.kind !== 'edit' || draft.editSource !== 'case' || !draft.calendarEventUid) return
+    const uid = draft.calendarEventUid
+    let cancel = false
+    const winStart = new Date(draft.start)
+    winStart.setDate(winStart.getDate() - 1)
+    const winEnd = new Date(draft.end)
+    winEnd.setDate(winEnd.getDate() + 1)
+    const params = new URLSearchParams({
+      start: winStart.toISOString(),
+      end: winEnd.toISOString(),
+    })
+    void apiFetch<CalendarEventOut[]>(`/users/me/calendar/events?${params}`, { token })
+      .then((rows) => {
+        if (cancel) return
+        const match = rows.find((r) => r.id === uid)
+        if (!match?.category_id) return
+        setDraft((d) => {
+          if (d?.kind !== 'edit' || d.editSource !== 'case' || d.calendarEventUid !== uid) return d
+          if (d.categoryId) return d
+          return {
+            ...d,
+            categoryId: match.category_id ? String(match.category_id) : null,
+            categoryLabel: match.category_name ?? null,
+          }
+        })
+      })
+      .catch(() => {
+        /* ignore */
+      })
+    return () => {
+      cancel = true
+    }
+  }, [
+    draft?.kind,
+    draft?.kind === 'edit' ? draft.editSource : null,
+    draft?.kind === 'edit' ? draft.calendarEventUid : null,
+    draft?.start,
+    draft?.end,
+    token,
+  ])
+
+  useEffect(() => {
+    if (draft?.kind !== 'edit' || draft.editSource !== 'case' || !draft.caseId || !draft.caseEventId) return
+    let cancel = false
+    void apiFetch<{ events: CaseEventOut[] }>(`/cases/${draft.caseId}/events`, { token })
+      .then((out) => {
+        if (cancel) return
+        const row = (out.events ?? []).find((e) => e.id === draft.caseEventId)
+        if (!row) return
+        setDraft((d) => {
+          if (d?.kind !== 'edit' || d.editSource !== 'case' || d.caseEventId !== row.id) return d
+          return {
+            ...d,
+            calendarEventUid: row.calendar_event_uid ?? null,
+            emailAlert: Boolean(row.email_alert_enabled),
+            trackInCalendar: Boolean(row.track_in_calendar),
+          }
+        })
+      })
+      .catch(() => {
+        /* ignore */
+      })
+    return () => {
+      cancel = true
+    }
+  }, [
+    draft?.kind,
+    draft?.kind === 'edit' ? draft.editSource : null,
+    draft?.kind === 'edit' ? draft.caseId : null,
+    draft?.kind === 'edit' ? draft.caseEventId : null,
+    token,
+  ])
 
   const transformEventFromApi = useCallback((event: EventInput): EventInput => {
     const ep = event.extendedProps as { api_all_day?: boolean } | undefined
@@ -790,6 +917,8 @@ export function CalendarPage({
       durMinutes: allDaySel ? 30 : durM,
       caseId: '',
       eventCategory: 'custom',
+      categoryId: null,
+      targetCalendarId: defaultOwnedCalendarId(calendars) || '',
       trackInCalendar: true,
       emailAlert: false,
     })
@@ -823,6 +952,8 @@ export function CalendarPage({
       durMinutes: dur.durMinutes,
       caseId: '',
       eventCategory: 'custom',
+      categoryId: null,
+      targetCalendarId: defaultOwnedCalendarId(calendars) || '',
       trackInCalendar: true,
       emailAlert: false,
     })
@@ -881,10 +1012,12 @@ export function CalendarPage({
         durMinutes,
         canEdit,
         calendarId: '',
-        categoryId: null,
-        categoryLabel: null,
+        categoryId: ep.category_id ? String(ep.category_id) : null,
+        categoryLabel: ep.category_name != null && ep.category_name !== '' ? String(ep.category_name) : null,
+        targetCalendarId: defaultOwnedCalendarId(calendars) || '',
         caseId: ep.case_id,
         caseEventId: ep.case_event_id,
+        calendarEventUid: null,
         trackInCalendar: Boolean(ep.track_in_calendar),
         emailAlert: Boolean(ep.email_alert_enabled),
       })
@@ -908,6 +1041,7 @@ export function CalendarPage({
       calendarId: String(ep.calendar_id ?? ''),
       categoryId: ep.category_id ? String(ep.category_id) : null,
       categoryLabel: ep.category_name != null && ep.category_name !== '' ? String(ep.category_name) : null,
+      targetCalendarId: String(ep.calendar_id ?? ''),
       emailAlert: Boolean(ep.email_alert_enabled),
       matterTemplateId: ep.matter_template_id != null && ep.matter_template_id !== '' ? String(ep.matter_template_id) : null,
     })
@@ -951,19 +1085,39 @@ export function CalendarPage({
 
   async function saveCreate() {
     if (!draft || draft.kind !== 'create') return
-    const cid = draft.caseId.trim()
-    if (!cid) {
-      setBanner('Please select a matter for this event.')
-      return
-    }
     const title = draft.title.trim()
     if (!title) {
       setBanner('Please enter an event name.')
       return
     }
+    const cid = draft.caseId.trim()
     setBusy(true)
     setBanner(null)
     try {
+      if (!cid) {
+        const times = buildCalDavTimesFromDraft(draft)
+        const calId = draft.targetCalendarId || defaultOwnedCalendarId(calendars)
+        if (!calId) {
+          setBanner('No writable calendar found. Create a calendar under Calendars… first.')
+          return
+        }
+        await apiFetch<CalendarEventOut>(`/users/me/calendar/events`, {
+          method: 'POST',
+          token,
+          json: {
+            title,
+            ...times,
+            description: null,
+            calendar_id: calId,
+            category_id: draft.categoryId || null,
+            email_alert: draft.emailAlert,
+          },
+        })
+        setDraft(null)
+        refresh()
+        return
+      }
+
       const payload = buildCaseEventApiPayload({
         title,
         start: draft.start,
@@ -973,17 +1127,24 @@ export function CalendarPage({
         trackInCalendar: draft.trackInCalendar,
         emailAlert: draft.emailAlert,
       })
+      let saved: CaseEventOut
       if (draft.eventCategory === 'custom') {
-        await apiFetch(`/cases/${cid}/events`, {
+        saved = await apiFetch<CaseEventOut>(`/cases/${cid}/events`, {
           method: 'POST',
           token,
           json: payload,
         })
       } else {
-        await apiFetch(`/cases/${cid}/events/${encodeURIComponent(draft.eventCategory)}`, {
+        saved = await apiFetch<CaseEventOut>(`/cases/${cid}/events/${encodeURIComponent(draft.eventCategory)}`, {
           method: 'PATCH',
           token,
           json: payload,
+        })
+      }
+      if (draft.trackInCalendar) {
+        await syncCaseEventToCalDav(token, cid, saved, {
+          categoryId: draft.categoryId,
+          calendarId: draft.targetCalendarId || defaultOwnedCalendarId(calendars),
         })
       }
       setDraft(null)
@@ -1026,11 +1187,17 @@ export function CalendarPage({
           trackInCalendar: Boolean(draft.trackInCalendar),
           emailAlert: draft.emailAlert,
         })
-        await apiFetch(`/cases/${cid}/events/${encodeURIComponent(eid)}`, {
+        const saved = await apiFetch<CaseEventOut>(`/cases/${cid}/events/${encodeURIComponent(eid)}`, {
           method: 'PATCH',
           token,
           json: payload,
         })
+        if (draft.trackInCalendar) {
+          await syncCaseEventToCalDav(token, cid, saved, {
+            categoryId: draft.categoryId,
+            calendarId: draft.targetCalendarId || defaultOwnedCalendarId(calendars),
+          })
+        }
       } else {
         let bodyStart: string
         let bodyEnd: string
@@ -1267,7 +1434,7 @@ export function CalendarPage({
             <div className="stack" style={{ gap: 12, minWidth: 0 }}>
               {draft.kind === 'create' ? (
                 <div className="field" style={{ minWidth: 0 }}>
-                  <span>Matter</span>
+                  <span>Matter (optional)</span>
                   <MatterSearchPicker
                     token={token}
                     value={draft.caseId}
@@ -1283,16 +1450,37 @@ export function CalendarPage({
                       })
                     }}
                   />
+                  <p className="muted" style={{ margin: '6px 0 0', fontSize: 13, lineHeight: 1.4 }}>
+                    Leave blank for a personal calendar event (not linked to a matter).
+                  </p>
                 </div>
               ) : null}
-              {draft.kind === 'create' ? (
+              {draft.kind === 'create' || (draft.kind === 'edit' && draft.canEdit) ? (
                 <SingleSelectDropdown
-                  label="Event category"
+                  label="Calendar label"
+                  options={draft.kind === 'create' ? createCalendarLabelOptions : editEventCategoryOptions}
+                  value={draft.categoryId ?? ''}
+                  disabled={busy || eventCategories.length === 0}
+                  open={eventDropdown.isOpen(draft.kind === 'create' ? 'createCalLabel' : 'editCalLabel')}
+                  onOpenChange={(next) =>
+                    eventDropdown.setOpen(draft.kind === 'create' ? 'createCalLabel' : 'editCalLabel', next)
+                  }
+                  onChange={(v) =>
+                    setDraft({
+                      ...draft,
+                      categoryId: v || null,
+                    })
+                  }
+                />
+              ) : null}
+              {draft.kind === 'create' && draft.caseId ? (
+                <SingleSelectDropdown
+                  label="Matter event type"
                   options={createEventCategoryOptions}
                   value={draft.eventCategory}
-                  disabled={busy || !draft.caseId}
-                  open={eventDropdown.isOpen('createCat')}
-                  onOpenChange={(next) => eventDropdown.setOpen('createCat', next)}
+                  disabled={busy}
+                  open={eventDropdown.isOpen('createMatterType')}
+                  onOpenChange={(next) => eventDropdown.setOpen('createMatterType', next)}
                   onChange={(v) => {
                     if (v === 'custom') {
                       setDraft({ ...draft, eventCategory: 'custom', title: '', trackInCalendar: true, emailAlert: false })
@@ -1302,27 +1490,11 @@ export function CalendarPage({
                   }}
                 />
               ) : null}
-              {draft.kind === 'edit' && draft.canEdit && draft.editSource === 'caldav' ? (
-                <SingleSelectDropdown
-                  label="Event category"
-                  options={editEventCategoryOptions}
-                  value={draft.categoryId ?? ''}
-                  disabled={busy}
-                  open={eventDropdown.isOpen('editCat')}
-                  onOpenChange={(next) => eventDropdown.setOpen('editCat', next)}
-                  onChange={(v) =>
-                    setDraft({
-                      ...draft,
-                      categoryId: v || null,
-                    })
-                  }
-                />
-              ) : null}
               {draft.kind === 'edit' && !draft.canEdit ? (
                 <p className="muted">You can view this event but not edit it (read-only share or subscription).</p>
               ) : null}
               <label className="field">
-                <span>{draft.kind === 'create' ? 'Name' : 'Title'}</span>
+                <span>{draft.kind === 'create' && !draft.caseId ? 'Title' : draft.kind === 'create' ? 'Name' : 'Title'}</span>
                 <input
                   value={draft.title}
                   onChange={(e) =>
@@ -1333,11 +1505,11 @@ export function CalendarPage({
                     )
                   }
                   disabled={busy || (draft.kind === 'edit' && !draft.canEdit)}
-                  placeholder={draft.kind === 'create' ? 'Event name…' : undefined}
+                  placeholder={draft.kind === 'create' ? (draft.caseId ? 'Event name…' : 'Event title…') : undefined}
                   autoFocus={draft.kind === 'create' || (draft.kind === 'edit' && draft.canEdit)}
                 />
               </label>
-              {draft.kind === 'create' ? (
+              {draft.kind === 'create' && draft.caseId ? (
                 <label className="row" style={{ gap: 8, alignItems: 'flex-start' }}>
                   <input
                     type="checkbox"
@@ -1557,9 +1729,13 @@ export function CalendarPage({
               ) : null}
               <p className="muted" style={{ margin: 0, fontSize: 13 }}>
                 {draft.kind === 'create'
-                  ? draft.allDay
-                    ? 'Saved as an all-day matter event — you can edit it from this calendar or the matter.'
-                    : 'Saved as a matter event with the start time and duration above — you can edit it from this calendar or the matter.'
+                  ? !draft.caseId
+                    ? draft.allDay
+                      ? 'Saved as an all-day event on your personal calendar.'
+                      : 'Saved as a personal calendar event with the start time and duration above.'
+                    : draft.allDay
+                      ? 'Saved as an all-day matter event — you can edit it from this calendar or the matter.'
+                      : 'Saved as a matter event with the start time and duration above — you can edit it from this calendar or the matter.'
                   : draft.kind === 'edit' && draft.canEdit && draft.editSource === 'caldav'
                     ? draft.allDay
                       ? 'All-day — drag the event on the calendar to change the date, or adjust options above.'
