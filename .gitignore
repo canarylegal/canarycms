@@ -19,7 +19,12 @@ data/
 
 # Firm-specific scripts and deployment configs (local only; not for GitHub)
 backend/scripts/seed_mcwilliams_portal_forms.py
-backend/scripts/*firm-local*
+backend/scripts/run_*_precedents_deploy.sh
+backend/scripts/deploy_*_precedents.py
+backend/scripts/prepare_*_precedents.py
+backend/scripts/prepare_*_quote_precedent.py
+backend/scripts/prepare_*_quote_spreadsheet.py
+backend/scripts/seed_*_fee_scales.py
 deploy/betterbird/policies.json
 
 # Stray artifacts
