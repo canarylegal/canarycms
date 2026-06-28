@@ -437,6 +437,14 @@ def _run_git_sync(cfg: ComposeUpdateConfig, journal: MutableSequence[str] | None
             )
         except subprocess.CalledProcessError as e:
             err = _git_sync_error_detail(e)
+            if cfg.git_reset_enabled:
+                _journal(
+                    journal,
+                    "git: pull --ff-only failed (checkout diverged from origin); "
+                    "falling back to fetch + reset --hard",
+                )
+                _run_git_sync(cfg, journal, "reset")
+                return
             raise RuntimeError(f"git pull failed: {err or e.returncode}") from e
         _journal(journal, "git: pull finished")
         return
