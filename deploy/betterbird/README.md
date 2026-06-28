@@ -1,67 +1,34 @@
-# Betterbird enterprise policy
+# Betterbird (Canary)
 
-Cross-platform `policies.json` for firm-managed Betterbird workstations:
+Optional Betterbird styling and enterprise deployment notes for firm-managed workstations.
 
-- Force-install **Canary — file to matter** add-on
-- Block all other add-ons
-- Require a **primary password**
-- Replace default calendar categories with the three firm labels (names and colours match Canary)
+## Canary UI theme
 
-Category names and colours were taken from a sample Betterbird profile on Colin’s machine (May 2026).
-
-## Deploy paths
-
-| OS | Path |
-|----|------|
-| **Linux (Kubuntu)** | `/etc/thunderbird/policies/policies.json` |
-| **Windows** | `C:\Program Files\Betterbird\distribution\policies.json` |
-
-Create the `policies` or `distribution` directory if it does not exist. Use the **official Betterbird installer** (not Flatpak).
-
-### Linux (this machine)
-
-```bash
-sudo mkdir -p /etc/thunderbird/policies
-sudo cp deploy/betterbird/policies.json /etc/thunderbird/policies/policies.json
-```
-
-Restart Betterbird. On first launch after policy install, users set the primary password when prompted.
-
-### Windows
-
-Copy `policies.json` to `C:\Program Files\Betterbird\distribution\` during imaging or via Intune/GPO/startup script (elevated).
-
-## Calendar colours in Betterbird
-
-Betterbird colours CalDAV events by **category name** when:
-
-1. The event iCal contains `CATEGORIES:<label>` (written by Canary when a calendar label is set), and  
-2. The category exists in this policy with a matching colour.
-
-Category strings must match **exactly** (including spaces around `/` in `Funds / Statement Requested`).
-
-## Canary server side
-
-Set in the firm `.env` (not committed):
-
-```bash
-CANARY_CALENDAR_LABEL_SPECS=[{"name":"Funds / Statement Requested","color":"#2563EB"},{"name":"Exchanged","color":"#F8E45C"},{"name":"Completed","color":"#33D17A"}]
-```
-
-Optional: `CANARY_SYNC_CALDAV_EVENT_CATEGORIES=0` disables one-time startup sync of existing labelled events to CalDAV.
-
-After changing `.env`, restart the backend. Labels are created on each user calendar at startup; new events pick up `CATEGORIES` automatically.
-
-## Canary UI theme (optional)
-
-Navy/white Betterbird chrome matching the web app.
+Navy/white chrome matching the Canary web app.
 
 **Install:** Settings → Add-ons and Themes → Install Add-on From File → `theme-extension/dist/canary-theme-1.2.0.xpi` (build: `node theme-extension/package.mjs`). Enable under **Themes**. v1.2 fixes spaces-sidebar icons and the reading-pane logo watermark.
 
-Optional deeper styling (recommended for logo + sidebar if the XPI alone is not enough): run `theme/install-theme.sh` — copies `userChrome.css` + logo and enables the legacy stylesheet pref (also set via `policies.json` when deployed).
+Optional deeper styling: run `theme/install-theme.sh` — copies `userChrome.css` + logo and enables the legacy stylesheet pref.
 
-For enterprise force-install, whitelist `canary-theme@canarylegal.co.uk` in `ExtensionSettings` alongside the mail add-on.
+See [theme/README.md](./theme/README.md) and [theme-extension/README.md](./theme-extension/README.md).
 
-## Updating the add-on URL
+## Enterprise policy (`policies.json`)
 
-When releasing a new signed `.xpi`, bump `install_url` in `policies.json` to match the version on `https://canarylegalsoftware.co.uk/thunderbird/`. Existing installs still auto-update via `updates.json` once the add-on is installed.
+Firm-specific `policies.json` files (force-installed add-ons, calendar category colours, primary password, etc.) are **not** stored in this repository. Maintain them locally or in your deployment tooling.
+
+Typical install paths:
+
+| OS | Path |
+|----|------|
+| **Linux** | `/etc/thunderbird/policies/policies.json` |
+| **Windows** | `C:\Program Files\Betterbird\distribution\policies.json` |
+
+Use the official Betterbird installer (not Flatpak). Restart Betterbird after deploying policy.
+
+When releasing a new signed mail add-on `.xpi`, update the firm's `install_url` to match the version on your hosting server. Existing installs still auto-update via `updates.json` once installed.
+
+## Calendar category colours
+
+Betterbird colours CalDAV events by **category name** when the event iCal contains `CATEGORIES:<label>` and the category exists in policy with a matching colour. Category strings must match exactly.
+
+On the Canary server, set label specs in the firm `.env` (not committed), e.g. `CANARY_CALENDAR_LABEL_SPECS=[{"name":"…","color":"#…"}]`. Restart the backend after changes.
