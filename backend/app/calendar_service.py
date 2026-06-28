@@ -211,9 +211,10 @@ def list_merged_events(
             item["can_edit"] = can_edit.get(str(cid), False) if cid is not None else False
             out.append(item)
     from app.calendar_category import enrich_events_with_categories
-    from app.event_service import list_tracked_case_events_for_calendar_merge
+    from app.event_service import enrich_caldav_events_with_linked_case_events, list_tracked_case_events_for_calendar_merge
 
     enrich_events_with_categories(db, out)
+    enrich_caldav_events_with_linked_case_events(db, requesting, out)
     out.extend(list_tracked_case_events_for_calendar_merge(db, requesting, range_start, range_end))
     from app.calendar_email_alert_service import enrich_merged_calendar_events
 
