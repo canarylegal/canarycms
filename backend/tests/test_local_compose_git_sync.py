@@ -32,10 +32,43 @@ def test_run_git_sync_ff_only(compose_cfg: ComposeUpdateConfig) -> None:
         with patch("app.local_compose_update.subprocess.run") as run:
             run.return_value = MagicMock(returncode=0)
             _run_git_sync(compose_cfg, journal, "ff-only")
-    assert run.call_count == 1
-    assert "pull" in run.call_args[0][0]
-    assert "ff-only" in run.call_args[0][0]
+    pull_args = run.call_args[0][0]
+    assert "pull" in pull_args
+    assert "--ff-only" in pull_args
     assert journal[0].startswith("git: pull")
+
+
+def test_run_git_sync_ff_only_falls_back_to_reset_when_enabled(compose_cfg: ComposeUpdateConfig) -> None:
+    journal: list[str] = []
+    pull_error = subprocess.CalledProcessError(1, ["git", "pull"], stderr="fatal: Not possible to fast-forward\n")
+    with patch("app.local_compose_update.shutil.which", return_value="/usr/bin/git"):
+        with patch("app.local_compose_update.subprocess.run") as run:
+            run.side_effect = [pull_error, MagicMock(returncode=0), MagicMock(returncode=0)]
+            _run_git_sync(compose_cfg, journal, "ff-only")
+    assert run.call_count == 3
+    assert "pull" in run.call_args_list[0][0][0]
+    assert "fetch" in run.call_args_list[1][0][0]
+    assert "reset" in run.call_args_list[2][0][0]
+    assert any("falling back" in line for line in journal)
+
+
+def test_run_git_sync_ff_only_does_not_fallback_when_reset_disabled(compose_cfg: ComposeUpdateConfig) -> None:
+    cfg_no_reset = ComposeUpdateConfig(
+        project_dir=compose_cfg.project_dir,
+        compose_files=compose_cfg.compose_files,
+        profiles=compose_cfg.profiles,
+        git_pull=True,
+        git_reset_enabled=False,
+        git_ref="main",
+    )
+    journal: list[str] = []
+    pull_error = subprocess.CalledProcessError(1, ["git", "pull"], stderr="fatal: Not possible to fast-forward\n")
+    with patch("app.local_compose_update.shutil.which", return_value="/usr/bin/git"):
+        with patch("app.local_compose_update.subprocess.run") as run:
+            run.side_effect = pull_error
+            with pytest.raises(RuntimeError, match="git pull failed"):
+                _run_git_sync(cfg_no_reset, journal, "ff-only")
+    assert run.call_count == 1
 
 
 def test_run_git_sync_reset(compose_cfg: ComposeUpdateConfig) -> None:
