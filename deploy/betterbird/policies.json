@@ -1,0 +1,33 @@
+{
+  "policies": {
+    "ExtensionSettings": {
+      "*": {
+        "installation_mode": "blocked",
+        "blocked_install_message": "Only the Canary add-on is permitted on this workstation."
+      },
+      "canary-file@canarylegal.co.uk": {
+        "installation_mode": "force_installed",
+        "install_url": "https://canarylegalsoftware.co.uk/thunderbird/canary_file_to_matter-1.5.14-tb.xpi"
+      }
+    },
+    "PrimaryPassword": true,
+    "Preferences": {
+      "calendar.categories.names": {
+        "Value": "Funds / Statement Requested,Exchanged,Completed",
+        "Status": "locked"
+      },
+      "calendar.category.color.funds_-ux2f-_statement_requested": {
+        "Value": "#2563eb",
+        "Status": "locked"
+      },
+      "calendar.category.color.exchanged": {
+        "Value": "#f8e45c",
+        "Status": "locked"
+      },
+      "calendar.category.color.completed": {
+        "Value": "#33d17a",
+        "Status": "locked"
+      }
+    }
+  }
+}

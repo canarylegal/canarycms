@@ -21,6 +21,7 @@ from app.models import User
 from app.calendar_category import (
     delete_event_category_link,
     enrich_events_with_categories,
+    require_category_on_calendar,
     set_event_category_link,
 )
 from app.calendar_email_alert_service import (
@@ -118,6 +119,9 @@ def post_calendar_event(
     require_write(access)
     if not access.dav_user.caldav_password_enc:
         raise HTTPException(status_code=502, detail="Calendar owner CalDAV unavailable")
+    category_name: str | None = None
+    if body.category_id is not None:
+        category_name = require_category_on_calendar(db, cal_id, body.category_id).name
     raw = create_event_on_calendar(
         access.dav_user,
         access.calendar.radicale_slug,
@@ -129,6 +133,7 @@ def post_calendar_event(
         calendar_display_name=access.calendar.name,
         calendar_id=str(access.calendar.id),
         matter_sub_type_event_template_id=body.matter_sub_type_event_template_id,
+        category_name=category_name,
     )
     raw["can_edit"] = True
     if body.category_id is not None:
@@ -190,7 +195,16 @@ def patch_calendar_event(
     if matter_in:
         matter_kw["matter_template_id"] = body.matter_sub_type_event_template_id
 
-    if updates or matter_in:
+    category_kw: dict = {}
+    if cat_set:
+        if new_cat is None:
+            category_kw["category_name"] = None
+        else:
+            category_kw["category_name"] = require_category_on_calendar(
+                db, access.calendar.id, new_cat
+            ).name
+
+    if updates or matter_in or cat_set:
         raw = update_event_on_principal(
             access.dav_user,
             href,
@@ -202,6 +216,7 @@ def patch_calendar_event(
             calendar_display_name=access.calendar.name,
             calendar_id=str(access.calendar.id),
             **matter_kw,
+            **category_kw,
         )
     else:
         ev = load_event_on_principal(access.dav_user, href)

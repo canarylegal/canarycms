@@ -79,6 +79,7 @@ async def lifespan(app: FastAPI):
     from app.matter_type_bootstrap import sync_matter_types_from_seed
     from app.merge_code_catalog_sync import sync_merge_code_catalog
     from app.permission_category_bootstrap import ensure_builtin_permission_categories
+    from app.calendar_label_bootstrap import ensure_calendar_labels_all_calendars
     from app.precedent_bootstrap import apply_precedent_seed_if_empty, sync_missing_global_precedents_from_seed
 
     _log = logging.getLogger("uvicorn.error")
@@ -93,6 +94,11 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         db.rollback()
         _log.warning("Permission category bootstrap skipped: %s", e)
+    try:
+        ensure_calendar_labels_all_calendars(db)
+    except Exception as e:
+        db.rollback()
+        _log.warning("Calendar label bootstrap skipped: %s", e)
     try:
         apply_precedent_seed_if_empty(db)
     except Exception as e:

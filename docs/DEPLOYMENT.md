@@ -309,9 +309,20 @@ Production installs require a **Mozilla-signed `.xpi`** (unlisted on the Thunder
 
 **Updates:** Thunderbird checks **`https://canarylegalsoftware.co.uk/thunderbird/updates.json`** about daily and installs newer signed builds automatically (after users have a build that includes `update_url` in the manifest).
 
-#### Enterprise pre-install (optional)
+#### Enterprise pre-install (Betterbird / Thunderbird)
 
-IT can pre-install the signed `.xpi` using Thunderbird [enterprise distribution](https://wiki.mozilla.org/Thunderbird/Enterprise) (`distribution.ini` / policies). The canonical download URL is **`https://canarylegalsoftware.co.uk/thunderbird/`**; firms may mirror internally if required.
+Firm-managed desktops should use **official Betterbird** (not Flatpak) and a system **`policies.json`**:
+
+| OS | Path |
+|----|------|
+| Linux | `/etc/thunderbird/policies/policies.json` |
+| Windows | `C:\Program Files\Betterbird\distribution\policies.json` |
+
+Template (force-install Canary add-on, block other add-ons, primary password, firm calendar categories): [deploy/betterbird/policies.json](../deploy/betterbird/policies.json) and [deploy/betterbird/README.md](../deploy/betterbird/README.md).
+
+On the Canary server, set **`CANARY_CALENDAR_LABEL_SPECS`** in `.env` so in-app calendar labels match Betterbird category names (see `.env.example`). Canary writes `CATEGORIES` into CalDAV events so Betterbird can colour them.
+
+Manual `.xpi` install remains valid for ad-hoc machines; the canonical download URL is **`https://canarylegalsoftware.co.uk/thunderbird/`**.
 
 #### For maintainers — build, sign, and publish
 

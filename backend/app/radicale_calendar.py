@@ -320,6 +320,19 @@ def list_events_on_calendar(
     )
 
 
+_CATEGORY_NAME_UNSET = object()
+
+
+def _apply_categories_to_vevent(vevent: ICalEvent, category_name: str | None) -> None:
+    """Set or clear RFC 5545 CATEGORIES on a VEVENT (Betterbird/Thunderbird colour by category)."""
+    for key in list(vevent.keys()):
+        if str(key).lower() == "categories":
+            del vevent[key]
+    name = (category_name or "").strip()
+    if name:
+        vevent.add("categories", name)
+
+
 def create_event_on_calendar(
     dav_user: User,
     slug: str,
@@ -332,6 +345,7 @@ def create_event_on_calendar(
     calendar_display_name: str,
     calendar_id: str,
     matter_sub_type_event_template_id: uuid.UUID | None = None,
+    category_name: str | None = None,
 ) -> dict[str, Any]:
     try:
         cal = get_caldav_calendar(dav_user, slug)
@@ -346,6 +360,7 @@ def create_event_on_calendar(
             ve.add("description", description)
         if matter_sub_type_event_template_id is not None:
             ve.add("X-CANARY-TEMPLATE-ID", str(matter_sub_type_event_template_id))
+        _apply_categories_to_vevent(ve, category_name)
         if all_day:
             sd = start if isinstance(start, date) else start.date()
             ed = end if isinstance(end, date) else end.date()
@@ -396,6 +411,7 @@ def update_event_on_principal(
     calendar_display_name: str | None = None,
     calendar_id: str | None = None,
     matter_template_id: Any = _MATTER_TEMPLATE_ID_UNSET,
+    category_name: str | None | Any = _CATEGORY_NAME_UNSET,
 ) -> dict[str, Any]:
     ev = load_event_on_principal(owner, href)
     try:
@@ -426,6 +442,10 @@ def update_event_on_principal(
                     del vevent[k]
             if matter_template_id is not None:
                 vevent.add("X-CANARY-TEMPLATE-ID", str(matter_template_id))
+
+        if category_name is not _CATEGORY_NAME_UNSET:
+            clear_name = None if category_name is None else str(category_name).strip() or None
+            _apply_categories_to_vevent(vevent, clear_name)
 
         use_all = cur_all if all_day is None else all_day
         if start is not None or end is not None or all_day is not None:
@@ -482,6 +502,27 @@ def event_uid_from_href(owner: User, href: str) -> str:
         uid_raw = c.get("uid")
         return str(uid_raw) if uid_raw else str(ev.url)
     raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid event data")
+
+
+def event_href_by_uid(owner: User, slug: str, ical_uid: str) -> str | None:
+    """Locate a CalDAV event URL by iCal UID within one calendar collection."""
+    cal = get_caldav_calendar(owner, slug)
+    if not cal:
+        return None
+    target = (ical_uid or "").strip()
+    if not target:
+        return None
+    try:
+        for ev in cal.events():
+            ev.load()
+            ical = ICal.from_ical(ev.data)
+            for c in ical.walk("VEVENT"):
+                uid_raw = c.get("uid")
+                if uid_raw is not None and str(uid_raw) == target:
+                    return str(ev.url)
+    except Exception:
+        return None
+    return None
 
 
 def delete_event_on_principal(owner: User, href: str) -> None:
