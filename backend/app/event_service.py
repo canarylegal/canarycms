@@ -10,7 +10,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.deps import get_case_if_accessible
+from app.deps import map_cases_if_accessible
 from app.models import (
     CalendarEventEmailAlertSubscription,
     Case,
@@ -382,23 +382,32 @@ def list_tracked_case_events_for_calendar_merge(
     rs_u = range_start if range_start.tzinfo else range_start.replace(tzinfo=z)
     re_u = range_end if range_end.tzinfo else range_end.replace(tzinfo=z)
 
+    start_d = rs_u.date()
+    end_d = re_u.date()
+    if end_d < start_d:
+        return []
+
     rows = (
         db.execute(
             select(CaseEvent).where(
                 CaseEvent.track_in_calendar.is_(True),
                 CaseEvent.event_date.isnot(None),
+                CaseEvent.calendar_event_uid.is_(None),
+                CaseEvent.event_date >= start_d,
+                CaseEvent.event_date <= end_d,
             )
         )
         .scalars()
         .all()
     )
+    if not rows:
+        return []
+
+    cases = map_cases_if_accessible(db, user, {ev.case_id for ev in rows})
     out: list[dict] = []
     for ev in rows:
-        case = get_case_if_accessible(ev.case_id, user, db)
+        case = cases.get(ev.case_id)
         if case is None:
-            continue
-        if ev.calendar_event_uid:
-            # Already synced to CalDAV — show that row only (with enrich below).
             continue
         if not _case_event_intersects_window(ev, rs_u, re_u):
             continue
@@ -437,11 +446,16 @@ def enrich_caldav_events_with_linked_case_events(
     events: list[dict],
 ) -> None:
     """Attach matter metadata to CalDAV rows synced from tracked case events."""
+    refs = {str(item.get("id") or "").strip() for item in events if not item.get("case_event_id")}
+    refs.discard("")
+    if not refs:
+        return
+
     rows = (
         db.execute(
             select(CaseEvent).where(
                 CaseEvent.track_in_calendar.is_(True),
-                CaseEvent.calendar_event_uid.isnot(None),
+                CaseEvent.calendar_event_uid.in_(refs),
             )
         )
         .scalars()
@@ -450,18 +464,12 @@ def enrich_caldav_events_with_linked_case_events(
     if not rows:
         return
 
+    cases = map_cases_if_accessible(db, user, {ev.case_id for ev in rows})
     by_ref: dict[str, CaseEvent] = {}
-    cases: dict[uuid.UUID, Case] = {}
     for ev in rows:
         ref = (ev.calendar_event_uid or "").strip()
-        if not ref:
+        if not ref or ev.case_id not in cases:
             continue
-        case = cases.get(ev.case_id)
-        if case is None:
-            case = get_case_if_accessible(ev.case_id, user, db)
-            if case is None:
-                continue
-            cases[ev.case_id] = case
         by_ref[ref] = ev
 
     for item in events:
@@ -471,9 +479,7 @@ def enrich_caldav_events_with_linked_case_events(
         ev = by_ref.get(ref)
         if ev is None:
             continue
-        case = cases.get(ev.case_id)
-        if case is None:
-            continue
+        case = cases[ev.case_id]
         item["case_id"] = str(case.id)
         item["case_event_id"] = str(ev.id)
         item["track_in_calendar"] = ev.track_in_calendar

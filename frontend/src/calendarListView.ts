@@ -3,7 +3,7 @@ import type { EventContentArg } from '@fullcalendar/core'
 /** Shared list-year view config (main ribbon + matter events). */
 export const CALENDAR_LIST_YEAR_VIEW = {
   type: 'list' as const,
-  duration: { years: 5 },
+  duration: { years: 1 },
   buttonText: 'list',
   listDaySideFormat: false as const,
   listDayFormat: {
