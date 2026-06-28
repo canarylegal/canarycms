@@ -15,6 +15,7 @@ from app.models import (
     FinanceCategoryTemplate,
     FinanceItem,
     FinanceItemTemplate,
+    MatterHeadType,
     MatterSubType,
     Case,
     AuditEvent,
@@ -106,29 +107,195 @@ def _cat_out(cat: FinanceCategory, items: list[FinanceItem]) -> FinanceCategoryO
 # ---------------------------------------------------------------------------
 
 FUNDS_RECEIVED_CATEGORY_NAME = "Funds received"
+PURCHASE_COSTS_CATEGORY_NAME = "Purchase Costs"
+PURCHASE_PRICE_ITEM_NAME = "Purchase Price"
+
+
+def _is_residential_conveyancing_purchase_sub_type(sub_type_id: uuid.UUID, db: Session) -> bool:
+    sub = db.get(MatterSubType, sub_type_id)
+    if not sub or _norm_name(sub.name) != "purchase":
+        return False
+    head = db.get(MatterHeadType, sub.head_type_id)
+    if not head:
+        return False
+    hn = _norm_name(head.name)
+    return "conveyancing" in hn and "residential" in hn
+
+
+def _ensure_purchase_costs_template(sub_type_id: uuid.UUID, db: Session) -> None:
+    """Ensure residential purchase sub-types have a Purchase Costs → Purchase Price debit category."""
+    cats = (
+        db.execute(
+            select(FinanceCategoryTemplate)
+            .where(FinanceCategoryTemplate.matter_sub_type_id == sub_type_id)
+            .order_by(FinanceCategoryTemplate.sort_order, FinanceCategoryTemplate.created_at)
+        )
+        .scalars()
+        .all()
+    )
+    purchase_cat = next(
+        (c for c in cats if not c.credit_only and _norm_name(c.name) == _norm_name(PURCHASE_COSTS_CATEGORY_NAME)),
+        None,
+    )
+    now = datetime.utcnow()
+    if purchase_cat is None:
+        for c in cats:
+            if not c.credit_only and c.sort_order >= 0:
+                c.sort_order += 1
+                c.updated_at = now
+                db.add(c)
+        purchase_cat = FinanceCategoryTemplate(
+            id=uuid.uuid4(),
+            matter_sub_type_id=sub_type_id,
+            name=PURCHASE_COSTS_CATEGORY_NAME,
+            sort_order=0,
+            credit_only=False,
+            created_at=now,
+            updated_at=now,
+        )
+        db.add(purchase_cat)
+        db.flush()
+    item = db.execute(
+        select(FinanceItemTemplate.id)
+        .where(
+            FinanceItemTemplate.category_id == purchase_cat.id,
+            FinanceItemTemplate.name == PURCHASE_PRICE_ITEM_NAME,
+        )
+        .limit(1)
+    ).scalar_one_or_none()
+    if item is None:
+        db.add(
+            FinanceItemTemplate(
+                id=uuid.uuid4(),
+                category_id=purchase_cat.id,
+                name=PURCHASE_PRICE_ITEM_NAME,
+                direction="debit",
+                sort_order=0,
+                created_at=now,
+                updated_at=now,
+            )
+        )
+    db.flush()
 
 
 def _ensure_default_finance_template_categories(sub_type_id: uuid.UUID, db: Session) -> None:
-    """Seed the default 'Funds received' category when a sub-type has no finance template yet."""
+    """Seed default finance template categories when a sub-type has none yet."""
     existing = db.execute(
         select(FinanceCategoryTemplate.id)
         .where(FinanceCategoryTemplate.matter_sub_type_id == sub_type_id)
         .limit(1)
     ).scalar_one_or_none()
     if existing:
+        if _is_residential_conveyancing_purchase_sub_type(sub_type_id, db):
+            _ensure_purchase_costs_template(sub_type_id, db)
         return
     now = datetime.utcnow()
+    if _is_residential_conveyancing_purchase_sub_type(sub_type_id, db):
+        purchase_cat = FinanceCategoryTemplate(
+            id=uuid.uuid4(),
+            matter_sub_type_id=sub_type_id,
+            name=PURCHASE_COSTS_CATEGORY_NAME,
+            sort_order=0,
+            credit_only=False,
+            created_at=now,
+            updated_at=now,
+        )
+        db.add(purchase_cat)
+        db.flush()
+        db.add(
+            FinanceItemTemplate(
+                id=uuid.uuid4(),
+                category_id=purchase_cat.id,
+                name=PURCHASE_PRICE_ITEM_NAME,
+                direction="debit",
+                sort_order=0,
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        funds_sort = 1
+    else:
+        funds_sort = 0
     db.add(
         FinanceCategoryTemplate(
             id=uuid.uuid4(),
             matter_sub_type_id=sub_type_id,
             name=FUNDS_RECEIVED_CATEGORY_NAME,
-            sort_order=0,
+            sort_order=funds_sort,
             credit_only=True,
             created_at=now,
             updated_at=now,
         )
     )
+    db.flush()
+
+
+def _ensure_purchase_costs_on_case(case_id: uuid.UUID, case: Case, db: Session) -> None:
+    """Backfill Purchase Costs on existing purchase matters that pre-date the default template."""
+    if not case.matter_sub_type_id:
+        return
+    if not _is_residential_conveyancing_purchase_sub_type(case.matter_sub_type_id, db):
+        return
+    _ensure_purchase_costs_template(case.matter_sub_type_id, db)
+    cats = (
+        db.execute(
+            select(FinanceCategory)
+            .where(FinanceCategory.case_id == case_id)
+            .order_by(FinanceCategory.sort_order, FinanceCategory.created_at)
+        )
+        .scalars()
+        .all()
+    )
+    if any(not c.credit_only and _norm_name(c.name) == _norm_name(PURCHASE_COSTS_CATEGORY_NAME) for c in cats):
+        return
+    tmpl_cat = db.execute(
+        select(FinanceCategoryTemplate)
+        .where(
+            FinanceCategoryTemplate.matter_sub_type_id == case.matter_sub_type_id,
+            FinanceCategoryTemplate.credit_only.is_(False),
+        )
+        .order_by(FinanceCategoryTemplate.sort_order, FinanceCategoryTemplate.created_at)
+    ).scalars().first()
+    if tmpl_cat is None or _norm_name(tmpl_cat.name) != _norm_name(PURCHASE_COSTS_CATEGORY_NAME):
+        return
+    tmpl_item = db.execute(
+        select(FinanceItemTemplate)
+        .where(FinanceItemTemplate.category_id == tmpl_cat.id)
+        .order_by(FinanceItemTemplate.sort_order, FinanceItemTemplate.created_at)
+        .limit(1)
+    ).scalar_one_or_none()
+    now = datetime.utcnow()
+    for c in cats:
+        if not c.credit_only:
+            c.sort_order += 1
+            c.updated_at = now
+            db.add(c)
+    cat = FinanceCategory(
+        id=uuid.uuid4(),
+        case_id=case_id,
+        template_category_id=tmpl_cat.id,
+        name=tmpl_cat.name,
+        sort_order=0,
+        credit_only=False,
+        created_at=now,
+        updated_at=now,
+    )
+    db.add(cat)
+    db.flush()
+    if tmpl_item:
+        db.add(
+            FinanceItem(
+                id=uuid.uuid4(),
+                category_id=cat.id,
+                template_item_id=tmpl_item.id,
+                name=tmpl_item.name,
+                direction=tmpl_item.direction,
+                amount_pence=None,
+                sort_order=tmpl_item.sort_order,
+                created_at=now,
+                updated_at=now,
+            )
+        )
     db.flush()
 
 
@@ -978,6 +1145,18 @@ def _get_or_init_finance(case_id: uuid.UUID, db: Session) -> list[FinanceCategor
         .all()
     )
     if existing:
+        case = db.get(Case, case_id)
+        if case:
+            _ensure_purchase_costs_on_case(case_id, case, db)
+            existing = (
+                db.execute(
+                    select(FinanceCategory).where(FinanceCategory.case_id == case_id).order_by(
+                        FinanceCategory.sort_order, FinanceCategory.created_at
+                    )
+                )
+                .scalars()
+                .all()
+            )
         return list(existing)
 
     # First access — check if case has a matter sub-type with a template.

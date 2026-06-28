@@ -2957,7 +2957,7 @@ export function CaseDetail({
                       ← Documents
                     </button>
                   </div>
-                  <CaseDocPanelZoomFit>
+                  <CaseDocPanelScroll>
                     <FinancePage
                       caseId={caseId}
                       token={token}
@@ -2968,7 +2968,7 @@ export function CaseDetail({
                           .catch(() => {})
                       }}
                     />
-                  </CaseDocPanelZoomFit>
+                  </CaseDocPanelScroll>
                 </div>
               ) : caseDocPanel === 'edit-details' && caseId ? (
                 <div
@@ -3209,7 +3209,7 @@ export function CaseDetail({
                     </div>
                   </div>
                   <div className="caseDocLedgerEmbed">
-                    <CaseDocPanelZoomFit>
+                    <CaseDocPanelScroll>
                       {accountsSubTab === 'ledger' ? (
                         <LedgerPage caseId={caseId} token={token} />
                       ) : (
@@ -3220,7 +3220,7 @@ export function CaseDetail({
                           currentUserId={currentUser?.id ?? ''}
                         />
                       )}
-                    </CaseDocPanelZoomFit>
+                    </CaseDocPanelScroll>
                   </div>
                 </div>
               ) : caseDocPanel === 'tasks' && caseId ? (
@@ -3341,7 +3341,7 @@ export function CaseDetail({
                       ← Documents
                     </button>
                   </div>
-                  <CaseDocPanelZoomFit>
+                  <CaseDocPanelScroll>
                     <div className="card caseDocPropertyEmbed">
                     <div className="paneHead">
                       <div>
@@ -3404,7 +3404,7 @@ export function CaseDetail({
                       onCaseContactsChange={onRefresh}
                     />
                   </div>
-                  </CaseDocPanelZoomFit>
+                  </CaseDocPanelScroll>
                 </div>
               ) : caseDocPanel === 'contacts' && caseId && (contactAddOpen || editSnapshot) ? (
                 <div
