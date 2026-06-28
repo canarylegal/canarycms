@@ -3371,6 +3371,21 @@ select {
   -webkit-overflow-scrolling: touch;
 }
 
+.caseDocPanelScrollHost .caseDocPropertyEmbed,
+.caseDocPanelScrollHost .caseDocLedgerEmbed {
+  flex: none;
+  min-height: min-content;
+}
+
+.caseDocPanelScrollHost .ledgerShell {
+  min-height: min-content;
+}
+
+.caseDocPanelScrollHost .ledgerTableWrap {
+  overflow: visible;
+  max-height: none;
+}
+
 .caseDocPanelZoomFitContent {
   width: 100%;
   max-width: 100%;
