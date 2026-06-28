@@ -4,6 +4,7 @@ from __future__ import annotations
 import base64
 import os
 import uuid
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
 from urllib.parse import unquote, urlparse
@@ -264,6 +265,29 @@ def parse_caldav_event(
     return out
 
 
+def _events_for_calendar_slug(
+    cal: caldav.Calendar,
+    display_name: str,
+    calendar_id: str,
+    range_start: datetime,
+    range_end: datetime,
+) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    evs = cal.date_search(start=range_start, end=range_end, expand=True)
+    for raw in evs:
+        try:
+            out.append(
+                parse_caldav_event(
+                    raw,
+                    display_name,
+                    calendar_id=str(calendar_id),
+                )
+            )
+        except Exception:
+            continue
+    return out
+
+
 def list_events_for_multiple_slugs(
     dav_user: User,
     items: list[tuple[str, str, str]],
@@ -279,23 +303,28 @@ def list_events_for_multiple_slugs(
         for cal in principal.calendars():
             by_slug[_slug_from_calendar(cal)] = cal
 
-        out: list[dict[str, Any]] = []
+        work: list[tuple[caldav.Calendar, str, str]] = []
         for slug, display_name, calendar_id in items:
             cal = by_slug.get(slug)
-            if not cal:
-                continue
-            evs = cal.date_search(start=range_start, end=range_end, expand=True)
-            for raw in evs:
-                try:
-                    out.append(
-                        parse_caldav_event(
-                            raw,
-                            display_name,
-                            calendar_id=str(calendar_id),
-                        )
-                    )
-                except Exception:
-                    continue
+            if cal is not None:
+                work.append((cal, display_name, str(calendar_id)))
+
+        if not work:
+            return []
+
+        if len(work) == 1:
+            cal, display_name, calendar_id = work[0]
+            return _events_for_calendar_slug(cal, display_name, calendar_id, range_start, range_end)
+
+        out: list[dict[str, Any]] = []
+        workers = min(4, len(work))
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            futures = [
+                pool.submit(_events_for_calendar_slug, cal, display_name, calendar_id, range_start, range_end)
+                for cal, display_name, calendar_id in work
+            ]
+            for future in as_completed(futures):
+                out.extend(future.result())
         return out
     except HTTPException:
         raise

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+from collections import defaultdict
 
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -236,6 +237,47 @@ def get_case_if_accessible(case_id: uuid.UUID, user: User, db: Session) -> Case 
         return case
 
     return None
+
+
+def map_cases_if_accessible(db: Session, user: User, case_ids: set[uuid.UUID]) -> dict[uuid.UUID, Case]:
+    """Return accessible matters keyed by id (batch variant of ``get_case_if_accessible``)."""
+    if not case_ids:
+        return {}
+    cases = db.execute(select(Case).where(Case.id.in_(case_ids))).scalars().all()
+    if not cases:
+        return {}
+
+    if user_effective_admin(user, db):
+        return {c.id: c for c in cases}
+
+    fee_ok = user_may_be_fee_earner(user, db)
+    locked_ids = [c.id for c in cases if c.lock_mode != CaseLockMode.none]
+    rules_by_case: dict[uuid.UUID, list[CaseAccessRule]] = defaultdict(list)
+    if locked_ids:
+        for rule in db.execute(
+            select(CaseAccessRule).where(
+                CaseAccessRule.case_id.in_(locked_ids),
+                CaseAccessRule.user_id == user.id,
+            )
+        ).scalars().all():
+            rules_by_case[rule.case_id].append(rule)
+
+    out: dict[uuid.UUID, Case] = {}
+    for case in cases:
+        if fee_ok and case.fee_earner_user_id == user.id:
+            out[case.id] = case
+            continue
+        if case.lock_mode == CaseLockMode.none:
+            out[case.id] = case
+            continue
+        rules = rules_by_case.get(case.id, [])
+        if case.lock_mode == CaseLockMode.allow_list:
+            if any(r.mode == CaseAccessMode.allow for r in rules):
+                out[case.id] = case
+        elif case.lock_mode == CaseLockMode.open_by_default:
+            if not any(r.mode == CaseAccessMode.deny for r in rules):
+                out[case.id] = case
+    return out
 
 
 def get_portal_session(

@@ -68,6 +68,16 @@ def user_has_email_alert(db: Session, user_id: uuid.UUID, event_key: str) -> boo
     return bool(row and row.enabled)
 
 
+def enabled_email_alert_event_keys(db: Session, user_id: uuid.UUID) -> set[str]:
+    rows = db.execute(
+        select(CalendarEventEmailAlertSubscription.event_key).where(
+            CalendarEventEmailAlertSubscription.user_id == user_id,
+            CalendarEventEmailAlertSubscription.enabled.is_(True),
+        )
+    ).scalars().all()
+    return set(rows)
+
+
 def upsert_subscription(
     db: Session,
     *,
@@ -120,6 +130,9 @@ def delete_subscriptions_for_event_key(db: Session, event_key: str) -> None:
 
 
 def enrich_merged_calendar_events(db: Session, user: User, events: list[dict[str, Any]]) -> None:
+    if not events:
+        return
+    enabled_keys = enabled_email_alert_event_keys(db, user.id)
     for ev in events:
         ek: str | None = None
         cid = ev.get("calendar_id")
@@ -134,7 +147,7 @@ def enrich_merged_calendar_events(db: Session, user: User, events: list[dict[str
                 ek = case_event_key(uuid.UUID(str(ev["case_event_id"])))
             except ValueError:
                 ek = None
-        ev["email_alert_enabled"] = bool(ek and user_has_email_alert(db, user.id, ek))
+        ev["email_alert_enabled"] = bool(ek and ek in enabled_keys)
 
 
 def _reminder_offsets_days(n: int, unit: str, *, max_k: int = 12) -> list[int]:

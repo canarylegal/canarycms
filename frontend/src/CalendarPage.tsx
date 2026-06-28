@@ -659,6 +659,12 @@ export function CalendarPage({
   const selectionKey = selectedCalIds.join(',')
 
   useEffect(() => {
+    if (needCaldav || calendars.length === 0) return
+    if (selectedCalIds.length === 0 || selectedCalIds.length === calendars.length) return
+    calRef.current?.getApi().refetchEvents()
+  }, [needCaldav, calendars.length, selectionKey, selectedCalIds.length])
+
+  useEffect(() => {
     if (!draft) {
       setEventCategories([])
       return
