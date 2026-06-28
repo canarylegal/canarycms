@@ -21,6 +21,16 @@ import { SearchInput } from './SearchInput'
 import { SingleSelectDropdown } from './SingleSelectDropdown'
 import { useExclusiveDropdownOpen } from './useExclusiveDropdownOpen'
 import { CALENDAR_LIST_YEAR_VIEW, calendarListEventContent, calendarNoEventsContent } from './calendarListView'
+import {
+  calendarEventCacheKey,
+  invalidateCalendarEventCache,
+  readCalendarEventCache,
+  writeCalendarEventCache,
+} from './calendarEventCache'
+import {
+  eventInputToYmd,
+  mapCalendarEventsToFullCalendar,
+} from './calendarEventMapping'
 import { useUserUiPreferences, type CalendarView } from './useUserUiPreferences'
 import { defaultOwnedCalendarId, syncCaseEventToCalDav } from './calendarEventSync'
 import type {
@@ -34,16 +44,6 @@ import type {
   UserPublic,
   UserSummary,
 } from './types'
-
-function contrastTextForBg(hex: string): string {
-  const h = hex.replace(/^#/, '')
-  if (h.length !== 6) return '#ffffff'
-  const r = parseInt(h.slice(0, 2), 16)
-  const g = parseInt(h.slice(2, 4), 16)
-  const b = parseInt(h.slice(4, 6), 16)
-  const yiq = (r * 299 + g * 587 + b * 114) / 1000
-  return yiq >= 128 ? '#1a1a1a' : '#ffffff'
-}
 
 function CalendarCategoriesPanel({
   token,
@@ -418,52 +418,6 @@ function toBodyDate(d: Date, allDay: boolean): string {
   return d.toISOString()
 }
 
-/** YYYY-MM-DD prefix from API (avoid parsing as UTC midnight for all-day). */
-function isoDateOnlyFromApi(s: string): string {
-  const m = /^(\d{4}-\d{2}-\d{2})/.exec(s.trim())
-  return m ? m[1] : s
-}
-
-/** Next calendar day after YYYY-MM-DD (local). FullCalendar uses exclusive end for all-day. */
-function addOneCalendarDayYmd(isoYmd: string): string {
-  const [y, mo, d] = isoYmd.split('-').map(Number)
-  const dt = new Date(y, mo - 1, d)
-  dt.setDate(dt.getDate() + 1)
-  return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`
-}
-
-/** Map API event to FullCalendar all-day: date-only strings + valid exclusive end. */
-function fullCalendarRangeFromApi(r: CalendarEventOut): { start: string; end: string; allDay: boolean } {
-  if (!r.all_day) {
-    return { start: r.start, end: r.end, allDay: false }
-  }
-  const start = isoDateOnlyFromApi(r.start)
-  let end = isoDateOnlyFromApi(r.end)
-  if (end <= start) {
-    end = addOneCalendarDayYmd(start)
-  }
-  return { start, end, allDay: true }
-}
-
-/** Strip auto-numbering some clients put in SUMMARY (e.g. "1. Meeting"). */
-function stripLeadingCalendarTitle(title: string): string {
-  const once = title.replace(/^\s*\d{1,3}[.)]\s+/, '').replace(/^\s*\d{1,3}\)\s+/, '').trim()
-  return once.length > 0 ? once : title
-}
-
-/** Coerce FullCalendar event start/end to YYYY-MM-DD for api_all_day transform. */
-function eventInputToYmd(v: EventInput['start']): string | undefined {
-  if (v == null) return undefined
-  if (typeof v === 'string') return isoDateOnlyFromApi(v)
-  if (v instanceof Date) {
-    const y = v.getFullYear()
-    const m = String(v.getMonth() + 1).padStart(2, '0')
-    const day = String(v.getDate()).padStart(2, '0')
-    return `${y}-${m}-${day}`
-  }
-  return undefined
-}
-
 export function CalendarPage({
   token,
   me,
@@ -476,10 +430,18 @@ export function CalendarPage({
   const calRef = useRef<FullCalendar>(null)
   const calWrapRef = useRef<HTMLDivElement | null>(null)
   const calendarSelectionHydratedRef = useRef(false)
+  const calendarsRef = useRef<UserCalendarListItem[]>([])
+  const selectedCalIdsRef = useRef<string[]>([])
+  const selectionKeyRef = useRef('')
+  const prevSelectionKeyRef = useRef<string | null>(null)
+  const fetchGenRef = useRef(0)
   const { prefs, setPreference } = useUserUiPreferences(me, token)
   const [calendarPixelHeight, setCalendarPixelHeight] = useState(480)
   const [needCaldav, setNeedCaldav] = useState(false)
+  const [calendarsLoaded, setCalendarsLoaded] = useState(false)
+  const [selectionReady, setSelectionReady] = useState(false)
   const [eventsLoading, setEventsLoading] = useState(true)
+  const [caldavSyncing, setCaldavSyncing] = useState(false)
   const [banner, setBanner] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [confirmDeleteEventOpen, setConfirmDeleteEventOpen] = useState(false)
@@ -606,6 +568,7 @@ export function CalendarPage({
   }, [createEventCategory, caseEventsForCreate])
 
   const refresh = useCallback(() => {
+    invalidateCalendarEventCache()
     calRef.current?.getApi().refetchEvents()
   }, [])
 
@@ -616,6 +579,8 @@ export function CalendarPage({
     } catch (e: unknown) {
       const err = e as ApiError
       if (err.status === 403) setNeedCaldav(true)
+    } finally {
+      setCalendarsLoaded(true)
     }
   }, [token])
 
@@ -625,7 +590,14 @@ export function CalendarPage({
   }, [needCaldav, loadCalendars])
 
   useEffect(() => {
-    if (calendars.length === 0) return
+    if (!calendarsLoaded) {
+      setSelectionReady(false)
+      return
+    }
+    if (calendars.length === 0) {
+      setSelectionReady(true)
+      return
+    }
     const valid = new Set(calendars.map((c) => c.id))
     const saved = prefs.calendar_selected_calendar_ids.filter((id) => valid.has(id))
     if (prefs.calendar_selected_calendar_ids.length > 0 && saved.length > 0) {
@@ -634,7 +606,8 @@ export function CalendarPage({
       setSelectedCalIds(calendars.map((c) => c.id))
     }
     calendarSelectionHydratedRef.current = true
-  }, [calendars, prefs.calendar_selected_calendar_ids])
+    setSelectionReady(true)
+  }, [calendars, prefs.calendar_selected_calendar_ids, calendarsLoaded])
 
   useEffect(() => {
     const api = calRef.current?.getApi()
@@ -657,12 +630,20 @@ export function CalendarPage({
   }, [needCaldav])
 
   const selectionKey = selectedCalIds.join(',')
+  calendarsRef.current = calendars
+  selectedCalIdsRef.current = selectedCalIds
+  selectionKeyRef.current = selectionKey
 
   useEffect(() => {
-    if (needCaldav || calendars.length === 0) return
-    if (selectedCalIds.length === 0 || selectedCalIds.length === calendars.length) return
+    if (!selectionReady || needCaldav) return
+    if (prevSelectionKeyRef.current === null) {
+      prevSelectionKeyRef.current = selectionKey
+      return
+    }
+    if (prevSelectionKeyRef.current === selectionKey) return
+    prevSelectionKeyRef.current = selectionKey
     calRef.current?.getApi().refetchEvents()
-  }, [needCaldav, calendars.length, selectionKey, selectedCalIds.length])
+  }, [selectionReady, needCaldav, selectionKey])
 
   useEffect(() => {
     if (!draft) {
@@ -827,58 +808,71 @@ export function CalendarPage({
       successCallback: (events: EventInput[]) => void,
       failureCallback: (error: Error) => void,
     ) => {
+      const gen = ++fetchGenRef.current
       setBanner(null)
       setNeedCaldav(false)
-      try {
-        const params = new URLSearchParams({ start: info.startStr, end: info.endStr })
-        if (calendars.length > 0 && selectedCalIds.length > 0 && selectedCalIds.length < calendars.length) {
-          params.set('calendar_ids', selectedCalIds.join(','))
-        }
-        const rows = await apiFetch<CalendarEventOut[]>(`/users/me/calendar/events?${params}`, { token })
-        successCallback(
-          rows.map((r) => {
-            const range = fullCalendarRangeFromApi(r)
-            const isCaseEvent = Boolean(r.case_event_id)
-            return {
-            id: r.id,
-            title: stripLeadingCalendarTitle(r.title),
-            start: range.start,
-            end: range.end,
-            allDay: range.allDay,
-            editable: (r.can_edit !== false) && !isCaseEvent,
-            display: 'block',
-            backgroundColor: r.category_color ?? undefined,
-            borderColor: r.category_color ?? undefined,
-            textColor: r.category_color ? contrastTextForBg(r.category_color) : undefined,
-            extendedProps: {
-              description: r.description ?? '',
-              calendar_id: r.calendar_id,
-              can_edit: r.can_edit !== false,
-              category_id: r.category_id ?? null,
-              category_name: r.category_name ?? null,
-              category_color: r.category_color ?? null,
-              api_all_day: r.all_day,
-              case_id: r.case_id ?? null,
-              case_event_id: r.case_event_id ?? null,
-              track_in_calendar: r.track_in_calendar ?? null,
-              email_alert_enabled: r.email_alert_enabled ?? false,
-              matter_template_id: r.matter_template_id ?? null,
-            },
+
+      const params = new URLSearchParams({ start: info.startStr, end: info.endStr })
+      const cals = calendarsRef.current
+      const sel = selectedCalIdsRef.current
+      const selectionKey = selectionKeyRef.current
+      if (cals.length > 0 && sel.length > 0 && sel.length < cals.length) {
+        params.set('calendar_ids', sel.join(','))
+      }
+
+      const cacheKey = calendarEventCacheKey(info.startStr, info.endStr, selectionKey)
+      const cached = readCalendarEventCache(cacheKey)
+      let painted = false
+
+      if (cached) {
+        successCallback(mapCalendarEventsToFullCalendar(cached))
+        painted = true
+        setCaldavSyncing(true)
+      }
+
+      if (!cached) {
+        try {
+          const localParams = new URLSearchParams(params)
+          localParams.set('include_caldav', 'false')
+          const localRows = await apiFetch<CalendarEventOut[]>(`/users/me/calendar/events?${localParams}`, {
+            token,
+          })
+          if (gen !== fetchGenRef.current) return
+          if (localRows.length > 0) {
+            successCallback(mapCalendarEventsToFullCalendar(localRows))
+            painted = true
+            setCaldavSyncing(true)
           }
-          }),
-        )
+        } catch {
+          /* local-only feed is best-effort */
+        }
+      }
+
+      try {
+        const rows = await apiFetch<CalendarEventOut[]>(`/users/me/calendar/events?${params}`, { token })
+        if (gen !== fetchGenRef.current) return
+        writeCalendarEventCache(cacheKey, rows)
+        successCallback(mapCalendarEventsToFullCalendar(rows))
+        setCaldavSyncing(false)
       } catch (e: unknown) {
+        if (gen !== fetchGenRef.current) return
         const err = e as ApiError
         if (err.status === 403) {
           setNeedCaldav(true)
+          setCaldavSyncing(false)
           successCallback([])
+          return
+        }
+        setCaldavSyncing(false)
+        if (painted) {
+          setBanner(err.message ?? 'Could not refresh personal calendar events from CalDAV')
           return
         }
         setBanner(err.message ?? 'Could not load events')
         failureCallback(err instanceof Error ? err : new Error(String(e)))
       }
     },
-    [token, calendars.length, selectionKey, selectedCalIds],
+    [token],
   )
 
   function toggleCal(id: string) {
@@ -1320,6 +1314,11 @@ export function CalendarPage({
         </div>
       ) : null}
       {banner ? <div className="error" style={{ marginTop: 12 }}>{banner}</div> : null}
+      {caldavSyncing && !needCaldav ? (
+        <div className="muted" style={{ marginTop: 8, fontSize: 13 }}>
+          Syncing personal calendar events…
+        </div>
+      ) : null}
       {!needCaldav && calendars.length > 0 ? (
         <div className="card" style={{ marginTop: 12, padding: 12 }}>
           <div className="muted" style={{ marginBottom: 8, fontSize: 13 }}>
@@ -1361,6 +1360,12 @@ export function CalendarPage({
         }}
       >
         <div ref={calWrapRef} className="canaryCalendarInner">
+          {!calendarsLoaded && !needCaldav ? (
+            <div className="muted" style={{ padding: 24, textAlign: 'center' }}>
+              Loading calendars…
+            </div>
+          ) : null}
+          {selectionReady && !needCaldav ? (
           <FullCalendar
           ref={calRef}
           plugins={[dayGridPlugin, timeGridPlugin, listPlugin, interactionPlugin]}
@@ -1397,6 +1402,7 @@ export function CalendarPage({
           nowIndicator
           eventTimeFormat={{ hour: '2-digit', minute: '2-digit', hour12: false }}
         />
+          ) : null}
         </div>
       </div>
 
