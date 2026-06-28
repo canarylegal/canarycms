@@ -317,6 +317,7 @@
       return
     }
     const ext = sh().getGecko()
+    await persistState(ext)
     const r = await sendRuntimeMessage(ext, {
       type: 'canary-open-attach-picker',
       caseId: caseId,
@@ -655,6 +656,13 @@
       return
     }
 
+    const restoreFromStore =
+      options && options.fromStorage && st.caseId && !st.userOverridden && !userMatterModeDirty
+    if (uiMode === 'pick' && restoreFromStore && !selectedCase) {
+      await applyCaseFromStore(ext, st)
+      return
+    }
+
     if (uiMode === 'pick' && selectedCase) {
       updateMatterPickVisibility()
       updateAttachSummary()
@@ -888,7 +896,7 @@
           selectedAttachIds = (st && st.attachmentFileIds) || []
           updateAttachSummary()
           if (!userMatterModeDirty && !selectedCase) {
-            await restoreState(ext)
+            await restoreState(ext, { fromStorage: true })
           }
         }
       })()
@@ -914,7 +922,7 @@
     }
 
     await ensureNewComposeDefaults(ext)
-    await restoreState(ext)
+    await restoreState(ext, { fromStorage: true })
     startPrefillSync()
   }
 

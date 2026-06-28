@@ -47,6 +47,12 @@ jobs:
           ATN_API_SECRET: ${{ secrets.ATN_API_SECRET }}
         run: npm run sign
 
+      - name: Build WordPress hosting bundle
+        if: >-
+          (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/thunderbird-v'))
+          || (github.event_name == 'workflow_dispatch' && inputs.sign)
+        run: npm run publish-hosting
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -54,6 +60,7 @@ jobs:
           path: |
             thunderbird-addin/dist/*.zip
             thunderbird-addin/dist/*.xpi
+            thunderbird-addin/hosting/**
           if-no-files-found: warn
 
       - name: Publish GitHub Release
@@ -63,9 +70,9 @@ jobs:
         run: |
           set -euo pipefail
           shopt -s nullglob
-          files=(dist/*.xpi dist/*.zip)
+          files=(dist/*.xpi dist/*.zip hosting/*.xpi hosting/updates.json hosting/.htaccess)
           if ((${#files[@]} == 0)); then
-            echo "No release files in dist/" >&2
+            echo "No release files in dist/ or hosting/" >&2
             exit 1
           fi
           if ! gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then

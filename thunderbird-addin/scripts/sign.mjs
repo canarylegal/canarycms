@@ -13,7 +13,7 @@ if (!apiKey || !apiSecret) {
 }
 
 const amoBaseUrl = process.env.ATN_AMO_BASE_URL || 'https://addons.thunderbird.net/api/v4'
-const distDir = path.join(addinRoot, 'dist')
+const distDir = process.env.CANARY_TB_ARTIFACTS_DIR || path.join(addinRoot, '.build-out')
 fs.mkdirSync(distDir, { recursive: true })
 
 const args = [
@@ -30,7 +30,6 @@ const args = [
   apiKey,
   '--api-secret',
   apiSecret,
-  '--overwrite-dest',
   '--approval-timeout',
   '900000',
 ]

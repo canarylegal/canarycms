@@ -208,8 +208,8 @@ Canary connects to users’ mail clients through two optional add-ons. Both use 
 
 | | **Outlook add-in** | **Thunderbird add-on** |
 |---|-------------------|------------------------|
-| **Shipped with** | Frontend Docker image (nginx serves `/outlook-addin/…`) | Separate **signed `.xpi`** file (not auto-installed with Docker) |
-| **Typical deploy** | Microsoft 365 admin center (tenant-wide) | Per workstation, or enterprise pre-install |
+| **Shipped with** | Frontend Docker image (nginx serves `/outlook-addin/…`) | Signed `.xpi` + update manifest on **canarylegalsoftware.co.uk/thunderbird/** |
+| **Typical deploy** | Microsoft 365 admin center (tenant-wide) | Manual install once, then auto-update from vendor host |
 | **User sign-in** | Task pane in Outlook | Toolbar **Server & sign-in** once per profile |
 | **Graph on server** | Optional but recommended (drafts, categories) | Not used |
 
@@ -300,20 +300,20 @@ Production installs require a **Mozilla-signed `.xpi`** (unlisted on the Thunder
 
 #### For firm IT — install on workstations
 
-1. Obtain **`canary-thunderbird-{version}.xpi`** (signed build) from your Canary vendor or internal release process.
+1. Download **`canary-thunderbird-{version}.xpi`** from **`https://canarylegalsoftware.co.uk/thunderbird/`** (or your vendor).
 2. On each PC (or via your software deployment tool):
    - **Tools** → **Add-ons and Themes** → gear menu → **Install Add-on From File…**
    - Select the signed `.xpi`.
 3. Confirm **Canary — file to matter** appears and **survives a Thunderbird restart**.
-4. Each user: toolbar **Canary** → **Server & sign-in** → enter `https://canary.yourfirm.co.uk` (same URL as the web app, no trailing slash).
+4. Each user: toolbar **Canary** → **Server & sign-in** → enter **`https://canary.yourfirm.co.uk`** (the **firm** Canary host, not canarylegalsoftware.co.uk).
 
-**Updates:** distribute a newer signed `.xpi`; users install over the old version (or remove the old add-on first).
+**Updates:** Thunderbird checks **`https://canarylegalsoftware.co.uk/thunderbird/updates.json`** about daily and installs newer signed builds automatically (after users have a build that includes `update_url` in the manifest).
 
 #### Enterprise pre-install (optional)
 
-IT can pre-install the signed `.xpi` using Thunderbird [enterprise distribution](https://wiki.mozilla.org/Thunderbird/Enterprise) (`distribution.ini` / policies). Host the XPI on an internal **HTTPS** URL workstations trust.
+IT can pre-install the signed `.xpi` using Thunderbird [enterprise distribution](https://wiki.mozilla.org/Thunderbird/Enterprise) (`distribution.ini` / policies). The canonical download URL is **`https://canarylegalsoftware.co.uk/thunderbird/`**; firms may mirror internally if required.
 
-#### For maintainers — build and sign a release
+#### For maintainers — build, sign, and publish
 
 Signing is **not** part of the Docker stack. Maintainers build from the Canary CMS repository (`thunderbird-addin/`):
 
@@ -322,12 +322,15 @@ cd thunderbird-addin
 npm ci
 export ATN_API_KEY='…'       # from https://addons.thunderbird.net/developers/addon/api/key/
 export ATN_API_SECRET='…'
-npm run release              # lint → package → sign
+npm run release              # lint → package → sign → publish-hosting
 ```
 
-Output: **`dist/canary-thunderbird-{version}.xpi`** — distribute this file to firms.
+Output:
 
-**One-time setup:** developer account at [addons.thunderbird.net/developers](https://addons.thunderbird.net/developers/); add-on ID is fixed as `canary-file@canarylegal.co.uk` in `manifest.json`. Bump `version` in `manifest.json` before each new release.
+- **`dist/canary-thunderbird-{version}.xpi`** — signed add-on
+- **`hosting/`** — upload to **`public_html/thunderbird/`** on canarylegalsoftware.co.uk (WordPress: static folder, not a WP page — see `thunderbird-addin/hosting/README.md`)
+
+**One-time setup:** developer account at [addons.thunderbird.net/developers](https://addons.thunderbird.net/developers/); add-on ID is fixed as `canary-file@canarylegal.co.uk` in `manifest.json`. Bump `version` before each new release. The manifest `update_url` points at the central host (all firms share one update channel).
 
 **Manual fallback (no API):** `npm run package`, upload the zip to the ATN developer hub as **unlisted**, download the signed `.xpi`.
 

@@ -51,7 +51,7 @@
         if (globalThis.canaryComposeStore && typeof globalThis.canaryComposeStore.setActiveComposeTab === 'function') {
           void globalThis.canaryComposeStore.setActiveComposeTab(ext, tab.id)
         }
-        scheduleOpen(ext, tab.id)
+        /* Do not scheduleOpen here — To/Cc/subject edits would reopen the panel after the user closes it. */
       })
     }
 

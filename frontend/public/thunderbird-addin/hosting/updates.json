@@ -1,0 +1,12 @@
+{
+  "addons": {
+    "canary-file@canarylegal.co.uk": {
+      "updates": [
+        {
+          "version": "1.5.6",
+          "update_link": "https://canarylegalsoftware.co.uk/thunderbird/canary_file_to_matter-1.5.6-tb.xpi"
+        }
+      ]
+    }
+  }
+}
