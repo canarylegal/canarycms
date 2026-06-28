@@ -122,8 +122,8 @@ services:
       CANARY_UPDATE_PROMPT_ON_LOGIN: ${CANARY_UPDATE_PROMPT_ON_LOGIN:-1}
       # Optional: override the commit shown in /health and update checks (e.g. dev bind-mount vs stale image label).
       CANARY_BUILD_COMMIT_OVERRIDE: ${CANARY_BUILD_COMMIT_OVERRIDE:-}
-      # Opt-in: open case PDFs in ONLYOFFICE (set CANARY_OPEN_PDF_IN_ONLYOFFICE=1 in `.env`).
-      CANARY_OPEN_PDF_IN_ONLYOFFICE: ${CANARY_OPEN_PDF_IN_ONLYOFFICE:-}
+      # Open case PDFs in ONLYOFFICE by default (set CANARY_OPEN_PDF_IN_ONLYOFFICE=0 in `.env` for browser viewer).
+      CANARY_OPEN_PDF_IN_ONLYOFFICE: ${CANARY_OPEN_PDF_IN_ONLYOFFICE:-1}
       # Firm calendar labels → Canary UI + CalDAV CATEGORIES (Betterbird). JSON array — see .env.example.
       CANARY_CALENDAR_LABEL_SPECS: ${CANARY_CALENDAR_LABEL_SPECS:-}
       CANARY_SYNC_CALDAV_EVENT_CATEGORIES: ${CANARY_SYNC_CALDAV_EVENT_CATEGORIES:-1}
@@ -205,7 +205,7 @@ services:
         VITE_ONLYOFFICE_URL: ${VITE_ONLYOFFICE_URL:-/office-ds}
         VITE_ONLYOFFICE_DIRECT_PORT: ${VITE_ONLYOFFICE_DIRECT_PORT:-}
         VITE_ONLYOFFICE_DIRECT_URL: ${VITE_ONLYOFFICE_DIRECT_URL:-}
-        VITE_CANARY_OPEN_PDF_IN_ONLYOFFICE: ${VITE_CANARY_OPEN_PDF_IN_ONLYOFFICE:-}
+        VITE_CANARY_OPEN_PDF_IN_ONLYOFFICE: ${VITE_CANARY_OPEN_PDF_IN_ONLYOFFICE:-1}
         CANARY_PUBLIC_URL: ${CANARY_PUBLIC_URL:-}
     container_name: canary-frontend
     restart: unless-stopped

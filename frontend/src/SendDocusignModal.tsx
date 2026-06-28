@@ -247,6 +247,10 @@ export function SendDocusignModal({
               {templates.length > 0 ? (
                 <label className="field">
                   <span>DocuSign template (optional)</span>
+                  <p className="muted" style={{ margin: '4px 0 0', fontSize: 13 }}>
+                    Templates include pre-placed fields. Without a template, Canary places Sign here and Date on
+                    the last page of the document.
+                  </p>
                   <select className="input" value={templateId} onChange={(e) => setTemplateId(e.target.value)} disabled={busy}>
                     <option value="">Send this document (no template)</option>
                     {templates.map((t) => (
@@ -296,6 +300,12 @@ export function SendDocusignModal({
                   </label>
                 ) : null}
               </div>
+              {!templateId ? (
+                <p className="muted" style={{ margin: 0, fontSize: 13 }}>
+                  Sign here and Date signed are placed on the last page automatically. For exact positions on
+                  complex forms, use a DocuSign template.
+                </p>
+              ) : null}
 
               <div className="stack" style={{ gap: 8 }}>
                 <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center' }}>

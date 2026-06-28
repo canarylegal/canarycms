@@ -55,18 +55,23 @@ def _request_access_token(row: DocusignIntegrationSettings, *, private_key_pem: 
     user_id = (row.user_id or "").strip()
     auth_host = _auth_host(bool(row.use_demo))
     now = int(time.time())
-    assertion = jwt.encode(
-        {
-            "iss": integration_key,
-            "sub": user_id,
-            "aud": auth_host,
-            "iat": now,
-            "exp": now + 3600,
-            "scope": "signature impersonation",
-        },
-        private_key_pem,
-        algorithm="RS256",
-    )
+    try:
+        assertion = jwt.encode(
+            {
+                "iss": integration_key,
+                "sub": user_id,
+                "aud": auth_host,
+                "iat": now,
+                "exp": now + 3600,
+                "scope": "signature impersonation",
+            },
+            private_key_pem,
+            algorithm="RS256",
+        )
+    except Exception as e:
+        raise DocusignApiError(
+            "DocuSign RSA private key is invalid — paste the full PEM from DocuSign Admin → Apps and Keys."
+        ) from e
     url = f"https://{auth_host}/oauth/token"
     with httpx.Client(timeout=30.0) as client:
         resp = client.post(
@@ -89,7 +94,14 @@ def _request_access_token(row: DocusignIntegrationSettings, *, private_key_pem: 
                 )
                 msg += f". JWT consent is required for the API sender — grant access once: {consent}"
             elif err.get("error_description"):
-                msg += f": {err['error_description']}"
+                desc = str(err["error_description"])
+                msg += f": {desc}"
+                if "issuer_not_found" in desc.lower():
+                    msg += (
+                        ". Your integration key is not registered in this DocuSign environment — "
+                        "if the key is from the developer/demo account, enable “Use DocuSign demo environment” "
+                        "in Admin → DocuSign; production keys require that box unticked."
+                    )
             elif err.get("message"):
                 msg += f": {err['message']}"
         except Exception:
@@ -276,6 +288,58 @@ def create_envelope(
     if not envelope_id:
         raise DocusignApiError("DocuSign did not return an envelope ID")
     return envelope_id
+
+
+def get_document_page_count(
+    row: DocusignIntegrationSettings,
+    *,
+    private_key_pem: str,
+    envelope_id: str,
+    document_id: str = "1",
+) -> int:
+    """Return page count after DocuSign has ingested a draft envelope document."""
+    data = _api_request(
+        row,
+        private_key_pem=private_key_pem,
+        method="GET",
+        path=f"/envelopes/{envelope_id}/documents/{document_id}/pages",
+    )
+    pages = (data or {}).get("pages") if isinstance(data, dict) else None
+    if isinstance(pages, list) and pages:
+        return len(pages)
+    return 1
+
+
+def create_recipient_tabs(
+    row: DocusignIntegrationSettings,
+    *,
+    private_key_pem: str,
+    envelope_id: str,
+    recipient_id: str,
+    tabs: dict[str, Any],
+) -> None:
+    _api_request(
+        row,
+        private_key_pem=private_key_pem,
+        method="POST",
+        path=f"/envelopes/{envelope_id}/recipients/{recipient_id}/tabs",
+        json_body=tabs,
+    )
+
+
+def send_envelope(
+    row: DocusignIntegrationSettings,
+    *,
+    private_key_pem: str,
+    envelope_id: str,
+) -> None:
+    _api_request(
+        row,
+        private_key_pem=private_key_pem,
+        method="PUT",
+        path=f"/envelopes/{envelope_id}",
+        json_body={"status": "sent"},
+    )
 
 
 def create_recipient_view(
