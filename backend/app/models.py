@@ -400,6 +400,9 @@ class FirmSettings(Base):
     quote_letterhead_file_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("file.id", ondelete="SET NULL"), nullable=True
     )
+    portal_logo_file_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("file.id", ondelete="SET NULL"), nullable=True
+    )
     invoice_template_file_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("file.id", ondelete="SET NULL"), nullable=True
     )
@@ -899,6 +902,7 @@ class FileCategory(str, enum.Enum):
     fee_scale = "fee_scale"
     system = "system"
     firm_letterhead = "firm_letterhead"
+    firm_portal_logo = "firm_portal_logo"
     user_signature = "user_signature"
 
 

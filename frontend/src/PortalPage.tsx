@@ -3,12 +3,20 @@ import { applyAuthHeaders, apiUrl, formatApiErrorDetail } from './api'
 import { DocMimeIcon } from './case/DocCells'
 import { PortalFormFillPanel } from './PortalFormFillPanel'
 import { PortalQuotePdfViewer } from './PortalQuotePdfViewer'
+import { PortalLayout, type PortalBrandingConfig } from './portal/PortalBranding'
 import type { PortalAuthOut, PortalBrowseOut, PortalDocusignSigningOut, PortalFileOut, PortalFormPendingOut, PortalGrantSummaryOut, PortalQuoteDeliveryViewOut, PortalQuoteExchangeOut, PortalSessionOut } from './types'
 
 const PORTAL_FILES_GRID = '32px 1fr 120px 100px 180px'
 
 const PORTAL_TOKEN_KEY = 'canary_portal_token'
-const PORTAL_TITLE = 'Canary Portal'
+
+const DEFAULT_PORTAL_CONFIG: PortalBrandingConfig = {
+  firm_name: '',
+  portal_title: 'Client Portal',
+  portal_logo_url: null,
+  powered_by_label: 'Powered by Canary Legal Software',
+  powered_by_url: 'https://canarylegalsoftware.co.uk',
+}
 
 type SignInMode = 'code' | 'email'
 
@@ -122,7 +130,7 @@ function quoteExchangeTokenFromLocation(): string | null {
 }
 
 export default function PortalPage() {
-  const [firmDisplayName, setFirmDisplayName] = useState('')
+  const [portalConfig, setPortalConfig] = useState<PortalBrandingConfig>(DEFAULT_PORTAL_CONFIG)
   const [signInMode, setSignInMode] = useState<SignInMode>('code')
   const [accessCode, setAccessCode] = useState('')
   const [otpEmail, setOtpEmail] = useState('')
@@ -183,16 +191,22 @@ export default function PortalPage() {
 
   const loadConfig = useCallback(async () => {
     try {
-      const cfg = await portalFetch<{ firm_name: string }>('/portal/config')
-      setFirmDisplayName(cfg.firm_name?.trim() ?? '')
+      const cfg = await portalFetch<PortalBrandingConfig>('/portal/config')
+      setPortalConfig({
+        firm_name: cfg.firm_name?.trim() ?? '',
+        portal_title: cfg.portal_title?.trim() || DEFAULT_PORTAL_CONFIG.portal_title,
+        portal_logo_url: cfg.portal_logo_url ?? null,
+        powered_by_label: cfg.powered_by_label?.trim() || DEFAULT_PORTAL_CONFIG.powered_by_label,
+        powered_by_url: cfg.powered_by_url?.trim() || DEFAULT_PORTAL_CONFIG.powered_by_url,
+      })
     } catch {
       /* optional */
     }
   }, [])
 
   useEffect(() => {
-    document.title = PORTAL_TITLE
-  }, [])
+    document.title = portalConfig.portal_title
+  }, [portalConfig.portal_title])
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
@@ -824,33 +838,25 @@ export default function PortalPage() {
 
   if (previewExchangeBusy || quoteExchangeBusy) {
     return (
-      <div className="portalShell">
-        <div className="portalCard card">
-          <h1>{PORTAL_TITLE}</h1>
-          <div className="muted" style={{ marginTop: 12 }}>
-            {quoteExchangeBusy ? 'Opening quote…' : 'Opening preview…'}
-          </div>
+      <PortalLayout config={portalConfig} wide={false}>
+        <div className="muted" style={{ marginTop: 12 }}>
+          {quoteExchangeBusy ? 'Opening quote…' : 'Opening preview…'}
         </div>
-      </div>
+      </PortalLayout>
     )
   }
 
   if (!sessionToken) {
     return (
-      <div className="portalShell">
-        <div className="portalCard card">
-          <h1>{PORTAL_TITLE}</h1>
-          {firmDisplayName ? <p className="muted" style={{ marginTop: 4 }}>{firmDisplayName}</p> : null}
-          <p className="muted">Sign in with your access code or e-mail one-time code.</p>
+      <PortalLayout config={portalConfig} wide={false} subtitle="Sign in with your access code or e-mail one-time code.">
+        {staffPreview ? (
+          <div className="notice portalStaffPreviewBanner">
+            Staff preview — choose a contact from the matter Portal panel, or sign in manually with an access code or
+            e-mail code.
+          </div>
+        ) : null}
 
-          {staffPreview ? (
-            <div className="notice portalStaffPreviewBanner">
-              Staff preview — choose a contact from the matter Portal panel, or sign in manually with an access code or
-              e-mail code.
-            </div>
-          ) : null}
-
-          <div className="portalSignInTabs row" style={{ gap: 8, marginBottom: 16 }}>
+        <div className="portalSignInTabs row" style={{ gap: 8, marginBottom: 16, marginTop: 16 }}>
             <button
               type="button"
               className={`btn${signInMode === 'code' ? ' primary' : ''}`}
@@ -946,8 +952,7 @@ export default function PortalPage() {
               )}
             </form>
           )}
-        </div>
-      </div>
+      </PortalLayout>
     )
   }
 
@@ -997,14 +1002,8 @@ export default function PortalPage() {
   }
 
   return (
-    <div className="portalShell">
-      <div className="portalCard card portalCardWide">
-        <div className="row" style={{ justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap' }}>
-          <div>
-            <h1 style={{ margin: 0 }}>{PORTAL_TITLE}</h1>
-            {firmDisplayName ? <div className="muted">{firmDisplayName}</div> : null}
-            <div className="muted">Signed in as {contactName}</div>
-          </div>
+    <PortalLayout config={portalConfig} subtitle={contactName ? `Signed in as ${contactName}` : null}>
+        <div className="portalUserBar row" style={{ justifyContent: 'flex-end', marginTop: 8, marginBottom: 4 }}>
           <button type="button" className="btn" onClick={signOut}>
             Sign out
           </button>
@@ -1448,7 +1447,6 @@ export default function PortalPage() {
             </div>
           </div>
         )}
-      </div>
-    </div>
+    </PortalLayout>
   )
 }

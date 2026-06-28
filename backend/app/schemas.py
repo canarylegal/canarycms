@@ -452,6 +452,8 @@ class FirmSettingsOut(BaseModel):
     letterhead_original_filename: str | None = None
     quote_letterhead_style: LetterheadStyle = LetterheadStyle.preprinted
     quote_letterhead_original_filename: str | None = None
+    portal_logo_configured: bool = False
+    portal_logo_original_filename: str | None = None
     mandate_two_factor: bool = False
     mandate_password_rotation: bool = False
     password_rotation_days: int | None = None
@@ -2317,6 +2319,10 @@ class FeeEarnerPickOut(BaseModel):
 
 class PortalConfigOut(BaseModel):
     firm_name: str
+    portal_title: str
+    portal_logo_url: str | None = None
+    powered_by_label: str = "Powered by Canary Legal Software"
+    powered_by_url: str = "https://canarylegalsoftware.co.uk"
 
 
 class PortalAuthIn(BaseModel):
