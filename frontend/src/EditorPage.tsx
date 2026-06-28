@@ -995,7 +995,7 @@ export default function EditorPage() {
         flexDirection: 'column',
         width: '100vw',
         height: '100vh',
-        background: 'var(--page-bg)',
+        background: 'var(--page-gradient)',
         overflow: 'hidden',
       }}
     >
