@@ -20,13 +20,17 @@ from app.audit import log_event
 from app.docusign_client import (
     DocusignApiError,
     create_envelope,
+    create_recipient_tabs,
     create_recipient_view,
     download_envelope_document_bytes,
     encode_document_base64,
     file_extension_for_mime,
+    get_document_page_count,
     get_envelope,
+    send_envelope,
     void_envelope,
 )
+from app.docusign_tabs import signer_tabs_for_document
 from app.docusign_settings import docusign_configured, docusign_rsa_private_key, envelope_cost_pence, get_docusign_settings
 from app.file_storage import FILES_ROOT, case_file_paths, ensure_files_root
 from app.models import (
@@ -166,6 +170,8 @@ def _build_envelope_body(
     template_id: str | None,
     recipients: list[DocusignSigningRecipient],
     signature_level: DocusignSignatureLevel,
+    embedded_signing: bool,
+    defer_signature_tabs: bool = False,
 ) -> dict[str, Any]:
     if template_id:
         template_roles = []
@@ -175,8 +181,9 @@ def _build_envelope_body(
                 "name": r.name,
                 "roleName": r.role_name or "Signer",
                 "routingOrder": str(r.routing_order),
-                "clientUserId": r.client_user_id,
             }
+            if embedded_signing:
+                role["clientUserId"] = r.client_user_id
             template_roles.append(role)
         return {
             "emailSubject": subject[:100],
@@ -201,8 +208,9 @@ def _build_envelope_body(
             "name": r.name,
             "recipientId": str(idx),
             "routingOrder": str(r.routing_order),
-            "clientUserId": r.client_user_id,
         }
+        if embedded_signing:
+            signer["clientUserId"] = r.client_user_id
         if signature_level == DocusignSignatureLevel.qes:
             signer["identityVerification"] = {"workflowId": "IDV_PREMIER"}
         signers.append(signer)
@@ -218,9 +226,33 @@ def _build_envelope_body(
             }
         ],
         "recipients": {"signers": signers},
-        "status": "sent",
+        "status": "created" if defer_signature_tabs else "sent",
     }
     return body
+
+
+def _attach_signature_tabs_and_send(
+    settings: DocusignIntegrationSettings,
+    *,
+    private_key_pem: str,
+    envelope_id: str,
+    recipient_count: int,
+) -> None:
+    last_page = get_document_page_count(settings, private_key_pem=private_key_pem, envelope_id=envelope_id)
+    for idx in range(1, recipient_count + 1):
+        create_recipient_tabs(
+            settings,
+            private_key_pem=private_key_pem,
+            envelope_id=envelope_id,
+            recipient_id=str(idx),
+            tabs=signer_tabs_for_document(
+                recipient_id=str(idx),
+                document_id="1",
+                signer_index=idx,
+                page_number=last_page,
+            ),
+        )
+    send_envelope(settings, private_key_pem=private_key_pem, envelope_id=envelope_id)
 
 
 def send_signing_request(
@@ -314,7 +346,9 @@ def send_signing_request(
         recipients.append(recipient)
     db.flush()
 
+    embedded_signing = firm_alerts_configured(db)
     private_key = _private_key(db, settings)
+    needs_signature_tabs = bool(not template_id and source_file)
     try:
         envelope_id = create_envelope(
             settings,
@@ -325,8 +359,17 @@ def send_signing_request(
                 template_id=template_id,
                 recipients=recipients,
                 signature_level=signature_level,
+                embedded_signing=embedded_signing,
+                defer_signature_tabs=needs_signature_tabs,
             ),
         )
+        if needs_signature_tabs:
+            _attach_signature_tabs_and_send(
+                settings,
+                private_key_pem=private_key,
+                envelope_id=envelope_id,
+                recipient_count=len(recipients),
+            )
     except DocusignApiError as e:
         log.warning("DocuSign envelope create failed: %s", e)
         req.status = DocusignSigningStatus.error
@@ -334,6 +377,16 @@ def send_signing_request(
         db.add(req)
         db.commit()
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(e)) from e
+    except Exception as e:
+        log.exception("DocuSign envelope create failed unexpectedly")
+        req.status = DocusignSigningStatus.error
+        req.status_detail = str(e)[:500]
+        db.add(req)
+        db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(e).strip() or "DocuSign send failed unexpectedly",
+        ) from e
 
     req.docusign_envelope_id = envelope_id
     req.updated_at = utcnow()
@@ -347,16 +400,24 @@ def send_signing_request(
             old.status_detail = "Superseded by amended envelope"
             db.add(old)
 
-    _notify_recipients_sign(db, req, recipients)
-    _notify_staff_sent(db, case_id, req, actor)
-    _post_docusign_anticipated_charge(
-        db,
-        case_id=case_id,
-        req=req,
-        envelope_id=envelope_id,
-        settings=settings,
-        actor=actor,
-    )
+    try:
+        _notify_recipients_sign(db, req, recipients)
+        _notify_staff_sent(db, case_id, req, actor)
+    except Exception as e:
+        log.warning("DocuSign alert e-mail failed after envelope %s was sent: %s", envelope_id, e)
+    try:
+        _post_docusign_anticipated_charge(
+            db,
+            case_id=case_id,
+            req=req,
+            envelope_id=envelope_id,
+            settings=settings,
+            actor=actor,
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.warning("DocuSign anticipated ledger charge failed after envelope %s was sent: %s", envelope_id, e)
 
     log_event(
         db,
@@ -529,6 +590,11 @@ def create_signing_redirect_url(db: Session, recipient: DocusignSigningRecipient
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Envelope is not ready")
 
     settings = _require_enabled(db)
+    if not firm_alerts_configured(db):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This envelope was sent by DocuSign e-mail — use the link in the message from DocuSign to sign.",
+        )
     return_url = f"{portal_public_url().rstrip('/')}?signing=complete&token={recipient.sign_token}"
     body = {
         "returnUrl": return_url,
@@ -837,6 +903,27 @@ def list_signing_menu_rows(
             }
         )
     return out
+
+
+def sync_pending_signing_requests(
+    db: Session,
+    *,
+    case_id: uuid.UUID | None = None,
+    source_file_ids: list[uuid.UUID] | None = None,
+) -> int:
+    """Poll DocuSign for pending envelopes and apply status updates."""
+    if not docusign_configured(db):
+        return 0
+    q = select(DocusignSigningRequest).where(DocusignSigningRequest.status == DocusignSigningStatus.pending)
+    if case_id is not None:
+        q = q.where(DocusignSigningRequest.case_id == case_id)
+    if source_file_ids is not None:
+        q = q.where(DocusignSigningRequest.source_file_id.in_(source_file_ids))
+    pending = db.execute(q).scalars().all()
+    for req in pending:
+        if req.docusign_envelope_id:
+            sync_envelope_status(db, req)
+    return len(pending)
 
 
 def sync_accessible_pending_signing_requests(db: Session, *, user: User) -> int:

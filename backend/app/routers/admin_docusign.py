@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -16,6 +17,8 @@ from app.models import User
 from app.schemas import DocusignIntegrationSettingsOut, DocusignIntegrationSettingsUpdate, DocusignTemplateOut
 
 router = APIRouter(prefix="/admin/docusign", tags=["admin-docusign"])
+
+log = logging.getLogger(__name__)
 
 
 def _row_to_out(row) -> DocusignIntegrationSettingsOut:
@@ -96,6 +99,9 @@ def list_docusign_templates(_admin: User = Depends(require_admin), db: Session =
     try:
         private_key = docusign_rsa_private_key(row)
         templates = list_templates(row, private_key_pem=private_key)
+    except RuntimeError as e:
+        log.warning("DocuSign template list failed (admin config): %s", e)
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(e)) from e
     except DocusignApiError as e:
         log.warning("DocuSign template list failed (admin): %s", e)
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(e)) from e

@@ -1069,7 +1069,8 @@ def list_case_files(
         for d in deliveries:
             delivery_by_file[d.file_id] = d
 
-    from app.docusign_signing_service import signing_request_file_list_item
+    from app.docusign_settings import get_docusign_settings
+    from app.docusign_signing_service import signing_request_file_list_item, sync_pending_signing_requests
     from app.models import Contact, DocusignSigningRequest, DocusignSigningStatus, PortalFormSubmission
     from app.portal_service import contact_display_name
     from app.portal_form_service import form_submission_file_list_item
@@ -1084,6 +1085,8 @@ def list_case_files(
 
     signing_by_file: dict[uuid.UUID, dict] = {}
     if file_ids:
+        if get_docusign_settings(db).enabled:
+            sync_pending_signing_requests(db, case_id=case_id, source_file_ids=file_ids)
         signing_rows = (
             db.execute(
                 select(DocusignSigningRequest)

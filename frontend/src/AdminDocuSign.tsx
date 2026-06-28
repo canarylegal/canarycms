@@ -122,6 +122,19 @@ export function AdminDocuSign({ token }: { token: string }) {
         <input type="checkbox" checked={useDemo} onChange={(e) => setUseDemo(e.target.checked)} disabled={busy} />
         <span>Use DocuSign demo environment</span>
       </label>
+      {!useDemo ? (
+        <p className="muted" style={{ margin: 0, fontSize: 13, lineHeight: 1.45 }}>
+          Production mode requires a <strong>production</strong> integration key, API user, and RSA keypair from{' '}
+          <code>account.docusign.com</code>. Demo/sandbox keys cause{' '}
+          <code>issuer_not_found</code> when this box is unchecked.
+        </p>
+      ) : (
+        <p className="muted" style={{ margin: 0, fontSize: 13, lineHeight: 1.45 }}>
+          Demo mode uses <code>account-d.docusign.com</code>. Keep this ticked while testing with sandbox
+          credentials. Signed documents will show a red &quot;DEMONSTRATION DOCUMENT ONLY&quot; banner until you
+          switch to production DocuSign.
+        </p>
+      )}
 
       <fieldset className="stack" style={{ gap: 8, border: '1px solid var(--border)', padding: 12 }}>
         <legend>Document tiers available to senders</legend>
@@ -230,6 +243,10 @@ export function AdminDocuSign({ token }: { token: string }) {
 
       <p className="muted" style={{ margin: 0, fontSize: 13 }}>
         Webhook URL for DocuSign Connect: <code>/api/docusign/connect</code> (append to your public Canary URL).
+      </p>
+      <p className="muted" style={{ margin: 0, fontSize: 13, lineHeight: 1.45 }}>
+        Signing e-mails: when automated firm e-mail alerts are configured (Admin → E-mail), recipients get a Canary
+        portal link for embedded signing. Otherwise DocuSign sends its own e-mail to each recipient.
       </p>
 
       {settings?.configured ? (

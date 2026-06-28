@@ -11,8 +11,17 @@ def _truthy_env(name: str) -> bool:
     return (os.getenv(name) or "").strip().lower() in ("1", "true", "yes", "on")
 
 
+def _falsy_env(name: str) -> bool:
+    return (os.getenv(name) or "").strip().lower() in ("0", "false", "no", "off")
+
+
 def open_pdf_in_onlyoffice() -> bool:
     """When true, case PDFs use ONLYOFFICE instead of the browser blob viewer."""
+    raw = (os.getenv("CANARY_OPEN_PDF_IN_ONLYOFFICE") or "").strip()
+    if not raw:
+        return True
+    if _falsy_env("CANARY_OPEN_PDF_IN_ONLYOFFICE"):
+        return False
     return _truthy_env("CANARY_OPEN_PDF_IN_ONLYOFFICE")
 
 

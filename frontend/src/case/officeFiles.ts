@@ -17,12 +17,14 @@ export function isEmlLikeFileSummary(f: FileSummary): boolean {
 
 function openPdfInOnlyOffice(): boolean {
   const v = (import.meta.env.VITE_CANARY_OPEN_PDF_IN_ONLYOFFICE as string | undefined)?.trim().toLowerCase()
+  if (!v) return true
+  if (v === '0' || v === 'false' || v === 'no' || v === 'off') return false
   return v === '1' || v === 'true' || v === 'yes' || v === 'on'
 }
 
 /**
- * Word / Excel / PowerPoint / ODF / RTF: open in ONLYOFFICE.
- * PDFs too when ``VITE_CANARY_OPEN_PDF_IN_ONLYOFFICE`` is set (deployment opt-in).
+ * Word / Excel / PowerPoint / ODF / RTF / PDF: open in ONLYOFFICE.
+ * Set ``VITE_CANARY_OPEN_PDF_IN_ONLYOFFICE=0`` in ``.env`` to open PDFs in the browser instead.
  */
 export function isOfficeLikeFile(f: FileSummary): boolean {
   const name = f.original_filename.toLowerCase()

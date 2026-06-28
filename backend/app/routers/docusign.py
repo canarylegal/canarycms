@@ -64,6 +64,9 @@ def staff_list_docusign_templates(
     try:
         private_key = docusign_rsa_private_key(row)
         templates = list_templates(row, private_key_pem=private_key)
+    except RuntimeError as e:
+        log.warning("DocuSign template list failed (config): %s", e)
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(e)) from e
     except DocusignApiError as e:
         log.warning("DocuSign template list failed: %s", e)
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(e)) from e
@@ -81,7 +84,10 @@ def staff_list_docusign_templates(
 
 @router.get("/docusign/options", response_model=DocusignStaffOptionsOut)
 def staff_docusign_options(user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> DocusignStaffOptionsOut:
-    row = get_docusign_settings(db)
+    try:
+        row = get_docusign_settings(db)
+    except RuntimeError as e:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(e)) from e
     return DocusignStaffOptionsOut(
         enabled=bool(row.enabled),
         allow_tier_a=bool(row.allow_tier_a),
@@ -114,6 +120,7 @@ def staff_list_docusign_requests(
     row = get_docusign_settings(db)
     if not row.enabled:
         return []
+    sync_accessible_pending_signing_requests(db, user=user)
     status_filter: DocusignSigningStatus | None = None
     if status:
         key = status.strip().lower()

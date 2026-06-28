@@ -33,7 +33,13 @@ def docusign_rsa_private_key(row: DocusignIntegrationSettings) -> str:
     enc = (row.rsa_private_key_enc or "").strip()
     if not enc:
         raise RuntimeError("DocuSign RSA private key is not configured")
-    return decrypt_password(enc)
+    try:
+        return decrypt_password(enc)
+    except Exception as e:
+        raise RuntimeError(
+            "DocuSign RSA private key could not be decrypted — re-enter it in Admin → DocuSign "
+            "(do not copy encrypted values from another server)."
+        ) from e
 
 
 def docusign_connect_hmac_secret(row: DocusignIntegrationSettings) -> str | None:
