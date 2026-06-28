@@ -16,7 +16,7 @@ function isoDateOnlyFromApi(s: string): string {
   return m ? m[1] : s
 }
 
-function addOneCalendarDayYmd(isoYmd: string): string {
+export function addOneCalendarDayYmd(isoYmd: string): string {
   const [y, mo, d] = isoYmd.split('-').map(Number)
   const dt = new Date(y, mo - 1, d)
   dt.setDate(dt.getDate() + 1)
