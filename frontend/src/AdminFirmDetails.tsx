@@ -1,11 +1,13 @@
 import { useEffect, useState } from 'react'
-import { apiFetch } from './api'
+import { apiFetch, apiUrl } from './api'
 import type { ApiError } from './api'
 import type { FirmSettingsOut } from './types'
 
 export function AdminFirmDetails({ token }: { token: string }) {
   const [row, setRow] = useState<FirmSettingsOut | null>(null)
   const [busy, setBusy] = useState(false)
+  const [logoBusy, setLogoBusy] = useState(false)
+  const [logoFileKey, setLogoFileKey] = useState(0)
   const [err, setErr] = useState<string | null>(null)
   const [saved, setSaved] = useState(false)
 
@@ -78,6 +80,45 @@ export function AdminFirmDetails({ token }: { token: string }) {
     }
   }
 
+  async function uploadPortalLogo(file: File) {
+    setLogoBusy(true)
+    setErr(null)
+    setSaved(false)
+    try {
+      const fd = new FormData()
+      fd.append('upload', file)
+      const data = await apiFetch<FirmSettingsOut>('/admin/firm-settings/portal-logo', {
+        token,
+        method: 'POST',
+        body: fd,
+      })
+      setRow(data)
+      setLogoFileKey((k) => k + 1)
+    } catch (e) {
+      setErr((e as ApiError).message ?? 'Portal logo upload failed')
+    } finally {
+      setLogoBusy(false)
+    }
+  }
+
+  async function removePortalLogo() {
+    setLogoBusy(true)
+    setErr(null)
+    setSaved(false)
+    try {
+      const data = await apiFetch<FirmSettingsOut>('/admin/firm-settings/portal-logo', {
+        token,
+        method: 'DELETE',
+      })
+      setRow(data)
+      setLogoFileKey((k) => k + 1)
+    } catch (e) {
+      setErr((e as ApiError).message ?? 'Could not remove portal logo')
+    } finally {
+      setLogoBusy(false)
+    }
+  }
+
   return (
     <div className="stack">
       <div className="paneHead">
@@ -106,6 +147,58 @@ export function AdminFirmDetails({ token }: { token: string }) {
               <span>Registered company name (optional)</span>
               <input value={registeredName} onChange={(e) => setRegisteredName(e.target.value)} disabled={busy} />
             </label>
+            <div style={{ fontWeight: 600, marginTop: 8 }}>Client portal</div>
+            <div className="muted" style={{ fontSize: 13, marginBottom: 4 }}>
+              Shown at the top of the client portal as <strong>{tradingName.trim() || 'Firm name'} Portal</strong>.
+              Use a horizontal logo on a transparent background (PNG, JPEG, or WebP, max 2 MB).
+            </div>
+            {row.portal_logo_configured ? (
+              <div className="stack" style={{ gap: 8 }}>
+                <img
+                  key={logoFileKey}
+                  src={`${apiUrl('/portal/logo')}?v=${logoFileKey}`}
+                  alt="Current portal logo preview"
+                  style={{ maxWidth: 240, maxHeight: 72, objectFit: 'contain' }}
+                />
+                <div className="muted" style={{ fontSize: 13 }}>
+                  {row.portal_logo_original_filename ?? 'Logo uploaded'}
+                </div>
+                <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
+                  <label className="btn" style={{ cursor: logoBusy ? 'wait' : 'pointer' }}>
+                    Replace logo
+                    <input
+                      type="file"
+                      accept="image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp"
+                      hidden
+                      disabled={logoBusy || busy}
+                      onChange={(e) => {
+                        const f = e.target.files?.[0]
+                        e.target.value = ''
+                        if (f) void uploadPortalLogo(f)
+                      }}
+                    />
+                  </label>
+                  <button type="button" className="btn" disabled={logoBusy || busy} onClick={() => void removePortalLogo()}>
+                    Remove logo
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <label className="btn" style={{ cursor: logoBusy ? 'wait' : 'pointer', alignSelf: 'flex-start' }}>
+                Upload portal logo
+                <input
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp"
+                  hidden
+                  disabled={logoBusy || busy}
+                  onChange={(e) => {
+                    const f = e.target.files?.[0]
+                    e.target.value = ''
+                    if (f) void uploadPortalLogo(f)
+                  }}
+                />
+              </label>
+            )}
             <div style={{ fontWeight: 600, marginTop: 8 }}>Firm address</div>
             <label className="field">
               <span>Address line 1</span>

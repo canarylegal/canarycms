@@ -35,7 +35,12 @@ from app.models import (
     User,
 )
 from app.permission_checks import user_may_be_fee_earner
-from app.portal_activity import log_portal_activity
+from app.portal_branding import (
+    CANARY_LEGAL_SOFTWARE_URL,
+    POWERED_BY_LABEL,
+    firm_display_name,
+    portal_title,
+)
 from app.portal_notifications import notify_portal_staff_client_upload
 from app.portal_case import filter_grants_for_portal_enabled_cases
 from app.portal_service import (
@@ -166,10 +171,30 @@ def _grant_summaries(db: Session, contact_id: uuid.UUID) -> list[PortalGrantSumm
 @router.get("/config", response_model=PortalConfigOut)
 def portal_config(db: Session = Depends(get_db)) -> PortalConfigOut:
     firm = db.get(FirmSettings, 1)
-    name = (firm.trading_name or "").strip() if firm else ""
-    if not name and firm and firm.registered_company_name:
-        name = (firm.registered_company_name or "").strip()
-    return PortalConfigOut(firm_name=name)
+    name = firm_display_name(firm)
+    logo_url = "/portal/logo" if firm and firm.portal_logo_file_id else None
+    return PortalConfigOut(
+        firm_name=name,
+        portal_title=portal_title(firm),
+        portal_logo_url=logo_url,
+        powered_by_label=POWERED_BY_LABEL,
+        powered_by_url=CANARY_LEGAL_SOFTWARE_URL,
+    )
+
+
+@router.get("/logo")
+def portal_logo(db: Session = Depends(get_db)) -> FileResponse:
+    firm = db.get(FirmSettings, 1)
+    if firm is None or not firm.portal_logo_file_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Portal logo not configured")
+    frow = db.get(File, firm.portal_logo_file_id)
+    if frow is None or frow.category != FileCategory.firm_portal_logo:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Portal logo not configured")
+    abs_path = (FILES_ROOT / frow.storage_path).resolve()
+    if not abs_path.is_file() or not str(abs_path).startswith(str(FILES_ROOT.resolve())):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Portal logo not found")
+    media = (frow.mime_type or mimetypes.guess_type(frow.original_filename)[0] or "image/png").split(";", 1)[0]
+    return FileResponse(abs_path, media_type=media, filename=frow.original_filename)
 
 
 @router.post("/auth", response_model=PortalAuthOut)

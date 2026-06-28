@@ -20,6 +20,7 @@ from app.file_storage import (
     FILES_ROOT,
     ensure_files_root,
     firm_letterhead_file_paths,
+    firm_portal_logo_file_paths,
     firm_quote_letterhead_file_paths,
 )
 from app.firm_letterhead_onlyoffice import (
@@ -57,6 +58,9 @@ _ALLOWED_LETTERHEAD_MIME = frozenset(
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     }
 )
+_ALLOWED_PORTAL_LOGO_SUFFIX = frozenset({".png", ".jpg", ".jpeg", ".webp"})
+_ALLOWED_PORTAL_LOGO_MIME = frozenset({"image/png", "image/jpeg", "image/webp"})
+_PORTAL_LOGO_MAX_BYTES = 2 * 1024 * 1024
 
 
 def _settings_row(db: Session) -> FirmSettings:
@@ -72,6 +76,7 @@ def _settings_row(db: Session) -> FirmSettings:
 def _to_out(db: Session, row: FirmSettings) -> FirmSettingsOut:
     name: str | None = None
     quote_name: str | None = None
+    portal_logo_name: str | None = None
     if row.letterhead_file_id:
         f = db.get(DbFile, row.letterhead_file_id)
         if f:
@@ -80,6 +85,10 @@ def _to_out(db: Session, row: FirmSettings) -> FirmSettingsOut:
         qf = db.get(DbFile, row.quote_letterhead_file_id)
         if qf:
             quote_name = qf.original_filename
+    if row.portal_logo_file_id:
+        pf = db.get(DbFile, row.portal_logo_file_id)
+        if pf:
+            portal_logo_name = pf.original_filename
     return FirmSettingsOut(
         id=row.id,
         trading_name=row.trading_name or "",
@@ -93,6 +102,8 @@ def _to_out(db: Session, row: FirmSettings) -> FirmSettingsOut:
         letterhead_original_filename=name,
         quote_letterhead_style=row.quote_letterhead_style,
         quote_letterhead_original_filename=quote_name,
+        portal_logo_configured=bool(row.portal_logo_file_id),
+        portal_logo_original_filename=portal_logo_name,
         mandate_two_factor=bool(row.mandate_two_factor),
         mandate_password_rotation=bool(row.mandate_password_rotation),
         password_rotation_days=row.password_rotation_days,
@@ -143,6 +154,40 @@ def _delete_quote_letterhead_file(db: Session, settings: FirmSettings) -> None:
         return
     f = db.get(DbFile, fid)
     settings.quote_letterhead_file_id = None
+    if f:
+        abs_path = (FILES_ROOT / f.storage_path).resolve()
+        db.delete(f)
+        db.flush()
+        if str(abs_path).startswith(str(FILES_ROOT)) and abs_path.is_file():
+            try:
+                abs_path.unlink()
+            except OSError:
+                pass
+
+
+def _validate_portal_logo_upload(filename: str, content_type: str | None) -> None:
+    suf = Path(filename or "").suffix.lower()
+    if suf not in _ALLOWED_PORTAL_LOGO_SUFFIX:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Portal logo must be PNG, JPEG, or WebP.",
+        )
+    mime = (content_type or "").split(";", 1)[0].strip().lower()
+    if mime and mime not in _ALLOWED_PORTAL_LOGO_MIME:
+        guess = mimetypes.guess_type(filename)[0]
+        if guess not in _ALLOWED_PORTAL_LOGO_MIME:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Portal logo must be PNG, JPEG, or WebP.",
+            )
+
+
+def _delete_portal_logo_file(db: Session, settings: FirmSettings) -> None:
+    fid = settings.portal_logo_file_id
+    if not fid:
+        return
+    f = db.get(DbFile, fid)
+    settings.portal_logo_file_id = None
     if f:
         abs_path = (FILES_ROOT / f.storage_path).resolve()
         db.delete(f)
@@ -376,6 +421,98 @@ def delete_quote_letterhead(admin: User = Depends(require_firm_admin), db: Sessi
         db,
         actor_user_id=admin.id,
         action="firm_settings.quote_letterhead_delete",
+        entity_type="firm_settings",
+        entity_id="1",
+        meta={},
+    )
+    return _to_out(db, row)
+
+
+@router.post("/portal-logo", response_model=FirmSettingsOut)
+async def upload_portal_logo(
+    upload: UploadFile = File(...),
+    admin: User = Depends(require_firm_admin),
+    db: Session = Depends(get_db),
+) -> FirmSettingsOut:
+    original = upload.filename or "portal-logo.bin"
+    _validate_portal_logo_upload(original, upload.content_type)
+
+    row = _settings_row(db)
+    ensure_files_root()
+    _delete_portal_logo_file(db, row)
+
+    file_id = uuid.uuid4()
+    paths = firm_portal_logo_file_paths(file_id=file_id, original_filename=original)
+
+    size = 0
+    with paths.abs_path.open("wb") as fh:
+        while True:
+            chunk = await upload.read(1024 * 1024)
+            if not chunk:
+                break
+            size += len(chunk)
+            if size > _PORTAL_LOGO_MAX_BYTES:
+                fh.close()
+                if paths.abs_path.is_file():
+                    paths.abs_path.unlink()
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Portal logo must be 2 MB or smaller.",
+                )
+            fh.write(chunk)
+
+    mime = upload.content_type or (mimetypes.guess_type(original)[0] or "image/png")
+    mime = mime.split(";", 1)[0].strip().lower()
+    if mime not in _ALLOWED_PORTAL_LOGO_MIME:
+        mime = "image/png"
+
+    now = datetime.utcnow()
+    frow = DbFile(
+        id=file_id,
+        case_id=None,
+        owner_id=admin.id,
+        category=FileCategory.firm_portal_logo,
+        storage_path=paths.rel_path,
+        folder_path="",
+        parent_file_id=None,
+        is_pinned=False,
+        original_filename=Path(original).name,
+        mime_type=mime,
+        size_bytes=size,
+        version=1,
+        checksum=None,
+        created_at=now,
+        updated_at=now,
+    )
+    row.portal_logo_file_id = file_id
+    row.updated_at = now
+    db.add(frow)
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    log_event(
+        db,
+        actor_user_id=admin.id,
+        action="firm_settings.portal_logo_upload",
+        entity_type="firm_settings",
+        entity_id="1",
+        meta={"file_id": str(file_id)},
+    )
+    return _to_out(db, row)
+
+
+@router.delete("/portal-logo", response_model=FirmSettingsOut)
+def delete_portal_logo(admin: User = Depends(require_firm_admin), db: Session = Depends(get_db)) -> FirmSettingsOut:
+    row = _settings_row(db)
+    _delete_portal_logo_file(db, row)
+    row.updated_at = datetime.utcnow()
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    log_event(
+        db,
+        actor_user_id=admin.id,
+        action="firm_settings.portal_logo_delete",
         entity_type="firm_settings",
         entity_id="1",
         meta={},
