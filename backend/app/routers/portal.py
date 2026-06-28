@@ -41,6 +41,7 @@ from app.portal_branding import (
     firm_display_name,
     portal_title,
 )
+from app.portal_activity import log_portal_activity
 from app.portal_notifications import notify_portal_staff_client_upload
 from app.portal_case import filter_grants_for_portal_enabled_cases
 from app.portal_service import (
