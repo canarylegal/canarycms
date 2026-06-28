@@ -2,9 +2,9 @@
   --app-font-stack: "DM Sans", system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   /* Dark blue page + white interactive surfaces (cards, sidebar, chrome) */
   --bg: #1e3a8a;
-  /* Single flat blue (no gradient); alias for embeds that used --page-gradient */
+  /* Solid mid-tone for chrome on the gradient (top bar buttons, color-mix borders). */
   --page-bg: #1e3a8a;
-  --page-gradient: #1e3a8a;
+  --page-gradient: linear-gradient(165deg, #1e3a8a 0%, #1e40af 42%, #172554 100%);
   --panel: #ffffff;
   /* Nested rows / chrome inside white panels — still reads as “white” on blue */
   --panel2: #f8fafc;
@@ -76,7 +76,7 @@ html.dark {
   color-scheme: dark;
   --bg: #0f172a;
   --page-bg: #0f172a;
-  --page-gradient: #0f172a;
+  --page-gradient: linear-gradient(165deg, #0f172a 0%, #1e293b 100%);
   --panel: #1e293b;
   --panel2: #334155;
   --text: #f1f5f9;
@@ -169,7 +169,8 @@ html {
 body {
   margin: 0;
   min-height: 100vh;
-  background: var(--page-bg);
+  background: var(--page-gradient);
+  background-attachment: fixed;
   color: var(--text);
   font-family: var(--app-font-stack);
 }
@@ -394,7 +395,8 @@ a {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  background: var(--page-bg);
+  background: var(--page-gradient);
+  background-attachment: fixed;
 }
 
 .topbar--content {
@@ -5507,7 +5509,8 @@ html.dark .emlPreviewBodyWrap {
   align-items: flex-start;
   justify-content: center;
   padding: 32px 16px 24px;
-  background: linear-gradient(165deg, #1e3a8a 0%, #1e40af 42%, #172554 100%);
+  background: var(--page-gradient);
+  background-attachment: fixed;
 }
 
 .portalLayout {
@@ -5653,7 +5656,8 @@ html.dark .emlPreviewBodyWrap {
 }
 
 html.dark .portalShell {
-  background: linear-gradient(165deg, #0f172a 0%, #1e293b 100%);
+  background: var(--page-gradient);
+  background-attachment: fixed;
 }
 
 html.dark .portalPoweredByLink {
