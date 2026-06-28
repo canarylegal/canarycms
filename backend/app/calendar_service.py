@@ -75,6 +75,10 @@ def ensure_default_calendar(db: Session, user: User) -> UserCalendar:
     db.add(row)
     db.commit()
     db.refresh(row)
+    from app.calendar_label_bootstrap import ensure_calendar_labels
+
+    ensure_calendar_labels(db, row.id)
+    db.commit()
     return row
 
 
