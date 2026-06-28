@@ -197,15 +197,6 @@
     const ext = sh().getGecko()
     if (!ext || composeTabId == null) return
     await cs().setTabState(ext, composeTabId, { attachmentFileIds: selectedIds.slice() })
-    const r = await sendRuntimeMessage(ext, {
-      type: 'canary-apply-compose-attachments',
-      composeTabId: composeTabId,
-      caseId: caseId,
-    })
-    if (!r || !r.ok) {
-      showErr((r && r.detail) || 'Could not attach files to the message.')
-      return
-    }
     await returnToComposePanel(ext)
   }
 

@@ -29,6 +29,9 @@ claudecanary1.txt
 
 # Thunderbird add-on build artifacts
 thunderbird-addin/dist/
+thunderbird-addin/.build-out/
+thunderbird-addin/hosting/*.xpi
+thunderbird-addin/hosting/updates.json
 thunderbird-addin/node_modules/
 thunderbird-addin/web-ext-artifacts/
 thunderbird-addin/.amo-upload-uuid

@@ -6,7 +6,10 @@
     "lint": "web-ext lint --source-dir .",
     "package": "node scripts/package.mjs",
     "sign": "node scripts/sign.mjs",
-    "release": "npm run lint && npm run package && npm run sign"
+    "publish-hosting": "node scripts/publish-hosting.mjs",
+    "deploy-smb": "node scripts/deploy-smb.mjs",
+    "release": "npm run package && npm run sign && npm run publish-hosting",
+    "release:deploy": "bash scripts/release-and-deploy.sh"
   },
   "devDependencies": {
     "web-ext": "^8.10.0"

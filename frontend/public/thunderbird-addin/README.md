@@ -45,12 +45,24 @@ Release Thunderbird only keeps **signed** add-ons after restart. Unsigned tempor
 
 ### Firm IT — install a signed `.xpi`
 
-1. Obtain **`canary-thunderbird-{version}.xpi`** from your Canary host or vendor (signed build).
+1. Download **`canary-thunderbird-{version}.xpi`** from [canarylegalsoftware.co.uk/thunderbird/](https://canarylegalsoftware.co.uk/thunderbird/) (or your vendor).
 2. In Thunderbird: **Add-ons and Themes** → gear menu → **Install Add-on From File…** → choose the `.xpi`.
 3. Confirm the add-on appears as **Canary — file to matter** and survives a Thunderbird restart.
-4. Each user opens **Server & sign-in** once and enters your Canary URL (same as the web app).
+4. Each user opens **Server & sign-in** once and enters **their firm’s** Canary URL (e.g. `https://canary.yourfirm.example` — not the download host).
 
-**Updates:** install a newer signed `.xpi` over the old one (or remove the old add-on first). There is no auto-update channel unless you configure enterprise distribution below.
+**Updates:** builds signed with `update_url` in the manifest auto-update from `https://canarylegalsoftware.co.uk/thunderbird/updates.json` (Thunderbird checks about daily). First install after enabling auto-update may still be manual if users only have an older build without `update_url`.
+
+### Central hosting (all firms)
+
+Signed releases and the update manifest are published to **`https://canarylegalsoftware.co.uk/thunderbird/`** (vendor domain — same `.xpi` for every firm). See **`hosting/README.md`** for WordPress upload steps.
+
+After `npm run sign`:
+
+```bash
+npm run publish-hosting   # → hosting/updates.json + hosting/canary-thunderbird-{version}.xpi
+```
+
+Upload the contents of **`hosting/`** to `public_html/thunderbird/` on the WordPress server.
 
 ### Enterprise pre-install (optional)
 
@@ -86,14 +98,18 @@ Or one step after credentials are exported:
 ```bash
 export ATN_API_KEY='your-jwt-issuer'
 export ATN_API_SECRET='your-jwt-secret'
-npm run release
+npm run release              # lint → package → sign → publish-hosting
 ```
 
 `npm run sign` reads `ATN_API_KEY` / `ATN_API_SECRET` (or `WEB_EXT_API_KEY` / `WEB_EXT_API_SECRET`). Optional override: `ATN_AMO_BASE_URL` (default `https://addons.thunderbird.net/api/v4`).
 
-**Output:** `dist/canary-thunderbird-{version}.zip` (unsigned package) and a **signed `.xpi`** after `npm run sign`. Distribute the **signed `.xpi`** to firms.
+**Output:**
 
-**Version bumps:** edit `version` in `manifest.json` before each release ATN accepts as a new version.
+- `dist/canary-thunderbird-{version}.zip` (unsigned package)
+- `dist/canary-thunderbird-{version}.xpi` (signed)
+- `hosting/` — upload to **canarylegalsoftware.co.uk/thunderbird/** (see `hosting/README.md`)
+
+**Version bumps:** edit `version` in `manifest.json` before each release ATN accepts as a new version. The manifest includes `applications.gecko.update_url`; re-sign after changing it.
 
 ### GitHub Actions (optional)
 

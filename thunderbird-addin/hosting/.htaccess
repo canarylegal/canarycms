@@ -1,0 +1,18 @@
+# Static Thunderbird add-on files under /thunderbird/ on canarylegalsoftware.co.uk
+# Apache serves these directly when the folder exists beside WordPress (no PHP needed).
+
+<IfModule mod_headers.c>
+  <FilesMatch "\.xpi$">
+    Header set Content-Type "application/x-xpinstall"
+    Header set Content-Disposition "attachment"
+  </FilesMatch>
+  <FilesMatch "^updates\.json$">
+    Header set Content-Type "application/json; charset=utf-8"
+    Header set Cache-Control "public, max-age=300"
+  </FilesMatch>
+</IfModule>
+
+<IfModule mod_mime.c>
+  AddType application/x-xpinstall .xpi
+  AddType application/json .json
+</IfModule>

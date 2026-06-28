@@ -1,13 +1,14 @@
 {
   "manifest_version": 2,
   "name": "Canary — file to matter",
-  "version": "1.5.5",
+  "version": "1.5.14",
   "description": "File mail to a matter; compose from a matter with merge and attachments; apply the Canary message tag.",
   "author": "Canary",
   "applications": {
     "gecko": {
       "id": "canary-file@canarylegal.co.uk",
-      "strict_min_version": "128.0"
+      "strict_min_version": "128.0",
+      "update_url": "https://canarylegalsoftware.co.uk/thunderbird/updates.json"
     }
   },
   "background": {

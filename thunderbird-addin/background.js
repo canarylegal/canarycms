@@ -168,13 +168,29 @@
       void (async function () {
         try {
           const tabId = message.composeTabId
-          const fromToolbar = globalThis.canaryOpenComposePanelFromToolbar
+          const focusWindow = globalThis.canaryFocusComposePanelWindow
           const openWindow = globalThis.canaryOpenComposePanelWindow
           let r
+          if (typeof focusWindow === 'function') {
+            r = await focusWindow(tabId)
+            if (r && r.ok) {
+              sendResponse(r)
+              return
+            }
+          }
+          if (typeof openWindow === 'function') {
+            r = await openWindow(tabId, { focusOnly: true })
+            if (r && r.ok) {
+              sendResponse(r)
+              return
+            }
+            r = await openWindow(tabId)
+            sendResponse(r)
+            return
+          }
+          const fromToolbar = globalThis.canaryOpenComposePanelFromToolbar
           if (typeof fromToolbar === 'function') {
             r = await fromToolbar(ext, { id: tabId })
-          } else if (typeof openWindow === 'function') {
-            r = await openWindow(tabId, { force: true })
           } else {
             r = { ok: false, detail: 'Compose panel opener missing' }
           }

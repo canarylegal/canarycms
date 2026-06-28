@@ -5,7 +5,7 @@ import { addinRoot, runWebExt } from './run-web-ext.mjs'
 const manifest = JSON.parse(fs.readFileSync(path.join(addinRoot, 'manifest.json'), 'utf8'))
 const version = manifest.version
 const filename = `canary-thunderbird-${version}.zip`
-const distDir = path.join(addinRoot, 'dist')
+const distDir = process.env.CANARY_TB_ARTIFACTS_DIR || path.join(addinRoot, '.build-out')
 
 fs.mkdirSync(distDir, { recursive: true })
 
@@ -20,5 +20,5 @@ runWebExt([
   filename,
 ])
 
-console.log(`[thunderbird-addin] packaged dist/${filename}`)
+console.log(`[thunderbird-addin] packaged ${path.relative(addinRoot, path.join(distDir, filename))}`)
 console.log('[thunderbird-addin] install the signed copy after npm run sign, or submit this zip to ATN manually')

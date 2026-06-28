@@ -23,19 +23,30 @@
     })
   }
 
-  function openExtensionPopupWindow(url, trackRef, sizeOpts) {
+  function openExtensionPopupWindow(url, trackRef, sizeOpts, windowOpts) {
     const ext = getGecko()
     if (!ext || !ext.windows || !ext.runtime.getURL) {
       return Promise.reject(new Error('windows API not available'))
     }
     const w = (sizeOpts && sizeOpts.width) || 480
     const h = (sizeOpts && sizeOpts.height) || 640
+    const focusOnly = windowOpts && windowOpts.focusOnly
     const trackedId = trackRef && trackRef.id != null ? trackRef.id : null
     if (trackedId != null) {
       return ext.windows
         .get(trackedId)
         .then(function (existing) {
           if (existing && existing.id != null) {
+            if (focusOnly) {
+              return ext.windows
+                .update(trackedId, { focused: true, drawAttention: true })
+                .catch(function () {
+                  return ext.windows.update(trackedId, { focused: true })
+                })
+                .then(function () {
+                  return { ok: true, focused: true, windowId: trackedId, reloaded: false }
+                })
+            }
             return navigateExtensionWindowToUrl(ext, trackedId, url)
               .catch(function () {
                 return false
@@ -120,12 +131,45 @@
    * Open compose panel in a popup window (works without user gesture; composeAction.openPopup often does not).
    * @param {number} tabId
    */
+  globalThis.canaryFocusComposePanelWindow = function (tabId) {
+    const ext = getGecko()
+    if (!ext || tabId == null) {
+      return Promise.resolve({ ok: false, detail: 'No compose tab or extension API.' })
+    }
+    const key = String(tabId)
+    const windowId = composePanelWindowByTab[key]
+    if (windowId == null) {
+      return Promise.resolve({ ok: false, detail: 'No compose panel window for tab.' })
+    }
+    return ext.windows
+      .get(windowId)
+      .then(function (existing) {
+        if (!existing || existing.id == null) {
+          composePanelWindowByTab[key] = null
+          return { ok: false, detail: 'Compose panel window was closed.' }
+        }
+        return ext.windows
+          .update(windowId, { focused: true, drawAttention: true })
+          .catch(function () {
+            return ext.windows.update(windowId, { focused: true })
+          })
+          .then(function () {
+            return { ok: true, focused: true, windowId: windowId, reloaded: false }
+          })
+      })
+      .catch(function () {
+        composePanelWindowByTab[key] = null
+        return { ok: false, detail: 'Could not focus compose panel.' }
+      })
+  }
+
   globalThis.canaryOpenComposePanelWindow = function (tabId, options) {
     const ext = getGecko()
     if (!ext || tabId == null) {
       return Promise.resolve({ ok: false, detail: 'No compose tab or extension API.' })
     }
     const force = options && options.force
+    const focusOnly = options && options.focusOnly
     const key = String(tabId)
     return (async function () {
       try {
@@ -144,7 +188,7 @@
           '&autoWindow=1'
         const url = ext.runtime.getURL('compose-panel/panel.html?' + q)
         const track = { id: composePanelWindowByTab[key] != null ? composePanelWindowByTab[key] : null }
-        const r = await openExtensionPopupWindow(url, track)
+        const r = await openExtensionPopupWindow(url, track, undefined, { focusOnly: focusOnly })
         composePanelWindowByTab[key] = track.id
         return r
       } catch (e) {
@@ -213,9 +257,7 @@
       for (const k of Object.keys(composePanelWindowByTab)) {
         if (composePanelWindowByTab[k] === windowId) {
           composePanelWindowByTab[k] = null
-          if (globalThis.canaryClearComposeAutoOpened) {
-            globalThis.canaryClearComposeAutoOpened(k)
-          }
+          /* Keep openedForTab until the compose tab closes — avoids re-auto-open when editing To after closing the panel. */
         }
       }
       if (windowId === attachPickerWindowId) attachPickerWindowId = null
