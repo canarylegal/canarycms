@@ -397,6 +397,9 @@ def list_tracked_case_events_for_calendar_merge(
         case = get_case_if_accessible(ev.case_id, user, db)
         if case is None:
             continue
+        if ev.calendar_event_uid:
+            # Already synced to CalDAV — show that row only (with enrich below).
+            continue
         if not _case_event_intersects_window(ev, rs_u, re_u):
             continue
         cs, ce_str, cad = _calendar_block_for_event(ev)
@@ -426,3 +429,54 @@ def list_tracked_case_events_for_calendar_merge(
             }
         )
     return out
+
+
+def enrich_caldav_events_with_linked_case_events(
+    db: Session,
+    user: User,
+    events: list[dict],
+) -> None:
+    """Attach matter metadata to CalDAV rows synced from tracked case events."""
+    rows = (
+        db.execute(
+            select(CaseEvent).where(
+                CaseEvent.track_in_calendar.is_(True),
+                CaseEvent.calendar_event_uid.isnot(None),
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if not rows:
+        return
+
+    by_ref: dict[str, CaseEvent] = {}
+    cases: dict[uuid.UUID, Case] = {}
+    for ev in rows:
+        ref = (ev.calendar_event_uid or "").strip()
+        if not ref:
+            continue
+        case = cases.get(ev.case_id)
+        if case is None:
+            case = get_case_if_accessible(ev.case_id, user, db)
+            if case is None:
+                continue
+            cases[ev.case_id] = case
+        by_ref[ref] = ev
+
+    for item in events:
+        if item.get("case_event_id"):
+            continue
+        ref = str(item.get("id") or "")
+        ev = by_ref.get(ref)
+        if ev is None:
+            continue
+        case = cases.get(ev.case_id)
+        if case is None:
+            continue
+        item["case_id"] = str(case.id)
+        item["case_event_id"] = str(ev.id)
+        item["track_in_calendar"] = ev.track_in_calendar
+        item["title"] = f"{case.case_number} · {ev.name}"
+        if ev.template_id:
+            item["matter_template_id"] = str(ev.template_id)

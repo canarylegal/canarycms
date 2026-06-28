@@ -29,6 +29,7 @@ import type {
   CalendarEventOut,
   CalendarShareOut,
   CaseEventOut,
+  CaseOut,
   UserCalendarListItem,
   UserPublic,
   UserSummary,
@@ -1142,7 +1143,9 @@ export function CalendarPage({
         })
       }
       if (draft.trackInCalendar) {
+        const caseRow = await apiFetch<CaseOut>(`/cases/${cid}`, { token })
         await syncCaseEventToCalDav(token, cid, saved, {
+          caseLabel: caseRow.case_number,
           categoryId: draft.categoryId,
           calendarId: draft.targetCalendarId || defaultOwnedCalendarId(calendars),
         })
@@ -1193,7 +1196,9 @@ export function CalendarPage({
           json: payload,
         })
         if (draft.trackInCalendar) {
+          const caseRow = await apiFetch<CaseOut>(`/cases/${cid}`, { token })
           await syncCaseEventToCalDav(token, cid, saved, {
+            caseLabel: caseRow.case_number,
             categoryId: draft.categoryId,
             calendarId: draft.targetCalendarId || defaultOwnedCalendarId(calendars),
           })
@@ -1763,7 +1768,7 @@ export function CalendarPage({
                 <button
                   type="button"
                   className="btn primary"
-                  disabled={busy || !draft.caseId.trim() || !draft.title.trim()}
+                  disabled={busy || !draft.title.trim()}
                   onClick={() => void saveCreate()}
                 >
                   Save
