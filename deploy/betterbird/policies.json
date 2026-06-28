@@ -12,6 +12,10 @@
     },
     "PrimaryPassword": true,
     "Preferences": {
+      "toolkit.legacyUserProfileCustomizations.stylesheets": {
+        "Value": true,
+        "Status": "locked"
+      },
       "calendar.categories.names": {
         "Value": "Funds / Statement Requested,Exchanged,Completed",
         "Status": "locked"
