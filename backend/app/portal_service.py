@@ -12,7 +12,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.file_storage import sanitize_folder_path
-from app.models import Case, Contact, ContactPortalAccess, ContactPortalGrant, File, FileCategory, PortalLoginOtp
+from app.models import Case, CaseContact, Contact, ContactPortalAccess, ContactPortalGrant, File, FileCategory, PortalLoginOtp
 
 PORTAL_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 PORTAL_CODE_GROUPS = (4, 4, 4)
@@ -372,6 +372,24 @@ def grant_folder_display_name(grant: ContactPortalGrant) -> str:
     if not folder:
         return "Documents"
     return folder.split("/")[-1]
+
+
+def resolve_matter_contact_email(db: Session, *, case_id: uuid.UUID, contact_id: uuid.UUID) -> str:
+    """E-mail for portal notifications: matter snapshot first, then global contact card."""
+    cc = db.execute(
+        select(CaseContact).where(
+            CaseContact.case_id == case_id,
+            CaseContact.contact_id == contact_id,
+        )
+    ).scalar_one_or_none()
+    if cc is not None:
+        snap = (cc.email or "").strip()
+        if snap:
+            return snap
+    contact = db.get(Contact, contact_id)
+    if contact is not None:
+        return (contact.email or "").strip()
+    return ""
 
 
 def contact_display_name(contact: Contact) -> str:
