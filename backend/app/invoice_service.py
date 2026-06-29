@@ -246,6 +246,16 @@ def approve_case_invoice(case_id: uuid.UUID, invoice_id: uuid.UUID, user: User, 
         total_pence=int(inv.total_pence),
         pair_id=inv.ledger_pair_id,
     )
+    from app.staff_workflow_notifications import notify_invoice_approved
+
+    notify_invoice_approved(
+        db,
+        case_id=case_id,
+        creator_user_id=inv.created_by_user_id,
+        actor=user,
+        invoice_number=inv.invoice_number,
+        total_pence=int(inv.total_pence),
+    )
     case = db.get(Case, case_id)
     if case is not None:
         from app.invoice_document_service import save_invoice_document_to_case
@@ -253,7 +263,14 @@ def approve_case_invoice(case_id: uuid.UUID, invoice_id: uuid.UUID, user: User, 
         save_invoice_document_to_case(inv=inv, case=case, actor_user_id=user.id, db=db)
 
 
-def void_case_invoice(case_id: uuid.UUID, invoice_id: uuid.UUID, user: User, db: Session) -> None:
+def void_case_invoice(
+    case_id: uuid.UUID,
+    invoice_id: uuid.UUID,
+    user: User,
+    db: Session,
+    *,
+    reject_comment: str | None = None,
+) -> None:
     if not user_may_approve_invoice(user, db):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -282,6 +299,17 @@ def void_case_invoice(case_id: uuid.UUID, invoice_id: uuid.UUID, user: User, db:
             invoice_number=inv.invoice_number,
             total_pence=int(inv.total_pence),
             was_pending=True,
+        )
+        from app.staff_workflow_notifications import notify_invoice_rejected
+
+        notify_invoice_rejected(
+            db,
+            case_id=case_id,
+            creator_user_id=inv.created_by_user_id,
+            actor=user,
+            invoice_number=inv.invoice_number,
+            total_pence=int(inv.total_pence),
+            comment=reject_comment,
         )
         return
 
@@ -316,7 +344,6 @@ def void_case_invoice(case_id: uuid.UUID, invoice_id: uuid.UUID, user: User, db:
         db,
     )
     rev_id = rev_result.pair_id
-    approve_ledger_pair(case_id, rev_id, user, db)
 
     release_billed_time_entries_for_invoice(invoice_id, db)
     inv.status = INV_VOIDED

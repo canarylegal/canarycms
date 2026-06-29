@@ -1,5 +1,6 @@
 """Category-based permissions; admins always pass."""
 
+
 from __future__ import annotations
 
 import uuid
@@ -14,6 +15,8 @@ from app.permission_checks import (
     assert_may_post_ledger,
     user_may_access_accounts_workspace,
     user_may_be_fee_earner,
+    user_may_post_client,
+    user_may_post_office,
 )
 from app.schemas import LedgerPostCreate
 
@@ -105,3 +108,53 @@ def test_fee_earner_without_approve_cannot_access_accounts_workspace() -> None:
     db = MagicMock()
     db.get.return_value = cat
     assert user_may_access_accounts_workspace(user, db) is False
+
+
+def test_perm_admin_without_post_client_cannot_post_client() -> None:
+    cat_id = uuid.uuid4()
+    user = User(id=uuid.uuid4(), role=UserRole.user, permission_category_id=cat_id)
+    cat = UserPermissionCategory(
+        id=cat_id,
+        name="Admin only",
+        perm_admin=True,
+        perm_post_client=False,
+        perm_post_office=True,
+    )
+    db = MagicMock()
+    db.get.return_value = cat
+    assert user_may_post_client(user, db) is False
+    assert user_may_post_office(user, db) is True
+    payload = LedgerPostCreate(
+        client_direction="credit",
+        office_direction=None,
+        amount_pence=5000,
+        description="Test",
+    )
+    with pytest.raises(HTTPException) as exc:
+        assert_may_post_ledger(user, payload, db)
+    assert exc.value.status_code == 403
+    assert "client account" in str(exc.value.detail).lower()
+
+
+def test_perm_admin_without_post_office_cannot_post_office() -> None:
+    cat_id = uuid.uuid4()
+    user = User(id=uuid.uuid4(), role=UserRole.user, permission_category_id=cat_id)
+    cat = UserPermissionCategory(
+        id=cat_id,
+        name="Admin only",
+        perm_admin=True,
+        perm_post_client=True,
+        perm_post_office=False,
+    )
+    db = MagicMock()
+    db.get.return_value = cat
+    payload = LedgerPostCreate(
+        client_direction=None,
+        office_direction="debit",
+        amount_pence=5000,
+        description="Test",
+    )
+    with pytest.raises(HTTPException) as exc:
+        assert_may_post_ledger(user, payload, db)
+    assert exc.value.status_code == 403
+    assert "office account" in str(exc.value.detail).lower()

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Body, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
@@ -20,7 +20,7 @@ from app.invoice_service import (
     void_case_invoice,
 )
 from app.models import Case, CaseInvoice, User
-from app.schemas import CaseInvoiceCreate, CaseInvoiceOut, CaseInvoicesOut, InvoiceBillingDefaultsOut
+from app.schemas import CaseInvoiceCreate, CaseInvoiceOut, CaseInvoicesOut, InvoiceBillingDefaultsOut, RejectCommentIn
 
 router = APIRouter(prefix="/cases", tags=["case-invoices"])
 
@@ -101,9 +101,10 @@ def download_invoice_document(
 def delete_invoice(
     case_id: uuid.UUID,
     invoice_id: uuid.UUID,
+    payload: RejectCommentIn = Body(default_factory=RejectCommentIn),
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> None:
     require_case_access(case_id, user, db)
-    void_case_invoice(case_id, invoice_id, user, db)
+    void_case_invoice(case_id, invoice_id, user, db, reject_comment=payload.comment)
     db.commit()
