@@ -6,6 +6,7 @@ import { canaryDocumentTitle } from './tabTitle'
 import { SingleSelectDropdown } from './SingleSelectDropdown'
 import type { ApiError } from './api'
 import { ConfirmModal } from './ConfirmModal'
+import { RejectWithCommentModal } from './RejectWithCommentModal'
 import { EditPendingLedgerModal } from './EditPendingLedgerModal'
 import { useModalDrag } from './useModalDrag'
 import type {
@@ -141,7 +142,7 @@ export function LedgerPage({ caseId, token }: Props) {
   const [exportBusy, setExportBusy] = useState(false)
   const [wipEntries, setWipEntries] = useState<CaseTimeEntryOut[]>([])
   const [selectedWipIds, setSelectedWipIds] = useState<Set<string>>(new Set())
-  const [voidInvoiceId, setVoidInvoiceId] = useState<string | null>(null)
+  const [voidInvoiceTarget, setVoidInvoiceTarget] = useState<{ id: string; pending: boolean } | null>(null)
   const [editPair, setEditPair] = useState<{
     pairId: string
     amountPence: number
@@ -449,11 +450,15 @@ export function LedgerPage({ caseId, token }: Props) {
     }
   }
 
-  async function rejectPair(pairId: string) {
+  async function rejectPair(pairId: string, comment: string) {
     setBusy(true)
     setError(null)
     try {
-      await apiFetch(`/cases/${caseId}/ledger/pairs/${pairId}`, { method: 'DELETE', token })
+      await apiFetch(`/cases/${caseId}/ledger/pairs/${pairId}`, {
+        method: 'DELETE',
+        token,
+        json: { comment: comment || null },
+      })
       setRejectPairId(null)
       await load()
     } catch (e) {
@@ -597,14 +602,18 @@ export function LedgerPage({ caseId, token }: Props) {
     }
   }
 
-  async function performVoidInvoice() {
-    if (!voidInvoiceId) return
-    const id = voidInvoiceId
-    setVoidInvoiceId(null)
+  async function performVoidInvoice(comment: string) {
+    if (!voidInvoiceTarget) return
+    const { id, pending } = voidInvoiceTarget
+    setVoidInvoiceTarget(null)
     setBusy(true)
     setError(null)
     try {
-      await apiFetch(`/cases/${caseId}/invoices/${id}`, { method: 'DELETE', token })
+      await apiFetch(`/cases/${caseId}/invoices/${id}`, {
+        method: 'DELETE',
+        token,
+        json: pending ? { comment: comment || null } : {},
+      })
       await load()
       await loadInvoices()
     } catch (e) {
@@ -998,7 +1007,9 @@ export function LedgerPage({ caseId, token }: Props) {
                             type="button"
                             className="btn ledgerInvoiceActionBtn ledgerInvoiceActionBtnDanger"
                             disabled={busy}
-                            onClick={() => setVoidInvoiceId(inv.id)}
+                            onClick={() =>
+                              setVoidInvoiceTarget({ id: inv.id, pending })
+                            }
                           >
                             Void
                           </button>
@@ -1555,26 +1566,36 @@ export function LedgerPage({ caseId, token }: Props) {
       ) : null}
 
       <ConfirmModal
-        open={voidInvoiceId !== null}
+        open={voidInvoiceTarget !== null && !voidInvoiceTarget.pending}
         title="Void invoice?"
-        message="This will remove the invoice or post a reversal on the ledger, depending on status. Continue?"
+        message="This will post a reversal on the ledger. Continue?"
         confirmLabel="Void"
         cancelLabel="Cancel"
         danger
         busy={busy}
-        onConfirm={() => void performVoidInvoice()}
-        onCancel={() => void setVoidInvoiceId(null)}
+        onConfirm={() => void performVoidInvoice('')}
+        onCancel={() => setVoidInvoiceTarget(null)}
       />
 
-      <ConfirmModal
-        open={rejectPairId !== null}
-        title="Reject posting?"
-        message="Remove this draft posting from the ledger? It will not affect account balances."
-        confirmLabel="Reject"
-        cancelLabel="Cancel"
+      <RejectWithCommentModal
+        open={voidInvoiceTarget !== null && voidInvoiceTarget.pending}
+        title="Reject invoice?"
+        message="Remove this pending invoice and its draft ledger posting? The person who created it can be notified by e-mail."
+        confirmLabel="Reject invoice"
         danger
         busy={busy}
-        onConfirm={() => rejectPairId && void rejectPair(rejectPairId)}
+        onConfirm={(comment) => void performVoidInvoice(comment)}
+        onCancel={() => setVoidInvoiceTarget(null)}
+      />
+
+      <RejectWithCommentModal
+        open={rejectPairId !== null}
+        title="Reject posting?"
+        message="Remove this anticipated payment from the ledger? It will not affect account balances. The person who posted it can be notified by e-mail."
+        confirmLabel="Reject"
+        danger
+        busy={busy}
+        onConfirm={(comment) => rejectPairId && void rejectPair(rejectPairId, comment)}
         onCancel={() => setRejectPairId(null)}
       />
 

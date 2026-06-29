@@ -1,4 +1,4 @@
-"""Category-based permissions; admins always pass."""
+"""Category-based permissions for ledger, invoices, and fee-earner assignment."""
 
 from __future__ import annotations
 
@@ -33,22 +33,22 @@ def assert_may_be_fee_earner(user: User, db: Session) -> None:
 
 
 def user_may_post_client(user: User, db: Session) -> bool:
-    if user_effective_admin(user, db):
+    if user.role == UserRole.admin:
         return True
     cat = _category(user, db)
     return bool(cat and cat.perm_post_client)
 
 
 def user_may_post_office(user: User, db: Session) -> bool:
-    if user_effective_admin(user, db):
+    if user.role == UserRole.admin:
         return True
     cat = _category(user, db)
     return bool(cat and cat.perm_post_office)
 
 
 def assert_may_post_ledger(user: User, payload: LedgerPostCreate, db: Session) -> None:
-    """Allow actual postings if admin, or category grants the relevant leg."""
-    if user_effective_admin(user, db):
+    """Actual postings require post-client / post-office on each affected leg (category Admin alone is not enough)."""
+    if user.role == UserRole.admin:
         return
     cat = _category(user, db)
     if cat is None:
@@ -94,7 +94,7 @@ def assert_may_edit_ledger_pair(
     db: Session,
 ) -> None:
     """Edit/reject uses the same rights as approving the posting."""
-    if user_effective_admin(user, db):
+    if not is_anticipated and user_effective_admin(user, db):
         return
     cat = _category(user, db)
     if cat is None:
@@ -103,6 +103,8 @@ def assert_may_edit_ledger_pair(
             detail="No permission profile is assigned to your account. Ask an administrator to assign one.",
         )
     if is_anticipated:
+        if user.role == UserRole.admin:
+            return
         if client_direction and not cat.perm_post_client:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,

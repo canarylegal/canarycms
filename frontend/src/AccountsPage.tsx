@@ -4,6 +4,7 @@ import { fetchCaseSearch } from './apiSearch'
 import { downloadInvoiceDocument, invoiceDownloadFilename } from './invoiceDownload'
 import type { ApiError } from './api'
 import { ConfirmModal } from './ConfirmModal'
+import { RejectWithCommentModal } from './RejectWithCommentModal'
 import { EditPendingLedgerModal } from './EditPendingLedgerModal'
 import type {
   CaseOut,
@@ -345,12 +346,16 @@ export function AccountsPage({ token, me, onOpenCase, onOpenReportsReconcile }: 
     }
   }
 
-  async function rejectLedgerPosting(caseId: string, pairId: string) {
+  async function rejectLedgerPosting(caseId: string, pairId: string, comment: string) {
     const key = `ledger:${caseId}:${pairId}`
     setActionKey(key)
     setErr(null)
     try {
-      await apiFetch(`/cases/${caseId}/ledger/pairs/${pairId}`, { method: 'DELETE', token })
+      await apiFetch(`/cases/${caseId}/ledger/pairs/${pairId}`, {
+        method: 'DELETE',
+        token,
+        json: { comment: comment || null },
+      })
       setRejectLedger(null)
       await reloadQueue()
       await reloadActivity()
@@ -853,16 +858,15 @@ export function AccountsPage({ token, me, onOpenCase, onOpenReportsReconcile }: 
         </div>
       </div>
 
-      <ConfirmModal
+      <RejectWithCommentModal
         open={rejectLedger !== null}
         title="Reject posting?"
-        message="Remove this draft posting from the ledger? It will not affect account balances."
+        message="Remove this anticipated payment from the ledger? The person who posted it can be notified by e-mail."
         confirmLabel="Reject"
-        cancelLabel="Cancel"
         danger
         busy={actionKey !== null}
-        onConfirm={() =>
-          rejectLedger && void rejectLedgerPosting(rejectLedger.caseId, rejectLedger.pairId)
+        onConfirm={(comment) =>
+          rejectLedger && void rejectLedgerPosting(rejectLedger.caseId, rejectLedger.pairId, comment)
         }
         onCancel={() => setRejectLedger(null)}
       />

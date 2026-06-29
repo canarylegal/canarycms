@@ -15,6 +15,7 @@ from app.invoice_service import (
     void_case_invoice,
 )
 from app.ledger_service import get_ledger, post_transaction
+from app.models import FirmSettings
 from app.schemas import CaseInvoiceCreate, CaseInvoiceLineCreate, LedgerPostCreate
 
 from tests.ledger_test_helpers import add_case, add_user, ledger_test_session

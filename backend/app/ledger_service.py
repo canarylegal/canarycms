@@ -243,7 +243,14 @@ def update_ledger_pair_unapproved(
     db.flush()
 
 
-def reject_ledger_pair_unapproved(case_id: uuid.UUID, pair_id: uuid.UUID, user: User, db: Session) -> None:
+def reject_ledger_pair_unapproved(
+    case_id: uuid.UUID,
+    pair_id: uuid.UUID,
+    user: User,
+    db: Session,
+    *,
+    reject_comment: str | None = None,
+) -> None:
     """Remove an unapproved or anticipated posting (reject draft)."""
     accounts, legs = _ledger_pair_legs(case_id, pair_id, db)
     if not legs:
@@ -253,6 +260,10 @@ def reject_ledger_pair_unapproved(case_id: uuid.UUID, pair_id: uuid.UUID, user: 
 
     client_direction, office_direction = _pair_directions(legs, accounts)
     is_anticipated = any(e.is_anticipated for e in legs)
+    poster_user_id = legs[0].posted_by_user_id
+    description = (legs[0].description or "").strip()
+    amount_pence = int(legs[0].amount_pence)
+    reference = legs[0].reference
     assert_may_edit_ledger_pair(
         user,
         client_direction=client_direction,
@@ -263,6 +274,19 @@ def reject_ledger_pair_unapproved(case_id: uuid.UUID, pair_id: uuid.UUID, user: 
     for e in legs:
         db.delete(e)
     db.flush()
+    if is_anticipated:
+        from app.staff_workflow_notifications import notify_anticipated_payment_rejected
+
+        notify_anticipated_payment_rejected(
+            db,
+            case_id=case_id,
+            poster_user_id=poster_user_id,
+            actor=user,
+            description=description,
+            amount_pence=amount_pence,
+            reference=reference,
+            comment=reject_comment,
+        )
 
 
 def delete_ledger_pair_unapproved(case_id: uuid.UUID, pair_id: uuid.UUID, db: Session) -> None:
@@ -366,6 +390,12 @@ def approve_ledger_pair(case_id: uuid.UUID, pair_id: uuid.UUID, user: User, db: 
     if any(e.is_approved for e in legs):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Posting is already approved")
 
+    was_anticipated = any(e.is_anticipated for e in legs)
+    poster_user_id = legs[0].posted_by_user_id
+    snap_description = (legs[0].description or "").strip()
+    snap_amount_pence = int(legs[0].amount_pence)
+    snap_reference = legs[0].reference
+
     client_direction = None
     office_direction = None
     for e in legs:
@@ -412,4 +442,17 @@ def approve_ledger_pair(case_id: uuid.UUID, pair_id: uuid.UUID, user: User, db: 
                 "Approving this posting would put the client account into deficit "
                 f"(balance would be £{abs(client_balance)/100:.2f} DR)."
             ),
+        )
+
+    if was_anticipated:
+        from app.staff_workflow_notifications import notify_anticipated_payment_approved
+
+        notify_anticipated_payment_approved(
+            db,
+            case_id=case_id,
+            poster_user_id=poster_user_id,
+            actor=user,
+            description=snap_description,
+            amount_pence=snap_amount_pence,
+            reference=snap_reference,
         )
