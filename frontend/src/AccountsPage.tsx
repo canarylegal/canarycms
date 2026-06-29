@@ -3,7 +3,6 @@ import { apiFetch } from './api'
 import { fetchCaseSearch } from './apiSearch'
 import { downloadInvoiceDocument, invoiceDownloadFilename } from './invoiceDownload'
 import type { ApiError } from './api'
-import { ConfirmModal } from './ConfirmModal'
 import { RejectWithCommentModal } from './RejectWithCommentModal'
 import { EditPendingLedgerModal } from './EditPendingLedgerModal'
 import type {
