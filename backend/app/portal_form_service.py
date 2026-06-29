@@ -34,7 +34,7 @@ from app.models import (
 )
 from app.portal_activity import log_portal_activity
 from app.portal_notifications import notify_portal_staff_form_completed
-from app.portal_service import client_matter_description, contact_display_name, portal_access_is_active
+from app.portal_service import client_matter_description, contact_display_name, portal_access_is_active, resolve_matter_contact_email
 from app.portal_case import require_case_portal_enabled
 from app.portal_notifications import ALERTS_NOT_CONFIGURED_MSG
 from app.quote_portal_service import pick_portal_grant_for_case
@@ -215,9 +215,7 @@ def send_form_to_contact(
     contact = db.get(Contact, contact_id)
     if contact is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Contact not found")
-    email = (contact.email or "").strip()
-    if not email:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Contact has no e-mail address")
+    email = resolve_matter_contact_email(db, case_id=case_id, contact_id=contact_id)
 
     access = db.execute(select(ContactPortalAccess).where(ContactPortalAccess.contact_id == contact_id)).scalar_one_or_none()
     if access is None or not portal_access_is_active(access):

@@ -32,6 +32,7 @@ from app.portal_service import (
     file_folder_in_grant,
     grant_is_client_visible,
     portal_access_is_active,
+    resolve_matter_contact_email,
 )
 from app.quote_portal_pdf import create_portal_quote_pdf_snapshot
 from app.security import PORTAL_QUOTE_EXCHANGE_TTL_SECONDS, decode_portal_quote_exchange_token
@@ -273,9 +274,7 @@ def send_quote_via_portal(
     contact = db.get(Contact, contact_id)
     if contact is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Contact not found")
-    email = (contact.email or "").strip()
-    if not email:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Contact has no e-mail address")
+    email = resolve_matter_contact_email(db, case_id=case_id, contact_id=contact_id)
 
     access = db.execute(
         select(ContactPortalAccess).where(ContactPortalAccess.contact_id == contact_id)
@@ -332,19 +331,22 @@ def send_quote_via_portal(
         summary=f"Quote sent to {contact_display_name(contact)} via portal ({row.original_filename})",
     )
 
-    email_sent = dispatch_alert(
-        db,
-        AlertKind.portal_quote_sent,
-        to_email=email,
-        context={
-            "contact_name": contact_display_name(contact),
-            "quote_filename": client_filename,
-            "matter_label": client_matter_description(case),
-            "portal_url": quote_url,
-        },
-        actor_user_id=actor_user_id,
-    )
-    skip_reason = None if email_sent else ALERTS_NOT_CONFIGURED_MSG
+    email_sent = False
+    skip_reason: str | None = "Contact has no e-mail address; notification was not sent."
+    if email:
+        email_sent = dispatch_alert(
+            db,
+            AlertKind.portal_quote_sent,
+            to_email=email,
+            context={
+                "contact_name": contact_display_name(contact),
+                "quote_filename": client_filename,
+                "matter_label": client_matter_description(case),
+                "portal_url": quote_url,
+            },
+            actor_user_id=actor_user_id,
+        )
+        skip_reason = None if email_sent else ALERTS_NOT_CONFIGURED_MSG
 
     log_event(
         db,
