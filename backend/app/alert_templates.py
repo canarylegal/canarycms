@@ -544,3 +544,179 @@ def docusign_sign_completed_staff(
         ],
     )
     return subject, body, html
+
+
+def _matter_lines(*, case_number: str, matter_label: str) -> list[str]:
+    lines: list[str] = []
+    if case_number:
+        lines.append(f"Matter: {case_number}")
+    if matter_label and matter_label != case_number:
+        lines.append(matter_label)
+    return lines
+
+
+def _optional_comment_lines(comment: str) -> list[str]:
+    text = (comment or "").strip()
+    if not text:
+        return []
+    return ["", "Comment:", text]
+
+
+def anticipated_payment_approved(
+    *,
+    firm_name: str,
+    staff_name: str,
+    decider_name: str,
+    case_number: str,
+    matter_label: str,
+    description: str,
+    amount_gbp: str,
+    reference: str,
+) -> tuple[str, str, str]:
+    ref = (reference or "").strip()
+    subject = f"Anticipated payment accepted — {case_number or matter_label or 'matter'}"
+    body_lines = [
+        f"Hello {staff_name},",
+        "",
+        f"{decider_name} has accepted your anticipated payment in Canary.",
+        "",
+        description,
+        f"Amount: {amount_gbp}",
+    ]
+    if ref:
+        body_lines.append(f"Reference: {ref}")
+    body_lines.extend(_matter_lines(case_number=case_number, matter_label=matter_label))
+    body_lines.append("")
+    body_lines.append(f"— {_firm_line(firm_name)}")
+    body = "\n".join(body_lines)
+    html_lines = [
+        f"{decider_name} has accepted your anticipated payment.",
+        description,
+        f"Amount: {amount_gbp}",
+    ]
+    if ref:
+        html_lines.append(f"Reference: {ref}")
+    html_lines.extend(_matter_lines(case_number=case_number, matter_label=matter_label))
+    html = _html_email_shell(
+        firm_name=firm_name,
+        inner_html=_html_info_block(title=f"Hello {staff_name}", lines=html_lines),
+    )
+    return subject, body, html
+
+
+def anticipated_payment_rejected(
+    *,
+    firm_name: str,
+    staff_name: str,
+    decider_name: str,
+    case_number: str,
+    matter_label: str,
+    description: str,
+    amount_gbp: str,
+    reference: str,
+    comment: str,
+) -> tuple[str, str, str]:
+    ref = (reference or "").strip()
+    subject = f"Anticipated payment not accepted — {case_number or matter_label or 'matter'}"
+    body_lines = [
+        f"Hello {staff_name},",
+        "",
+        f"{decider_name} has not accepted your anticipated payment in Canary.",
+        "",
+        description,
+        f"Amount: {amount_gbp}",
+    ]
+    if ref:
+        body_lines.append(f"Reference: {ref}")
+    body_lines.extend(_matter_lines(case_number=case_number, matter_label=matter_label))
+    body_lines.extend(_optional_comment_lines(comment))
+    body_lines.append("")
+    body_lines.append(f"— {_firm_line(firm_name)}")
+    body = "\n".join(body_lines)
+    html_lines = [
+        f"{decider_name} has not accepted your anticipated payment.",
+        description,
+        f"Amount: {amount_gbp}",
+    ]
+    if ref:
+        html_lines.append(f"Reference: {ref}")
+    html_lines.extend(_matter_lines(case_number=case_number, matter_label=matter_label))
+    comment_text = (comment or "").strip()
+    if comment_text:
+        html_lines.append(f"Comment: {comment_text}")
+    html = _html_email_shell(
+        firm_name=firm_name,
+        inner_html=_html_info_block(title=f"Hello {staff_name}", lines=html_lines),
+    )
+    return subject, body, html
+
+
+def invoice_approved_staff(
+    *,
+    firm_name: str,
+    staff_name: str,
+    decider_name: str,
+    case_number: str,
+    matter_label: str,
+    invoice_number: str,
+    amount_gbp: str,
+) -> tuple[str, str, str]:
+    subject = f"Invoice {invoice_number} approved"
+    body_lines = [
+        f"Hello {staff_name},",
+        "",
+        f"{decider_name} has approved invoice {invoice_number} in Canary.",
+        f"Total: {amount_gbp}",
+    ]
+    body_lines.extend(_matter_lines(case_number=case_number, matter_label=matter_label))
+    body_lines.append("")
+    body_lines.append(f"— {_firm_line(firm_name)}")
+    body = "\n".join(body_lines)
+    html_lines = [
+        f"{decider_name} has approved invoice {invoice_number}.",
+        f"Total: {amount_gbp}",
+    ]
+    html_lines.extend(_matter_lines(case_number=case_number, matter_label=matter_label))
+    html = _html_email_shell(
+        firm_name=firm_name,
+        inner_html=_html_info_block(title=f"Hello {staff_name}", lines=html_lines),
+    )
+    return subject, body, html
+
+
+def invoice_rejected_staff(
+    *,
+    firm_name: str,
+    staff_name: str,
+    decider_name: str,
+    case_number: str,
+    matter_label: str,
+    invoice_number: str,
+    amount_gbp: str,
+    comment: str,
+) -> tuple[str, str, str]:
+    subject = f"Invoice {invoice_number} not approved"
+    body_lines = [
+        f"Hello {staff_name},",
+        "",
+        f"{decider_name} has not approved invoice {invoice_number} in Canary.",
+        f"Total: {amount_gbp}",
+    ]
+    body_lines.extend(_matter_lines(case_number=case_number, matter_label=matter_label))
+    body_lines.extend(_optional_comment_lines(comment))
+    body_lines.append("")
+    body_lines.append(f"— {_firm_line(firm_name)}")
+    body = "\n".join(body_lines)
+    html_lines = [
+        f"{decider_name} has not approved invoice {invoice_number}.",
+        f"Total: {amount_gbp}",
+    ]
+    html_lines.extend(_matter_lines(case_number=case_number, matter_label=matter_label))
+    comment_text = (comment or "").strip()
+    if comment_text:
+        html_lines.append(f"Comment: {comment_text}")
+    html = _html_email_shell(
+        firm_name=firm_name,
+        inner_html=_html_info_block(title=f"Hello {staff_name}", lines=html_lines),
+    )
+    return subject, body, html

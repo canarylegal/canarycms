@@ -10,10 +10,14 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.alert_templates import (
+    anticipated_payment_approved,
+    anticipated_payment_rejected,
     calendar_event_reminder,
     docusign_sign_completed_staff,
     docusign_sign_requested,
     docusign_sign_sent_staff,
+    invoice_approved_staff,
+    invoice_rejected_staff,
     portal_contact_access_granted,
     portal_contact_files_added,
     portal_contact_folder_granted,
@@ -48,6 +52,10 @@ class AlertKind(str, enum.Enum):
     docusign_sign_requested = "docusign_sign_requested"
     docusign_sign_sent_staff = "docusign_sign_sent_staff"
     docusign_sign_completed_staff = "docusign_sign_completed_staff"
+    anticipated_payment_approved = "anticipated_payment_approved"
+    anticipated_payment_rejected = "anticipated_payment_rejected"
+    invoice_approved = "invoice_approved"
+    invoice_rejected = "invoice_rejected"
 
 
 def firm_alerts_configured(db: Session) -> bool:
@@ -181,6 +189,50 @@ def dispatch_alert(
             firm_name=firm,
             staff_name=str(context.get("staff_name") or "Colleague"),
             document_name=str(context.get("document_name") or "Document"),
+        )
+    elif kind == AlertKind.anticipated_payment_approved:
+        subject, body, body_html = anticipated_payment_approved(
+            firm_name=firm,
+            staff_name=str(context.get("staff_name") or "Colleague"),
+            decider_name=str(context.get("decider_name") or "A colleague"),
+            case_number=str(context.get("case_number") or ""),
+            matter_label=str(context.get("matter_label") or ""),
+            description=str(context.get("description") or ""),
+            amount_gbp=str(context.get("amount_gbp") or ""),
+            reference=str(context.get("reference") or ""),
+        )
+    elif kind == AlertKind.anticipated_payment_rejected:
+        subject, body, body_html = anticipated_payment_rejected(
+            firm_name=firm,
+            staff_name=str(context.get("staff_name") or "Colleague"),
+            decider_name=str(context.get("decider_name") or "A colleague"),
+            case_number=str(context.get("case_number") or ""),
+            matter_label=str(context.get("matter_label") or ""),
+            description=str(context.get("description") or ""),
+            amount_gbp=str(context.get("amount_gbp") or ""),
+            reference=str(context.get("reference") or ""),
+            comment=str(context.get("comment") or ""),
+        )
+    elif kind == AlertKind.invoice_approved:
+        subject, body, body_html = invoice_approved_staff(
+            firm_name=firm,
+            staff_name=str(context.get("staff_name") or "Colleague"),
+            decider_name=str(context.get("decider_name") or "A colleague"),
+            case_number=str(context.get("case_number") or ""),
+            matter_label=str(context.get("matter_label") or ""),
+            invoice_number=str(context.get("invoice_number") or ""),
+            amount_gbp=str(context.get("amount_gbp") or ""),
+        )
+    elif kind == AlertKind.invoice_rejected:
+        subject, body, body_html = invoice_rejected_staff(
+            firm_name=firm,
+            staff_name=str(context.get("staff_name") or "Colleague"),
+            decider_name=str(context.get("decider_name") or "A colleague"),
+            case_number=str(context.get("case_number") or ""),
+            matter_label=str(context.get("matter_label") or ""),
+            invoice_number=str(context.get("invoice_number") or ""),
+            amount_gbp=str(context.get("amount_gbp") or ""),
+            comment=str(context.get("comment") or ""),
         )
     else:
         log.warning("alert_dispatch: unknown kind %s", kind)

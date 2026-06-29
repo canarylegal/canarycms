@@ -4,7 +4,7 @@ from __future__ import annotations
 import uuid
 from io import BytesIO
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Body, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
@@ -20,7 +20,7 @@ from app.ledger_service import (
     update_ledger_pair_unapproved,
 )
 from app.models import Case, User
-from app.schemas import LedgerOut, LedgerPairUpdate, LedgerPostCreate
+from app.schemas import LedgerOut, LedgerPairUpdate, LedgerPostCreate, RejectCommentIn
 
 router = APIRouter(prefix="/cases", tags=["ledger"])
 
@@ -110,10 +110,11 @@ def edit_posting(
 def reject_posting(
     case_id: uuid.UUID,
     pair_id: uuid.UUID,
+    payload: RejectCommentIn = Body(default_factory=RejectCommentIn),
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> None:
     require_case_access(case_id, user, db)
-    reject_ledger_pair_unapproved(case_id, pair_id, user, db)
+    reject_ledger_pair_unapproved(case_id, pair_id, user, db, reject_comment=payload.comment)
     db.commit()
     log_ledger_reject(db, actor_user_id=user.id, case_id=case_id, pair_id=pair_id)

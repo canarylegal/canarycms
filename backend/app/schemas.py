@@ -1773,6 +1773,14 @@ class LedgerPairUpdate(BaseModel):
         return self
 
 
+class RejectCommentIn(BaseModel):
+    """Optional comment when rejecting an anticipated payment or pending invoice."""
+
+    comment: str | None = Field(default=None, max_length=2000)
+
+    model_config = {"extra": "forbid"}
+
+
 class LedgerEntryOut(BaseModel):
     id: uuid.UUID
     pair_id: uuid.UUID
