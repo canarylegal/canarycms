@@ -1,13 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  Canary - Outlook add-in (File to Case).
-
-  Every https:// URL below must match CANARY_PUBLIC_URL in the repo .env (your public app origin).
-  This committed copy uses the placeholder https://YOUR_CANARY_PUBLIC_URL — not a live host.
-  On deploy, the frontend Docker build rewrites dist/outlook-addin/manifest.xml from CANARY_PUBLIC_URL.
-  For local sideload: set CANARY_PUBLIC_URL in .env, then run
-    node frontend/scripts/generate-outlook-manifest.mjs --target public
-  Re-upload or re-sideload the manifest in Outlook after changing the URL.
+  Canary Outlook add-in (File to Case).
+  Set CANARY_PUBLIC_URL in repo .env before deploy; the build rewrites URLs in dist/outlook-addin/manifest.xml.
+  For local sideload: node frontend/scripts/generate-outlook-manifest.mjs with target public.
 -->
 <OfficeApp xmlns="http://schemas.microsoft.com/office/appforoffice/1.1"
            xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
@@ -15,7 +10,7 @@
            xmlns:mailappor="http://schemas.microsoft.com/office/mailappversionoverrides/1.0"
            xsi:type="MailApp">
   <Id>c4e8f2a1-9b3d-4a7e-8f2c-1d9e3a7b5f6a</Id>
-  <Version>1.0.13.0</Version>
+  <Version>1.0.14.0</Version>
   <ProviderName>Canary</ProviderName>
   <DefaultLocale>en-US</DefaultLocale>
   <DisplayName DefaultValue="Canary - File to Case"/>
