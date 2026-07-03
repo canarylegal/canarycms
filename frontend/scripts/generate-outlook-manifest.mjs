@@ -90,6 +90,7 @@ if (!fs.existsSync(baseDir)) {
 
 const manifestPath = path.join(baseDir, 'manifest.xml')
 const sendManifestPath = path.join(baseDir, 'manifest-with-send.xml')
+const minimalManifestPath = path.join(baseDir, 'manifest-minimal.xml')
 if (!fs.existsSync(manifestPath)) {
   console.error('[outlook-addin] missing', manifestPath)
   process.exit(1)
@@ -116,6 +117,7 @@ function rewriteManifestAt(pathToManifest) {
 
 rewriteManifestAt(manifestPath)
 rewriteManifestAt(sendManifestPath)
+rewriteManifestAt(minimalManifestPath)
 
 if (!origin.startsWith('https://') && !/^https:\/\/localhost(:\d+)?$/i.test(origin)) {
   console.warn(
