@@ -11,7 +11,7 @@
   /** Outlook master + item category applied after a successful file (client-only). */
   const CANARY_CATEGORY = 'Canary'
   /** Bumped when task pane logic changes — shown in error text so you can confirm the browser loaded the new bundle. */
-  const ADDIN_UI_VERSION = '1.0.11.0'
+  const ADDIN_UI_VERSION = '1.0.16.0'
   const officeMail = function () {
     return globalThis.canaryOutlookShared || {}
   }

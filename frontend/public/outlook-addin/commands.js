@@ -3,6 +3,9 @@
  * Event-based activation: OnMessageSend — save a synthetic .eml to Canary when a matter is known
  * (pending send from Canary web, or thread match via conversation id / linked metadata).
  * Does not use Microsoft Graph. Keep upload/MIME helpers aligned with taskpane.js.
+ *
+ * Classic Outlook on Windows loads this file in a JS-only runtime (not a browser). That engine
+ * does not support async/await — use Promise chains and callbacks only.
  */
 ;(function () {
   'use strict'
@@ -10,16 +13,23 @@
   /* Initialize Office; handler registration must not rely only on this callback (classic Outlook + JS runtime). */
   Office.onReady()
 
-  const LS_KEY = 'canary_outlook_addin_jwt'
-  const LS_API_ORIGIN_KEY = 'canary_outlook_addin_api_origin'
-  const RS_KEY = 'canary_jwt'
-  const RS_API_ORIGIN_KEY = 'canary_api_origin'
-  const RS_PENDING_CASE_KEY = 'canary_pending_send_case_id'
-  const RS_PENDING_EXPIRES_KEY = 'canary_pending_send_expires_ms'
+  var LS_KEY = 'canary_outlook_addin_jwt'
+  var LS_API_ORIGIN_KEY = 'canary_outlook_addin_api_origin'
+  var RS_KEY = 'canary_jwt'
+  var RS_API_ORIGIN_KEY = 'canary_api_origin'
+  var RS_PENDING_CASE_KEY = 'canary_pending_send_case_id'
+  var RS_PENDING_EXPIRES_KEY = 'canary_pending_send_expires_ms'
+
+  function globalRef() {
+    if (typeof globalThis !== 'undefined') return globalThis
+    if (typeof self !== 'undefined') return self
+    if (typeof window !== 'undefined') return window
+    return {}
+  }
 
   function pageOrigin() {
     try {
-      if (window.location && window.location.href) {
+      if (typeof window !== 'undefined' && window.location && window.location.href) {
         var u = new URL(window.location.href)
         return u.origin
       }
@@ -31,8 +41,10 @@
   function apiRoot() {
     var origin = ''
     try {
-      var fromLs = localStorage.getItem(LS_API_ORIGIN_KEY)
-      if (fromLs) origin = String(fromLs).trim().replace(/\/$/, '')
+      if (typeof localStorage !== 'undefined') {
+        var fromLs = localStorage.getItem(LS_API_ORIGIN_KEY)
+        if (fromLs) origin = String(fromLs).trim().replace(/\/$/, '')
+      }
     } catch (_) {}
     if (!origin) {
       try {
@@ -47,14 +59,16 @@
 
   function getToken() {
     try {
-      var fromLs = localStorage.getItem(LS_KEY)
-      if (fromLs) return String(fromLs)
+      if (typeof localStorage !== 'undefined') {
+        var fromLs = localStorage.getItem(LS_KEY)
+        if (fromLs) return String(fromLs)
+      }
     } catch (_) {}
     try {
-      var fromRo = Office.context.roamingSettings.get(RS_KEY)
-      if (fromRo) return String(fromRo)
-    } catch (_) {}
-    return ''
+      return Office.context.roamingSettings.get(RS_KEY) || ''
+    } catch (_) {
+      return ''
+    }
   }
 
   /** OnMessageSend uses the JS-only runtime (not the task pane WebView) — read OfficeRuntime.storage first. */
@@ -132,18 +146,21 @@
     ]).catch(function () {})
   }
 
-  async function clearPendingSendAsync(token) {
-    await fetch(apiRoot() + '/mail-plugin/pending-send', {
+  function clearPendingSendAsync(token) {
+    return fetch(apiRoot() + '/mail-plugin/pending-send', {
       method: 'DELETE',
       headers: authHeaders(token),
-    }).catch(function () {})
-    await persistPendingSendRoamingAsync(null)
+    })
+      .catch(function () {})
+      .then(function () {
+        return persistPendingSendRoamingAsync(null)
+      })
   }
 
-  async function syncServerPendingToRoamingAsync(token) {
-    if (!token) return
-    var pending = await fetchPending(token)
-    if (pending && pending.active && pending.case_id) {
+  function syncServerPendingToRoamingAsync(token) {
+    if (!token) return Promise.resolve()
+    return fetchPending(token).then(function (pending) {
+      if (!pending || !pending.active || !pending.case_id) return
       var ttl = 86400
       if (pending.expires_at) {
         try {
@@ -151,9 +168,10 @@
           if (ms > 60000) ttl = Math.ceil(ms / 1000)
         } catch (_) {}
       }
-      await persistPendingSendRoamingAsync(String(pending.case_id), ttl)
-      await mirrorAuthToEventRuntimeAsync(token)
-    }
+      return persistPendingSendRoamingAsync(String(pending.case_id), ttl).then(function () {
+        return mirrorAuthToEventRuntimeAsync(token)
+      })
+    })
   }
 
   function authHeaders(token) {
@@ -177,7 +195,7 @@
   }
 
   function officeMail() {
-    return globalThis.canaryOutlookShared || {}
+    return globalRef().canaryOutlookShared || {}
   }
 
   function formatRecipients(list) {
@@ -319,7 +337,7 @@
     })
   }
 
-  async function uploadMultipart(token, caseId, payload) {
+  function uploadMultipart(token, caseId, payload) {
     var fd = new FormData()
     fd.append('upload', payload.blob, payload.filename)
     fd.append('folder', '')
@@ -331,37 +349,41 @@
       if (imid) fd.append('source_internet_message_id', imid)
     }
 
-    var res = await fetch(apiRoot() + '/cases/' + encodeURIComponent(caseId) + '/files', {
+    return fetch(apiRoot() + '/cases/' + encodeURIComponent(caseId) + '/files', {
       method: 'POST',
       headers: { Authorization: 'Bearer ' + token },
       body: fd,
+    }).then(function (res) {
+      return res.json().catch(function () {
+        return null
+      }).then(function (body) {
+        if (!res.ok) {
+          var detail = body && typeof body === 'object' && body.detail
+          var msg = typeof detail === 'string' ? detail : 'Upload failed (' + res.status + ')'
+          throw new Error(msg)
+        }
+        if (!body || typeof body !== 'object' || !body.id) {
+          throw new Error('Upload succeeded but no file id returned.')
+        }
+        return body
+      })
     })
-    var body = await res.json().catch(function () {
-      return null
-    })
-    if (!res.ok) {
-      var detail = body && typeof body === 'object' && body.detail
-      var msg = typeof detail === 'string' ? detail : 'Upload failed (' + res.status + ')'
-      throw new Error(msg)
-    }
-    if (!body || typeof body !== 'object' || !body.id) {
-      throw new Error('Upload succeeded but no file id returned.')
-    }
-    return body
   }
 
-  async function fetchPending(token) {
-    var res = await fetch(apiRoot() + '/mail-plugin/pending-send', { headers: authHeaders(token) })
-    var body = await res.json().catch(function () {
-      return null
-    })
-    if (!res.ok || !body || typeof body !== 'object') return { active: false }
-    return body
+  function fetchPending(token) {
+    return fetch(apiRoot() + '/mail-plugin/pending-send', { headers: authHeaders(token) })
+      .then(function (res) {
+        return res.json().catch(function () {
+          return null
+        }).then(function (body) {
+          if (!res.ok || !body || typeof body !== 'object') return { active: false }
+          return body
+        })
+      })
   }
 
-
-  async function resolveLinkedCase(token, outlookItemId, internetMessageId, conversationId) {
-    var res = await fetch(apiRoot() + '/mail-plugin/linked-case', {
+  function resolveLinkedCase(token, outlookItemId, internetMessageId, conversationId) {
+    return fetch(apiRoot() + '/mail-plugin/linked-case', {
       method: 'POST',
       headers: jsonAuthHeaders(token),
       body: JSON.stringify({
@@ -369,155 +391,161 @@
         internet_message_id: internetMessageId || null,
         conversation_id: conversationId || null,
       }),
-    })
-    var body = await res.json().catch(function () {
-      return null
-    })
-    if (!res.ok || !body || !body.linked_case || !body.linked_case.id) return ''
-    return String(body.linked_case.id)
-  }
-
-  function sh() {
-    return globalThis.canaryOutlookShared || {}
-  }
-
-  async function captureSendToCanary(event) {
-    var finishOk = function () {
-      event.completed({ allowEvent: true })
-    }
-
-    try {
-      var token = await getTokenAsync()
-      if (!token) {
-        finishOk()
-        return
-      }
-      var root = apiRoot()
-      if (!root) {
-        finishOk()
-        return
-      }
-
-      var item = Office.context.mailbox.item
-      var Msg = Office.MailboxEnums && Office.MailboxEnums.ItemType && Office.MailboxEnums.ItemType.Message
-      if (!item || (Msg != null && item.itemType !== Msg)) {
-        finishOk()
-        return
-      }
-
-      var oid = ''
-      var imid = ''
-      var conv = ''
-      try {
-        oid = primaryOutlookItemIdForApi(item)
-      } catch (_) {}
-      try {
-        if (item.internetMessageId) imid = String(item.internetMessageId).trim()
-      } catch (_) {}
-      try {
-        if (item.conversationId) conv = String(item.conversationId).trim()
-      } catch (_) {}
-
-      await syncServerPendingToRoamingAsync(token)
-
-      var roamingCaseId = readPendingSendCaseIdSync()
-      var pending = await fetchPending(token)
-      var linkedCaseId = await resolveLinkedCase(token, oid || '', imid || '', conv || '')
-      var caseId = ''
-      var usedPending = false
-      if (roamingCaseId) {
-        caseId = roamingCaseId
-        usedPending = true
-      } else if (pending && pending.active && pending.case_id) {
-        caseId = String(pending.case_id)
-        usedPending = true
-      } else if (linkedCaseId) {
-        caseId = linkedCaseId
-      }
-
-      if (!caseId) {
-        finishOk()
-        return
-      }
-
-      var bodyText = ''
-      try {
-        bodyText = await getBodyAsync(item, Office.CoercionType.Text)
-      } catch (_) {
-        bodyText = ''
-      }
-      if (!bodyText || !bodyText.trim()) {
-        try {
-          var html = await getBodyAsync(item, Office.CoercionType.Html)
-          bodyText = String(html || '')
-            .replace(/<br\s*\/?>/gi, '\n')
-            .replace(/<[^>]+>/g, '')
-        } catch (_) {
-          bodyText = ''
-        }
-      }
-
-      var subj = officeMail().getSubjectAsync
-        ? await officeMail().getSubjectAsync(item)
-        : ''
-      var displayBase = subj.trim() || 'sent-message'
-      var fromLine = composeFromLine(item)
-      var parentBlob = buildSyntheticEmlCompose(item, bodyText, displayBase, fromLine)
-      var parentName = sanitizeFilename(displayBase) + '.eml'
-
-      /* Compose item ids are invalid for OWA read after send — store conversation only. */
-      var parent = await uploadMultipart(token, caseId, {
-        blob: parentBlob,
-        filename: parentName,
-        mime: 'message/rfc822',
-        parentFileId: null,
-        outlookItemId: undefined,
-        outlookConversationId: conv || undefined,
-        internetMessageId: imid || undefined,
+    }).then(function (res) {
+      return res.json().catch(function () {
+        return null
+      }).then(function (body) {
+        if (!res.ok || !body || !body.linked_case || !body.linked_case.id) return ''
+        return String(body.linked_case.id)
       })
-      var parentId = parent.id
+    })
+  }
 
-      var atts = item.attachments || []
-      for (var i = 0; i < atts.length; i++) {
-        var a = atts[i]
-        if (shouldSkipAttachment(a)) continue
-        try {
-          var name = sanitizeFilename(a.name || 'attachment')
-          var mime = (a.contentType || 'application/octet-stream').split(';')[0].trim()
-          var content = await getAttachmentContentAsync(item, a.id)
+  function getSubjectForItem(item) {
+    var om = officeMail()
+    if (om.getSubjectAsync) {
+      return om.getSubjectAsync(item).then(function (subj) {
+        return String(subj || '').trim()
+      })
+    }
+    return Promise.resolve('')
+  }
+
+  function resolveBodyText(item) {
+    return getBodyAsync(item, Office.CoercionType.Text)
+      .catch(function () {
+        return ''
+      })
+      .then(function (bodyText) {
+        if (bodyText && String(bodyText).trim()) return String(bodyText)
+        return getBodyAsync(item, Office.CoercionType.Html)
+          .catch(function () {
+            return ''
+          })
+          .then(function (html) {
+            return String(html || '')
+              .replace(/<br\s*\/?>/gi, '\n')
+              .replace(/<[^>]+>/g, '')
+          })
+      })
+  }
+
+  function uploadAttachmentsSequential(item, token, caseId, parentId) {
+    var atts = item.attachments || []
+    var idx = 0
+
+    function next() {
+      if (idx >= atts.length) return Promise.resolve()
+      var a = atts[idx++]
+      if (shouldSkipAttachment(a)) return next()
+      var name = sanitizeFilename(a.name || 'attachment')
+      var mime = (a.contentType || 'application/octet-stream').split(';')[0].trim()
+      return getAttachmentContentAsync(item, a.id)
+        .then(function (content) {
           var b64 = content && content.content
-          if (!b64) continue
+          if (!b64) return
           var blob = base64ToBlob(b64, mime)
-          await uploadMultipart(token, caseId, {
+          return uploadMultipart(token, caseId, {
             blob: blob,
             filename: name,
             mime: mime,
             parentFileId: parentId,
           })
-        } catch (_) {
-          /* best-effort attachments */
-        }
-      }
-
-      if (usedPending) {
-        await clearPendingSendAsync(token)
-      }
-
-      try {
-        await applyCanaryCategoryToItem(item)
-      } catch (_) {
-        /* category is best-effort */
-      }
-
-      try {
-        await applyGraphCategoryTag(token, item)
-      } catch (_) {
-        /* Graph fallback for sent/reply mail when Office.js categories fail on OWA */
-      }
-    } catch (_) {
-      /* Never block send — capture is best-effort. */
+        })
+        .catch(function () {})
+        .then(next)
     }
-    finishOk()
+
+    return next()
+  }
+
+  function captureSendToCanary(event) {
+    function finishOk() {
+      event.completed({ allowEvent: true })
+    }
+
+    getTokenAsync()
+      .then(function (token) {
+        if (!token || !apiRoot()) return null
+
+        var item = Office.context.mailbox.item
+        var Msg = Office.MailboxEnums && Office.MailboxEnums.ItemType && Office.MailboxEnums.ItemType.Message
+        if (!item || (Msg != null && item.itemType !== Msg)) return null
+
+        var oid = ''
+        var imid = ''
+        var conv = ''
+        try {
+          oid = primaryOutlookItemIdForApi(item)
+        } catch (_) {}
+        try {
+          if (item.internetMessageId) imid = String(item.internetMessageId).trim()
+        } catch (_) {}
+        try {
+          if (item.conversationId) conv = String(item.conversationId).trim()
+        } catch (_) {}
+
+        return syncServerPendingToRoamingAsync(token).then(function () {
+          var roamingCaseId = readPendingSendCaseIdSync()
+          return fetchPending(token).then(function (pending) {
+            return resolveLinkedCase(token, oid || '', imid || '', conv || '').then(function (linkedCaseId) {
+              var caseId = ''
+              var usedPending = false
+              if (roamingCaseId) {
+                caseId = roamingCaseId
+                usedPending = true
+              } else if (pending && pending.active && pending.case_id) {
+                caseId = String(pending.case_id)
+                usedPending = true
+              } else if (linkedCaseId) {
+                caseId = linkedCaseId
+              }
+              if (!caseId) return null
+
+              return resolveBodyText(item).then(function (bodyText) {
+                return getSubjectForItem(item).then(function (subj) {
+                  var displayBase = String(subj || '').trim() || 'sent-message'
+                  var fromLine = composeFromLine(item)
+                  var parentBlob = buildSyntheticEmlCompose(item, bodyText, displayBase, fromLine)
+                  var parentName = sanitizeFilename(displayBase) + '.eml'
+
+                  return uploadMultipart(token, caseId, {
+                    blob: parentBlob,
+                    filename: parentName,
+                    mime: 'message/rfc822',
+                    parentFileId: null,
+                    outlookItemId: undefined,
+                    outlookConversationId: conv || undefined,
+                    internetMessageId: imid || undefined,
+                  }).then(function (parent) {
+                    return uploadAttachmentsSequential(item, token, caseId, parent.id).then(function () {
+                      var chain = Promise.resolve()
+                      if (usedPending) {
+                        chain = clearPendingSendAsync(token)
+                      }
+                      return chain
+                        .then(function () {
+                          return applyCanaryCategoryToItem(item)
+                        })
+                        .catch(function () {})
+                        .then(function () {
+                          return applyGraphCategoryTag(token, item)
+                        })
+                        .catch(function () {})
+                    })
+                  })
+                })
+              })
+            })
+          })
+        })
+      })
+      .catch(function () {
+        /* Never block send — capture is best-effort. */
+      })
+      .then(function () {
+        finishOk()
+      })
   }
 
   function applyGraphCategoryTag(token, item) {
@@ -576,7 +604,7 @@
   }
 
   function onMessageSendHandler(event) {
-    void captureSendToCanary(event)
+    captureSendToCanary(event)
   }
 
   function showFileTaskpane(event) {
@@ -611,8 +639,8 @@
   registerSendHandler()
   Office.onReady(function () {
     registerSendHandler()
-    void getTokenAsync().then(function (token) {
-      if (token) void syncServerPendingToRoamingAsync(token)
+    getTokenAsync().then(function (token) {
+      if (token) syncServerPendingToRoamingAsync(token)
     })
   })
 })()

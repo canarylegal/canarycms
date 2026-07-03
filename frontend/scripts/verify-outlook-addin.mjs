@@ -28,6 +28,23 @@ const REQUIRED_DIST = [
   'styles.css',
 ]
 
+/** PNG dimensions Outlook expects for mail add-in icons (exact match required). */
+const ICON_SIZES = {
+  'icons/icon16.png': 16,
+  'icons/icon32.png': 32,
+  'icons/icon64.png': 64,
+  'icons/icon80.png': 80,
+  'icons/icon128.png': 128,
+}
+
+function readPngDimensions(filePath) {
+  const buf = fs.readFileSync(filePath)
+  if (buf.length < 24 || buf[0] !== 0x89 || buf.toString('ascii', 1, 4) !== 'PNG') {
+    return null
+  }
+  return { width: buf.readUInt32BE(16), height: buf.readUInt32BE(20) }
+}
+
 const distAddin = path.join(root, 'dist', 'outlook-addin')
 
 if (!fs.existsSync(path.join(root, 'dist'))) {
@@ -40,6 +57,22 @@ for (const f of REQUIRED_DIST) {
   const p = path.join(distAddin, f)
   if (!fs.existsSync(p)) {
     console.error('[outlook-addin] missing build output:', p)
+    ok = false
+  }
+}
+
+for (const [rel, size] of Object.entries(ICON_SIZES)) {
+  const p = path.join(root, 'public', rel)
+  if (!fs.existsSync(p)) {
+    console.error('[outlook-addin] missing icon:', p)
+    ok = false
+    continue
+  }
+  const dim = readPngDimensions(p)
+  if (!dim || dim.width !== size || dim.height !== size) {
+    console.error(
+      `[outlook-addin] ${rel} must be ${size}x${size}px (got ${dim ? `${dim.width}x${dim.height}` : 'invalid PNG'})`,
+    )
     ok = false
   }
 }
