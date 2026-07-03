@@ -87,6 +87,10 @@ Sign-in opens `/connect/mail-plugin` in an Office dialog so passkeys and authent
 
 Use `frontend/public/outlook-addin/manifest.xml` or download from `https://YOUR_HOST/outlook-addin/manifest.xml`.
 
+**Do not sideload the committed manifest with `https://YOUR_CANARY_PUBLIC_URL` placeholders** — installation may succeed but every add-in URL will be invalid. Either sideload from your deployed manifest URL, or run `node frontend/scripts/generate-outlook-manifest.mjs --target public` with `CANARY_PUBLIC_URL` set in `.env` first.
+
+After changing the manifest, remove the old add-in, close Outlook (Windows), sideload again, and clear the [Office cache](https://learn.microsoft.com/office/dev/add-ins/testing/clear-cache) if the task pane still shows stale UI.
+
 ### Admin center shows the add-in as **Off** (grey icon)
 
 In **Microsoft 365 admin center → Settings → Integrated apps**, **Off** means the deployment is **not enabled for users**. Turn **On**, assign users, wait a few minutes, sign out and back into OWA.
@@ -97,18 +101,24 @@ In **Microsoft 365 admin center → Settings → Integrated apps**, **Off** mean
 
 Outlook’s iframe never loaded `taskpane.html`. Check every URL in the sideloaded manifest points at your live Canary host. Sanity-check `https://YOUR_HOST/outlook-addin/taskpane.html` in a normal browser tab — you should see the sign-in form. Open an **email** first, then launch from **Apps** or the message toolbar.
 
-**Server checks**
+**No ribbon buttons (only listed under Get Add-ins / sideload menu)**
 
-| URL | Expect |
-|-----|--------|
-| `…/outlook-addin/manifest.xml` | HTTP **200**, `Content-Type: text/xml` |
-| `…/outlook-addin/taskpane.html` | HTTP **200** |
-| `…/icons/icon16.png`, `icon32.png`, `icon80.png` | HTTP **200**, PNG |
+Outlook requires **exact PNG sizes** for mail add-in icons. If `icon32.png`, `icon64.png`, or `icon128.png` are the wrong dimensions, the sideload list icon and ribbon buttons can both fail to render. Regenerate from `public/icons/icon512.png`:
+
+```bash
+cd frontend/public/icons
+for size in 16 32 64 80 128; do
+  magick icon512.png -filter Lanczos -resize ${size}x${size} icon${size}.png
+done
+```
+
+Then rebuild the frontend, bump the manifest `<Version>`, remove the old sideload, and install again. Clear the [Office cache](https://learn.microsoft.com/office/dev/add-ins/testing/clear-cache) on Windows if icons stay blank.
 
 **Where to look in Outlook**
 
-1. **Open a message** — not the inbox list.
-2. **Apps** (grid) or message toolbar **Canary** group → **File to Case** / **Compose from matter**.
+1. **Open a message** — not the inbox list alone.
+2. **Classic Outlook:** message toolbar → **Canary** group → **File to Case** / **Quick file** (read mode), or **Compose from matter** (compose mode).
+3. **New Outlook / OWA:** with a message open, use **Apps** (grid icon) on the message toolbar, or the **Canary** group if shown on the ribbon.
 
 ## Sign-in and 2FA
 
