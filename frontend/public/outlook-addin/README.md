@@ -34,8 +34,7 @@ After changing the manifest, validate with Microsoft’s tooling if needed, e.g.
    - `/outlook-addin/manifest.xml`
    - `/outlook-addin/taskpane.html`
    - `/outlook-addin/auth-callback.html`
-   - `/outlook-addin/icons/icon64.png`, `icon128.png`, `icon16.png`, `icon32.png`, `icon80.png`
-   - `/icons/icon64.png` (legacy; prefer outlook-addin/icons for the manifest)
+   - `/icons/icon64.png`, `icon128.png`, `icon16.png`, `icon32.png`, `icon80.png`
 
 This add-in gives Outlook on the web and Outlook desktop:
 
@@ -118,7 +117,7 @@ Then rebuild the frontend, bump the manifest `<Version>`, remove the old sideloa
 **Where to look in Outlook**
 
 1. **Open a message** — not the inbox list alone.
-2. **Classic Outlook:** message toolbar → **Canary** group → **File to Case** (read mode), or **Compose from matter** (compose mode).
+2. **Classic Outlook:** message toolbar → **Canary** group → **File to Case** / **Quick file** (read mode), or **Compose from matter** (compose mode).
 3. **New Outlook / OWA:** with a message open, use **Apps** (grid icon) on the message toolbar, or the **Canary** group if shown on the ribbon.
 
 ## Sign-in and 2FA
