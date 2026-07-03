@@ -14,6 +14,8 @@
   const LS_API_ORIGIN_KEY = 'canary_outlook_addin_api_origin'
   const RS_KEY = 'canary_jwt'
   const RS_API_ORIGIN_KEY = 'canary_api_origin'
+  const RS_PENDING_CASE_KEY = 'canary_pending_send_case_id'
+  const RS_PENDING_EXPIRES_KEY = 'canary_pending_send_expires_ms'
 
   function pageOrigin() {
     try {
@@ -49,9 +51,108 @@
       if (fromLs) return String(fromLs)
     } catch (_) {}
     try {
-      return Office.context.roamingSettings.get(RS_KEY) || ''
+      var fromRo = Office.context.roamingSettings.get(RS_KEY)
+      if (fromRo) return String(fromRo)
+    } catch (_) {}
+    return ''
+  }
+
+  /** OnMessageSend uses the JS-only runtime (not the task pane WebView) — read OfficeRuntime.storage first. */
+  function getTokenAsync() {
+    if (typeof OfficeRuntime !== 'undefined' && OfficeRuntime.storage && OfficeRuntime.storage.getItem) {
+      return OfficeRuntime.storage.getItem(LS_KEY)
+        .then(function (fromRt) {
+          if (fromRt) return String(fromRt)
+          return getToken()
+        })
+        .catch(function () {
+          return getToken()
+        })
+    }
+    return Promise.resolve(getToken())
+  }
+
+  function readPendingSendCaseIdSync() {
+    try {
+      var expRaw = Office.context.roamingSettings.get(RS_PENDING_EXPIRES_KEY)
+      var exp = parseInt(String(expRaw || '0'), 10)
+      if (exp && Date.now() > exp) return ''
+      return String(Office.context.roamingSettings.get(RS_PENDING_CASE_KEY) || '').trim()
     } catch (_) {
       return ''
+    }
+  }
+
+  function persistPendingSendRoamingAsync(caseId, ttlSeconds) {
+    var ttl = ttlSeconds == null ? 86400 : Number(ttlSeconds)
+    var exp = Date.now() + Math.max(60, ttl) * 1000
+    var v = caseId ? String(caseId) : ''
+    return new Promise(function (resolve, reject) {
+      try {
+        if (v) {
+          Office.context.roamingSettings.set(RS_PENDING_CASE_KEY, v)
+          Office.context.roamingSettings.set(RS_PENDING_EXPIRES_KEY, String(exp))
+        } else {
+          Office.context.roamingSettings.remove(RS_PENDING_CASE_KEY)
+          Office.context.roamingSettings.remove(RS_PENDING_EXPIRES_KEY)
+        }
+        Office.context.roamingSettings.saveAsync(function (r) {
+          if (r.status === Office.AsyncResultStatus.Succeeded || v) resolve()
+          else reject(new Error(r.error ? r.error.message : 'Could not save pending send.'))
+        })
+      } catch (e) {
+        if (v) resolve()
+        else reject(e)
+      }
+    }).then(function () {
+      if (typeof OfficeRuntime === 'undefined' || !OfficeRuntime.storage || !OfficeRuntime.storage.setItem) {
+        return
+      }
+      if (v) {
+        return OfficeRuntime.storage.setItem(RS_PENDING_CASE_KEY, v).catch(function () {})
+      }
+      return OfficeRuntime.storage.removeItem(RS_PENDING_CASE_KEY).catch(function () {})
+    })
+  }
+
+  function mirrorAuthToEventRuntimeAsync(token) {
+    if (typeof OfficeRuntime === 'undefined' || !OfficeRuntime.storage || !OfficeRuntime.storage.setItem) {
+      return Promise.resolve()
+    }
+    var origin = apiRoot().replace(/\/api$/, '')
+    if (!token) {
+      return Promise.all([
+        OfficeRuntime.storage.removeItem(LS_KEY).catch(function () {}),
+        OfficeRuntime.storage.removeItem(LS_API_ORIGIN_KEY).catch(function () {}),
+      ])
+    }
+    return Promise.all([
+      OfficeRuntime.storage.setItem(LS_KEY, String(token)),
+      OfficeRuntime.storage.setItem(LS_API_ORIGIN_KEY, origin),
+    ]).catch(function () {})
+  }
+
+  async function clearPendingSendAsync(token) {
+    await fetch(apiRoot() + '/mail-plugin/pending-send', {
+      method: 'DELETE',
+      headers: authHeaders(token),
+    }).catch(function () {})
+    await persistPendingSendRoamingAsync(null)
+  }
+
+  async function syncServerPendingToRoamingAsync(token) {
+    if (!token) return
+    var pending = await fetchPending(token)
+    if (pending && pending.active && pending.case_id) {
+      var ttl = 86400
+      if (pending.expires_at) {
+        try {
+          var ms = new Date(pending.expires_at).getTime() - Date.now()
+          if (ms > 60000) ttl = Math.ceil(ms / 1000)
+        } catch (_) {}
+      }
+      await persistPendingSendRoamingAsync(String(pending.case_id), ttl)
+      await mirrorAuthToEventRuntimeAsync(token)
     }
   }
 
@@ -250,7 +351,7 @@
   }
 
   async function fetchPending(token) {
-    var res = await fetch(apiRoot() + '/outlook-plugin/pending-send', { headers: authHeaders(token) })
+    var res = await fetch(apiRoot() + '/mail-plugin/pending-send', { headers: authHeaders(token) })
     var body = await res.json().catch(function () {
       return null
     })
@@ -258,15 +359,9 @@
     return body
   }
 
-  async function clearPending(token) {
-    await fetch(apiRoot() + '/outlook-plugin/pending-send', {
-      method: 'DELETE',
-      headers: authHeaders(token),
-    }).catch(function () {})
-  }
 
   async function resolveLinkedCase(token, outlookItemId, internetMessageId, conversationId) {
-    var res = await fetch(apiRoot() + '/outlook-plugin/linked-case', {
+    var res = await fetch(apiRoot() + '/mail-plugin/linked-case', {
       method: 'POST',
       headers: jsonAuthHeaders(token),
       body: JSON.stringify({
@@ -292,13 +387,12 @@
     }
 
     try {
-      var shared = sh()
-      var token = shared.getTokenAsync ? await shared.getTokenAsync() : getToken()
+      var token = await getTokenAsync()
       if (!token) {
         finishOk()
         return
       }
-      var root = shared.apiRoot ? shared.apiRoot() : apiRoot()
+      var root = apiRoot()
       if (!root) {
         finishOk()
         return
@@ -324,16 +418,18 @@
         if (item.conversationId) conv = String(item.conversationId).trim()
       } catch (_) {}
 
+      await syncServerPendingToRoamingAsync(token)
+
+      var roamingCaseId = readPendingSendCaseIdSync()
       var pending = await fetchPending(token)
-      var roamingCaseId = shared.readPendingSendCaseIdSync ? shared.readPendingSendCaseIdSync() : ''
       var linkedCaseId = await resolveLinkedCase(token, oid || '', imid || '', conv || '')
       var caseId = ''
       var usedPending = false
-      if (pending && pending.active && pending.case_id) {
-        caseId = String(pending.case_id)
-        usedPending = true
-      } else if (roamingCaseId) {
+      if (roamingCaseId) {
         caseId = roamingCaseId
+        usedPending = true
+      } else if (pending && pending.active && pending.case_id) {
+        caseId = String(pending.case_id)
         usedPending = true
       } else if (linkedCaseId) {
         caseId = linkedCaseId
@@ -404,8 +500,7 @@
       }
 
       if (usedPending) {
-        if (shared.clearPendingSendAsync) await shared.clearPendingSendAsync(token)
-        else await clearPending(token)
+        await clearPendingSendAsync(token)
       }
 
       try {
@@ -484,9 +579,30 @@
     void captureSendToCanary(event)
   }
 
+  function showFileTaskpane(event) {
+    var done = function () {
+      try {
+        event.completed()
+      } catch (_) {}
+    }
+    try {
+      if (Office.addin && typeof Office.addin.showAsTaskpane === 'function') {
+        Office.addin
+          .showAsTaskpane()
+          .then(done)
+          .catch(function () {
+            done()
+          })
+        return
+      }
+    } catch (_) {}
+    done()
+  }
+
   function registerSendHandler() {
     try {
       Office.actions.associate('onMessageSendHandler', onMessageSendHandler)
+      Office.actions.associate('showFileTaskpane', showFileTaskpane)
     } catch (_) {
       /* Event-based activation not supported on this host. */
     }
@@ -495,5 +611,8 @@
   registerSendHandler()
   Office.onReady(function () {
     registerSendHandler()
+    void getTokenAsync().then(function (token) {
+      if (token) void syncServerPendingToRoamingAsync(token)
+    })
   })
 })()

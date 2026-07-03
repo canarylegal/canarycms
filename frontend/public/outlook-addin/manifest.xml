@@ -15,7 +15,7 @@
            xmlns:mailappor="http://schemas.microsoft.com/office/mailappversionoverrides/1.0"
            xsi:type="MailApp">
   <Id>c4e8f2a1-9b3d-4a7e-8f2c-1d9e3a7b5f6a</Id>
-  <Version>1.0.12.0</Version>
+  <Version>1.0.13.0</Version>
   <ProviderName>Canary</ProviderName>
   <DefaultLocale>en-US</DefaultLocale>
   <DisplayName DefaultValue="Canary - File to Case"/>
@@ -92,6 +92,21 @@
                       <SupportsPinning>true</SupportsPinning>
                     </Action>
                   </Control>
+                  <Control xsi:type="Button" id="canaryQuickFileBtn">
+                    <Label resid="quickFileButtonLabel"/>
+                    <Supertip>
+                      <Title resid="quickFileButtonLabel"/>
+                      <Description resid="quickFileButtonTip"/>
+                    </Supertip>
+                    <Icon>
+                      <bt:Image size="16" resid="icon16"/>
+                      <bt:Image size="32" resid="icon32"/>
+                      <bt:Image size="80" resid="icon80"/>
+                    </Icon>
+                    <Action xsi:type="ExecuteFunction">
+                      <FunctionName>showFileTaskpane</FunctionName>
+                    </Action>
+                  </Control>
                 </Group>
               </OfficeTab>
             </ExtensionPoint>
@@ -144,10 +159,12 @@
           <bt:String id="groupLabel" DefaultValue="Canary"/>
           <bt:String id="buttonLabel" DefaultValue="File to Case"/>
           <bt:String id="composeButtonLabel" DefaultValue="Compose from matter"/>
+          <bt:String id="quickFileButtonLabel" DefaultValue="Quick file"/>
         </bt:ShortStrings>
         <bt:LongStrings>
           <bt:String id="residAppDesc" DefaultValue="File mail to a Canary matter; compose from a matter with merge and case attachments without Microsoft Graph."/>
           <bt:String id="buttonTip" DefaultValue="Save this message to a Canary matter."/>
+          <bt:String id="quickFileButtonTip" DefaultValue="Open the File to Case pane for the selected message (Outlook does not allow add-ins on the message-list right-click menu)."/>
           <bt:String id="composeButtonTip" DefaultValue="Merge a precedent, pick a recipient, and attach case files to this compose message."/>
         </bt:LongStrings>
       </Resources>

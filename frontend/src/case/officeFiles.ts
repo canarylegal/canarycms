@@ -4,7 +4,14 @@ import type { FileSummary } from '../types'
 export function isEmlLikeUploadFile(file: File): boolean {
   const name = (file.name || '').toLowerCase()
   const type = (file.type || '').toLowerCase()
-  return name.endsWith('.eml') || type.includes('message/rfc822') || type.includes('rfc822')
+  return (
+    name.endsWith('.eml') ||
+    name.endsWith('.msg') ||
+    type.includes('message/rfc822') ||
+    type.includes('rfc822') ||
+    type.includes('ms-outlook') ||
+    type.includes('application/vnd.ms-outlook')
+  )
 }
 
 /** E-mail stored as .eml / RFC822 — must match backend ``_row_is_eml_like``. */

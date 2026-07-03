@@ -558,6 +558,55 @@
     }
   }
 
+  async function prefetchLinkedMatterForReply() {
+    if (!isReplyCompose) return
+    const token = sh().getToken()
+    if (!token) return
+    const item = Office.context.mailbox.item
+    if (!item) return
+    let conv = ''
+    let imid = ''
+    let oid = ''
+    try {
+      if (item.conversationId) conv = String(item.conversationId).trim()
+    } catch (_) {}
+    try {
+      if (item.internetMessageId) imid = String(item.internetMessageId).trim()
+    } catch (_) {}
+    try {
+      if (item.itemId) oid = String(item.itemId).trim()
+    } catch (_) {}
+    if (!conv && !imid && !oid) return
+    try {
+      const res = await fetch(sh().apiRoot() + '/mail-plugin/linked-case', {
+        method: 'POST',
+        headers: sh().jsonAuthHeaders(token),
+        body: JSON.stringify({
+          outlook_item_id: oid || null,
+          internet_message_id: imid || null,
+          conversation_id: conv || null,
+        }),
+      })
+      const body = await res.json().catch(function () {
+        return null
+      })
+      const lc = body && body.linked_case
+      if (!res.ok || !lc || !lc.id) return
+      const c = allCases.find(function (x) {
+        return String(x.id) === String(lc.id)
+      }) || {
+        id: lc.id,
+        case_number: lc.case_number,
+        client_name: lc.client_name,
+        matter_description: lc.matter_description,
+      }
+      await selectCase(c, { keepAttachIds: true })
+      await syncPendingSend(token, String(lc.id))
+    } catch (_) {
+      /* best-effort thread prefill */
+    }
+  }
+
   async function detectComposeKind() {
     try {
       const item = Office.context.mailbox.item
@@ -614,6 +663,9 @@
     void (async function () {
       await detectComposeKind()
       await refreshAuthAndCases()
+      if (isReplyCompose) {
+        await prefetchLinkedMatterForReply()
+      }
     })()
   })
 })()
