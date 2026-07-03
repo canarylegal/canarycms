@@ -607,30 +607,9 @@
     captureSendToCanary(event)
   }
 
-  function showFileTaskpane(event) {
-    var done = function () {
-      try {
-        event.completed()
-      } catch (_) {}
-    }
-    try {
-      if (Office.addin && typeof Office.addin.showAsTaskpane === 'function') {
-        Office.addin
-          .showAsTaskpane()
-          .then(done)
-          .catch(function () {
-            done()
-          })
-        return
-      }
-    } catch (_) {}
-    done()
-  }
-
   function registerSendHandler() {
     try {
       Office.actions.associate('onMessageSendHandler', onMessageSendHandler)
-      Office.actions.associate('showFileTaskpane', showFileTaskpane)
     } catch (_) {
       /* Event-based activation not supported on this host. */
     }

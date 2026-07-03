@@ -11,6 +11,11 @@ const root = path.join(__dirname, '..')
 
 const REQUIRED_DIST = [
   'manifest.xml',
+  'icons/icon16.png',
+  'icons/icon32.png',
+  'icons/icon64.png',
+  'icons/icon80.png',
+  'icons/icon128.png',
   'taskpane.html',
   'taskpane.js',
   'compose-pane.html',
@@ -35,6 +40,11 @@ const ICON_SIZES = {
   'icons/icon64.png': 64,
   'icons/icon80.png': 80,
   'icons/icon128.png': 128,
+  'outlook-addin/icons/icon16.png': 16,
+  'outlook-addin/icons/icon32.png': 32,
+  'outlook-addin/icons/icon64.png': 64,
+  'outlook-addin/icons/icon80.png': 80,
+  'outlook-addin/icons/icon128.png': 128,
 }
 
 function readPngDimensions(filePath) {
