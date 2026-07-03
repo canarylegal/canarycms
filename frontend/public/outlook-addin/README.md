@@ -65,6 +65,10 @@ When a fee earner uses **Send by e-mail** on a matter with attachments and **Des
 
 **Important:** Compose send filing requires **`OnMessageSend`** in `manifest.xml` (v1.0.10+). Web-initiated compose sets pending-send automatically; manual **Compose from matter** still requires **Apply to message** before send.
 
+**OnMessageSend runtime:** Send capture runs in Outlook’s lightweight JS runtime (`commands.js`), not the task-pane WebView. Sign-in mirrors the JWT to `OfficeRuntime.storage` and roaming settings so send-time filing works even when the task pane used a separate localStorage partition.
+
+**Message-list right-click:** Outlook web add-ins **cannot** add items to the middle-column message list context menu (Microsoft platform limit). Use **File to Case** or **Quick file** on the ribbon instead; Thunderbird has a native context menu.
+
 It calls the same backend routes as the main app: `POST /api/auth/plugin/authorize`, `POST /api/auth/plugin/token`, `GET /api/cases`, `POST /api/cases/{case_id}/files`, `POST /api/mail-plugin/cases/{case_id}/compose-bundle`.
 
 Sign-in opens `/connect/mail-plugin` in an Office dialog so passkeys and authenticator apps work (inline password login is not used).
