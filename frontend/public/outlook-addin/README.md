@@ -1,16 +1,24 @@
 # Canary — Outlook add-in (“File to Case”)
 
-There is **one manifest**: `manifest.xml`. Use it for sideload, M365 admin upload, and the public URL `https://YOUR_HOST/outlook-addin/manifest.xml`.
+There are **two manifests**:
+
+| File | Use |
+|------|-----|
+| `manifest.xml` | **Sideload** and OWA testing — ribbon + task panes only (no `OnMessageSend`) |
+| `manifest-with-send.xml` | **M365 admin central deploy** — includes send-time filing via `OnMessageSend` |
+
+Public URLs after deploy: `https://YOUR_HOST/outlook-addin/manifest.xml` and `…/manifest-with-send.xml`.
 
 Office add-in manifests **must** use absolute `https://…` URLs. Committed `manifest.xml` uses the placeholder **`https://YOUR_CANARY_PUBLIC_URL`**. Docker builds rewrite **`dist/outlook-addin/manifest.xml`** from **`CANARY_PUBLIC_URL`** in `.env` before nginx serves it.
 
 ### M365 admin upload (Integrated apps)
 
-1. Deploy the frontend (so `/outlook-addin/manifest.xml` on your host matches `CANARY_PUBLIC_URL`).
-2. Upload either:
-   - **Manifest URL:** `https://YOUR_HOST/outlook-addin/manifest.xml`, or
-   - **From device:** `frontend/public/outlook-addin/manifest.xml` (same file — must match the host you deploy to).
+1. Deploy the frontend (manifest URLs must match `CANARY_PUBLIC_URL`).
+2. Upload **`manifest-with-send.xml`** (includes send filing):
+   - **Manifest URL:** `https://YOUR_HOST/outlook-addin/manifest-with-send.xml`
 3. Turn **On** and assign users.
+
+For ribbon-only testing, sideload `manifest.xml` instead (see below).
 
 ### If upload fails with “already installed elsewhere”
 
@@ -101,24 +109,29 @@ In **Microsoft 365 admin center → Settings → Integrated apps**, **Off** mean
 
 Outlook’s iframe never loaded `taskpane.html`. Check every URL in the sideloaded manifest points at your live Canary host. Sanity-check `https://YOUR_HOST/outlook-addin/taskpane.html` in a normal browser tab — you should see the sign-in form. Open an **email** first, then launch from **Apps** or the message toolbar.
 
-**No ribbon buttons (only listed under Get Add-ins / sideload menu)**
+**No ribbon / not in Apps on an open message (M365 work + Outlook on the web)**
 
-Outlook requires **exact PNG sizes** for mail add-in icons. If `icon32.png`, `icon64.png`, or `icon128.png` are the wrong dimensions, the sideload list icon and ribbon buttons can both fail to render. Regenerate from `public/icons/icon512.png`:
+Outlook on the web uses **VersionOverridesV1_1 only** — parent V1_0 settings are ignored. A manifest that includes **`LaunchEvent` / `OnMessageSend`** often installs (shows under Custom add-ins) but **never activates on messages** on M365 work accounts when sideloaded.
+
+Use **`manifest.xml`** (no send events) for sideload testing. For production on a work tenant, deploy **`manifest-with-send.xml`** via [Integrated apps](https://learn.microsoft.com/microsoft-365/admin/manage/manage-deployment-of-add-ins) and ensure the app is **On** for your users.
+
+If sideload still shows only in the add-in manager after installing `manifest.xml` v1.0.18+, your tenant may block user-installed add-ins — ask your M365 admin to deploy centrally.
 
 ```bash
 cd frontend/public/icons
 for size in 16 32 64 80 128; do
   magick icon512.png -filter Lanczos -resize ${size}x${size} icon${size}.png
 done
+cp icon*.png ../outlook-addin/icons/
 ```
 
-Then rebuild the frontend, bump the manifest `<Version>`, remove the old sideload, and install again. Clear the [Office cache](https://learn.microsoft.com/office/dev/add-ins/testing/clear-cache) on Windows if icons stay blank.
+Outlook requires **exact PNG sizes** for mail add-in icons (wrong dimensions → blank sideload icon).
 
 **Where to look in Outlook**
 
 1. **Open a message** — not the inbox list alone.
-2. **Classic Outlook:** message toolbar → **Canary** group → **File to Case** / **Quick file** (read mode), or **Compose from matter** (compose mode).
-3. **New Outlook / OWA:** with a message open, use **Apps** (grid icon) on the message toolbar, or the **Canary** group if shown on the ribbon.
+2. **Classic Outlook:** message toolbar → **Canary** group → **File to Case** (read mode), or **Compose from matter** (compose mode).
+3. **New Outlook / OWA:** with a message open, **Apps** (grid) on the message toolbar, or the **Canary** group on the ribbon.
 
 ## Sign-in and 2FA
 

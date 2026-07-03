@@ -1,12 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  Canary Outlook add-in (File to Case) — ribbon + task panes.
+  Canary Outlook add-in with OnMessageSend (admin central deployment).
 
-  Outlook on the web and New Outlook use VersionOverridesV1_1 only (V1_0 is not inherited).
-  Keep V1_0 as an empty wrapper; declare all UI in V1_1. Do not mix LaunchEvent here — that
-  breaks M365 OWA sideload. Use manifest-with-send.xml for admin deploy when send filing is needed.
-
-  Set CANARY_PUBLIC_URL before deploy; build rewrites dist/outlook-addin/manifest.xml.
+  Upload via Microsoft 365 admin center → Integrated apps. Do not sideload this variant for
+  OWA testing — LaunchEvent breaks M365 web sideload. Use manifest.xml for sideload / ribbon UI.
 -->
 <OfficeApp xmlns="http://schemas.microsoft.com/office/appforoffice/1.1"
            xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
@@ -56,13 +53,19 @@
 
   <VersionOverrides xmlns="http://schemas.microsoft.com/office/mailappversionoverrides" xsi:type="VersionOverridesV1_0">
     <VersionOverrides xmlns="http://schemas.microsoft.com/office/mailappversionoverrides/1.1" xsi:type="VersionOverridesV1_1">
+      <Description resid="residAppDesc"/>
       <Requirements>
-        <bt:Sets DefaultMinVersion="1.8">
+        <bt:Sets DefaultMinVersion="1.12">
           <bt:Set Name="Mailbox"/>
         </bt:Sets>
       </Requirements>
       <Hosts>
         <Host xsi:type="MailHost">
+          <Runtimes>
+            <Runtime resid="WebViewRuntime.Url">
+              <Override type="javascript" resid="JSRuntime.Url"/>
+            </Runtime>
+          </Runtimes>
           <DesktopFormFactor>
             <ExtensionPoint xsi:type="MessageReadCommandSurface">
               <OfficeTab id="TabDefault">
@@ -81,6 +84,7 @@
                     </Icon>
                     <Action xsi:type="ShowTaskpane">
                       <SourceLocation resid="taskPaneUrl"/>
+                      <SupportsPinning>true</SupportsPinning>
                     </Action>
                   </Control>
                 </Group>
@@ -103,10 +107,17 @@
                     </Icon>
                     <Action xsi:type="ShowTaskpane">
                       <SourceLocation resid="composePaneUrl"/>
+                      <SupportsPinning>true</SupportsPinning>
                     </Action>
                   </Control>
                 </Group>
               </OfficeTab>
+            </ExtensionPoint>
+            <ExtensionPoint xsi:type="LaunchEvent">
+              <LaunchEvents>
+                <LaunchEvent Type="OnMessageSend" FunctionName="onMessageSendHandler" SendMode="SoftBlock"/>
+              </LaunchEvents>
+              <SourceLocation resid="WebViewRuntime.Url"/>
             </ExtensionPoint>
           </DesktopFormFactor>
         </Host>
@@ -118,6 +129,8 @@
           <bt:Image id="icon80" DefaultValue="https://YOUR_CANARY_PUBLIC_URL/outlook-addin/icons/icon80.png"/>
         </bt:Images>
         <bt:Urls>
+          <bt:Url id="WebViewRuntime.Url" DefaultValue="https://YOUR_CANARY_PUBLIC_URL/outlook-addin/commands.html"/>
+          <bt:Url id="JSRuntime.Url" DefaultValue="https://YOUR_CANARY_PUBLIC_URL/outlook-addin/commands.js"/>
           <bt:Url id="taskPaneUrl" DefaultValue="https://YOUR_CANARY_PUBLIC_URL/outlook-addin/taskpane.html"/>
           <bt:Url id="composePaneUrl" DefaultValue="https://YOUR_CANARY_PUBLIC_URL/outlook-addin/compose-pane.html"/>
         </bt:Urls>
@@ -127,6 +140,7 @@
           <bt:String id="composeButtonLabel" DefaultValue="Compose from matter"/>
         </bt:ShortStrings>
         <bt:LongStrings>
+          <bt:String id="residAppDesc" DefaultValue="File mail to a Canary matter; compose from a matter with merge and case attachments without Microsoft Graph."/>
           <bt:String id="buttonTip" DefaultValue="Save this message to a Canary matter."/>
           <bt:String id="composeButtonTip" DefaultValue="Merge a precedent, pick a recipient, and attach case files to this compose message."/>
         </bt:LongStrings>
