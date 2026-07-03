@@ -11,11 +11,6 @@ const root = path.join(__dirname, '..')
 
 const REQUIRED_DIST = [
   'manifest.xml',
-  'icons/icon16.png',
-  'icons/icon32.png',
-  'icons/icon64.png',
-  'icons/icon80.png',
-  'icons/icon128.png',
   'taskpane.html',
   'taskpane.js',
   'compose-pane.html',
@@ -31,6 +26,11 @@ const REQUIRED_DIST = [
   'auth-callback.html',
   'auth-callback.js',
   'styles.css',
+  'icons/icon16.png',
+  'icons/icon32.png',
+  'icons/icon64.png',
+  'icons/icon80.png',
+  'icons/icon128.png',
 ]
 
 /** PNG dimensions Outlook expects for mail add-in icons (exact match required). */
@@ -72,7 +72,9 @@ for (const f of REQUIRED_DIST) {
 }
 
 for (const [rel, size] of Object.entries(ICON_SIZES)) {
-  const p = path.join(root, 'public', rel)
+  const p = rel.startsWith('outlook-addin/')
+    ? path.join(distAddin, rel.slice('outlook-addin/'.length))
+    : path.join(root, 'public', rel)
   if (!fs.existsSync(p)) {
     console.error('[outlook-addin] missing icon:', p)
     ok = false

@@ -1,8 +1,11 @@
-<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<?xml version="1.0" encoding="UTF-8"?>
 <!--
   Canary Outlook add-in (File to Case).
   Set CANARY_PUBLIC_URL in repo .env before deploy; the build rewrites URLs in dist/outlook-addin/manifest.xml.
   For local sideload: node frontend/scripts/generate-outlook-manifest.mjs with target public.
+
+  Ribbon commands are declared in VersionOverridesV1_0 (fallback) and VersionOverridesV1_1 (pinning + send events).
+  If only V1_1 is present, some Outlook builds show the add-in in Get Add-ins but no message ribbon buttons.
 -->
 <OfficeApp xmlns="http://schemas.microsoft.com/office/appforoffice/1.1"
            xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
@@ -39,12 +42,6 @@
         <RequestedHeight>450</RequestedHeight>
       </DesktopSettings>
     </Form>
-    <Form xsi:type="ItemEdit">
-      <DesktopSettings>
-        <SourceLocation DefaultValue="https://YOUR_CANARY_PUBLIC_URL/outlook-addin/compose-pane.html"/>
-        <RequestedHeight>450</RequestedHeight>
-      </DesktopSettings>
-    </Form>
   </FormSettings>
 
   <Permissions>ReadWriteMailbox</Permissions>
@@ -57,7 +54,84 @@
   <DisableEntityHighlighting>false</DisableEntityHighlighting>
 
   <VersionOverrides xmlns="http://schemas.microsoft.com/office/mailappversionoverrides" xsi:type="VersionOverridesV1_0">
+    <Requirements>
+      <bt:Sets DefaultMinVersion="1.8">
+        <bt:Set Name="Mailbox"/>
+      </bt:Sets>
+    </Requirements>
+    <Hosts>
+      <Host xsi:type="MailHost">
+        <DesktopFormFactor>
+          <ExtensionPoint xsi:type="MessageReadCommandSurface">
+            <OfficeTab id="TabDefault">
+              <Group id="canaryGroupReadV10">
+                <Label resid="groupLabel"/>
+                <Control xsi:type="Button" id="canaryFileToCaseBtnV10">
+                  <Label resid="buttonLabel"/>
+                  <Supertip>
+                    <Title resid="buttonLabel"/>
+                    <Description resid="buttonTip"/>
+                  </Supertip>
+                  <Icon>
+                    <bt:Image size="16" resid="icon16"/>
+                    <bt:Image size="32" resid="icon32"/>
+                    <bt:Image size="80" resid="icon80"/>
+                  </Icon>
+                  <Action xsi:type="ShowTaskpane">
+                    <SourceLocation resid="taskPaneUrl"/>
+                  </Action>
+                </Control>
+              </Group>
+            </OfficeTab>
+          </ExtensionPoint>
+          <ExtensionPoint xsi:type="MessageComposeCommandSurface">
+            <OfficeTab id="TabDefault">
+              <Group id="canaryGroupComposeV10">
+                <Label resid="groupLabel"/>
+                <Control xsi:type="Button" id="canaryComposeFromMatterBtnV10">
+                  <Label resid="composeButtonLabel"/>
+                  <Supertip>
+                    <Title resid="composeButtonLabel"/>
+                    <Description resid="composeButtonTip"/>
+                  </Supertip>
+                  <Icon>
+                    <bt:Image size="16" resid="icon16"/>
+                    <bt:Image size="32" resid="icon32"/>
+                    <bt:Image size="80" resid="icon80"/>
+                  </Icon>
+                  <Action xsi:type="ShowTaskpane">
+                    <SourceLocation resid="composePaneUrl"/>
+                  </Action>
+                </Control>
+              </Group>
+            </OfficeTab>
+          </ExtensionPoint>
+        </DesktopFormFactor>
+      </Host>
+    </Hosts>
+    <Resources>
+      <bt:Images>
+        <bt:Image id="icon16" DefaultValue="https://YOUR_CANARY_PUBLIC_URL/outlook-addin/icons/icon16.png"/>
+        <bt:Image id="icon32" DefaultValue="https://YOUR_CANARY_PUBLIC_URL/outlook-addin/icons/icon32.png"/>
+        <bt:Image id="icon80" DefaultValue="https://YOUR_CANARY_PUBLIC_URL/outlook-addin/icons/icon80.png"/>
+      </bt:Images>
+      <bt:Urls>
+        <bt:Url id="taskPaneUrl" DefaultValue="https://YOUR_CANARY_PUBLIC_URL/outlook-addin/taskpane.html"/>
+        <bt:Url id="composePaneUrl" DefaultValue="https://YOUR_CANARY_PUBLIC_URL/outlook-addin/compose-pane.html"/>
+      </bt:Urls>
+      <bt:ShortStrings>
+        <bt:String id="groupLabel" DefaultValue="Canary"/>
+        <bt:String id="buttonLabel" DefaultValue="File to Case"/>
+        <bt:String id="composeButtonLabel" DefaultValue="Compose from matter"/>
+      </bt:ShortStrings>
+      <bt:LongStrings>
+        <bt:String id="buttonTip" DefaultValue="Save this message to a Canary matter."/>
+        <bt:String id="composeButtonTip" DefaultValue="Merge a precedent, pick a recipient, and attach case files to this compose message."/>
+      </bt:LongStrings>
+    </Resources>
+
     <VersionOverrides xmlns="http://schemas.microsoft.com/office/mailappversionoverrides/1.1" xsi:type="VersionOverridesV1_1">
+      <Description resid="residAppDesc"/>
       <Requirements>
         <bt:Sets DefaultMinVersion="1.12">
           <bt:Set Name="Mailbox"/>
@@ -88,6 +162,7 @@
                     </Icon>
                     <Action xsi:type="ShowTaskpane">
                       <SourceLocation resid="taskPaneUrl"/>
+                      <SupportsPinning>true</SupportsPinning>
                     </Action>
                   </Control>
                 </Group>
@@ -110,6 +185,7 @@
                     </Icon>
                     <Action xsi:type="ShowTaskpane">
                       <SourceLocation resid="composePaneUrl"/>
+                      <SupportsPinning>true</SupportsPinning>
                     </Action>
                   </Control>
                 </Group>
@@ -142,6 +218,7 @@
           <bt:String id="composeButtonLabel" DefaultValue="Compose from matter"/>
         </bt:ShortStrings>
         <bt:LongStrings>
+          <bt:String id="residAppDesc" DefaultValue="File mail to a Canary matter; compose from a matter with merge and case attachments without Microsoft Graph."/>
           <bt:String id="buttonTip" DefaultValue="Save this message to a Canary matter."/>
           <bt:String id="composeButtonTip" DefaultValue="Merge a precedent, pick a recipient, and attach case files to this compose message."/>
         </bt:LongStrings>
