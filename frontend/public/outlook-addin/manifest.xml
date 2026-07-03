@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="UTF-8"?>
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <!--
   Canary Outlook add-in (File to Case).
   Set CANARY_PUBLIC_URL in repo .env before deploy; the build rewrites URLs in dist/outlook-addin/manifest.xml.
@@ -10,13 +10,13 @@
            xmlns:mailappor="http://schemas.microsoft.com/office/mailappversionoverrides/1.0"
            xsi:type="MailApp">
   <Id>c4e8f2a1-9b3d-4a7e-8f2c-1d9e3a7b5f6a</Id>
-  <Version>1.0.16.0</Version>
+  <Version>1.0.17.0</Version>
   <ProviderName>Canary</ProviderName>
   <DefaultLocale>en-US</DefaultLocale>
   <DisplayName DefaultValue="Canary - File to Case"/>
   <Description DefaultValue="File mail to a Canary matter; compose from a matter with merge and attachments (no Graph required)."/>
-  <IconUrl DefaultValue="https://YOUR_CANARY_PUBLIC_URL/icons/icon64.png"/>
-  <HighResolutionIconUrl DefaultValue="https://YOUR_CANARY_PUBLIC_URL/icons/icon128.png"/>
+  <IconUrl DefaultValue="https://YOUR_CANARY_PUBLIC_URL/outlook-addin/icons/icon64.png"/>
+  <HighResolutionIconUrl DefaultValue="https://YOUR_CANARY_PUBLIC_URL/outlook-addin/icons/icon128.png"/>
   <SupportUrl DefaultValue="https://YOUR_CANARY_PUBLIC_URL/"/>
   <AppDomains>
     <AppDomain>https://YOUR_CANARY_PUBLIC_URL</AppDomain>
@@ -39,6 +39,12 @@
         <RequestedHeight>450</RequestedHeight>
       </DesktopSettings>
     </Form>
+    <Form xsi:type="ItemEdit">
+      <DesktopSettings>
+        <SourceLocation DefaultValue="https://YOUR_CANARY_PUBLIC_URL/outlook-addin/compose-pane.html"/>
+        <RequestedHeight>450</RequestedHeight>
+      </DesktopSettings>
+    </Form>
   </FormSettings>
 
   <Permissions>ReadWriteMailbox</Permissions>
@@ -52,7 +58,6 @@
 
   <VersionOverrides xmlns="http://schemas.microsoft.com/office/mailappversionoverrides" xsi:type="VersionOverridesV1_0">
     <VersionOverrides xmlns="http://schemas.microsoft.com/office/mailappversionoverrides/1.1" xsi:type="VersionOverridesV1_1">
-      <Description resid="residAppDesc"/>
       <Requirements>
         <bt:Sets DefaultMinVersion="1.12">
           <bt:Set Name="Mailbox"/>
@@ -66,7 +71,6 @@
             </Runtime>
           </Runtimes>
           <DesktopFormFactor>
-            <FunctionFile resid="functionFile"/>
             <ExtensionPoint xsi:type="MessageReadCommandSurface">
               <OfficeTab id="TabDefault">
                 <Group id="canaryGroup">
@@ -84,22 +88,6 @@
                     </Icon>
                     <Action xsi:type="ShowTaskpane">
                       <SourceLocation resid="taskPaneUrl"/>
-                      <SupportsPinning>true</SupportsPinning>
-                    </Action>
-                  </Control>
-                  <Control xsi:type="Button" id="canaryQuickFileBtn">
-                    <Label resid="quickFileButtonLabel"/>
-                    <Supertip>
-                      <Title resid="quickFileButtonLabel"/>
-                      <Description resid="quickFileButtonTip"/>
-                    </Supertip>
-                    <Icon>
-                      <bt:Image size="16" resid="icon16"/>
-                      <bt:Image size="32" resid="icon32"/>
-                      <bt:Image size="80" resid="icon80"/>
-                    </Icon>
-                    <Action xsi:type="ExecuteFunction">
-                      <FunctionName>showFileTaskpane</FunctionName>
                     </Action>
                   </Control>
                 </Group>
@@ -122,7 +110,6 @@
                     </Icon>
                     <Action xsi:type="ShowTaskpane">
                       <SourceLocation resid="composePaneUrl"/>
-                      <SupportsPinning>true</SupportsPinning>
                     </Action>
                   </Control>
                 </Group>
@@ -139,12 +126,11 @@
       </Hosts>
       <Resources>
         <bt:Images>
-          <bt:Image id="icon16" DefaultValue="https://YOUR_CANARY_PUBLIC_URL/icons/icon16.png"/>
-          <bt:Image id="icon32" DefaultValue="https://YOUR_CANARY_PUBLIC_URL/icons/icon32.png"/>
-          <bt:Image id="icon80" DefaultValue="https://YOUR_CANARY_PUBLIC_URL/icons/icon80.png"/>
+          <bt:Image id="icon16" DefaultValue="https://YOUR_CANARY_PUBLIC_URL/outlook-addin/icons/icon16.png"/>
+          <bt:Image id="icon32" DefaultValue="https://YOUR_CANARY_PUBLIC_URL/outlook-addin/icons/icon32.png"/>
+          <bt:Image id="icon80" DefaultValue="https://YOUR_CANARY_PUBLIC_URL/outlook-addin/icons/icon80.png"/>
         </bt:Images>
         <bt:Urls>
-          <bt:Url id="functionFile" DefaultValue="https://YOUR_CANARY_PUBLIC_URL/outlook-addin/commands.html"/>
           <bt:Url id="WebViewRuntime.Url" DefaultValue="https://YOUR_CANARY_PUBLIC_URL/outlook-addin/commands.html"/>
           <bt:Url id="JSRuntime.Url" DefaultValue="https://YOUR_CANARY_PUBLIC_URL/outlook-addin/commands.js"/>
           <bt:Url id="taskPaneUrl" DefaultValue="https://YOUR_CANARY_PUBLIC_URL/outlook-addin/taskpane.html"/>
@@ -154,12 +140,9 @@
           <bt:String id="groupLabel" DefaultValue="Canary"/>
           <bt:String id="buttonLabel" DefaultValue="File to Case"/>
           <bt:String id="composeButtonLabel" DefaultValue="Compose from matter"/>
-          <bt:String id="quickFileButtonLabel" DefaultValue="Quick file"/>
         </bt:ShortStrings>
         <bt:LongStrings>
-          <bt:String id="residAppDesc" DefaultValue="File mail to a Canary matter; compose from a matter with merge and case attachments without Microsoft Graph."/>
           <bt:String id="buttonTip" DefaultValue="Save this message to a Canary matter."/>
-          <bt:String id="quickFileButtonTip" DefaultValue="Open the File to Case pane for the selected message (Outlook does not allow add-ins on the message-list right-click menu)."/>
           <bt:String id="composeButtonTip" DefaultValue="Merge a precedent, pick a recipient, and attach case files to this compose message."/>
         </bt:LongStrings>
       </Resources>
