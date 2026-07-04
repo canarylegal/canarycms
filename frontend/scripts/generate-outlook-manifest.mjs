@@ -89,8 +89,6 @@ if (!fs.existsSync(baseDir)) {
 }
 
 const manifestPath = path.join(baseDir, 'manifest.xml')
-const sendManifestPath = path.join(baseDir, 'manifest-with-send.xml')
-const minimalManifestPath = path.join(baseDir, 'manifest-minimal.xml')
 if (!fs.existsSync(manifestPath)) {
   console.error('[outlook-addin] missing', manifestPath)
   process.exit(1)
@@ -103,21 +101,14 @@ if (!origin) {
   process.exit(0)
 }
 
-function rewriteManifestAt(pathToManifest) {
-  if (!fs.existsSync(pathToManifest)) return
-  const before = fs.readFileSync(pathToManifest, 'utf8')
-  const after = rewriteManifestXml(before, origin)
-  if (after === before) {
-    console.log(`[outlook-addin] ${path.relative(frontendRoot, pathToManifest)} already uses ${origin}`)
-  } else {
-    fs.writeFileSync(pathToManifest, after)
-    console.log(`[outlook-addin] ${path.relative(frontendRoot, pathToManifest)} URLs → ${origin}`)
-  }
+const before = fs.readFileSync(manifestPath, 'utf8')
+const after = rewriteManifestXml(before, origin)
+if (after === before) {
+  console.log(`[outlook-addin] ${target}/manifest.xml already uses ${origin}`)
+} else {
+  fs.writeFileSync(manifestPath, after)
+  console.log(`[outlook-addin] ${target}/manifest.xml URLs → ${origin}`)
 }
-
-rewriteManifestAt(manifestPath)
-rewriteManifestAt(sendManifestPath)
-rewriteManifestAt(minimalManifestPath)
 
 if (!origin.startsWith('https://') && !/^https:\/\/localhost(:\d+)?$/i.test(origin)) {
   console.warn(
