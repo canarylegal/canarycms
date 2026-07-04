@@ -147,8 +147,7 @@ def post_calendar_event(
         category_name=category_name,
     )
     raw["can_edit"] = True
-    if body.category_id is not None:
-        set_event_category_link(db, access.calendar.id, raw["uid"], body.category_id)
+    set_event_category_link(db, access.calendar.id, raw["uid"], body.category_id)
     enrich_events_with_categories(db, [raw])
     tid: uuid.UUID | None = body.matter_sub_type_event_template_id
     if tid is None and raw.get("matter_template_id"):

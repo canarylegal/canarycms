@@ -33,7 +33,11 @@ import {
   mapCalendarEventsToFullCalendar,
 } from './calendarEventMapping'
 import { useUserUiPreferences, type CalendarView } from './useUserUiPreferences'
-import { defaultOwnedCalendarId, syncCaseEventToCalDav } from './calendarEventSync'
+import {
+  defaultWritableCalendarId,
+  syncCaseEventToCalDav,
+  writableCalendarPickerOptions,
+} from './calendarEventSync'
 import type {
   CalendarCategoryOut,
   CalendarDirectoryRow,
@@ -269,6 +273,7 @@ const DUR_HOUR_SELECT_OPTIONS = DUR_HOURS_0_24.map((h) => ({ value: String(h), l
 const DUR_MIN_SELECT_OPTIONS = DUR_MINS_1_60.map((m) => ({ value: String(m), label: String(m) }))
 
 type CalendarEventDropdownKey =
+  | 'createCal'
   | 'createMatterType'
   | 'createCalLabel'
   | 'editCalLabel'
@@ -535,6 +540,16 @@ export function CalendarPage({
     [eventCategories],
   )
 
+  const createTargetCalendarOptions = useMemo(
+    () => writableCalendarPickerOptions(calendars),
+    [calendars],
+  )
+
+  const createTargetCalendarName = useMemo(() => {
+    if (draft?.kind !== 'create') return null
+    return calendars.find((c) => c.id === draft.targetCalendarId)?.name ?? null
+  }, [calendars, draft])
+
   useEffect(() => {
     if (!draft) eventDropdown.closeAll()
   }, [draft, eventDropdown.closeAll])
@@ -653,11 +668,11 @@ export function CalendarPage({
     }
     let calId = ''
     if (draft.kind === 'create') {
-      calId = draft.targetCalendarId || defaultOwnedCalendarId(calendars) || ''
+      calId = draft.targetCalendarId || defaultWritableCalendarId(calendars, selectedCalIds) || ''
     } else if (draft.kind === 'edit' && draft.editSource === 'caldav') {
       calId = draft.calendarId
     } else if (draft.kind === 'edit' && draft.editSource === 'case') {
-      calId = draft.targetCalendarId || defaultOwnedCalendarId(calendars) || ''
+      calId = draft.targetCalendarId || defaultWritableCalendarId(calendars, selectedCalIds) || ''
     } else {
       setEventCategories([])
       return
@@ -677,7 +692,21 @@ export function CalendarPage({
     return () => {
       cancel = true
     }
-  }, [draft, calendars, token])
+  }, [draft, calendars, selectedCalIds, token])
+
+  /** Keep create draft on a writable calendar when calendars load or selection changes. */
+  useEffect(() => {
+    if (draft?.kind !== 'create') return
+    const writableIds = new Set(writableCalendarPickerOptions(calendars).map((o) => o.value))
+    if (writableIds.size === 0) return
+    setDraft((d) => {
+      if (!d || d.kind !== 'create') return d
+      if (d.targetCalendarId && writableIds.has(d.targetCalendarId)) return d
+      const nextId = defaultWritableCalendarId(calendars, selectedCalIds)
+      if (!nextId || nextId === d.targetCalendarId) return d
+      return { ...d, targetCalendarId: nextId, categoryId: null }
+    })
+  }, [draft?.kind, calendars, selectedCalIds])
 
   /** Load CalDAV category for a tracked case event being edited. */
   useEffect(() => {
@@ -920,7 +949,7 @@ export function CalendarPage({
       caseId: '',
       eventCategory: 'custom',
       categoryId: null,
-      targetCalendarId: defaultOwnedCalendarId(calendars) || '',
+      targetCalendarId: defaultWritableCalendarId(calendars, selectedCalIds) || '',
       trackInCalendar: true,
       emailAlert: false,
     })
@@ -955,7 +984,7 @@ export function CalendarPage({
       caseId: '',
       eventCategory: 'custom',
       categoryId: null,
-      targetCalendarId: defaultOwnedCalendarId(calendars) || '',
+      targetCalendarId: defaultWritableCalendarId(calendars, selectedCalIds) || '',
       trackInCalendar: true,
       emailAlert: false,
     })
@@ -1016,7 +1045,7 @@ export function CalendarPage({
         calendarId: '',
         categoryId: ep.category_id ? String(ep.category_id) : null,
         categoryLabel: ep.category_name != null && ep.category_name !== '' ? String(ep.category_name) : null,
-        targetCalendarId: defaultOwnedCalendarId(calendars) || '',
+        targetCalendarId: defaultWritableCalendarId(calendars, selectedCalIds) || '',
         caseId: ep.case_id,
         caseEventId: ep.case_event_id,
         calendarEventUid: null,
@@ -1098,7 +1127,7 @@ export function CalendarPage({
     try {
       if (!cid) {
         const times = buildCalDavTimesFromDraft(draft)
-        const calId = draft.targetCalendarId || defaultOwnedCalendarId(calendars)
+        const calId = draft.targetCalendarId || defaultWritableCalendarId(calendars, selectedCalIds)
         if (!calId) {
           setBanner('No writable calendar found. Create a calendar under Calendars… first.')
           return
@@ -1148,7 +1177,7 @@ export function CalendarPage({
         await syncCaseEventToCalDav(token, cid, saved, {
           caseLabel: caseRow.case_number,
           categoryId: draft.categoryId,
-          calendarId: draft.targetCalendarId || defaultOwnedCalendarId(calendars),
+          calendarId: draft.targetCalendarId || defaultWritableCalendarId(calendars, selectedCalIds),
         })
       }
       setDraft(null)
@@ -1201,7 +1230,7 @@ export function CalendarPage({
           await syncCaseEventToCalDav(token, cid, saved, {
             caseLabel: caseRow.case_number,
             categoryId: draft.categoryId,
-            calendarId: draft.targetCalendarId || defaultOwnedCalendarId(calendars),
+            calendarId: draft.targetCalendarId || defaultWritableCalendarId(calendars, selectedCalIds),
           })
         }
       } else {
@@ -1450,6 +1479,29 @@ export function CalendarPage({
           >
             <h3 style={{ marginTop: 0 }}>{draft.kind === 'create' ? 'New event' : 'Edit event'}</h3>
             <div className="stack" style={{ gap: 12, minWidth: 0 }}>
+              {draft.kind === 'create' ? (
+                createTargetCalendarOptions.length > 0 ? (
+                  <SingleSelectDropdown
+                    label="Calendar"
+                    options={createTargetCalendarOptions}
+                    value={draft.targetCalendarId}
+                    disabled={busy || createTargetCalendarOptions.length === 0}
+                    open={eventDropdown.isOpen('createCal')}
+                    onOpenChange={(next) => eventDropdown.setOpen('createCal', next)}
+                    onChange={(v) =>
+                      setDraft({
+                        ...draft,
+                        targetCalendarId: v,
+                        categoryId: null,
+                      })
+                    }
+                  />
+                ) : (
+                  <p className="muted" style={{ margin: 0, fontSize: 13 }}>
+                    No writable calendar found. Create one under Calendars… first.
+                  </p>
+                )
+              ) : null}
               {draft.kind === 'create' ? (
                 <div className="field" style={{ minWidth: 0 }}>
                   <span>Matter (optional)</span>
@@ -1749,11 +1801,11 @@ export function CalendarPage({
                 {draft.kind === 'create'
                   ? !draft.caseId
                     ? draft.allDay
-                      ? 'Saved as an all-day event on your personal calendar.'
-                      : 'Saved as a personal calendar event with the start time and duration above.'
+                      ? `Saved as an all-day event on ${createTargetCalendarName ?? 'your calendar'}.`
+                      : `Saved as a personal event on ${createTargetCalendarName ?? 'your calendar'} with the start time and duration above.`
                     : draft.allDay
-                      ? 'Saved as an all-day matter event — you can edit it from this calendar or the matter.'
-                      : 'Saved as a matter event with the start time and duration above — you can edit it from this calendar or the matter.'
+                      ? `Saved as an all-day matter event on ${createTargetCalendarName ?? 'your calendar'} — you can edit it from this calendar or the matter.`
+                      : `Saved as a matter event on ${createTargetCalendarName ?? 'your calendar'} with the start time and duration above — you can edit it from this calendar or the matter.`
                   : draft.kind === 'edit' && draft.canEdit && draft.editSource === 'caldav'
                     ? draft.allDay
                       ? 'All-day — drag the event on the calendar to change the date, or adjust options above.'
@@ -1781,7 +1833,12 @@ export function CalendarPage({
                 <button
                   type="button"
                   className="btn primary"
-                  disabled={busy || !draft.title.trim()}
+                  disabled={
+                    busy ||
+                    !draft.title.trim() ||
+                    !draft.targetCalendarId ||
+                    createTargetCalendarOptions.length === 0
+                  }
                   onClick={() => void saveCreate()}
                 >
                   Save

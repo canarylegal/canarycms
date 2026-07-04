@@ -12,7 +12,12 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models import CalendarEventCategory, User, UserCalendar, UserCalendarCategory
-from app.radicale_calendar import event_href_by_uid, update_event_on_principal
+from app.radicale_calendar import (
+    category_names_from_vevent,
+    event_href_by_uid,
+    get_caldav_calendar,
+    update_event_on_principal,
+)
 
 log = logging.getLogger(__name__)
 
@@ -133,6 +138,81 @@ def sync_caldav_categories_for_calendar(db: Session, calendar: UserCalendar) -> 
                 e,
             )
     return updated
+
+
+def _caldav_categories_match(target_name: str | None, current_names: list[str]) -> bool:
+    if not target_name:
+        return not current_names
+    return current_names == [target_name]
+
+
+def full_sync_caldav_categories_for_calendar(db: Session, calendar: UserCalendar) -> tuple[int, int]:
+    """Push Canary category names to all CalDAV events; clear CATEGORIES on unlinked events.
+
+    Returns (updated_with_category, cleared).
+    """
+    if not _truthy(os.getenv("CANARY_SYNC_CALDAV_EVENT_CATEGORIES", "1")):
+        return 0, 0
+    owner = db.get(User, calendar.owner_user_id)
+    if owner is None or not owner.caldav_password_enc:
+        return 0, 0
+
+    from icalendar import Calendar as ICal
+
+    dav_cal = get_caldav_calendar(owner, calendar.radicale_slug)
+    if dav_cal is None:
+        return 0, 0
+
+    rows = db.execute(
+        select(CalendarEventCategory, UserCalendarCategory)
+        .outerjoin(UserCalendarCategory, UserCalendarCategory.id == CalendarEventCategory.category_id)
+        .where(CalendarEventCategory.calendar_id == calendar.id)
+    ).all()
+    name_by_uid: dict[str, str | None] = {}
+    for link, cat in rows:
+        name_by_uid[link.event_uid] = cat.name if cat is not None else None
+
+    updated = cleared = 0
+    for ev in dav_cal.events():
+        try:
+            ev.load()
+            ical = ICal.from_ical(ev.data)
+            vevent = next((c for c in ical.walk("VEVENT")), None)
+            if vevent is None:
+                continue
+            uid_raw = vevent.get("uid")
+            uid = str(uid_raw).strip() if uid_raw else ""
+            if not uid:
+                continue
+            target_name = name_by_uid.get(uid)
+            if uid not in name_by_uid:
+                target_name = None
+            current = category_names_from_vevent(vevent)
+            if _caldav_categories_match(target_name, current):
+                continue
+            update_event_on_principal(
+                owner,
+                str(ev.url),
+                calendar_display_name=calendar.name,
+                calendar_id=str(calendar.id),
+                category_name=target_name,
+            )
+            if target_name:
+                updated += 1
+            else:
+                cleared += 1
+        except Exception as e:
+            log.debug(
+                "Full CalDAV category sync skipped calendar=%s: %s",
+                calendar.id,
+                e,
+            )
+
+    if updated or cleared:
+        from app.calendar_caldav_cache import invalidate_caldav_events_cache
+
+        invalidate_caldav_events_cache(dav_user_id=owner.id)
+    return updated, cleared
 
 
 def ensure_calendar_labels_all_calendars(db: Session) -> None:

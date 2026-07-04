@@ -171,6 +171,19 @@ def _midnight_span_all_day_dates(dtstart: datetime, dtend: object) -> tuple[date
     return (d0, d1)
 
 
+def category_names_from_vevent(vevent) -> list[str]:
+    """RFC 5545 CATEGORIES values from a VEVENT component."""
+    raw = vevent.get("CATEGORIES")
+    if raw is None:
+        return []
+    if hasattr(raw, "cats"):
+        return [str(x).strip() for x in raw.cats if str(x).strip()]
+    if isinstance(raw, list):
+        return [str(x).strip() for x in raw if str(x).strip()]
+    s = str(raw).strip()
+    return [s] if s else []
+
+
 def parse_caldav_event(
     ev: caldav.Event,
     calendar_name: str | None = None,
@@ -262,6 +275,8 @@ def parse_caldav_event(
             break
     if matter_template_id is not None:
         out["matter_template_id"] = str(matter_template_id)
+
+    out["caldav_category_names"] = category_names_from_vevent(vevent)
 
     return out
 

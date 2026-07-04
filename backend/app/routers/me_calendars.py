@@ -21,10 +21,12 @@ from app.db import get_db
 from app.deps import get_current_user
 from app.models import User, UserCalendar, UserCalendarCategory, UserCalendarShare, UserCalendarSubscription
 from app.radicale_calendar import delete_calendar_remote, ensure_calendar_remote
+from app.calendar_label_bootstrap import full_sync_caldav_categories_for_calendar
 from app.schemas import (
     CalendarCategoryCreate,
     CalendarCategoryOut,
     CalendarCategoryPatch,
+    CalendarCategorySyncOut,
     CalendarCreate,
     CalendarDirectoryRow,
     CalendarOwnerMini,
@@ -287,7 +289,27 @@ def patch_calendar_category(
         db.rollback()
         raise HTTPException(status_code=409, detail="A category with this name already exists") from None
     db.refresh(row)
+    if "name" in data:
+        updated, cleared = full_sync_caldav_categories_for_calendar(db, access.calendar)
+        if updated or cleared:
+            db.commit()
     return CalendarCategoryOut(id=row.id, calendar_id=row.calendar_id, name=row.name, color=row.color)
+
+
+@router.post("/{calendar_id}/sync-categories", response_model=CalendarCategorySyncOut)
+def sync_calendar_categories_to_caldav(
+    calendar_id: uuid.UUID,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> CalendarCategorySyncOut:
+    """Push Canary category names to CalDAV (Outlook and other clients read CATEGORIES)."""
+    _require_caldav(user)
+    access = resolve_calendar_access(db, user, calendar_id)
+    if access.permission != "owner":
+        raise HTTPException(status_code=403, detail="Only the calendar owner can sync categories")
+    updated, cleared = full_sync_caldav_categories_for_calendar(db, access.calendar)
+    db.commit()
+    return CalendarCategorySyncOut(updated=updated, cleared=cleared)
 
 
 @router.delete("/{calendar_id}/categories/{category_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -306,6 +328,9 @@ def delete_calendar_category(
         raise HTTPException(status_code=404, detail="Category not found")
     db.delete(row)
     db.commit()
+    updated, cleared = full_sync_caldav_categories_for_calendar(db, access.calendar)
+    if updated or cleared:
+        db.commit()
     return None
 
 

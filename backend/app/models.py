@@ -180,6 +180,8 @@ class UserCalendar(Base):
     # Radicale calendar collection id (directory name); stable after create.
     radicale_slug: Mapped[str] = mapped_column(String(80), nullable=False)
     is_public: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # Optional fill for events with no category (in-app display only; not written to CalDAV).
+    default_event_color: Mapped[str | None] = mapped_column(String(20), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
 

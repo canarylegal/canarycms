@@ -248,6 +248,11 @@ class CalendarCategoryPatch(BaseModel):
     color: str | None = Field(default=None, max_length=20)
 
 
+class CalendarCategorySyncOut(BaseModel):
+    updated: int
+    cleared: int
+
+
 class CalendarOwnerMini(BaseModel):
     id: uuid.UUID
     display_name: str

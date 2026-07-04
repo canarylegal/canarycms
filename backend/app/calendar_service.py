@@ -206,6 +206,7 @@ def list_merged_events(
     from app.radicale_calendar import list_events_for_multiple_slugs
 
     out: list[dict] = []
+    accesses: list[CalendarAccess] = []
     if include_caldav:
         # Sync runs on GET /users/me/calendars; avoid a second Radicale list on every events fetch.
         accesses = list_accessible_calendars(db, requesting, filter_ids=calendar_ids)
@@ -237,11 +238,19 @@ def list_merged_events(
                     for future in as_completed(futures):
                         out.extend(future.result())
 
-    from app.calendar_category import enrich_events_with_categories
+    from app.calendar_category import (
+        enrich_events_with_categories,
+        enrich_events_with_default_colors,
+        reconcile_event_categories_from_caldav,
+    )
     from app.event_service import enrich_caldav_events_with_linked_case_events, list_tracked_case_events_for_calendar_merge
 
     if include_caldav:
+        writable_calendar_ids = {a.calendar.id for a in accesses if a.permission != "read"}
+        if reconcile_event_categories_from_caldav(db, out, writable_calendar_ids=writable_calendar_ids):
+            db.commit()
         enrich_events_with_categories(db, out)
+        enrich_events_with_default_colors(db, out)
         enrich_caldav_events_with_linked_case_events(db, requesting, out)
     out.extend(list_tracked_case_events_for_calendar_merge(db, requesting, range_start, range_end))
     from app.calendar_email_alert_service import enrich_merged_calendar_events
