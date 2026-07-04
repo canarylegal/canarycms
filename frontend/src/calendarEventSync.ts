@@ -11,6 +11,15 @@ export function allDayExclusiveEnd(iso: string | null | undefined): { start: str
   return { start: d, end: next.toISOString().slice(0, 10) }
 }
 
+export function isWritableCalendar(c: { access: string }): boolean {
+  return c.access === 'owner' || c.access === 'write'
+}
+
+/** Calendars the user may create events on (owned or shared with write). */
+export function writableCalendars<T extends { access: string }>(calendars: T[]): T[] {
+  return calendars.filter(isWritableCalendar)
+}
+
 export function defaultOwnedCalendarId(
   calendars: { id: string; source: string; access: string }[],
 ): string | null {
@@ -18,6 +27,30 @@ export function defaultOwnedCalendarId(
     (c) => c.source === 'owned' && (c.access === 'owner' || c.access === 'write'),
   )
   return owned.length > 0 ? owned[0].id : null
+}
+
+/** Default calendar for new events — prefers a visible writable calendar, then first owned. */
+export function defaultWritableCalendarId(
+  calendars: { id: string; source: string; access: string }[],
+  preferredIds?: string[],
+): string | null {
+  const writable = writableCalendars(calendars)
+  if (writable.length === 0) return null
+  if (preferredIds?.length) {
+    const pick = preferredIds.find((id) => writable.some((c) => c.id === id))
+    if (pick) return pick
+  }
+  const owned = writable.find((c) => c.source === 'owned')
+  return owned?.id ?? writable[0].id
+}
+
+export function writableCalendarPickerOptions(
+  calendars: { id: string; name: string; source: string; owner: { display_name: string } }[],
+) {
+  return writableCalendars(calendars).map((c) => ({
+    value: c.id,
+    label: c.source === 'owned' ? c.name : `${c.name} (${c.owner.display_name})`,
+  }))
 }
 
 type CalDavEventBody = {
