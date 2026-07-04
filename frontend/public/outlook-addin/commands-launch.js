@@ -20,7 +20,6 @@
   var QUEUE_WAKE_KEY = 'canary_send_queue_wake_v1'
   var SNAPSHOT_TIMEOUT_MS = 8000
   var UPLOAD_QUEUE_KEY = 'canary_send_upload_queue_v1'
-  var DEFAULT_ORIGIN = 'https://YOUR_CANARY_PUBLIC_URL'
 
   function apiOriginFromRoaming() {
     try {
@@ -32,7 +31,6 @@
 
   function apiRootSync() {
     var origin = apiOriginFromRoaming()
-    if (!origin) origin = DEFAULT_ORIGIN
     return origin ? origin + '/api' : ''
   }
 
@@ -43,7 +41,6 @@
       return OfficeRuntime.storage.getItem(LS_API_ORIGIN_KEY)
         .then(function (fromRt) {
           origin = fromRt ? String(fromRt).trim().replace(/\/$/, '') : ''
-          if (!origin) origin = DEFAULT_ORIGIN
           return origin ? origin + '/api' : ''
         })
         .catch(function () {
