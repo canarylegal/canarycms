@@ -1,0 +1,7 @@
+{
+  "allowed": [
+    "https://YOUR_CANARY_PUBLIC_URL/outlook-addin/commands.html",
+    "https://YOUR_CANARY_PUBLIC_URL/outlook-addin/commands.js",
+    "https://YOUR_CANARY_PUBLIC_URL/outlook-addin/outlook-shared.js"
+  ]
+}

@@ -1,16 +1,12 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!--
-  Canary Outlook add-in (File to Case).
-  Set CANARY_PUBLIC_URL in repo .env before deploy; the build rewrites URLs in dist/outlook-addin/manifest.xml.
-  For local sideload: node frontend/scripts/generate-outlook-manifest.mjs with target public.
--->
+<!-- Canary Outlook add-in (File to Case). Deploy build rewrites https://YOUR_CANARY_PUBLIC_URL URLs. -->
 <OfficeApp xmlns="http://schemas.microsoft.com/office/appforoffice/1.1"
            xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
            xmlns:bt="http://schemas.microsoft.com/office/officeappbasictypes/1.0"
            xmlns:mailappor="http://schemas.microsoft.com/office/mailappversionoverrides/1.0"
            xsi:type="MailApp">
   <Id>c4e8f2a1-9b3d-4a7e-8f2c-1d9e3a7b5f6a</Id>
-  <Version>1.0.14.0</Version>
+  <Version>1.0.28.0</Version>
   <ProviderName>Canary</ProviderName>
   <DefaultLocale>en-US</DefaultLocale>
   <DisplayName DefaultValue="Canary - File to Case"/>
@@ -60,8 +56,9 @@
       </Requirements>
       <Hosts>
         <Host xsi:type="MailHost">
+          <!-- WebView (OWA / New Outlook): commands.html. Classic Windows: JS-only override (commands-launch.js). -->
           <Runtimes>
-            <Runtime resid="WebViewRuntime.Url">
+            <Runtime resid="WebViewRuntime.Url" lifetime="long">
               <Override type="javascript" resid="JSRuntime.Url"/>
             </Runtime>
           </Runtimes>
@@ -85,21 +82,6 @@
                     <Action xsi:type="ShowTaskpane">
                       <SourceLocation resid="taskPaneUrl"/>
                       <SupportsPinning>true</SupportsPinning>
-                    </Action>
-                  </Control>
-                  <Control xsi:type="Button" id="canaryQuickFileBtn">
-                    <Label resid="quickFileButtonLabel"/>
-                    <Supertip>
-                      <Title resid="quickFileButtonLabel"/>
-                      <Description resid="quickFileButtonTip"/>
-                    </Supertip>
-                    <Icon>
-                      <bt:Image size="16" resid="icon16"/>
-                      <bt:Image size="32" resid="icon32"/>
-                      <bt:Image size="80" resid="icon80"/>
-                    </Icon>
-                    <Action xsi:type="ExecuteFunction">
-                      <FunctionName>showFileTaskpane</FunctionName>
                     </Action>
                   </Control>
                 </Group>
@@ -146,7 +128,7 @@
         <bt:Urls>
           <bt:Url id="functionFile" DefaultValue="https://YOUR_CANARY_PUBLIC_URL/outlook-addin/commands.html"/>
           <bt:Url id="WebViewRuntime.Url" DefaultValue="https://YOUR_CANARY_PUBLIC_URL/outlook-addin/commands.html"/>
-          <bt:Url id="JSRuntime.Url" DefaultValue="https://YOUR_CANARY_PUBLIC_URL/outlook-addin/commands.js"/>
+          <bt:Url id="JSRuntime.Url" DefaultValue="https://YOUR_CANARY_PUBLIC_URL/outlook-addin/commands-launch.js"/>
           <bt:Url id="taskPaneUrl" DefaultValue="https://YOUR_CANARY_PUBLIC_URL/outlook-addin/taskpane.html"/>
           <bt:Url id="composePaneUrl" DefaultValue="https://YOUR_CANARY_PUBLIC_URL/outlook-addin/compose-pane.html"/>
         </bt:Urls>
@@ -154,12 +136,10 @@
           <bt:String id="groupLabel" DefaultValue="Canary"/>
           <bt:String id="buttonLabel" DefaultValue="File to Case"/>
           <bt:String id="composeButtonLabel" DefaultValue="Compose from matter"/>
-          <bt:String id="quickFileButtonLabel" DefaultValue="Quick file"/>
         </bt:ShortStrings>
         <bt:LongStrings>
           <bt:String id="residAppDesc" DefaultValue="File mail to a Canary matter; compose from a matter with merge and case attachments without Microsoft Graph."/>
           <bt:String id="buttonTip" DefaultValue="Save this message to a Canary matter."/>
-          <bt:String id="quickFileButtonTip" DefaultValue="Open the File to Case pane for the selected message (Outlook does not allow add-ins on the message-list right-click menu)."/>
           <bt:String id="composeButtonTip" DefaultValue="Merge a precedent, pick a recipient, and attach case files to this compose message."/>
         </bt:LongStrings>
       </Resources>

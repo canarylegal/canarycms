@@ -30,6 +30,8 @@ from app.schemas import (
     OutlookPluginPendingComposeHandoffPutIn,
     OutlookPluginPendingSendOut,
     OutlookPluginPendingSendPutIn,
+    OutlookPluginSendCaptureLogIn,
+    OutlookPluginSendCaptureLogOut,
 )
 from app.security import decode_compose_handoff_token
 
@@ -414,6 +416,22 @@ def outlook_plugin_ensure_master_category(
             status="graph_error",
             detail=str(e)[:800],
         )
+
+
+@router.post("/send-capture-log", response_model=OutlookPluginSendCaptureLogOut)
+def outlook_plugin_send_capture_log(
+    payload: OutlookPluginSendCaptureLogIn,
+    user: User = Depends(get_current_user),
+) -> OutlookPluginSendCaptureLogOut:
+    """Best-effort OnMessageSend diagnostics from the Outlook add-in (does not block send)."""
+    log.info(
+        "outlook send capture user_id=%s step=%s case_id=%s detail=%s",
+        user.id,
+        payload.step,
+        payload.case_id,
+        (payload.detail or "")[:500],
+    )
+    return OutlookPluginSendCaptureLogOut(ok=True)
 
 
 @router.post("/graph-tag-category", response_model=OutlookPluginGraphTagCategoryOut)

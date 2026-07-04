@@ -7,6 +7,7 @@
   const RS_API_ORIGIN_KEY = 'canary_api_origin'
   const RS_PENDING_CASE_KEY = 'canary_pending_send_case_id'
   const RS_PENDING_EXPIRES_KEY = 'canary_pending_send_expires_ms'
+  const ITEM_CASE_KEY = 'canary_case_id'
 
   function pageOrigin() {
     try {
@@ -86,6 +87,101 @@
     }
   }
 
+  function readCaseIdFromItemAsync(item) {
+    return new Promise(function (resolve) {
+      if (!item || typeof item.loadCustomPropertiesAsync !== 'function') {
+        resolve('')
+        return
+      }
+      item.loadCustomPropertiesAsync(function (r) {
+        if (r.status !== Office.AsyncResultStatus.Succeeded || !r.value) {
+          resolve('')
+          return
+        }
+        try {
+          const v = r.value.get(ITEM_CASE_KEY)
+          resolve(v ? String(v).trim() : '')
+        } catch (_) {
+          resolve('')
+        }
+      })
+    })
+  }
+
+  function persistCaseOnItemAsync(item, caseId) {
+    return new Promise(function (resolve, reject) {
+      if (!item || typeof item.loadCustomPropertiesAsync !== 'function') {
+        resolve(false)
+        return
+      }
+      const v = caseId ? String(caseId).trim() : ''
+      item.loadCustomPropertiesAsync(function (r) {
+        if (r.status !== Office.AsyncResultStatus.Succeeded || !r.value) {
+          reject(new Error(r.error ? r.error.message : 'Could not load message properties.'))
+          return
+        }
+        const props = r.value
+        try {
+          if (v) props.set(ITEM_CASE_KEY, v)
+          else props.remove(ITEM_CASE_KEY)
+        } catch (e) {
+          reject(e)
+          return
+        }
+        props.saveAsync(function (sr) {
+          if (sr.status === Office.AsyncResultStatus.Succeeded) resolve(true)
+          else reject(new Error(sr.error ? sr.error.message : 'Could not save message properties.'))
+        })
+      })
+    })
+  }
+
+  async function bindPendingMatterToComposeItem(token) {
+    const item = Office.context.mailbox && Office.context.mailbox.item
+    if (!item || !token) return ''
+    const existing = await readCaseIdFromItemAsync(item)
+    if (existing) return existing
+    let caseId = ''
+    try {
+      const res = await fetch(apiRoot() + '/mail-plugin/pending-send', { headers: authHeaders(token) })
+      const body = await res.json().catch(function () {
+        return null
+      })
+      if (res.ok && body && body.active && body.case_id) {
+        caseId = String(body.case_id)
+      }
+    } catch (_) {}
+    if (!caseId) caseId = readPendingSendCaseIdSync()
+    if (!caseId) caseId = await readPendingSendCaseIdAsync()
+    if (!caseId) return ''
+    await persistCaseOnItemAsync(item, caseId)
+    await persistPendingSendAsync(caseId, 86400)
+    await mirrorAuthToEventRuntimeAsync(token)
+    return caseId
+  }
+
+  /** OnMessageSend may run before roaming settings hydrate — prefer OfficeRuntime.storage. */
+  function readPendingSendCaseIdAsync() {
+    const fromRoaming = readPendingSendCaseIdSync()
+    if (fromRoaming) return Promise.resolve(fromRoaming)
+    if (typeof OfficeRuntime === 'undefined' || !OfficeRuntime.storage || !OfficeRuntime.storage.getItem) {
+      return Promise.resolve('')
+    }
+    return Promise.all([
+      OfficeRuntime.storage.getItem(RS_PENDING_CASE_KEY).catch(function () {
+        return ''
+      }),
+      OfficeRuntime.storage.getItem(RS_PENDING_EXPIRES_KEY).catch(function () {
+        return ''
+      }),
+    ]).then(function (arr) {
+      const id = arr[0] ? String(arr[0]).trim() : ''
+      const exp = parseInt(String(arr[1] || '0'), 10)
+      if (id && exp && Date.now() > exp) return ''
+      return id
+    })
+  }
+
   function persistPendingSendAsync(caseId, ttlSeconds) {
     const ttl = ttlSeconds == null ? 86400 : Number(ttlSeconds)
     const exp = Date.now() + Math.max(60, ttl) * 1000
@@ -111,10 +207,15 @@
       if (typeof OfficeRuntime === 'undefined' || !OfficeRuntime.storage || !OfficeRuntime.storage.setItem) {
         return
       }
+      const tasks = []
       if (v) {
-        return OfficeRuntime.storage.setItem(RS_PENDING_CASE_KEY, v).catch(function () {})
+        tasks.push(OfficeRuntime.storage.setItem(RS_PENDING_CASE_KEY, v).catch(function () {}))
+        tasks.push(OfficeRuntime.storage.setItem(RS_PENDING_EXPIRES_KEY, String(exp)).catch(function () {}))
+      } else {
+        tasks.push(OfficeRuntime.storage.removeItem(RS_PENDING_CASE_KEY).catch(function () {}))
+        tasks.push(OfficeRuntime.storage.removeItem(RS_PENDING_EXPIRES_KEY).catch(function () {}))
       }
-      return OfficeRuntime.storage.removeItem(RS_PENDING_CASE_KEY).catch(function () {})
+      return Promise.all(tasks)
     })
   }
 
@@ -421,6 +522,10 @@
     persistTokenAsync: persistTokenAsync,
     mirrorAuthToEventRuntimeAsync: mirrorAuthToEventRuntimeAsync,
     readPendingSendCaseIdSync: readPendingSendCaseIdSync,
+    readPendingSendCaseIdAsync: readPendingSendCaseIdAsync,
+    readCaseIdFromItemAsync: readCaseIdFromItemAsync,
+    persistCaseOnItemAsync: persistCaseOnItemAsync,
+    bindPendingMatterToComposeItem: bindPendingMatterToComposeItem,
     persistPendingSendAsync: persistPendingSendAsync,
     clearPendingSendAsync: clearPendingSendAsync,
     authHeaders: authHeaders,
