@@ -761,11 +761,6 @@ def _case_email_compose_bundle(
 
     to_addr = _resolve_recipient_email_m365(db, case_id, merge_in)
 
-    prec_name = ""
-    if body.precedent_id:
-        pr = db.get(Precedent, body.precedent_id)
-        if pr:
-            prec_name = (pr.name or "").strip()
     contact_ref = ""
     if body.case_contact_id and not body.precedent_merge_all_clients:
         cc_subj = db.get(CaseContact, body.case_contact_id)
@@ -777,8 +772,6 @@ def _case_email_compose_bundle(
         subject_bits.append(case_row.title.strip())
     if contact_ref:
         subject_bits.append(contact_ref)
-    elif prec_name:
-        subject_bits.append(prec_name)
     subject = " — ".join(subject_bits) if subject_bits else "E-mail"
 
     attachments: list[tuple[str, str, bytes]] = []

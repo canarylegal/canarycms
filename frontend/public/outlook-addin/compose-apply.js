@@ -2,6 +2,34 @@
 'use strict'
 ;(function () {
   const MAX_ATTACH = 25
+  const SUBJECT_CASE_TOKEN_RE = /^\[CANARY:([0-9a-f-]{36})\]\s*/i
+
+  /** Strip legacy matter tokens from older add-in builds (never shown to recipients). */
+  function parseSubjectCaseToken(subject) {
+    const s = String(subject || '')
+    const m = SUBJECT_CASE_TOKEN_RE.exec(s)
+    if (!m) return { caseId: '', cleanSubject: s }
+    return { caseId: String(m[1]), cleanSubject: s.replace(SUBJECT_CASE_TOKEN_RE, '') }
+  }
+
+  function stripLegacySubjectToken(subject) {
+    return parseSubjectCaseToken(subject).cleanSubject
+  }
+
+  /** When a precedent is used, subject should be the matter description, not the precedent title. */
+  function resolveComposeSubject(bundle) {
+    if (!bundle || typeof bundle !== 'object') return ''
+    const matterDesc =
+      bundle.matter_description != null ? String(bundle.matter_description).trim() : ''
+    const hasPrecedent = !!(
+      bundle.precedent_id ||
+      bundle.applied_precedent_id ||
+      bundle.precedent_applied
+    )
+    if (hasPrecedent && matterDesc) return matterDesc
+    if (bundle.subject != null) return stripLegacySubjectToken(String(bundle.subject))
+    return ''
+  }
 
   function officeAsync(fn) {
     return new Promise(function (resolve, reject) {
@@ -133,8 +161,9 @@
         await setToAsync(item, recipients)
       }
     }
-    if (bundle && bundle.subject != null) {
-      await setSubjectAsync(item, bundle.subject)
+    const resolvedSubject = resolveComposeSubject(bundle)
+    if (resolvedSubject || (bundle && bundle.subject != null)) {
+      await setSubjectAsync(item, resolvedSubject)
     }
     if (bundle && bundle.body != null) {
       await prependBodyAsync(item, bundle.body)
@@ -196,8 +225,9 @@
           })
         }
       }
-      if (bundle && bundle.subject != null) {
-        params.subject = String(bundle.subject || '')
+      const resolvedSubject = resolveComposeSubject(bundle)
+      if (resolvedSubject) {
+        params.subject = resolvedSubject
       }
       const bodyText = String((bundle && bundle.body) || '').trim()
       if (bodyText) {
@@ -232,5 +262,8 @@
     applyComposeBundle: applyComposeBundle,
     applyCanaryCategoryAsync: applyCanaryCategoryAsync,
     openNewMessageFromBundle: openNewMessageFromBundle,
+    resolveComposeSubject: resolveComposeSubject,
+    parseSubjectCaseToken: parseSubjectCaseToken,
+    stripLegacySubjectToken: stripLegacySubjectToken,
   }
 })()

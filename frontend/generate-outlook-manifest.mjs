@@ -56,21 +56,13 @@ export function normalizeOrigin(raw) {
 
 export function rewriteManifestXml(xml, origin) {
   if (!origin) return xml
-  const fromList = [TEMPLATE_ORIGIN, ...LEGACY_ORIGINS].filter((from) => from !== origin && xml.includes(from))
-  if (!fromList.length) return xml
-
-  // Never rewrite inside XML comments (``--`` in comments must not be corrupted by URL substitution).
-  const segments = xml.split(/(<!--[\s\S]*?-->)/g)
-  return segments
-    .map(function (segment) {
-      if (segment.indexOf('<!--') === 0) return segment
-      var out = segment
-      for (var i = 0; i < fromList.length; i++) {
-        out = out.split(fromList[i]).join(origin)
-      }
-      return out
-    })
-    .join('')
+  let out = xml
+  for (const from of [TEMPLATE_ORIGIN, ...LEGACY_ORIGINS]) {
+    if (from !== origin && out.includes(from)) {
+      out = out.split(from).join(origin)
+    }
+  }
+  return out
 }
 
 function parseArgs(argv) {

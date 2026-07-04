@@ -37,6 +37,59 @@
     await sh().mirrorAuthToEventRuntimeAsync(token)
   }
 
+  async function resolveHandoffSubject(token, bundle, caseId) {
+    const shared = sh()
+    const apply = applyApi()
+    if (!bundle) return bundle
+
+    if (apply && apply.resolveComposeSubject) {
+      const fromBundle = apply.resolveComposeSubject(bundle)
+      const rawSubject = bundle.subject != null ? String(bundle.subject) : ''
+      const stripped = apply.stripLegacySubjectToken ? apply.stripLegacySubjectToken(rawSubject) : rawSubject
+      if (fromBundle && fromBundle !== stripped) {
+        bundle.subject = fromBundle
+        return bundle
+      }
+    }
+
+    if (!caseId || !token) return bundle
+
+    let caseData = null
+    try {
+      const res = await fetch(shared.apiRoot() + '/cases/' + encodeURIComponent(String(caseId)), {
+        headers: shared.authHeaders(token),
+      })
+      caseData = await res.json().catch(function () {
+        return null
+      })
+      if (!res.ok) caseData = null
+    } catch (_) {}
+
+    if (!caseData) return bundle
+
+    let matterDesc =
+      caseData.matter_description != null ? String(caseData.matter_description).trim() : ''
+    if (!matterDesc && shared.matterLabel) {
+      const label = shared.matterLabel(caseData)
+      const parts = label.split(' — ')
+      if (parts.length > 1) matterDesc = parts[parts.length - 1].trim()
+    }
+    if (!matterDesc) return bundle
+
+    const hasPrecedent = !!(
+      bundle.precedent_id ||
+      bundle.applied_precedent_id ||
+      bundle.precedent_applied
+    )
+    // Canary web handoffs often omit precedent_id; merged body means a precedent was applied.
+    const hasMergedContent = !!(bundle.body && String(bundle.body).trim())
+    if (hasPrecedent || hasMergedContent) {
+      bundle.subject = matterDesc
+      bundle.matter_description = matterDesc
+    }
+    return bundle
+  }
+
   async function tryClaimAndOpen() {
     if (busy) return
     const shared = sh()
@@ -64,8 +117,6 @@
       })
       if (!handoffRes.ok || !bundle) return
 
-      await apply.openNewMessageFromBundle(bundle)
-
       const caseId = bundle.case_id ? String(bundle.case_id) : claim.case_id ? String(claim.case_id) : ''
       let sourceFileId = null
       const atts = bundle.attachments || []
@@ -73,8 +124,18 @@
         sourceFileId = String(atts[0].file_id)
       }
       if (caseId) {
-        await syncPendingSend(token, caseId, sourceFileId)
+        try {
+          await syncPendingSend(token, caseId, sourceFileId)
+        } catch (e) {
+          await shared.persistPendingSendAsync(caseId, 86400)
+          await shared.mirrorAuthToEventRuntimeAsync(token)
+          console.warn('Canary handoff pending sync:', e && e.message ? e.message : e)
+        }
       }
+
+      await resolveHandoffSubject(token, bundle, caseId)
+
+      await apply.openNewMessageFromBundle(bundle)
     } catch (e) {
       console.warn('Canary Outlook compose handoff:', e && e.message ? e.message : e)
     } finally {
@@ -82,40 +143,12 @@
     }
   }
 
-  async function syncServerPendingFromApi(token) {
-    if (!token || !sh()) return
-    try {
-      const res = await fetch(sh().apiRoot() + '/mail-plugin/pending-send', {
-        headers: sh().authHeaders(token),
-      })
-      const body = await res.json().catch(function () {
-        return null
-      })
-      if (!res.ok || !body || !body.active || !body.case_id) return
-      let ttl = 86400
-      if (body.expires_at) {
-        try {
-          const ms = new Date(body.expires_at).getTime() - Date.now()
-          if (ms > 60000) ttl = Math.ceil(ms / 1000)
-        } catch (_) {}
-      }
-      await sh().persistPendingSendAsync(String(body.case_id), ttl)
-      await sh().mirrorAuthToEventRuntimeAsync(token)
-    } catch (_) {
-      /* best-effort */
-    }
-  }
-
   function startPolling() {
     if (timer != null) return
     timer = setInterval(function () {
       void tryClaimAndOpen()
-      const token = sh() && sh().getToken ? sh().getToken() : ''
-      if (token) void syncServerPendingFromApi(token)
     }, POLL_MS)
     void tryClaimAndOpen()
-    const token = sh() && sh().getToken ? sh().getToken() : ''
-    if (token) void syncServerPendingFromApi(token)
   }
 
   Office.onReady(function () {

@@ -471,6 +471,8 @@
     const mode = ($('matter-mode') && $('matter-mode').value) || 'pick'
     if (mode === 'none') {
       await syncPendingSend(token, null)
+      const item = Office.context.mailbox.item
+      if (item) await sh().persistCaseOnItemAsync(item, null).catch(function () {})
       showStatus('ok', 'Matter set to none — sent mail will not be filed.', false)
       return
     }
@@ -498,8 +500,23 @@
         const detail = bundle && bundle.detail
         throw new Error(typeof detail === 'string' ? detail : 'Compose bundle failed')
       }
+      if (body.precedent_id) {
+        let matterDesc =
+          selectedCase.matter_description != null ? String(selectedCase.matter_description).trim() : ''
+        if (!matterDesc) {
+          const label = sh().matterLabel(selectedCase)
+          const parts = label.split(' — ')
+          if (parts.length > 1) matterDesc = parts[parts.length - 1].trim()
+        }
+        if (matterDesc) {
+          bundle.subject = matterDesc
+          bundle.matter_description = matterDesc
+          bundle.precedent_id = body.precedent_id
+        }
+      }
       const added = await applyApi().applyComposeBundle(bundle, { skipTo: isReplyCompose })
       await syncPendingSend(token, String(selectedCase.id))
+      await sh().persistCaseOnItemAsync(item, String(selectedCase.id))
       const tagged = applyApi().applyCanaryCategoryAsync
         ? await applyApi().applyCanaryCategoryAsync(item)
         : false
@@ -510,6 +527,9 @@
         selectedCase.case_number != null ? String(selectedCase.case_number) : sh().matterLabel(selectedCase)
       okMsg += tagged ? ' and receive the Canary category.' : '.'
       showStatus('ok', okMsg, false)
+      if (globalThis.canaryProcessSendUploadQueue) {
+        void globalThis.canaryProcessSendUploadQueue()
+      }
     } catch (e) {
       showStatus('msg', (e && e.message ? String(e.message) : 'Apply failed') + ' [' + ADDIN_UI_VERSION + ']', true)
     } finally {
@@ -558,61 +578,15 @@
     }
   }
 
-  async function prefetchLinkedMatterForReply() {
-    if (!isReplyCompose) return
-    const token = sh().getToken()
-    if (!token) return
-    const item = Office.context.mailbox.item
-    if (!item) return
-    let conv = ''
-    let imid = ''
-    let oid = ''
-    try {
-      if (item.conversationId) conv = String(item.conversationId).trim()
-    } catch (_) {}
-    try {
-      if (item.internetMessageId) imid = String(item.internetMessageId).trim()
-    } catch (_) {}
-    try {
-      if (item.itemId) oid = String(item.itemId).trim()
-    } catch (_) {}
-    if (!conv && !imid && !oid) return
-    try {
-      const res = await fetch(sh().apiRoot() + '/mail-plugin/linked-case', {
-        method: 'POST',
-        headers: sh().jsonAuthHeaders(token),
-        body: JSON.stringify({
-          outlook_item_id: oid || null,
-          internet_message_id: imid || null,
-          conversation_id: conv || null,
-        }),
-      })
-      const body = await res.json().catch(function () {
-        return null
-      })
-      const lc = body && body.linked_case
-      if (!res.ok || !lc || !lc.id) return
-      const c = allCases.find(function (x) {
-        return String(x.id) === String(lc.id)
-      }) || {
-        id: lc.id,
-        case_number: lc.case_number,
-        client_name: lc.client_name,
-        matter_description: lc.matter_description,
-      }
-      await selectCase(c, { keepAttachIds: true })
-      await syncPendingSend(token, String(lc.id))
-    } catch (_) {
-      /* best-effort thread prefill */
-    }
-  }
-
   async function detectComposeKind() {
     try {
       const item = Office.context.mailbox.item
       if (!item) return
       const ct = await applyApi().getComposeTypeAsync(item)
       isReplyCompose = ct === 'reply' || ct === 'forward'
+      if (!isReplyCompose) {
+        showStatus('ok', '', false)
+      }
       updateComposeKindUi()
     } catch (_) {
       isReplyCompose = false
@@ -620,6 +594,14 @@
   }
 
   Office.onReady(function () {
+    globalThis.canarySendUploadStatus = function (ok, msg) {
+      if (ok) {
+        showStatus('ok', msg, false)
+      } else {
+        showStatus('msg', msg, true)
+      }
+    }
+
     const signIn = $('btn-sign-in')
     if (signIn) signIn.onclick = function () {
       void connectToCanary()
@@ -663,9 +645,25 @@
     void (async function () {
       await detectComposeKind()
       await refreshAuthAndCases()
-      if (isReplyCompose) {
-        await prefetchLinkedMatterForReply()
+      const token = sh().getToken()
+      if (token && sh().bindPendingMatterToComposeItem) {
+        try {
+          const boundCaseId = await sh().bindPendingMatterToComposeItem(token)
+          if (boundCaseId && allCases.length) {
+            const c = allCases.find(function (x) {
+              return String(x.id) === String(boundCaseId)
+            })
+            if (c && (!selectedCase || String(selectedCase.id) !== String(boundCaseId))) {
+              await selectCase(c)
+            }
+          }
+        } catch (_) {}
       }
+      setInterval(function () {
+        if (globalThis.canaryProcessSendUploadQueue) {
+          void globalThis.canaryProcessSendUploadQueue()
+        }
+      }, 400)
     })()
   })
 })()

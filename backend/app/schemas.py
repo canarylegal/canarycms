@@ -1605,6 +1605,18 @@ class OutlookPluginGraphTagCategoryOut(BaseModel):
     detail: str | None = None
 
 
+class OutlookPluginSendCaptureLogIn(BaseModel):
+    """Best-effort diagnostic from OnMessageSend (Classic Outlook send filing)."""
+
+    step: str = Field(max_length=64)
+    detail: str | None = Field(default=None, max_length=2000)
+    case_id: str | None = Field(default=None, max_length=64)
+
+
+class OutlookPluginSendCaptureLogOut(BaseModel):
+    ok: bool = True
+
+
 class CaseFolderCreate(BaseModel):
     # Relative folder path inside the case ("" == root).
     # Example: "Contracts" or "Contracts/2019"
