@@ -600,11 +600,15 @@ export function CaseDetail({
   const [propertyDraft, setPropertyDraft] = useState<CasePropertyPayload | null>(null)
   const [propertyBaseline, setPropertyBaseline] = useState<CasePropertyPayload | null>(null)
   const [precedentPicker, setPrecedentPicker] = useState<PrecedentPickerState | null>(null)
-  const [precedentChoices, setPrecedentChoices] = useState<PrecedentOut[]>([])
-  const [precedentCategories, setPrecedentCategories] = useState<PrecedentCategoryOut[]>([])
+  const [precedentChoicesBySubType, setPrecedentChoicesBySubType] = useState<Record<string, PrecedentOut[]>>({})
+  const [precedentCategoriesBySubType, setPrecedentCategoriesBySubType] = useState<
+    Record<string, PrecedentCategoryOut[]>
+  >({})
+  const [precedentPickerSubTypeId, setPrecedentPickerSubTypeId] = useState<string | null>(null)
   const [precedentPickerCategoryId, setPrecedentPickerCategoryId] = useState<string | null>(null)
-  const [precedentPickerIncludeSiblingSubTypes, setPrecedentPickerIncludeSiblingSubTypes] = useState(false)
-  const [siblingPrecedentChoices, setSiblingPrecedentChoices] = useState<PrecedentOut[]>([])
+  const [precedentPickerExpandedSubTypes, setPrecedentPickerExpandedSubTypes] = useState<Set<string>>(
+    () => new Set(),
+  )
   const [precedentSearch, setPrecedentSearch] = useState('')
   const [precedentChosenId, setPrecedentChosenId] = useState<string | null>(null)
   const [contactPickModal, setContactPickModal] = useState<
@@ -1075,11 +1079,11 @@ export function CaseDetail({
 
   useEffect(() => {
     if (!precedentPicker) {
-      setPrecedentChoices([])
-      setPrecedentCategories([])
+      setPrecedentChoicesBySubType({})
+      setPrecedentCategoriesBySubType({})
+      setPrecedentPickerSubTypeId(null)
       setPrecedentPickerCategoryId(null)
-      setPrecedentPickerIncludeSiblingSubTypes(false)
-      setSiblingPrecedentChoices([])
+      setPrecedentPickerExpandedSubTypes(new Set())
       setPrecedentSearch('')
       return
     }
@@ -1097,13 +1101,15 @@ export function CaseDetail({
               { token },
             )
             if (cancelled) return
-            setPrecedentCategories([])
-            setPrecedentChoices(list)
+            setPrecedentCategoriesBySubType({})
+            setPrecedentChoicesBySubType({ __head__: list })
+            setPrecedentPickerSubTypeId('__head__')
             setPrecedentChosenId(
               preferReference ? list.find((p) => p.reference === preferReference)?.id ?? null : null,
             )
             setPrecedentSearch('')
             setPrecedentPickerCategoryId(null)
+            setPrecedentPickerExpandedSubTypes(new Set())
             return
           }
           const list = await apiFetch<PrecedentOut[]>(
@@ -1111,87 +1117,56 @@ export function CaseDetail({
             { token },
           )
           if (cancelled) return
-          setPrecedentCategories([])
-          setPrecedentChoices(list)
+          setPrecedentCategoriesBySubType({})
+          setPrecedentChoicesBySubType({ __global__: list })
+          setPrecedentPickerSubTypeId('__global__')
           setPrecedentChosenId(
             preferReference ? list.find((p) => p.reference === preferReference)?.id ?? null : null,
           )
           setPrecedentSearch('')
           setPrecedentPickerCategoryId(null)
+          setPrecedentPickerExpandedSubTypes(new Set())
           return
         }
-        const [cats, list] = await Promise.all([
-          apiFetch<PrecedentCategoryOut[]>(`/matter-types/sub-types/${subId}/precedent-categories`, { token }),
-          apiFetch<PrecedentOut[]>(`/precedents?kind=${kind}&matter_sub_type_id=${subId}`, { token }),
-        ])
+
+        const headId = caseDetail?.matter_head_type_id
+        const head = headId ? matterHeadTypes.find((h) => h.id === headId) : null
+        const subGroups =
+          head && head.sub_types.length > 0
+            ? head.sub_types.map((s) => ({ subId: s.id, subName: s.name }))
+            : [{ subId: subId, subName: caseDetail?.matter_sub_type_name ?? 'This sub-type' }]
+
+        const catEntries = await Promise.all(
+          subGroups.map(async (g) => {
+            const cats = await apiFetch<PrecedentCategoryOut[]>(
+              `/matter-types/sub-types/${g.subId}/precedent-categories`,
+              { token },
+            )
+            return [g.subId, cats] as const
+          }),
+        )
+        const list = await apiFetch<PrecedentOut[]>(
+          `/precedents?kind=${kind}&matter_sub_type_id=${subId}`,
+          { token },
+        )
         if (cancelled) return
-        setPrecedentCategories(cats)
-        setPrecedentChoices(list)
+        setPrecedentCategoriesBySubType(Object.fromEntries(catEntries))
+        setPrecedentChoicesBySubType({ [subId]: list })
+        setPrecedentPickerSubTypeId(subId)
+        setPrecedentPickerCategoryId(null)
+        setPrecedentPickerExpandedSubTypes(new Set([subId]))
         setPrecedentChosenId(
           preferReference ? list.find((p) => p.reference === preferReference)?.id ?? null : null,
         )
         setPrecedentSearch('')
-        setPrecedentPickerCategoryId(null)
       } catch {
         if (!cancelled) {
-          setPrecedentCategories([])
-          setPrecedentChoices([])
+          setPrecedentCategoriesBySubType({})
+          setPrecedentChoicesBySubType({})
+          setPrecedentPickerSubTypeId(null)
           setPrecedentPickerCategoryId(null)
+          setPrecedentPickerExpandedSubTypes(new Set())
         }
-      }
-    }
-    void load()
-    return () => {
-      cancelled = true
-    }
-  }, [precedentPicker, token, caseDetail?.matter_sub_type_id, caseDetail?.matter_head_type_id, caseDetail?.id])
-
-  const precedentPickerSiblingSubTypes = useMemo(() => {
-    const headId = caseDetail?.matter_head_type_id
-    const subId = caseDetail?.matter_sub_type_id
-    if (!headId || !subId) return []
-    const head = matterHeadTypes.find((h) => h.id === headId)
-    if (!head) return []
-    return head.sub_types.filter((s) => s.id !== subId)
-  }, [matterHeadTypes, caseDetail?.matter_head_type_id, caseDetail?.matter_sub_type_id])
-
-  useEffect(() => {
-    if (
-      !precedentPicker ||
-      !precedentPickerIncludeSiblingSubTypes ||
-      !caseDetail?.matter_sub_type_id ||
-      precedentPickerSiblingSubTypes.length === 0
-    ) {
-      setSiblingPrecedentChoices([])
-      return
-    }
-    const kind = precedentPicker.kind
-    let cancelled = false
-    async function load() {
-      try {
-        const lists = await Promise.all(
-          precedentPickerSiblingSubTypes.map((s) =>
-            apiFetch<PrecedentOut[]>(`/precedents?kind=${kind}&matter_sub_type_id=${s.id}`, { token }),
-          ),
-        )
-        if (cancelled) return
-        const currentIds = new Set(precedentChoices.map((p) => p.id))
-        const merged: PrecedentOut[] = []
-        const seen = new Set<string>()
-        lists.forEach((list, idx) => {
-          const subName = precedentPickerSiblingSubTypes[idx]?.name ?? ''
-          for (const p of list) {
-            if (currentIds.has(p.id) || seen.has(p.id)) continue
-            seen.add(p.id)
-            merged.push({
-              ...p,
-              matter_sub_type_name: p.matter_sub_type_name ?? subName,
-            })
-          }
-        })
-        setSiblingPrecedentChoices(merged)
-      } catch {
-        if (!cancelled) setSiblingPrecedentChoices([])
       }
     }
     void load()
@@ -1200,18 +1175,62 @@ export function CaseDetail({
     }
   }, [
     precedentPicker,
-    precedentPickerIncludeSiblingSubTypes,
-    precedentPickerSiblingSubTypes,
     token,
-    precedentChoices,
     caseDetail?.matter_sub_type_id,
+    caseDetail?.matter_head_type_id,
+    caseDetail?.matter_sub_type_name,
+    caseDetail?.id,
+    matterHeadTypes,
   ])
+
+  const precedentPickerSubTypeGroups = useMemo(() => {
+    const caseSubId = caseDetail?.matter_sub_type_id
+    const headId = caseDetail?.matter_head_type_id
+    if (!caseSubId) return []
+    const head = headId ? matterHeadTypes.find((h) => h.id === headId) : null
+    if (head && head.sub_types.length > 0) {
+      return head.sub_types.map((s) => ({ subId: s.id, subName: s.name }))
+    }
+    return [{ subId: caseSubId, subName: caseDetail?.matter_sub_type_name ?? 'This sub-type' }]
+  }, [matterHeadTypes, caseDetail?.matter_head_type_id, caseDetail?.matter_sub_type_id, caseDetail?.matter_sub_type_name])
+
+  async function ensurePrecedentChoicesForSubType(subTypeId: string) {
+    if (!precedentPicker || precedentChoicesBySubType[subTypeId]) return
+    const kind = precedentPicker.kind
+    try {
+      const list = await apiFetch<PrecedentOut[]>(
+        `/precedents?kind=${kind}&matter_sub_type_id=${subTypeId}`,
+        { token },
+      )
+      setPrecedentChoicesBySubType((prev) => ({ ...prev, [subTypeId]: list }))
+    } catch {
+      setPrecedentChoicesBySubType((prev) => ({ ...prev, [subTypeId]: [] }))
+    }
+  }
+
+  function togglePrecedentPickerSubTypeExpanded(subTypeId: string) {
+    setPrecedentPickerExpandedSubTypes((prev) => {
+      const opening = !prev.has(subTypeId)
+      if (opening) void ensurePrecedentChoicesForSubType(subTypeId)
+      const next = new Set(prev)
+      if (next.has(subTypeId)) next.delete(subTypeId)
+      else next.add(subTypeId)
+      return next
+    })
+  }
+
+  function selectPrecedentPickerNav(subTypeId: string, categoryId: string | null) {
+    setPrecedentPickerSubTypeId(subTypeId)
+    setPrecedentPickerCategoryId(categoryId)
+    setPrecedentChosenId(null)
+    setPrecedentPickerExpandedSubTypes((prev) => new Set(prev).add(subTypeId))
+    void ensurePrecedentChoicesForSubType(subTypeId)
+  }
 
   const filteredPrecedentChoices = useMemo(() => {
     const headOnly =
       !!caseDetail && !caseDetail.matter_sub_type_id && !!caseDetail.matter_head_type_id
-    const subNoCategories =
-      !!caseDetail?.matter_sub_type_id && precedentCategories.length === 0
+    const globalOnly = !!caseDetail && !caseDetail.matter_sub_type_id && !caseDetail.matter_head_type_id
     const filterBySearch = (rows: PrecedentOut[]) => {
       const s = precedentSearch.trim().toLowerCase()
       if (!s) return rows
@@ -1219,32 +1238,32 @@ export function CaseDetail({
         (p) => p.name.toLowerCase().includes(s) || p.reference.toLowerCase().includes(s),
       )
     }
-    if (headOnly || subNoCategories) {
-      return filterBySearch(precedentChoices)
+    if (headOnly) {
+      return filterBySearch(precedentChoicesBySubType.__head__ ?? [])
     }
-    if (precedentPickerCategoryId === null) {
-      return filterBySearch(precedentChoices)
+    if (globalOnly) {
+      return filterBySearch(precedentChoicesBySubType.__global__ ?? [])
     }
-    const base = precedentChoices.filter(
+    const activeSubId = precedentPickerSubTypeId ?? caseDetail?.matter_sub_type_id
+    if (!activeSubId) return []
+    const rows = precedentChoicesBySubType[activeSubId] ?? []
+    const cats = precedentCategoriesBySubType[activeSubId] ?? []
+    if (cats.length === 0 || precedentPickerCategoryId === null) {
+      return filterBySearch(rows)
+    }
+    const base = rows.filter(
       (p) => !p.category_id || p.category_id === precedentPickerCategoryId,
     )
     return filterBySearch(base)
   }, [
-    precedentChoices,
+    precedentChoicesBySubType,
+    precedentCategoriesBySubType,
+    precedentPickerSubTypeId,
     precedentPickerCategoryId,
     precedentSearch,
-    precedentCategories.length,
     caseDetail?.matter_sub_type_id,
     caseDetail?.matter_head_type_id,
   ])
-
-  const filteredSiblingPrecedentChoices = useMemo(() => {
-    const s = precedentSearch.trim().toLowerCase()
-    if (!s) return siblingPrecedentChoices
-    return siblingPrecedentChoices.filter(
-      (p) => p.name.toLowerCase().includes(s) || p.reference.toLowerCase().includes(s),
-    )
-  }, [siblingPrecedentChoices, precedentSearch])
 
   const filteredFiles = useMemo(() => {
     const s = docSearch.trim().toLowerCase()
@@ -3904,38 +3923,62 @@ export function CaseDetail({
                   <div className="precedentPickerCatsTitle">Category</div>
                   <div className="precedentPickerCatList">
                     {caseDetail?.matter_sub_type_id ? (
-                      precedentCategories.length > 0 ? (
-                        <>
-                          <button
-                            type="button"
-                            className={`precedentPickerCatBtn ${precedentPickerCategoryId === null ? 'active' : ''}`}
-                            onClick={() => {
-                              setPrecedentPickerCategoryId(null)
-                              setPrecedentChosenId(null)
-                            }}
-                          >
-                            All
-                          </button>
-                          {precedentCategories.map((c) => (
+                      precedentPickerSubTypeGroups.map((group) => {
+                        const expanded = precedentPickerExpandedSubTypes.has(group.subId)
+                        const categories = precedentCategoriesBySubType[group.subId] ?? []
+                        const isCurrentCaseSubType = group.subId === caseDetail.matter_sub_type_id
+                        return (
+                          <div key={group.subId} className="precedentPickerSubTypeGroup">
                             <button
-                              key={c.id}
                               type="button"
-                              className={`precedentPickerCatBtn ${precedentPickerCategoryId === c.id ? 'active' : ''}`}
-                              onClick={() => {
-                                setPrecedentPickerCategoryId(c.id)
-                                setPrecedentChosenId(null)
-                              }}
+                              className={`precedentPickerSubTypeToggle${isCurrentCaseSubType ? ' precedentPickerSubTypeToggle--current' : ''}`}
+                              aria-expanded={expanded}
+                              onClick={() => togglePrecedentPickerSubTypeExpanded(group.subId)}
                             >
-                              {c.name}
+                              <span className="precedentPickerSubTypeChevron" aria-hidden>
+                                {expanded ? '▾' : '▸'}
+                              </span>
+                              <span>{group.subName}</span>
                             </button>
-                          ))}
-                        </>
-                      ) : (
-                        <div className="muted" style={{ padding: '8px 0' }}>
-                          No categories — head / sub-wide templates below (add categories under Admin → Matters to group
-                          further).
-                        </div>
-                      )
+                            {expanded ? (
+                              <div className="precedentPickerSubTypeCategories">
+                                <button
+                                  type="button"
+                                  className={`precedentPickerCatBtn precedentPickerCatBtn--nested${
+                                    precedentPickerSubTypeId === group.subId &&
+                                    precedentPickerCategoryId === null
+                                      ? ' active'
+                                      : ''
+                                  }`}
+                                  onClick={() => selectPrecedentPickerNav(group.subId, null)}
+                                >
+                                  All
+                                </button>
+                                {categories.map((c) => (
+                                  <button
+                                    key={c.id}
+                                    type="button"
+                                    className={`precedentPickerCatBtn precedentPickerCatBtn--nested${
+                                      precedentPickerSubTypeId === group.subId &&
+                                      precedentPickerCategoryId === c.id
+                                        ? ' active'
+                                        : ''
+                                    }`}
+                                    onClick={() => selectPrecedentPickerNav(group.subId, c.id)}
+                                  >
+                                    {c.name}
+                                  </button>
+                                ))}
+                                {categories.length === 0 ? (
+                                  <div className="muted precedentPickerSubTypeEmpty">
+                                    No named categories for this sub-type.
+                                  </div>
+                                ) : null}
+                              </div>
+                            ) : null}
+                          </div>
+                        )
+                      })
                     ) : caseDetail?.matter_head_type_id ? (
                       <div className="muted" style={{ padding: '8px 0' }}>
                         All templates for {caseDetail.matter_head_type_name ?? 'this matter type'}
@@ -3944,19 +3987,6 @@ export function CaseDetail({
                   </div>
                 </div>
                 <div className="precedentPickerMain">
-                  {caseDetail?.matter_sub_type_id && precedentPickerSiblingSubTypes.length > 0 ? (
-                    <label className="row precedentPickerSiblingToggle" style={{ marginBottom: 8, gap: 8 }}>
-                      <input
-                        type="checkbox"
-                        checked={precedentPickerIncludeSiblingSubTypes}
-                        onChange={(e) => {
-                          setPrecedentPickerIncludeSiblingSubTypes(e.target.checked)
-                          setPrecedentChosenId(null)
-                        }}
-                      />
-                      <span>Include templates from other sub-types under this matter type</span>
-                    </label>
-                  ) : null}
                   <label className="field" style={{ marginBottom: 8 }}>
                     <span>Search by name or reference</span>
                     <SearchInput
@@ -4013,33 +4043,6 @@ export function CaseDetail({
                           <div className="muted precedentPickerEmpty">
                             No precedents match this category and search.
                           </div>
-                        ) : null}
-                        {precedentPickerIncludeSiblingSubTypes && filteredSiblingPrecedentChoices.length > 0 ? (
-                          <>
-                            <div className="precedentPickerSectionTitle">Other sub-types</div>
-                            {filteredSiblingPrecedentChoices.map((p) => (
-                              <label
-                                key={p.id}
-                                className={`precedentPickerRow rowbtn row ${precedentChosenId === p.id ? 'active' : ''}`}
-                              >
-                                <span className="precedentPickerColPick">
-                                  <input
-                                    type="radio"
-                                    name="precedentChoice"
-                                    checked={precedentChosenId === p.id}
-                                    onChange={() => setPrecedentChosenId(p.id)}
-                                  />
-                                </span>
-                                <span className="precedentPickerColName">
-                                  {p.name}
-                                  {p.matter_sub_type_name ? (
-                                    <span className="precedentPickerSubTypeBadge">{p.matter_sub_type_name}</span>
-                                  ) : null}
-                                </span>
-                                <span className="precedentPickerColRef mono">{p.reference}</span>
-                              </label>
-                            ))}
-                          </>
                         ) : null}
                       </div>
                     </>

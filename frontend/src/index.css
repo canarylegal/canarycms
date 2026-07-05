@@ -5106,11 +5106,67 @@ html.dark .ledgerBalanceBand--client {
 .precedentPickerCatList {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
   overflow-y: auto;
   flex: 1 1 auto;
   min-height: 0;
   max-height: none;
+}
+
+.precedentPickerSubTypeGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.precedentPickerSubTypeToggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--panel2);
+  color: inherit;
+  font-size: 1.02rem;
+  font-weight: 650;
+  cursor: pointer;
+  text-align: left;
+}
+
+.precedentPickerSubTypeToggle:hover {
+  background: rgba(37, 99, 235, 0.08);
+}
+
+.precedentPickerSubTypeToggle--current {
+  border-color: color-mix(in srgb, var(--primary, #2563eb) 35%, var(--border));
+}
+
+.precedentPickerSubTypeChevron {
+  width: 14px;
+  flex-shrink: 0;
+  color: var(--muted-fg, #64748b);
+}
+
+.precedentPickerSubTypeCategories {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-left: 12px;
+  margin-left: 8px;
+  border-left: 2px solid color-mix(in srgb, var(--border) 88%, var(--muted));
+}
+
+.precedentPickerCatBtn--nested {
+  padding: 12px 14px;
+  font-size: 0.98rem;
+  font-weight: 500;
+}
+
+.precedentPickerSubTypeEmpty {
+  padding: 4px 8px 8px;
+  font-size: 0.92rem;
 }
 
 .precedentPickerCatBtn {
