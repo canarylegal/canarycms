@@ -10,10 +10,11 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.ledger_party import resolve_ledger_party
-from app.models import LedgerAccount, LedgerAccountType, LedgerDirection, LedgerEntry, User
+from app.models import Case, CaseStatus, LedgerAccount, LedgerAccountType, LedgerDirection, LedgerEntry, User
 from app.permission_checks import (
     assert_may_approve_anticipated_ledger,
     assert_may_edit_ledger_pair,
+    assert_may_post_anticipated,
     assert_may_post_ledger,
     user_may_approve_ledger,
 )
@@ -69,6 +70,16 @@ def _balance(account_id: uuid.UUID, db: Session, *, approved_only: bool = True) 
     return total
 
 
+def _maybe_activate_quote_case(db: Session, case_id: uuid.UUID) -> None:
+    """First approved ledger activity on a quote matter promotes it to Active (open)."""
+    case = db.get(Case, case_id)
+    if case is None or case.status != CaseStatus.quote:
+        return
+    case.status = CaseStatus.open
+    case.updated_at = datetime.utcnow()
+    db.add(case)
+
+
 def post_transaction(
     case_id: uuid.UUID,
     payload: LedgerPostCreate,
@@ -80,8 +91,8 @@ def post_transaction(
     """
     Create a double-entry posting.
 
-    Anticipated postings may be created by any user with matter access; they stay
-    unapproved and off balances until a user with post rights on each leg approves.
+    Anticipated postings require post anticipated permission; they stay unapproved and off
+    balances until a user with post rights on each leg approves.
 
     Actual postings require client/office post permission on each affected leg and
     take effect immediately (approved).
@@ -96,6 +107,7 @@ def post_transaction(
         is_anticipated = False
         is_approved = False
     elif payload.anticipated:
+        assert_may_post_anticipated(user, db)
         is_anticipated = True
         is_approved = False
     else:
@@ -170,6 +182,9 @@ def post_transaction(
             ),
         )
 
+    if is_approved:
+        _maybe_activate_quote_case(db, case_id)
+
     return LedgerPostResult(pair_id=pair_id, is_approved=is_approved, is_anticipated=is_anticipated)
 
 
@@ -216,12 +231,14 @@ def update_ledger_pair_unapproved(
 
     client_direction, office_direction = _pair_directions(legs, accounts)
     is_anticipated = any(e.is_anticipated for e in legs)
+    poster_user_id = legs[0].posted_by_user_id
     assert_may_edit_ledger_pair(
         user,
         client_direction=client_direction,
         office_direction=office_direction,
         is_anticipated=is_anticipated,
         db=db,
+        posted_by_user_id=poster_user_id,
     )
 
     if payload.anticipated_for_date is not None and not is_anticipated:
@@ -241,6 +258,18 @@ def update_ledger_pair_unapproved(
             e.anticipated_for_date = payload.anticipated_for_date
         db.add(e)
     db.flush()
+    if is_anticipated and poster_user_id is not None and user.id != poster_user_id:
+        from app.staff_workflow_notifications import notify_anticipated_payment_amended
+
+        notify_anticipated_payment_amended(
+            db,
+            case_id=case_id,
+            actor=user,
+            poster_user_id=poster_user_id,
+            description=(legs[0].description or "").strip(),
+            amount_pence=int(legs[0].amount_pence),
+            reference=legs[0].reference,
+        )
 
 
 def reject_ledger_pair_unapproved(
@@ -270,6 +299,8 @@ def reject_ledger_pair_unapproved(
         office_direction=office_direction,
         is_anticipated=is_anticipated,
         db=db,
+        posted_by_user_id=poster_user_id,
+        for_reject=True,
     )
     for e in legs:
         db.delete(e)
@@ -456,3 +487,5 @@ def approve_ledger_pair(case_id: uuid.UUID, pair_id: uuid.UUID, user: User, db: 
             amount_pence=snap_amount_pence,
             reference=snap_reference,
         )
+
+    _maybe_activate_quote_case(db, case_id)

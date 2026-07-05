@@ -167,6 +167,7 @@ class LedgerPermissionsOut(BaseModel):
     accounts_workspace_access: bool = False
     can_post_client: bool = False
     can_post_office: bool = False
+    can_post_anticipated: bool = False
 
 
 class UserCalDAVStatusOut(BaseModel):
@@ -408,6 +409,7 @@ class UserPermissionCategoryOut(BaseModel):
     perm_fee_earner: bool
     perm_post_client: bool
     perm_post_office: bool
+    perm_post_anticipated: bool
     perm_approve_payments: bool
     perm_approve_invoices: bool
     perm_admin: bool
@@ -423,6 +425,7 @@ class UserPermissionCategoryCreate(BaseModel):
     perm_fee_earner: bool = False
     perm_post_client: bool = False
     perm_post_office: bool = False
+    perm_post_anticipated: bool = False
     perm_approve_payments: bool = False
     perm_approve_invoices: bool = False
     perm_admin: bool = False
@@ -433,6 +436,7 @@ class UserPermissionCategoryPatch(BaseModel):
     perm_fee_earner: bool | None = None
     perm_post_client: bool | None = None
     perm_post_office: bool | None = None
+    perm_post_anticipated: bool | None = None
     perm_approve_payments: bool | None = None
     perm_approve_invoices: bool | None = None
     perm_admin: bool | None = None

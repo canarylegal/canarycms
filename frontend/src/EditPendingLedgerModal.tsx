@@ -90,7 +90,9 @@ export function EditPendingLedgerModal({
     <div className="modalOverlay" role="dialog" aria-modal="true" onClick={() => !busy && onClose()}>
       <div className="modal card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 440 }}>
         <div className="paneHead">
-          <h2 style={{ margin: 0, fontSize: 18 }}>Edit pending posting</h2>
+          <h2 style={{ margin: 0, fontSize: 18 }}>
+            {isAnticipated ? 'Amend anticipated payment' : 'Edit pending posting'}
+          </h2>
           <button type="button" className="btn" disabled={busy} onClick={onClose}>
             Close
           </button>

@@ -82,6 +82,40 @@ def notify_anticipated_payment_approved(
     )
 
 
+def notify_anticipated_payment_amended(
+    db: Session,
+    *,
+    case_id: uuid.UUID,
+    actor: User,
+    poster_user_id: uuid.UUID,
+    description: str,
+    amount_pence: int,
+    reference: str | None,
+) -> None:
+    case = db.get(Case, case_id)
+    if case is None or case.fee_earner_user_id is None:
+        return
+    if actor.id == case.fee_earner_user_id:
+        return
+    case_number, matter_title = _case_labels(db, case_id)
+    poster = db.get(User, poster_user_id)
+    _notify_user(
+        db,
+        recipient_user_id=case.fee_earner_user_id,
+        actor=actor,
+        kind=AlertKind.anticipated_payment_amended,
+        context={
+            "editor_name": _user_label(actor),
+            "poster_name": _user_label(poster),
+            "case_number": case_number,
+            "matter_label": matter_title or case_number or "your matter",
+            "description": (description or "").strip() or "Anticipated payment",
+            "amount_gbp": _format_gbp(amount_pence),
+            "reference": (reference or "").strip(),
+        },
+    )
+
+
 def notify_anticipated_payment_rejected(
     db: Session,
     *,

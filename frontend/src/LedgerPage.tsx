@@ -21,18 +21,27 @@ import type {
   LedgerPermissionsOut,
   LedgerOut,
   LedgerPostCreate,
+  UserPublic,
 } from './types'
 import {
+  canAmendLedgerPair,
   canApproveLedgerPair,
+  canCancelLedgerPair,
   canPostActualLedger,
+  canPostAnticipatedLedger,
   hasLedgerPostPrivilege,
+  hasPostAnticipatedPrivilege,
   isLedgerEntryAnticipated,
   isLedgerEntryPending,
+  pendingLedgerRowFromPair,
 } from './ledgerApproval'
 
 interface Props {
   caseId: string
   token: string
+  currentUserId?: string | null
+  /** Called after a posting that may change matter status (e.g. quote → active). */
+  onCaseChanged?: () => void
 }
 
 function pence(p: number): string {
@@ -119,7 +128,7 @@ const EMPTY_POST: LedgerPostCreate = {
   office_direction: null,
 }
 
-export function LedgerPage({ caseId, token }: Props) {
+export function LedgerPage({ caseId, token, currentUserId, onCaseChanged }: Props) {
   const [ledger, setLedger] = useState<LedgerOut | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -151,7 +160,11 @@ export function LedgerPage({ caseId, token }: Props) {
     isAnticipated: boolean
     anticipatedForDate: string
   } | null>(null)
-  const [rejectPairId, setRejectPairId] = useState<string | null>(null)
+  const [rejectTarget, setRejectTarget] = useState<{
+    pairId: string
+    isAnticipated: boolean
+    isOwn: boolean
+  } | null>(null)
   const postModalDrag = useModalDrag(postOpen)
   const invoiceModalDrag = useModalDrag(invoiceModalOpen)
 
@@ -236,6 +249,8 @@ export function LedgerPage({ caseId, token }: Props) {
   }, [caseId, token])
 
   const hasPostPrivilege = useMemo(() => hasLedgerPostPrivilege(ledgerPerm), [ledgerPerm])
+  const hasAnticipatedPrivilege = useMemo(() => hasPostAnticipatedPrivilege(ledgerPerm), [ledgerPerm])
+  const canCreatePosting = hasPostPrivilege || hasAnticipatedPrivilege
 
   const canPostActual = useMemo(
     () => canPostActualLedger(form, ledgerPerm),
@@ -370,6 +385,10 @@ export function LedgerPage({ caseId, token }: Props) {
       setPostError('Select the anticipated payment date.')
       return
     }
+    if (postingAnticipated && !canPostAnticipatedLedger(ledgerPerm)) {
+      setPostError('You do not have permission to post anticipated payments.')
+      return
+    }
     if (!postingAnticipated && !canPostActual) {
       setPostError('You cannot post actual payments for the selected account directions.')
       return
@@ -395,6 +414,7 @@ export function LedgerPage({ caseId, token }: Props) {
       })
       setPostOpen(false)
       await load()
+      if (!postingAnticipated) onCaseChanged?.()
     } catch (e) {
       setPostError((e as ApiError).message ?? 'Failed to post transaction')
     } finally {
@@ -443,6 +463,7 @@ export function LedgerPage({ caseId, token }: Props) {
     try {
       await apiFetch(`/cases/${caseId}/ledger/approve/${pairId}`, { method: 'POST', token })
       await load()
+      onCaseChanged?.()
     } catch (e) {
       setError((e as ApiError).message ?? 'Could not approve')
     } finally {
@@ -459,7 +480,7 @@ export function LedgerPage({ caseId, token }: Props) {
         token,
         json: { comment: comment || null },
       })
-      setRejectPairId(null)
+      setRejectTarget(null)
       await load()
     } catch (e) {
       setError((e as ApiError).message ?? 'Could not reject posting')
@@ -716,7 +737,7 @@ export function LedgerPage({ caseId, token }: Props) {
           >
             {exportBusy ? 'Exporting…' : 'Export Excel'}
           </button>
-          <button type="button" className="btn ledgerPostBtn" onClick={openPost} disabled={busy}>
+          <button type="button" className="btn ledgerPostBtn" onClick={openPost} disabled={busy || !canCreatePosting}>
             New posting
           </button>
           <button
@@ -863,7 +884,16 @@ export function LedgerPage({ caseId, token }: Props) {
                   pending &&
                   approveRep.get(e.pair_id) === e.id &&
                   canApproveLedgerPair(e.pair_id, entries, ledgerPerm)
-                const showEdit = showApprove
+                const showAmend =
+                  pending &&
+                  approveRep.get(e.pair_id) === e.id &&
+                  canAmendLedgerPair(e.pair_id, entries, ledgerPerm, currentUserId)
+                const showCancel =
+                  pending &&
+                  approveRep.get(e.pair_id) === e.id &&
+                  canCancelLedgerPair(e.pair_id, entries, ledgerPerm, currentUserId)
+                const amendLabel = anticipated ? 'Amend' : 'Edit'
+                const cancelLabel = anticipated ? 'Cancel' : 'Reject'
                 const rc = runningById.get(e.id)
                 return (
                   <tr key={e.id} className={rowClass}>
@@ -875,34 +905,47 @@ export function LedgerPage({ caseId, token }: Props) {
                         {anticipated ? <span className="muted"> (anticipated)</span> : null}
                         {pending && !anticipated ? <span className="muted"> (pending)</span> : null}
                       </span>
-                      {showApprove ? (
+                      {showAmend || showApprove || showCancel ? (
                         <span className="ledgerRowActions">
-                          {showEdit ? (
+                          {showAmend ? (
                             <button
                               type="button"
                               className="btn ledgerApproveBtn"
                               disabled={busy}
                               onClick={() => openEditPair(e.pair_id)}
                             >
-                              Edit
+                              {amendLabel}
                             </button>
                           ) : null}
-                          <button
-                            type="button"
-                            className="btn ledgerApproveBtn"
-                            disabled={busy}
-                            onClick={() => void approvePair(e.pair_id)}
-                          >
-                            Approve
-                          </button>
-                          <button
-                            type="button"
-                            className="btn ledgerApproveBtn"
-                            disabled={busy}
-                            onClick={() => setRejectPairId(e.pair_id)}
-                          >
-                            Reject
-                          </button>
+                          {showApprove ? (
+                            <button
+                              type="button"
+                              className="btn ledgerApproveBtn"
+                              disabled={busy}
+                              onClick={() => void approvePair(e.pair_id)}
+                            >
+                              Approve
+                            </button>
+                          ) : null}
+                          {showCancel ? (
+                            <button
+                              type="button"
+                              className="btn ledgerApproveBtn"
+                              disabled={busy}
+                              onClick={() => {
+                                const row = pendingLedgerRowFromPair(e.pair_id, entries)
+                                setRejectTarget({
+                                  pairId: e.pair_id,
+                                  isAnticipated: Boolean(row.is_anticipated),
+                                  isOwn: Boolean(
+                                    currentUserId && row.posted_by_user_id === currentUserId,
+                                  ),
+                                })
+                              }}
+                            >
+                              {cancelLabel}
+                            </button>
+                          ) : null}
                         </span>
                       ) : null}
                     </td>
@@ -1243,11 +1286,11 @@ export function LedgerPage({ caseId, token }: Props) {
                   Anticipated items stay off balances until someone with client/office post rights approves them.
                 </p>
               </fieldset>
-            ) : (
+            ) : hasAnticipatedPrivilege ? (
               <p className="muted" style={{ margin: '0 0 8px', fontSize: '0.92em' }}>
                 This will be recorded as an anticipated payment pending approval.
               </p>
-            )}
+            ) : null}
 
             {postingAnticipated ? (
               <label className="ledgerPostLabel">
@@ -1589,14 +1632,28 @@ export function LedgerPage({ caseId, token }: Props) {
       />
 
       <RejectWithCommentModal
-        open={rejectPairId !== null}
-        title="Reject posting?"
-        message="Remove this anticipated payment from the ledger? It will not affect account balances. The person who posted it can be notified by e-mail."
-        confirmLabel="Reject"
+        open={rejectTarget !== null}
+        title={
+          rejectTarget?.isAnticipated
+            ? rejectTarget.isOwn
+              ? 'Cancel anticipated payment?'
+              : 'Reject anticipated payment?'
+            : 'Reject posting?'
+        }
+        message={
+          rejectTarget?.isAnticipated
+            ? rejectTarget.isOwn
+              ? 'Remove this anticipated payment from the ledger? It will not affect account balances.'
+              : 'Remove this anticipated payment from the ledger? It will not affect account balances. The person who posted it can be notified by e-mail.'
+            : 'Remove this pending posting from the ledger? The person who posted it can be notified by e-mail.'
+        }
+        confirmLabel={
+          rejectTarget?.isAnticipated ? (rejectTarget.isOwn ? 'Cancel payment' : 'Reject') : 'Reject'
+        }
         danger
         busy={busy}
-        onConfirm={(comment) => rejectPairId && void rejectPair(rejectPairId, comment)}
-        onCancel={() => setRejectPairId(null)}
+        onConfirm={(comment) => rejectTarget && void rejectPair(rejectTarget.pairId, comment)}
+        onCancel={() => setRejectTarget(null)}
       />
 
       {editPair ? (
@@ -1624,9 +1681,10 @@ export function LedgerPage({ caseId, token }: Props) {
  */
 export function LedgerStandalone({ caseId, token }: { caseId: string; token: string }) {
   const [caseRef, setCaseRef] = useState<string | null>(null)
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null)
 
-  useEffect(() => {
-    apiFetch<CaseOut>(`/cases/${caseId}`, { token })
+  const reloadCaseRef = () => {
+    void apiFetch<CaseOut>(`/cases/${caseId}`, { token })
       .then((c) => {
         const label = [c.case_number, c.client_name, c.matter_description].filter(Boolean).join(' — ')
         setCaseRef(label || caseId)
@@ -1635,6 +1693,13 @@ export function LedgerStandalone({ caseId, token }: { caseId: string; token: str
       .catch(() => {
         document.title = canaryDocumentTitle('Accounts')
       })
+  }
+
+  useEffect(() => {
+    reloadCaseRef()
+    apiFetch<UserPublic>('/auth/me', { token })
+      .then((me) => setCurrentUserId(me.id))
+      .catch(() => setCurrentUserId(null))
   }, [caseId, token])
 
   return (
@@ -1645,7 +1710,7 @@ export function LedgerStandalone({ caseId, token }: { caseId: string; token: str
         <span className="ledgerStandaloneTitle">Accounts</span>
       </div>
       <div className="ledgerStandaloneBody">
-        <LedgerPage caseId={caseId} token={token} />
+        <LedgerPage caseId={caseId} token={token} currentUserId={currentUserId} onCaseChanged={reloadCaseRef} />
       </div>
     </div>
   )

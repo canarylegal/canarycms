@@ -14,6 +14,8 @@ import type {
 } from './types'
 import {
   canApprovePendingLedgerRow,
+  canCancelAnticipatedLedgerRow,
+  canEditPendingLedgerRow,
   matchesPendingLedgerFilters,
   type PendingLedgerAccountFilter,
   type PendingLedgerDirectionFilter,
@@ -31,6 +33,7 @@ type ExceptionLedgerRow = {
   matter_description: string
   fee_earner_name: string
   posted_at: string
+  posted_by_user_id?: string | null
   posted_by_name: string
   description: string
   amount_pence: number
@@ -192,7 +195,12 @@ export function AccountsPage({ token, me, onOpenCase, onOpenReportsReconcile }: 
     isAnticipated: boolean
     anticipatedForDate: string
   } | null>(null)
-  const [rejectLedger, setRejectLedger] = useState<{ caseId: string; pairId: string } | null>(null)
+  const [rejectLedger, setRejectLedger] = useState<{
+    caseId: string
+    pairId: string
+    isAnticipated: boolean
+    isOwn: boolean
+  } | null>(null)
 
   const loadFeeEarners = useCallback(async () => {
     const rows = await apiFetch<FeeEarnerPick[]>('/reports/fee-earners', { token })
@@ -325,6 +333,15 @@ export function AccountsPage({ token, me, onOpenCase, onOpenReportsReconcile }: 
   const latestReconcile = recRows[0] ?? null
 
   const canApproveInvoices = ledgerPerm?.can_approve_invoices ?? false
+
+  function canAmendPendingRow(row: ExceptionLedgerRow): boolean {
+    return canEditPendingLedgerRow(row, ledgerPerm, me?.id)
+  }
+
+  function canCancelPendingRow(row: ExceptionLedgerRow): boolean {
+    if (row.is_anticipated) return canCancelAnticipatedLedgerRow(row, ledgerPerm, me?.id)
+    return canEditPendingLedgerRow(row, ledgerPerm, me?.id)
+  }
 
   function canApprovePendingRow(row: ExceptionLedgerRow): boolean {
     return canApprovePendingLedgerRow(row, ledgerPerm)
@@ -579,32 +596,45 @@ export function AccountsPage({ token, me, onOpenCase, onOpenReportsReconcile }: 
                                   <button type="button" className="btn btn--small" onClick={() => openLedgerWindow(caseId)}>
                                     Ledger
                                   </button>
-                                  {canApprovePendingRow(r) ? (
+                                  {canAmendPendingRow(r) || canApprovePendingRow(r) || canCancelPendingRow(r) ? (
                                     <>
-                                      <button
-                                        type="button"
-                                        className="btn btn--small"
-                                        disabled={actionBusy}
-                                        onClick={() => openEditLedger(r)}
-                                      >
-                                        Edit
-                                      </button>
-                                      <button
-                                        type="button"
-                                        className="btn btn--small primary"
-                                        disabled={actionBusy}
-                                        onClick={() => void approveLedgerPosting(caseId, r.pair_id)}
-                                      >
-                                        Approve
-                                      </button>
-                                      <button
-                                        type="button"
-                                        className="btn btn--small"
-                                        disabled={actionBusy}
-                                        onClick={() => setRejectLedger({ caseId, pairId: r.pair_id })}
-                                      >
-                                        Reject
-                                      </button>
+                                      {canAmendPendingRow(r) ? (
+                                        <button
+                                          type="button"
+                                          className="btn btn--small"
+                                          disabled={actionBusy}
+                                          onClick={() => openEditLedger(r)}
+                                        >
+                                          {r.is_anticipated ? 'Amend' : 'Edit'}
+                                        </button>
+                                      ) : null}
+                                      {canApprovePendingRow(r) ? (
+                                        <button
+                                          type="button"
+                                          className="btn btn--small primary"
+                                          disabled={actionBusy}
+                                          onClick={() => void approveLedgerPosting(caseId, r.pair_id)}
+                                        >
+                                          Approve
+                                        </button>
+                                      ) : null}
+                                      {canCancelPendingRow(r) ? (
+                                        <button
+                                          type="button"
+                                          className="btn btn--small"
+                                          disabled={actionBusy}
+                                          onClick={() =>
+                                            setRejectLedger({
+                                              caseId,
+                                              pairId: r.pair_id,
+                                              isAnticipated: Boolean(r.is_anticipated),
+                                              isOwn: Boolean(me?.id && r.posted_by_user_id === me.id),
+                                            })
+                                          }
+                                        >
+                                          {r.is_anticipated ? 'Cancel' : 'Reject'}
+                                        </button>
+                                      ) : null}
                                     </>
                                   ) : null}
                                 </>
@@ -859,9 +889,23 @@ export function AccountsPage({ token, me, onOpenCase, onOpenReportsReconcile }: 
 
       <RejectWithCommentModal
         open={rejectLedger !== null}
-        title="Reject posting?"
-        message="Remove this anticipated payment from the ledger? The person who posted it can be notified by e-mail."
-        confirmLabel="Reject"
+        title={
+          rejectLedger?.isAnticipated
+            ? rejectLedger.isOwn
+              ? 'Cancel anticipated payment?'
+              : 'Reject anticipated payment?'
+            : 'Reject posting?'
+        }
+        message={
+          rejectLedger?.isAnticipated
+            ? rejectLedger.isOwn
+              ? 'Remove this anticipated payment from the ledger? It will not affect account balances.'
+              : 'Remove this anticipated payment from the ledger? It will not affect account balances. The person who posted it can be notified by e-mail.'
+            : 'Remove this pending posting from the ledger? The person who posted it can be notified by e-mail.'
+        }
+        confirmLabel={
+          rejectLedger?.isAnticipated ? (rejectLedger.isOwn ? 'Cancel payment' : 'Reject') : 'Reject'
+        }
         danger
         busy={actionKey !== null}
         onConfirm={(comment) =>

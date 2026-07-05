@@ -28,6 +28,7 @@ class BuiltinCategorySpec:
     perm_fee_earner: bool
     perm_post_client: bool
     perm_post_office: bool
+    perm_post_anticipated: bool
     perm_approve_payments: bool
     perm_approve_invoices: bool
     perm_admin: bool
@@ -40,6 +41,7 @@ BUILTIN_CATEGORY_SPECS: tuple[BuiltinCategorySpec, ...] = (
         perm_fee_earner=True,
         perm_post_client=False,
         perm_post_office=False,
+        perm_post_anticipated=True,
         perm_approve_payments=False,
         perm_approve_invoices=False,
         perm_admin=False,
@@ -50,6 +52,7 @@ BUILTIN_CATEGORY_SPECS: tuple[BuiltinCategorySpec, ...] = (
         perm_fee_earner=False,
         perm_post_client=True,
         perm_post_office=True,
+        perm_post_anticipated=False,
         perm_approve_payments=True,
         perm_approve_invoices=True,
         perm_admin=False,
@@ -75,6 +78,7 @@ def _insert_spec(db: Session, spec: BuiltinCategorySpec, *, now: datetime) -> No
             perm_fee_earner=spec.perm_fee_earner,
             perm_post_client=spec.perm_post_client,
             perm_post_office=spec.perm_post_office,
+            perm_post_anticipated=spec.perm_post_anticipated,
             perm_approve_payments=spec.perm_approve_payments,
             perm_approve_invoices=spec.perm_approve_invoices,
             perm_admin=spec.perm_admin,

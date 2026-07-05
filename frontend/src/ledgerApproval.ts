@@ -7,10 +7,19 @@ export type PendingLedgerApprovalRow = {
   office_direction?: string | null
   is_anticipated?: boolean
   anticipated_for_date?: string | null
+  posted_by_user_id?: string | null
 }
 
 export function hasLedgerPostPrivilege(perm: LedgerPermissionsOut | null | undefined): boolean {
   return Boolean(perm?.can_post_client || perm?.can_post_office)
+}
+
+export function hasPostAnticipatedPrivilege(perm: LedgerPermissionsOut | null | undefined): boolean {
+  return Boolean(perm?.can_post_anticipated)
+}
+
+export function canPostAnticipatedLedger(perm: LedgerPermissionsOut | null | undefined): boolean {
+  return hasPostAnticipatedPrivilege(perm)
 }
 
 export function canPostActualLedger(
@@ -23,25 +32,58 @@ export function canPostActualLedger(
   return Boolean(form.client_direction || form.office_direction)
 }
 
+export function canApproveAnticipatedLedgerRow(
+  row: PendingLedgerApprovalRow,
+  perm: LedgerPermissionsOut | null | undefined,
+): boolean {
+  if (!perm || !row.is_anticipated) return false
+  if (row.client_direction && !perm.can_post_client) return false
+  if (row.office_direction && !perm.can_post_office) return false
+  return Boolean(row.client_direction || row.office_direction)
+}
+
 export function canApprovePendingLedgerRow(
   row: PendingLedgerApprovalRow,
   perm: LedgerPermissionsOut | null | undefined,
 ): boolean {
+  if (row.is_anticipated) return canApproveAnticipatedLedgerRow(row, perm)
   return canEditPendingLedgerRow(row, perm)
 }
 
-/** Same permission as approve — edit before confirming anticipated or pending postings. */
+/** Edit before confirming pending (non-anticipated) postings, or amend anticipated ones. */
 export function canEditPendingLedgerRow(
   row: PendingLedgerApprovalRow,
   perm: LedgerPermissionsOut | null | undefined,
+  currentUserId?: string | null,
 ): boolean {
-  if (!perm) return false
   if (row.is_anticipated) {
-    if (row.client_direction && !perm.can_post_client) return false
-    if (row.office_direction && !perm.can_post_office) return false
-    return Boolean(row.client_direction || row.office_direction)
+    if (currentUserId && row.posted_by_user_id === currentUserId) return true
+    return Boolean(perm?.can_post_anticipated)
   }
+  if (!perm) return false
   return Boolean(perm.can_approve_ledger)
+}
+
+export function canAmendAnticipatedLedgerRow(
+  row: PendingLedgerApprovalRow,
+  perm: LedgerPermissionsOut | null | undefined,
+  currentUserId?: string | null,
+): boolean {
+  if (!row.is_anticipated) return false
+  return canEditPendingLedgerRow(row, perm, currentUserId)
+}
+
+export function canCancelAnticipatedLedgerRow(
+  row: PendingLedgerApprovalRow,
+  perm: LedgerPermissionsOut | null | undefined,
+  currentUserId?: string | null,
+): boolean {
+  if (!row.is_anticipated) return false
+  if (currentUserId && row.posted_by_user_id === currentUserId) return true
+  if (perm?.can_post_anticipated) return true
+  if (row.client_direction && perm?.can_post_client) return true
+  if (row.office_direction && perm?.can_post_office) return true
+  return false
 }
 
 export function canApproveLedgerPair(
@@ -62,6 +104,49 @@ export function canApproveLedgerPair(
     },
     perm,
   )
+}
+
+export function pendingLedgerRowFromPair(
+  pairId: string,
+  entries: LedgerEntryOut[],
+): PendingLedgerApprovalRow {
+  const legs = entries.filter((e) => e.pair_id === pairId)
+  const clientLeg = legs.find((e) => e.account_type === 'client')
+  const officeLeg = legs.find((e) => e.account_type === 'office')
+  const leg = legs[0]
+  return {
+    pair_id: pairId,
+    client_direction: clientLeg?.direction ?? null,
+    office_direction: officeLeg?.direction ?? null,
+    is_anticipated: legs.some((e) => e.is_anticipated),
+    posted_by_user_id: leg?.posted_by_user_id ?? null,
+  }
+}
+
+export function canAmendLedgerPair(
+  pairId: string,
+  entries: LedgerEntryOut[],
+  perm: LedgerPermissionsOut | null | undefined,
+  currentUserId?: string | null,
+): boolean {
+  const row = pendingLedgerRowFromPair(pairId, entries)
+  if (row.is_anticipated) {
+    return canAmendAnticipatedLedgerRow(row, perm, currentUserId)
+  }
+  return canEditPendingLedgerRow(row, perm)
+}
+
+export function canCancelLedgerPair(
+  pairId: string,
+  entries: LedgerEntryOut[],
+  perm: LedgerPermissionsOut | null | undefined,
+  currentUserId?: string | null,
+): boolean {
+  const row = pendingLedgerRowFromPair(pairId, entries)
+  if (row.is_anticipated) {
+    return canCancelAnticipatedLedgerRow(row, perm, currentUserId)
+  }
+  return canEditPendingLedgerRow(row, perm)
 }
 
 export type PendingLedgerAccountFilter = 'all' | 'client' | 'office'

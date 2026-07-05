@@ -15,11 +15,11 @@ from app.ledger_service import (
     reject_ledger_pair_unapproved,
     update_ledger_pair_unapproved,
 )
-from app.models import UserPermissionCategory, UserRole
+from app.models import UserPermissionCategory, UserRole, CaseStatus
 from app.reports_service import balances_by_case_ids
 from app.schemas import LedgerPairUpdate, LedgerPostCreate
 
-from tests.ledger_test_helpers import add_case, add_cashier_category, add_user, ledger_test_session
+from tests.ledger_test_helpers import add_case, add_cashier_category, add_fee_earner_category, add_user, ledger_test_session
 
 
 def _post(
@@ -187,7 +187,7 @@ def test_integer_pence_balance_is_exact_after_many_postings() -> None:
     assert ledger.client.balance_pence == net
 
 
-def test_any_user_may_post_anticipated_without_post_permissions() -> None:
+def test_user_without_post_anticipated_cannot_post_anticipated() -> None:
     db = ledger_test_session()
     admin = add_user(db)
     readonly = UserPermissionCategory(
@@ -196,6 +196,7 @@ def test_any_user_may_post_anticipated_without_post_permissions() -> None:
         perm_fee_earner=True,
         perm_post_client=False,
         perm_post_office=False,
+        perm_post_anticipated=False,
         perm_approve_payments=False,
         perm_approve_invoices=False,
         perm_admin=False,
@@ -205,6 +206,25 @@ def test_any_user_may_post_anticipated_without_post_permissions() -> None:
     db.add(readonly)
     db.commit()
     secretary = add_user(db, role=UserRole.user, permission_category_id=readonly.id)
+    case = add_case(db, fee_earner_user_id=admin.id)
+
+    with pytest.raises(HTTPException) as exc:
+        _post(
+            db,
+            case.id,
+            secretary,
+            amount_pence=4_000,
+            client_direction="credit",
+            anticipated=True,
+        )
+    assert exc.value.status_code == 403
+
+
+def test_user_with_post_anticipated_may_post_anticipated() -> None:
+    db = ledger_test_session()
+    admin = add_user(db)
+    cat = add_fee_earner_category(db)
+    secretary = add_user(db, role=UserRole.user, permission_category_id=cat.id)
     case = add_case(db, fee_earner_user_id=admin.id)
 
     pair_id = _post(
@@ -225,23 +245,10 @@ def test_any_user_may_post_anticipated_without_post_permissions() -> None:
 def test_anticipated_posting_affects_balance_after_post_permission_approval() -> None:
     db = ledger_test_session()
     admin = add_user(db)
-    readonly = UserPermissionCategory(
-        id=uuid.uuid4(),
-        name="Read only",
-        perm_fee_earner=True,
-        perm_post_client=False,
-        perm_post_office=False,
-        perm_approve_payments=False,
-        perm_approve_invoices=False,
-        perm_admin=False,
-        created_at=datetime.utcnow(),
-        updated_at=datetime.utcnow(),
-    )
-    db.add(readonly)
-    db.commit()
-    cat = add_cashier_category(db)
-    poster = add_user(db, role=UserRole.user, permission_category_id=readonly.id)
-    approver = add_user(db, role=UserRole.user, permission_category_id=cat.id)
+    poster_cat = add_fee_earner_category(db)
+    cashier_cat = add_cashier_category(db)
+    poster = add_user(db, role=UserRole.user, permission_category_id=poster_cat.id)
+    approver = add_user(db, role=UserRole.user, permission_category_id=cashier_cat.id)
     case = add_case(db, fee_earner_user_id=admin.id)
 
     pair_id = _post(
@@ -262,11 +269,11 @@ def test_anticipated_posting_affects_balance_after_post_permission_approval() ->
     assert all(not e.is_anticipated for e in ledger.entries if e.pair_id == pair_id)
 
 
-def test_cashier_may_edit_anticipated_office_debit_before_approval() -> None:
+def test_user_with_post_anticipated_may_edit_anticipated_before_approval() -> None:
     db = ledger_test_session()
     admin = add_user(db)
-    cat = add_cashier_category(db)
-    cashier = add_user(db, role=UserRole.user, permission_category_id=cat.id)
+    editor_cat = add_fee_earner_category(db)
+    editor = add_user(db, role=UserRole.user, permission_category_id=editor_cat.id)
     case = add_case(db, fee_earner_user_id=admin.id)
 
     pair_id = _post(
@@ -283,7 +290,7 @@ def test_cashier_may_edit_anticipated_office_debit_before_approval() -> None:
         case.id,
         pair_id,
         LedgerPairUpdate(amount_pence=200, description="DocuSign — revised"),
-        cashier,
+        editor,
         db,
     )
     db.commit()
@@ -295,7 +302,7 @@ def test_cashier_may_edit_anticipated_office_debit_before_approval() -> None:
     assert legs[0].description == "DocuSign — revised"
     assert ledger.office.balance_pence == 0
 
-    approve_ledger_pair(case.id, pair_id, cashier, db)
+    approve_ledger_pair(case.id, pair_id, admin, db)
     db.commit()
     assert get_ledger(case.id, db).office.balance_pence == -200
 
@@ -318,6 +325,183 @@ def test_cashier_may_reject_anticipated_posting() -> None:
     db.commit()
 
     reject_ledger_pair_unapproved(case.id, pair_id, cashier, db)
+    db.commit()
+
+    ledger = get_ledger(case.id, db)
+    assert not any(e.pair_id == pair_id for e in ledger.entries)
+
+
+def test_cashier_cannot_amend_anticipated_without_post_anticipated() -> None:
+    db = ledger_test_session()
+    admin = add_user(db)
+    cat = add_cashier_category(db)
+    cashier = add_user(db, role=UserRole.user, permission_category_id=cat.id)
+    case = add_case(db, fee_earner_user_id=admin.id)
+
+    pair_id = _post(
+        db,
+        case.id,
+        admin,
+        amount_pence=150,
+        office_direction="debit",
+        anticipated=True,
+    )
+    db.commit()
+
+    with pytest.raises(HTTPException) as exc:
+        update_ledger_pair_unapproved(
+            case.id,
+            pair_id,
+            LedgerPairUpdate(amount_pence=200, description="Revised"),
+            cashier,
+            db,
+        )
+    assert exc.value.status_code == 403
+
+
+def test_amend_by_non_fee_earner_notifies_fee_earner(monkeypatch: pytest.MonkeyPatch) -> None:
+    db = ledger_test_session()
+    fee_earner = add_user(db, email="fee@example.com")
+    poster_cat = add_fee_earner_category(db)
+    editor_cat = UserPermissionCategory(
+        id=uuid.uuid4(),
+        name="Other fee earner",
+        perm_fee_earner=True,
+        perm_post_anticipated=True,
+        perm_post_client=False,
+        perm_post_office=False,
+        perm_approve_payments=False,
+        perm_approve_invoices=False,
+        perm_admin=False,
+        created_at=datetime.utcnow(),
+        updated_at=datetime.utcnow(),
+    )
+    db.add(editor_cat)
+    db.commit()
+    poster = add_user(db, role=UserRole.user, permission_category_id=poster_cat.id)
+    editor = add_user(db, role=UserRole.user, permission_category_id=editor_cat.id)
+    case = add_case(db, fee_earner_user_id=fee_earner.id)
+
+    pair_id = _post(
+        db,
+        case.id,
+        poster,
+        amount_pence=2_000,
+        client_direction="credit",
+        anticipated=True,
+    )
+    db.commit()
+
+    sent: list[dict] = []
+
+    def _capture(db, kind, *, to_email, context, actor_user_id=None):
+        sent.append({"kind": kind, "to_email": to_email, "context": context})
+        return True
+
+    monkeypatch.setattr("app.staff_workflow_notifications.dispatch_alert", _capture)
+
+    update_ledger_pair_unapproved(
+        case.id,
+        pair_id,
+        LedgerPairUpdate(amount_pence=2_500, description="Updated payment"),
+        editor,
+        db,
+    )
+    db.commit()
+
+    assert len(sent) == 1
+    assert sent[0]["to_email"] == "fee@example.com"
+    assert sent[0]["context"]["description"] == "Updated payment"
+
+
+def test_ledger_post_activates_quote_matter() -> None:
+    db = ledger_test_session()
+    admin = add_user(db)
+    case = add_case(db, fee_earner_user_id=admin.id, status=CaseStatus.quote)
+
+    _post(db, case.id, admin, amount_pence=5_000, client_direction="credit")
+    db.commit()
+    db.refresh(case)
+
+    assert case.status == CaseStatus.open
+
+
+def test_anticipated_post_does_not_activate_quote_until_approved() -> None:
+    db = ledger_test_session()
+    admin = add_user(db)
+    cat = add_cashier_category(db)
+    cashier = add_user(db, role=UserRole.user, permission_category_id=cat.id)
+    case = add_case(db, fee_earner_user_id=admin.id, status=CaseStatus.quote)
+
+    pair_id = _post(
+        db,
+        case.id,
+        admin,
+        amount_pence=3_000,
+        client_direction="credit",
+        anticipated=True,
+    )
+    db.commit()
+    db.refresh(case)
+    assert case.status == CaseStatus.quote
+
+    approve_ledger_pair(case.id, pair_id, cashier, db)
+    db.commit()
+    db.refresh(case)
+    assert case.status == CaseStatus.open
+
+
+def test_poster_may_amend_own_anticipated_before_approval() -> None:
+    db = ledger_test_session()
+    admin = add_user(db)
+    cat = add_fee_earner_category(db)
+    secretary = add_user(db, role=UserRole.user, permission_category_id=cat.id)
+    case = add_case(db, fee_earner_user_id=admin.id)
+
+    pair_id = _post(
+        db,
+        case.id,
+        secretary,
+        amount_pence=4_000,
+        client_direction="credit",
+        anticipated=True,
+    )
+    db.commit()
+
+    update_ledger_pair_unapproved(
+        case.id,
+        pair_id,
+        LedgerPairUpdate(amount_pence=3_500, description="Client payment — revised"),
+        secretary,
+        db,
+    )
+    db.commit()
+
+    ledger = get_ledger(case.id, db)
+    legs = [e for e in ledger.entries if e.pair_id == pair_id]
+    assert len(legs) == 1
+    assert legs[0].amount_pence == 3_500
+    assert legs[0].description == "Client payment — revised"
+
+
+def test_poster_may_cancel_own_anticipated_before_approval() -> None:
+    db = ledger_test_session()
+    admin = add_user(db)
+    cat = add_fee_earner_category(db)
+    secretary = add_user(db, role=UserRole.user, permission_category_id=cat.id)
+    case = add_case(db, fee_earner_user_id=admin.id)
+
+    pair_id = _post(
+        db,
+        case.id,
+        secretary,
+        amount_pence=4_000,
+        client_direction="credit",
+        anticipated=True,
+    )
+    db.commit()
+
+    reject_ledger_pair_unapproved(case.id, pair_id, secretary, db)
     db.commit()
 
     ledger = get_ledger(case.id, db)

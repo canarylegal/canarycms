@@ -651,6 +651,50 @@ def anticipated_payment_rejected(
     return subject, body, html
 
 
+def anticipated_payment_amended(
+    *,
+    firm_name: str,
+    staff_name: str,
+    editor_name: str,
+    poster_name: str,
+    case_number: str,
+    matter_label: str,
+    description: str,
+    amount_gbp: str,
+    reference: str,
+) -> tuple[str, str, str]:
+    ref = (reference or "").strip()
+    subject = f"Anticipated payment amended — {case_number or matter_label or 'matter'}"
+    body_lines = [
+        f"Hello {staff_name},",
+        "",
+        f"{editor_name} has amended an anticipated payment on your matter in Canary.",
+        f"It was originally posted by {poster_name}.",
+        "",
+        description,
+        f"Amount: {amount_gbp}",
+    ]
+    if ref:
+        body_lines.append(f"Reference: {ref}")
+    body_lines.extend(_matter_lines(case_number=case_number, matter_label=matter_label))
+    body_lines.append("")
+    body_lines.append(f"— {_firm_line(firm_name)}")
+    body = "\n".join(body_lines)
+    html_lines = [
+        f"{editor_name} has amended an anticipated payment originally posted by {poster_name}.",
+        description,
+        f"Amount: {amount_gbp}",
+    ]
+    if ref:
+        html_lines.append(f"Reference: {ref}")
+    html_lines.extend(_matter_lines(case_number=case_number, matter_label=matter_label))
+    html = _html_email_shell(
+        firm_name=firm_name,
+        inner_html=_html_info_block(title=f"Hello {staff_name}", lines=html_lines),
+    )
+    return subject, body, html
+
+
 def invoice_approved_staff(
     *,
     firm_name: str,

@@ -212,6 +212,7 @@ export type UserPermissionCategoryOut = {
   perm_fee_earner: boolean
   perm_post_client: boolean
   perm_post_office: boolean
+  perm_post_anticipated: boolean
   perm_approve_payments: boolean
   perm_approve_invoices: boolean
   perm_admin: boolean
@@ -226,6 +227,7 @@ export type LedgerPermissionsOut = {
   accounts_workspace_access?: boolean
   can_post_client?: boolean
   can_post_office?: boolean
+  can_post_anticipated?: boolean
 }
 
 export function userCanAccessAccountsWorkspace(me: UserPublic | null | undefined): boolean {
@@ -431,6 +433,21 @@ export function formatCaseStatusLabel(status: string): string {
     default:
       return status
   }
+}
+
+/** Stored reference without a leading Q (API may already include display prefix). */
+export function stripCaseNumberPrefix(caseNumber: string): string {
+  const s = (caseNumber || '').trim()
+  if (s.length > 1 && /^Q/i.test(s) && /\d/.test(s[1]!)) return s.slice(1)
+  return s
+}
+
+/** Matter reference for UI — Q prefix while status is quote. */
+export function displayCaseNumber(caseNumber: string, status: string): string {
+  const raw = stripCaseNumberPrefix(caseNumber)
+  if (!raw) return raw
+  if (status === 'quote') return `Q${raw}`
+  return raw
 }
 
 export type CaseOut = {

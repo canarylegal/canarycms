@@ -52,7 +52,9 @@ def test_ensure_builtin_permission_categories_inserts_missing() -> None:
     cashier = db.rows[CASHIER_CATEGORY_ID]
     assert fee.name == FEE_EARNER_CATEGORY_NAME
     assert fee.perm_fee_earner is True
+    assert fee.perm_post_anticipated is True
     assert fee.perm_approve_payments is False
     assert cashier.name == CASHIER_CATEGORY_NAME
+    assert cashier.perm_post_anticipated is False
     assert cashier.perm_approve_payments is True
     assert cashier.perm_approve_invoices is True
