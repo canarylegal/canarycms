@@ -25,6 +25,7 @@ from app.models import (
     MatterSubTypeStandardTask,
     User,
 )
+from app.case_reference import display_case_number
 from app.schemas import CaseCreate, CaseOut, CaseUpdate, MatterSubTypeStandardTaskOut
 from app.audit import log_event
 from app.ledger_service import get_ledger
@@ -130,7 +131,7 @@ def _case_dict(
 ) -> dict:
     return {
         "id": case.id,
-        "case_number": case.case_number,
+        "case_number": display_case_number(case.case_number, case.status),
         "client_name": case.client_name,
         "matter_description": case.title,
         "fee_earner_user_id": case.fee_earner_user_id,

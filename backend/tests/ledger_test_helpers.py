@@ -97,6 +97,7 @@ def add_cashier_category(db: Session) -> UserPermissionCategory:
         perm_fee_earner=False,
         perm_post_client=True,
         perm_post_office=True,
+        perm_post_anticipated=False,
         perm_approve_payments=True,
         perm_approve_invoices=True,
         perm_admin=False,
@@ -109,14 +110,34 @@ def add_cashier_category(db: Session) -> UserPermissionCategory:
     return row
 
 
-def add_case(db: Session, *, fee_earner_user_id: uuid.UUID) -> Case:
+def add_fee_earner_category(db: Session) -> UserPermissionCategory:
+    row = UserPermissionCategory(
+        id=uuid.uuid4(),
+        name="Fee earner",
+        perm_fee_earner=True,
+        perm_post_client=False,
+        perm_post_office=False,
+        perm_post_anticipated=True,
+        perm_approve_payments=False,
+        perm_approve_invoices=False,
+        perm_admin=False,
+        created_at=datetime.utcnow(),
+        updated_at=datetime.utcnow(),
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+def add_case(db: Session, *, fee_earner_user_id: uuid.UUID, status: CaseStatus = CaseStatus.open) -> Case:
     row = Case(
         id=uuid.uuid4(),
         case_number=f"TST/{uuid.uuid4().hex[:6]}",
         title="Ledger test matter",
         fee_earner_user_id=fee_earner_user_id,
         created_by=fee_earner_user_id,
-        status=CaseStatus.open,
+        status=status,
         created_at=datetime.utcnow(),
         updated_at=datetime.utcnow(),
     )

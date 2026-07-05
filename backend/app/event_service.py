@@ -11,6 +11,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.deps import map_cases_if_accessible
+from app.case_reference import display_case_number
 from app.models import (
     CalendarEventEmailAlertSubscription,
     Case,
@@ -415,7 +416,7 @@ def list_tracked_case_events_for_calendar_merge(
         if not cs or not ce_str:
             continue
         syn_id = f"caseevt-{ev.id}"
-        title = f"{case.case_number} · {ev.name}"
+        title = f"{display_case_number(case.case_number, case.status)} · {ev.name}"
         out.append(
             {
                 "id": syn_id,
@@ -483,6 +484,6 @@ def enrich_caldav_events_with_linked_case_events(
         item["case_id"] = str(case.id)
         item["case_event_id"] = str(ev.id)
         item["track_in_calendar"] = ev.track_in_calendar
-        item["title"] = f"{case.case_number} · {ev.name}"
+        item["title"] = f"{display_case_number(case.case_number, case.status)} · {ev.name}"
         if ev.template_id:
             item["matter_template_id"] = str(ev.template_id)

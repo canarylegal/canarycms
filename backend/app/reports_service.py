@@ -12,6 +12,7 @@ from sqlalchemy import case as sql_case, func, select
 from sqlalchemy.orm import Session
 
 from app.admin_access import user_effective_admin
+from app.case_reference import display_case_number
 from app.permission_checks import user_may_access_accounts_workspace, user_may_be_fee_earner
 from app.invoice_service import INV_APPROVED, INV_PENDING
 from app.models import (
@@ -184,7 +185,7 @@ def report_client_office_balances(
         out.append(
             ClientOfficeBalanceRow(
                 case_id=c.id,
-                case_number=c.case_number,
+                case_number=display_case_number(c.case_number, c.status),
                 client_name=c.client_name,
                 matter_description=c.title,
                 fee_earner_user_id=c.fee_earner_user_id,
@@ -267,7 +268,7 @@ def report_billing(
             BillingReportRow(
                 invoice_id=inv.id,
                 case_id=case.id,
-                case_number=case.case_number,
+                case_number=display_case_number(case.case_number, case.status),
                 client_name=case.client_name,
                 invoice_number=inv.invoice_number,
                 invoice_status=inv.status,
@@ -324,7 +325,7 @@ def report_cases(
     return [
         CaseReportRow(
             case_id=c.id,
-            case_number=c.case_number,
+            case_number=display_case_number(c.case_number, c.status),
             client_name=c.client_name,
             matter_description=c.title,
             status=c.status.value,
@@ -372,7 +373,7 @@ def report_cases_opened(
     return [
         CaseReportRow(
             case_id=c.id,
-            case_number=c.case_number,
+            case_number=display_case_number(c.case_number, c.status),
             client_name=c.client_name,
             matter_description=c.title,
             status=c.status.value,
@@ -441,7 +442,7 @@ def report_events(
             EventsReportRow(
                 event_id=e.id,
                 case_id=c.id,
-                case_number=c.case_number,
+                case_number=display_case_number(c.case_number, c.status),
                 matter_description=c.title,
                 fee_earner_name=_fee_earner_label(db, c.fee_earner_user_id),
                 event_name=e.name,
@@ -510,7 +511,7 @@ def report_ledger_activity(
             bucket = {
                 "pair_id": pid,
                 "case_id": case.id,
-                "case_number": case.case_number,
+                "case_number": display_case_number(case.case_number, case.status),
                 "client_name": case.client_name,
                 "matter_description": case.title,
                 "fee_earner_name": _fee_earner_label(db, case.fee_earner_user_id),
@@ -618,7 +619,7 @@ def report_aged_debt(
             AgedDebtRow(
                 invoice_id=inv.id,
                 case_id=case.id,
-                case_number=case.case_number,
+                case_number=display_case_number(case.case_number, case.status),
                 client_name=case.client_name,
                 matter_description=case.title,
                 fee_earner_name=_fee_earner_label(db, case.fee_earner_user_id),
@@ -643,6 +644,7 @@ class PendingLedgerApprovalRow:
     matter_description: str
     fee_earner_name: str
     posted_at: datetime
+    posted_by_user_id: uuid.UUID | None
     posted_by_name: str
     description: str
     amount_pence: int
@@ -734,11 +736,12 @@ def _pending_ledger_approvals(
             bucket = {
                 "pair_id": pid,
                 "case_id": case.id,
-                "case_number": case.case_number,
+                "case_number": display_case_number(case.case_number, case.status),
                 "client_name": case.client_name,
                 "matter_description": case.title,
                 "fee_earner_name": _fee_earner_label(db, case.fee_earner_user_id),
                 "posted_at": entry.posted_at,
+                "posted_by_user_id": entry.posted_by_user_id,
                 "posted_by_name": poster_name,
                 "description": entry.description or "",
                 "amount_pence": int(entry.amount_pence),
@@ -776,7 +779,7 @@ def _pending_invoices(fee_earner_user_ids: list[uuid.UUID], db: Session) -> list
         PendingInvoiceRow(
             invoice_id=inv.id,
             case_id=case.id,
-            case_number=case.case_number,
+            case_number=display_case_number(case.case_number, case.status),
             client_name=case.client_name,
             matter_description=case.title,
             fee_earner_name=_fee_earner_label(db, case.fee_earner_user_id),
@@ -815,7 +818,7 @@ def _case_balance_exceptions(
         out.append(
             CaseBalanceExceptionRow(
                 case_id=case.id,
-                case_number=case.case_number,
+                case_number=display_case_number(case.case_number, case.status),
                 client_name=case.client_name,
                 matter_description=case.title,
                 status=case.status.value,
@@ -864,7 +867,7 @@ def _large_postings(
             bucket = {
                 "pair_id": pid,
                 "case_id": case.id,
-                "case_number": case.case_number,
+                "case_number": display_case_number(case.case_number, case.status),
                 "client_name": case.client_name,
                 "matter_description": case.title,
                 "fee_earner_name": _fee_earner_label(db, case.fee_earner_user_id),

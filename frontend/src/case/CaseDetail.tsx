@@ -3352,7 +3352,12 @@ export function CaseDetail({
                   <div className="caseDocLedgerEmbed">
                     <CaseDocPanelScroll>
                       {accountsSubTab === 'ledger' ? (
-                        <LedgerPage caseId={caseId} token={token} />
+                        <LedgerPage
+                          caseId={caseId}
+                          token={token}
+                          currentUserId={currentUser?.id}
+                          onCaseChanged={onRefresh}
+                        />
                       ) : (
                         <CaseTimePanel
                           caseId={caseId}

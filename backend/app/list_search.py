@@ -7,6 +7,7 @@ import uuid
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
+from app.case_reference import strip_case_number_prefix
 from app.deps import get_case_if_accessible
 from app.models import Case, CaseStatus, Contact, ContactType, User
 
@@ -80,6 +81,7 @@ def search_cases(
         return []
 
     pat = _ilike_pattern(q_trim)
+    ref_pat = _ilike_pattern(strip_case_number_prefix(q_trim))
     cap = min(limit or CASE_SEARCH_DEFAULT_LIMIT, CASE_SEARCH_MAX_LIMIT)
     fetch_cap = min(cap * 3, CASE_SEARCH_MAX_LIMIT * 3)
 
@@ -89,6 +91,7 @@ def search_cases(
         .where(
             or_(
                 Case.case_number.ilike(pat),
+                Case.case_number.ilike(ref_pat),
                 Case.client_name.ilike(pat),
                 Case.title.ilike(pat),
                 User.display_name.ilike(pat),

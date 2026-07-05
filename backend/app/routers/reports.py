@@ -702,6 +702,7 @@ def _serialize_exceptions(report) -> dict:
             "matter_description": r.matter_description,
             "fee_earner_name": r.fee_earner_name,
             "posted_at": r.posted_at.isoformat(),
+            "posted_by_user_id": str(r.posted_by_user_id) if r.posted_by_user_id else None,
             "posted_by_name": r.posted_by_name,
             "description": r.description,
             "amount_pence": r.amount_pence,

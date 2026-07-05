@@ -1,5 +1,5 @@
 import type { CaseOut, UserSummary } from './types'
-import { formatCaseStatusLabel } from './types'
+import { formatCaseStatusLabel, stripCaseNumberPrefix } from './types'
 
 export const MATTER_PICKER_LIMIT = 50
 
@@ -23,6 +23,7 @@ export function caseMatchesMatterSearch(
   if (!s) return false
   const parts = [
     c.case_number,
+    stripCaseNumberPrefix(c.case_number),
     c.client_name ?? '',
     c.matter_description ?? '',
     formatCaseStatusLabel(c.status),

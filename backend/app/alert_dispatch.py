@@ -10,6 +10,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.alert_templates import (
+    anticipated_payment_amended,
     anticipated_payment_approved,
     anticipated_payment_rejected,
     calendar_event_reminder,
@@ -54,6 +55,7 @@ class AlertKind(str, enum.Enum):
     docusign_sign_completed_staff = "docusign_sign_completed_staff"
     anticipated_payment_approved = "anticipated_payment_approved"
     anticipated_payment_rejected = "anticipated_payment_rejected"
+    anticipated_payment_amended = "anticipated_payment_amended"
     invoice_approved = "invoice_approved"
     invoice_rejected = "invoice_rejected"
 
@@ -212,6 +214,18 @@ def dispatch_alert(
             amount_gbp=str(context.get("amount_gbp") or ""),
             reference=str(context.get("reference") or ""),
             comment=str(context.get("comment") or ""),
+        )
+    elif kind == AlertKind.anticipated_payment_amended:
+        subject, body, body_html = anticipated_payment_amended(
+            firm_name=firm,
+            staff_name=str(context.get("staff_name") or "Colleague"),
+            editor_name=str(context.get("editor_name") or "A colleague"),
+            poster_name=str(context.get("poster_name") or "A colleague"),
+            case_number=str(context.get("case_number") or ""),
+            matter_label=str(context.get("matter_label") or ""),
+            description=str(context.get("description") or ""),
+            amount_gbp=str(context.get("amount_gbp") or ""),
+            reference=str(context.get("reference") or ""),
         )
     elif kind == AlertKind.invoice_approved:
         subject, body, body_html = invoice_approved_staff(

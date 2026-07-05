@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import uuid
+
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
@@ -46,6 +48,29 @@ def user_may_post_office(user: User, db: Session) -> bool:
     return bool(cat and cat.perm_post_office)
 
 
+def user_may_post_anticipated(user: User, db: Session) -> bool:
+    if user.role == UserRole.admin:
+        return True
+    cat = _category(user, db)
+    return bool(cat and cat.perm_post_anticipated)
+
+
+def assert_may_post_anticipated(user: User, db: Session) -> None:
+    if user.role == UserRole.admin:
+        return
+    cat = _category(user, db)
+    if cat is None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="No permission profile is assigned to your account. Ask an administrator to assign one.",
+        )
+    if not cat.perm_post_anticipated:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Your role is not permitted to post anticipated payments.",
+        )
+
+
 def assert_may_post_ledger(user: User, payload: LedgerPostCreate, db: Session) -> None:
     """Actual postings require post-client / post-office on each affected leg (category Admin alone is not enough)."""
     if user.role == UserRole.admin:
@@ -76,13 +101,24 @@ def assert_may_approve_anticipated_ledger(
     db: Session,
 ) -> None:
     """Anticipated postings are confirmed by users with post rights on each affected leg."""
-    assert_may_edit_ledger_pair(
-        user,
-        client_direction=client_direction,
-        office_direction=office_direction,
-        is_anticipated=True,
-        db=db,
-    )
+    if user.role == UserRole.admin:
+        return
+    cat = _category(user, db)
+    if cat is None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="No permission profile is assigned to your account. Ask an administrator to assign one.",
+        )
+    if client_direction and not cat.perm_post_client:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Your role is not permitted to approve client account postings.",
+        )
+    if office_direction and not cat.perm_post_office:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Your role is not permitted to approve office account postings.",
+        )
 
 
 def assert_may_edit_ledger_pair(
@@ -92,8 +128,16 @@ def assert_may_edit_ledger_pair(
     office_direction: str | None,
     is_anticipated: bool,
     db: Session,
+    posted_by_user_id: uuid.UUID | None = None,
+    for_reject: bool = False,
 ) -> None:
-    """Edit/reject uses the same rights as approving the posting."""
+    """Edit/reject unapproved postings.
+
+    Anticipated: amend/cancel by original author or users with post anticipated; cashiers with
+    client/office post rights may reject (not amend) before approval.
+    """
+    if is_anticipated and posted_by_user_id is not None and user.id == posted_by_user_id:
+        return
     if not is_anticipated and user_effective_admin(user, db):
         return
     cat = _category(user, db)
@@ -105,17 +149,17 @@ def assert_may_edit_ledger_pair(
     if is_anticipated:
         if user.role == UserRole.admin:
             return
-        if client_direction and not cat.perm_post_client:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Your role is not permitted to edit client account postings.",
-            )
-        if office_direction and not cat.perm_post_office:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Your role is not permitted to edit office account postings.",
-            )
-        return
+        if cat.perm_post_anticipated:
+            return
+        if for_reject:
+            if client_direction and cat.perm_post_client:
+                return
+            if office_direction and cat.perm_post_office:
+                return
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Your role is not permitted to edit anticipated payments.",
+        )
     if not cat.perm_approve_payments:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,

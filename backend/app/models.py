@@ -42,6 +42,7 @@ class UserPermissionCategory(Base):
     perm_fee_earner: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     perm_post_client: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     perm_post_office: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    perm_post_anticipated: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     perm_approve_payments: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     perm_approve_invoices: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     perm_admin: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)

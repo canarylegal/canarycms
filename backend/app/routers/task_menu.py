@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.exc import DBAPIError
 
+from app.case_reference import display_case_number
 from app.case_task_visibility import case_task_list_visibility_clause, case_task_ribbon_visibility_clause
 from app.db_errors import raise_if_missing_case_task_is_private
 from app.db import get_db
@@ -96,7 +97,7 @@ def list_task_menu(
             TaskMenuRowOut(
                 id=task.id,
                 case_id=case.id,
-                case_number=case.case_number,
+                case_number=display_case_number(case.case_number, case.status),
                 client_name=case.client_name,
                 matter_description=case.title,
                 matter_type_label=matter_label,

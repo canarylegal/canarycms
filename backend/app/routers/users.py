@@ -27,6 +27,7 @@ from app.permission_checks import (
     user_may_be_fee_earner,
     user_may_post_client,
     user_may_post_office,
+    user_may_post_anticipated,
 )
 from app.radicale_htpasswd import remove_user, upsert_user
 from app.schemas import (
@@ -152,6 +153,7 @@ def my_ledger_permissions(user: User = Depends(get_current_user), db: Session = 
         accounts_workspace_access=user_may_access_accounts_workspace(user, db),
         can_post_client=user_may_post_client(user, db),
         can_post_office=user_may_post_office(user, db),
+        can_post_anticipated=user_may_post_anticipated(user, db),
     )
 
 
