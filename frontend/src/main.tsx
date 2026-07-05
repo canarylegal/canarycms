@@ -63,7 +63,7 @@ if (!el) {
   const searchParams = new URLSearchParams(window.location.search)
   const ledgerCaseId = searchParams.get('ledger')
 
-  if (window.location.pathname === '/portal' || /^\/portal\/q\/[^/]+$/i.test(window.location.pathname)) {
+  if (window.location.pathname === '/portal' || /^\/portal\/q\/[^/]+$/i.test(window.location.pathname) || /^\/portal\/f\/[^/]+$/i.test(window.location.pathname)) {
     document.documentElement.style.zoom = '1'
     void import('./PortalPage.tsx').then(({ default: PortalPage }) => {
       root.render(<PortalPage />)

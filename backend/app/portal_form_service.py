@@ -38,8 +38,13 @@ from app.portal_service import client_matter_description, contact_display_name, 
 from app.portal_case import require_case_portal_enabled
 from app.portal_notifications import ALERTS_NOT_CONFIGURED_MSG
 from app.quote_portal_service import pick_portal_grant_for_case
+from app.security import PORTAL_QUOTE_EXCHANGE_TTL_SECONDS
 
 _FIELD_KEY_RE = re.compile(r"^[a-z][a-z0-9_]{0,79}$")
+_FORM_SUBMISSION_ID_RE = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+    re.IGNORECASE,
+)
 
 FORM_EMAIL_SEND_FAILED_MSG = (
     "The notification e-mail could not be delivered. The form is still available on the portal."
@@ -56,6 +61,37 @@ def _form_email_skip_reason(db: Session, *, email_sent: bool) -> str | None:
 
 def utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def form_link_for_submission(submission_id: uuid.UUID) -> str:
+    """Short client portal link for a form submission (used in e-mail)."""
+    base = portal_public_url().rstrip("/")
+    return f"{base}/f/{submission_id}"
+
+
+def _form_submission_link_expired(submission: PortalFormSubmission) -> bool:
+    sent_at = submission.sent_at
+    if sent_at.tzinfo is None:
+        sent_at = sent_at.replace(tzinfo=timezone.utc)
+    age = (utcnow() - sent_at).total_seconds()
+    return age > PORTAL_QUOTE_EXCHANGE_TTL_SECONDS
+
+
+def resolve_form_exchange_submission(db: Session, exchange_token: str) -> PortalFormSubmission:
+    """Resolve a form e-mail link token (submission UUID) to a pending submission row."""
+    token = (exchange_token or "").strip()
+    if not token or not _FORM_SUBMISSION_ID_RE.match(token):
+        raise ValueError("Invalid or expired form link")
+
+    submission_id = uuid.UUID(token)
+    submission = db.get(PortalFormSubmission, submission_id)
+    if submission is None:
+        raise ValueError("Invalid or expired form link")
+    if submission.status != PortalFormSubmissionStatus.pending:
+        raise ValueError("Invalid or expired form link")
+    if _form_submission_link_expired(submission):
+        raise ValueError("Invalid or expired form link")
+    return submission
 
 
 def _normalize_field_key(key: str) -> str:
@@ -260,7 +296,7 @@ def send_form_to_contact(
     db.add(submission)
     db.flush()
 
-    portal_url = portal_public_url().rstrip("/")
+    form_url = form_link_for_submission(submission.id)
     email_sent = dispatch_alert(
         db,
         AlertKind.portal_form_sent,
@@ -269,7 +305,7 @@ def send_form_to_contact(
             "contact_name": contact_display_name(contact),
             "form_name": template.name,
             "matter_label": client_matter_description(case),
-            "portal_url": portal_url,
+            "portal_url": form_url,
         },
         actor_user_id=actor.id,
     )

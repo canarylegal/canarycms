@@ -88,9 +88,10 @@ from app.portal_form_service import (
     get_submission_for_contact,
     list_pending_for_contact as list_pending_forms_for_contact,
     portal_form_detail,
+    resolve_form_exchange_submission,
     upload_submission_file,
 )
-from app.models import DocusignSigningRequest, PortalFormSubmissionStatus
+from app.models import DocusignSigningRequest, PortalFormSubmission, PortalFormSubmissionStatus
 from app.schemas import (
     PortalAuthIn,
     PortalAuthOut,
@@ -108,6 +109,8 @@ from app.schemas import (
     PortalSessionOut,
     PortalDocusignSigningOut,
     PortalFormDetailOut,
+    PortalFormExchangeIn,
+    PortalFormExchangeOut,
     PortalFormPendingOut,
     PortalFormSubmitIn,
     PortalFormSubmissionOut,
@@ -386,6 +389,63 @@ def portal_quote_exchange(payload: PortalQuoteExchangeIn, db: Session = Depends(
         contact_name=contact_display_name(contact),
         grants=_grant_summaries(db, contact.id),
         quote=_quote_delivery_view(db, delivery),
+    )
+
+
+def _form_pending_out(db: Session, submission: PortalFormSubmission) -> PortalFormPendingOut:
+    detail = portal_form_detail(db, submission)
+    case = db.get(Case, submission.case_id)
+    label = client_matter_description(case)
+    return PortalFormPendingOut(
+        id=submission.id,
+        template_name=detail.get("template_name") or "",
+        template_reference=detail.get("template_reference") or "",
+        status=submission.status.value,
+        sent_at=submission.sent_at,
+        case_id=submission.case_id,
+        matter_label=label,
+    )
+
+
+@router.post("/form-exchange", response_model=PortalFormExchangeOut)
+def portal_form_exchange(payload: PortalFormExchangeIn, db: Session = Depends(get_db)) -> PortalFormExchangeOut:
+    """Exchange a form e-mail link for a portal session and open the pending form."""
+    try:
+        submission = resolve_form_exchange_submission(db, payload.exchange_token)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired form link") from exc
+
+    contact_id = submission.contact_id
+    case_id = submission.case_id
+
+    contact = db.get(Contact, contact_id)
+    if contact is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid form link")
+    access_row = db.execute(
+        select(ContactPortalAccess).where(ContactPortalAccess.contact_id == contact_id)
+    ).scalar_one_or_none()
+    if access_row is None or not portal_access_is_active(access_row):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Portal access is not active")
+
+    from app.portal_case import require_case_portal_enabled
+
+    require_case_portal_enabled(db, case_id)
+
+    token = create_portal_session_token(contact_id=str(contact.id))
+    log_event(
+        db,
+        actor_user_id=None,
+        action="portal.form.exchange",
+        entity_type="portal_form_submission",
+        entity_id=str(submission.id),
+        meta={"case_id": str(case_id), "template_id": str(submission.template_id), "contact_id": str(contact_id)},
+    )
+    db.commit()
+    return PortalFormExchangeOut(
+        session_token=token,
+        contact_name=contact_display_name(contact),
+        grants=_grant_summaries(db, contact.id),
+        form=_form_pending_out(db, submission),
     )
 
 
