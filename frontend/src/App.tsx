@@ -3479,7 +3479,8 @@ function UserSettingsPage({
           <p className="muted" style={{ marginTop: 0 }}>
             Upload a PNG, JPEG, GIF, or WebP image of your signature. Use merge code{' '}
             <code>[FEE_EARNER_SIGNATURE]</code> on its own line in letter precedents — Canary replaces it with your
-            image when composing documents (fee earner on the matter). Scale controls width (7 ≈ 2 inches).
+            image when composing documents (fee earner on the matter). Scale controls width (7 ≈ 2 inches). If you
+            have not uploaded a signature, the firm default from Admin → Precedents is used when one is configured.
           </p>
           {signatureErr ? <div className="error">{signatureErr}</div> : null}
           <label className="field" style={{ maxWidth: 420, marginBottom: 12 }}>

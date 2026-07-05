@@ -2934,21 +2934,34 @@ def fee_earner_signature_for_merge(
     user_id: uuid.UUID | None,
 ) -> tuple[Path, float] | None:
     from app.file_storage import FILES_ROOT
-    from app.models import File, User
+    from app.models import File, FirmSettings, User
 
-    if not user_id:
-        return None
-    user = db.get(User, user_id)
-    if not user or not user.signature_file_id:
-        return None
-    row = db.get(File, user.signature_file_id)
-    if not row:
-        return None
-    abs_path = (FILES_ROOT / row.storage_path).resolve()
-    if not abs_path.is_file():
-        return None
-    width = signature_width_inches_from_scale(getattr(user, "signature_scale", SIGNATURE_SCALE_DEFAULT))
-    return abs_path, width
+    def _resolve_file(*, file_id: uuid.UUID | None, scale: int | None) -> tuple[Path, float] | None:
+        if not file_id:
+            return None
+        row = db.get(File, file_id)
+        if not row:
+            return None
+        abs_path = (FILES_ROOT / row.storage_path).resolve()
+        if not abs_path.is_file():
+            return None
+        width = signature_width_inches_from_scale(scale)
+        return abs_path, width
+
+    if user_id:
+        user = db.get(User, user_id)
+        if user and user.signature_file_id:
+            info = _resolve_file(file_id=user.signature_file_id, scale=getattr(user, "signature_scale", None))
+            if info:
+                return info
+
+    firm = db.get(FirmSettings, 1)
+    if firm and firm.default_signature_file_id:
+        return _resolve_file(
+            file_id=firm.default_signature_file_id,
+            scale=getattr(firm, "default_signature_scale", SIGNATURE_SCALE_DEFAULT),
+        )
+    return None
 
 
 def _normalized_merge_paragraph_text(text: str | None) -> str:
