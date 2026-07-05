@@ -189,3 +189,20 @@ export function countFilteredCustomPrecedents(
 ): number {
   return items.filter((p) => !isSystemPrecedent(p, systemRefs) && precedentMatchesListFilters(p, filters)).length
 }
+
+export function countMatterBlockPrecedents(block: PrecedentMatterBlock): number {
+  return (
+    block.headPrecedents.length +
+    block.subGroups.reduce(
+      (n, sg) =>
+        n +
+        sg.uncategorised.length +
+        sg.categoryGroups.reduce((m, cg) => m + cg.precedents.length, 0),
+      0,
+    )
+  )
+}
+
+export function countSubTypeBlockPrecedents(block: PrecedentSubTypeBlock): number {
+  return block.uncategorised.length + block.categoryGroups.reduce((n, cg) => n + cg.precedents.length, 0)
+}

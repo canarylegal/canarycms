@@ -69,6 +69,12 @@ function portalFolderLabel(path: string | null | undefined): string {
   return decodeFolderPathForDisplay(raw)
 }
 
+function portalGrantFolderLabel(label: string | null | undefined): string {
+  const raw = (label ?? '').trim()
+  if (!raw) return 'Documents'
+  return decodeFolderPathForDisplay(raw)
+}
+
 function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
@@ -758,7 +764,7 @@ export default function PortalPage() {
       const obj = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = obj
-      a.download = `${activeGrant?.folder_label ?? 'documents'}.zip`
+      a.download = `${portalGrantFolderLabel(activeGrant?.folder_label) ?? 'documents'}.zip`
       a.click()
       URL.revokeObjectURL(obj)
     } catch (e: unknown) {
@@ -1222,7 +1228,7 @@ export default function PortalPage() {
                   style={{ width: '100%', textAlign: 'left' }}
                   onClick={() => openGrant(g.id)}
                 >
-                  <div className="listTitle">{g.folder_label}</div>
+                  <div className="listTitle">{portalGrantFolderLabel(g.folder_label)}</div>
                   <div className="muted">
                     {g.can_download ? 'View & download' : 'View'}
                     {g.can_upload ? ' · Upload allowed' : ''}
@@ -1237,7 +1243,7 @@ export default function PortalPage() {
               <button type="button" className="btn" onClick={() => void backToFolderList()}>
                 ← Folders
               </button>
-              <h2 style={{ margin: 0, flex: 1 }}>{activeGrant?.folder_label ?? 'Documents'}</h2>
+              <h2 style={{ margin: 0, flex: 1 }}>{portalGrantFolderLabel(activeGrant?.folder_label)}</h2>
               {activeGrant?.can_download && (files.length > 0 || subfolders.length > 0) ? (
                 <button type="button" className="btn" disabled={busy} onClick={() => void downloadAllFiles()}>
                   Download all
@@ -1263,7 +1269,7 @@ export default function PortalPage() {
 
             <div className="portalBreadcrumb muted" style={{ marginBottom: 12, display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
               <button type="button" className="btnLink" onClick={() => navigateBreadcrumb(-1)}>
-                {activeGrant?.folder_label ?? 'Root'}
+                {portalGrantFolderLabel(activeGrant?.folder_label) || 'Root'}
               </button>
               {(browse?.breadcrumb ?? []).map((part, idx) => (
                 <span key={`${part}-${idx}`} style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>

@@ -13,13 +13,16 @@ import type { ApiError } from './api'
 import { CASE_MENU_OPTIONS } from './caseMenuOptions'
 import { useDialogs } from './DialogProvider'
 import { SingleSelectDropdown } from './SingleSelectDropdown'
-import { FeeScaleScaleRows, FeeScaleThreadGroup } from './FeeScaleThreadTree'
+import { FeeScaleScaleRows } from './FeeScaleThreadTree'
 import { openOnlyOfficeFirmLetterheadEditor, openOnlyOfficePrecedentEditor } from './onlyofficeEditorWindow'
 import {
   buildPrecedentTree,
   countFilteredCustomPrecedents,
+  countMatterBlockPrecedents,
+  countSubTypeBlockPrecedents,
   SYSTEM_PRECEDENT_REFERENCES,
   type PrecedentKindFilter,
+  type PrecedentMatterBlock,
 } from './precedentGrouping'
 import { SearchInput } from './SearchInput'
 import type {
@@ -707,6 +710,7 @@ function AdminPrecedents({ token }: { token: string }) {
   const [qlhFileKey, setQlhFileKey] = useState(0)
   const [listSearch, setListSearch] = useState('')
   const [listKindFilter, setListKindFilter] = useState<PrecedentKindFilter>('all')
+  const [expandedTreeNodes, setExpandedTreeNodes] = useState<Set<string>>(() => new Set())
 
   const listFilters = useMemo(
     () => ({ search: listSearch, kind: listKindFilter }),
@@ -722,6 +726,132 @@ function AdminPrecedents({ token }: { token: string }) {
     () => countFilteredCustomPrecedents(items, listFilters),
     [items, listFilters],
   )
+
+  const listFilterActive = listKindFilter !== 'all' || listSearch.trim().length > 0
+
+  function isTreeNodeExpanded(key: string): boolean {
+    return expandedTreeNodes.has(key)
+  }
+
+  function toggleTreeNode(key: string) {
+    setExpandedTreeNodes((prev) => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  }
+
+  function expandAllTreeNodes() {
+    const keys = new Set<string>()
+    for (const block of precedentTree) {
+      if (block.kind === 'system') {
+        keys.add('system')
+      } else if (block.kind === 'global') {
+        keys.add('global')
+      } else if (block.kind === 'orphan') {
+        keys.add('orphan')
+      } else {
+        keys.add(`head:${block.headId}`)
+        if (block.headPrecedents.length) keys.add(`head:${block.headId}:all-subs`)
+        for (const sg of block.subGroups) {
+          keys.add(`head:${block.headId}:sub:${sg.subId}`)
+          if (sg.uncategorised.length) keys.add(`head:${block.headId}:sub:${sg.subId}:uncat`)
+          for (const cg of sg.categoryGroups) {
+            keys.add(`head:${block.headId}:sub:${sg.subId}:cat:${cg.categoryId}`)
+          }
+        }
+      }
+    }
+    setExpandedTreeNodes(keys)
+  }
+
+  function collapseAllTreeNodes() {
+    setExpandedTreeNodes(new Set())
+  }
+
+  function renderTreeSectionToggle(
+    key: string,
+    title: string,
+    count: number,
+    opts?: { className?: string },
+  ) {
+    const expanded = isTreeNodeExpanded(key)
+    return (
+      <button
+        type="button"
+        className={`precedentTreeSectionToggle${opts?.className ? ` ${opts.className}` : ''}`}
+        aria-expanded={expanded}
+        onClick={() => toggleTreeNode(key)}
+      >
+        <span className="precedentTreeSectionChevron" aria-hidden>
+          {expanded ? '▾' : '▸'}
+        </span>
+        <span className="precedentTreeSectionTitle">{title}</span>
+        <span className="precedentTreeSectionCount">{count}</span>
+      </button>
+    )
+  }
+
+  function renderMatterBlock(block: PrecedentMatterBlock) {
+    const headKey = `head:${block.headId}`
+    const headExpanded = isTreeNodeExpanded(headKey)
+    const headCount = countMatterBlockPrecedents(block)
+    return (
+      <section key={block.headId} className="feeScaleTreeBlock feeScaleTreeBlock--matter precedentTreeBlock">
+        {renderTreeSectionToggle(headKey, block.headName, headCount, { className: 'precedentTreeSectionToggle--head' })}
+        {headExpanded ? (
+          <div className="precedentTreeSectionBody">
+            {block.headPrecedents.length ? (
+              <div className="precedentTreeNestedSection">
+                {renderTreeSectionToggle(
+                  `${headKey}:all-subs`,
+                  'All sub-types',
+                  block.headPrecedents.length,
+                )}
+                {isTreeNodeExpanded(`${headKey}:all-subs`) ? renderPrecedentRows(block.headPrecedents, 1) : null}
+              </div>
+            ) : null}
+            {block.subGroups.map((sg) => {
+              const subKey = `${headKey}:sub:${sg.subId}`
+              const subCount = countSubTypeBlockPrecedents(sg)
+              return (
+                <div key={sg.subId} className="precedentTreeNestedSection">
+                  {renderTreeSectionToggle(subKey, sg.subName, subCount, { className: 'precedentTreeSectionToggle--sub' })}
+                  {isTreeNodeExpanded(subKey) ? (
+                    <div className="precedentTreeSectionBody precedentTreeSectionBody--nested">
+                      {sg.uncategorised.length ? (
+                        <div className="precedentTreeSubGroup">
+                          {renderTreeSectionToggle(
+                            `${subKey}:uncat`,
+                            'Uncategorised',
+                            sg.uncategorised.length,
+                          )}
+                          {isTreeNodeExpanded(`${subKey}:uncat`) ? renderPrecedentRows(sg.uncategorised, 2) : null}
+                        </div>
+                      ) : null}
+                      {sg.categoryGroups.map((cg) => (
+                        <div key={cg.categoryId} className="precedentTreeSubGroup">
+                          {renderTreeSectionToggle(
+                            `${subKey}:cat:${cg.categoryId}`,
+                            cg.categoryName,
+                            cg.precedents.length,
+                          )}
+                          {isTreeNodeExpanded(`${subKey}:cat:${cg.categoryId}`)
+                            ? renderPrecedentRows(cg.precedents, 2)
+                            : null}
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+              )
+            })}
+          </div>
+        ) : null}
+      </section>
+    )
+  }
 
   const matterTypeOptions = useMemo(
     () => matterHeads.map((h) => ({ id: h.id, label: h.name })),
@@ -2065,70 +2195,67 @@ function AdminPrecedents({ token }: { token: string }) {
                 type="button"
                 role="tab"
                 aria-selected={listKindFilter === value}
-                className={`btn precedentKindTab ${listKindFilter === value ? 'active' : ''}`}
+                className={`btn precedentKindTab${listKindFilter === value ? ' precedentKindTab--active' : ''}`}
                 onClick={() => setListKindFilter(value)}
               >
                 {label}
               </button>
             ))}
           </div>
+          <div className="row precedentLibraryMeta" style={{ gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+            {listFilterActive ? (
+              <span className="precedentLibraryFilterStatus">
+                Showing {filteredCustomCount} firm precedent{filteredCustomCount === 1 ? '' : 's'}
+                {listKindFilter !== 'all' ? ` · ${listKindFilter === 'email' ? 'E-mails' : listKindFilter === 'letter' ? 'Letters' : 'Documents'} only` : ''}
+                {listSearch.trim() ? ` · matching “${listSearch.trim()}”` : ''}
+              </span>
+            ) : (
+              <span className="muted">Expand a section to browse — system templates are listed separately below.</span>
+            )}
+            <button type="button" className="btn" onClick={expandAllTreeNodes}>
+              Expand all
+            </button>
+            <button type="button" className="btn" onClick={collapseAllTreeNodes}>
+              Collapse all
+            </button>
+          </div>
         </div>
 
         <div className="feeScaleTree precedentTree stack" style={{ gap: 24 }}>
           {precedentTree.map((block) => {
             if (block.kind === 'system') {
+              const expanded = isTreeNodeExpanded('system')
               return (
-                <section key="system" className="feeScaleTreeBlock precedentTreeBlock--system">
-                  <h4 className="feeScaleTreeBlockTitle">System templates</h4>
+                <section key="system" className="feeScaleTreeBlock precedentTreeBlock precedentTreeBlock--system">
+                  {renderTreeSectionToggle('system', 'System templates', block.precedents.length, {
+                    className: 'precedentTreeSectionToggle--system',
+                  })}
                   <p className="muted precedentTreeBlockHint">
-                    Built-in Canary templates — always shown here regardless of search or kind filters.
+                    Built-in Canary templates — always listed; not affected by search or kind filters.
                   </p>
-                  {renderPrecedentRows(block.precedents, 0)}
+                  {expanded ? renderPrecedentRows(block.precedents, 0) : null}
                 </section>
               )
             }
             if (block.kind === 'global') {
+              const expanded = isTreeNodeExpanded('global')
               return (
-                <section key="global" className="feeScaleTreeBlock">
-                  <h4 className="feeScaleTreeBlockTitle">Global — all cases</h4>
-                  {renderPrecedentRows(block.precedents, 0)}
+                <section key="global" className="feeScaleTreeBlock precedentTreeBlock">
+                  {renderTreeSectionToggle('global', 'Global — all cases', block.precedents.length)}
+                  {expanded ? renderPrecedentRows(block.precedents, 0) : null}
                 </section>
               )
             }
             if (block.kind === 'orphan') {
+              const expanded = isTreeNodeExpanded('orphan')
               return (
-                <section key="orphan" className="feeScaleTreeBlock">
-                  <h4 className="feeScaleTreeBlockTitle">Other</h4>
-                  {renderPrecedentRows(block.precedents, 1)}
+                <section key="orphan" className="feeScaleTreeBlock precedentTreeBlock">
+                  {renderTreeSectionToggle('orphan', 'Other', block.precedents.length)}
+                  {expanded ? renderPrecedentRows(block.precedents, 1) : null}
                 </section>
               )
             }
-            return (
-              <section key={block.headId} className="feeScaleTreeBlock feeScaleTreeBlock--matter">
-                <h4 className="feeScaleTreeBlockTitle">{block.headName}</h4>
-                {block.headPrecedents.length ? (
-                  <FeeScaleThreadGroup depth={1} label="All sub-types">
-                    {renderPrecedentRows(block.headPrecedents, 1)}
-                  </FeeScaleThreadGroup>
-                ) : null}
-                {block.subGroups.map((sg) => (
-                  <FeeScaleThreadGroup key={sg.subId} depth={2} label={sg.subName}>
-                    {sg.uncategorised.length ? (
-                      <div className="precedentTreeSubGroup">
-                        <div className="feeScaleThreadGroupLabel">Uncategorised</div>
-                        {renderPrecedentRows(sg.uncategorised, 2)}
-                      </div>
-                    ) : null}
-                    {sg.categoryGroups.map((cg) => (
-                      <div key={cg.categoryId} className="precedentTreeSubGroup">
-                        <div className="feeScaleThreadGroupLabel">{cg.categoryName}</div>
-                        {renderPrecedentRows(cg.precedents, 2)}
-                      </div>
-                    ))}
-                  </FeeScaleThreadGroup>
-                ))}
-              </section>
-            )
+            return renderMatterBlock(block)
           })}
           {items.length === 0 ? <div className="muted">No precedents yet — upload one above.</div> : null}
           {items.length > 0 &&
