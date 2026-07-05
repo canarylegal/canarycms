@@ -5,7 +5,7 @@ import { decodeFolderPathForDisplay, decodeFolderPathSegment } from './case/fold
 import { PortalFormFillPanel } from './PortalFormFillPanel'
 import { PortalQuotePdfViewer } from './PortalQuotePdfViewer'
 import { PortalLayout, type PortalBrandingConfig } from './portal/PortalBranding'
-import type { PortalAuthOut, PortalBrowseOut, PortalDocusignSigningOut, PortalFileOut, PortalFormPendingOut, PortalGrantSummaryOut, PortalQuoteDeliveryViewOut, PortalQuoteExchangeOut, PortalSessionOut } from './types'
+import type { PortalAuthOut, PortalBrowseOut, PortalDocusignSigningOut, PortalFileOut, PortalFormExchangeOut, PortalFormPendingOut, PortalGrantSummaryOut, PortalQuoteDeliveryViewOut, PortalQuoteExchangeOut, PortalSessionOut } from './types'
 
 const PORTAL_FILES_GRID = '32px 1fr 120px 100px 180px'
 
@@ -142,6 +142,12 @@ function quoteExchangeTokenFromLocation(): string | null {
   return new URLSearchParams(window.location.search).get('quote')?.trim() || null
 }
 
+function formExchangeTokenFromLocation(): string | null {
+  const pathMatch = window.location.pathname.match(/^\/portal\/f\/([^/]+)$/i)
+  if (pathMatch?.[1]) return pathMatch[1].trim()
+  return new URLSearchParams(window.location.search).get('form')?.trim() || null
+}
+
 export default function PortalPage() {
   const [portalConfig, setPortalConfig] = useState<PortalBrandingConfig>(DEFAULT_PORTAL_CONFIG)
   const [signInMode, setSignInMode] = useState<SignInMode>('code')
@@ -162,6 +168,7 @@ export default function PortalPage() {
   const [uploadBusy, setUploadBusy] = useState(false)
   const [previewExchangeBusy, setPreviewExchangeBusy] = useState(false)
   const [quoteExchangeBusy, setQuoteExchangeBusy] = useState(false)
+  const [formExchangeBusy, setFormExchangeBusy] = useState(false)
   const [quoteDelivery, setQuoteDelivery] = useState<PortalQuoteDeliveryViewOut | null>(null)
   const [quoteDeclineOpen, setQuoteDeclineOpen] = useState(false)
   const [quoteDeclineReason, setQuoteDeclineReason] = useState('')
@@ -292,6 +299,38 @@ export default function PortalPage() {
     })()
   }, [])
 
+  useEffect(() => {
+    const formToken = formExchangeTokenFromLocation()
+    if (!formToken) return
+    void (async () => {
+      setFormExchangeBusy(true)
+      setErr(null)
+      try {
+        const out = await portalFetch<PortalFormExchangeOut>('/portal/form-exchange', {
+          method: 'POST',
+          json: { exchange_token: formToken },
+        })
+        storePortalToken(out.session_token)
+        setSessionToken(out.session_token)
+        setContactName(out.contact_name)
+        setGrants(out.grants)
+        setActiveFormId(out.form.id)
+        if (out.form.case_id) {
+          setActiveCaseId(out.form.case_id)
+          const grant = out.grants.find((g) => g.case_id === out.form.case_id)
+          if (grant) setActiveGrantId(grant.id)
+        }
+        window.history.replaceState(null, '', '/portal')
+      } catch (e: unknown) {
+        storePortalToken('')
+        setSessionToken('')
+        setErr((e as { message?: string }).message ?? 'Form link expired or invalid')
+      } finally {
+        setFormExchangeBusy(false)
+      }
+    })()
+  }, [])
+
   const refreshSession = useCallback(async (token: string) => {
     const sess = await portalFetch<PortalSessionOut>('/portal/session', { portalToken: token })
     setContactName(sess.contact_name)
@@ -352,10 +391,10 @@ export default function PortalPage() {
 
   useEffect(() => {
     const token = sessionToken.trim()
-    if (!token || previewExchangeBusy || quoteExchangeBusy) return
+    if (!token || previewExchangeBusy || quoteExchangeBusy || formExchangeBusy) return
     void loadPendingForms(token)
     void loadPendingQuotes(token)
-  }, [sessionToken, loadPendingForms, loadPendingQuotes, previewExchangeBusy, quoteExchangeBusy])
+  }, [sessionToken, loadPendingForms, loadPendingQuotes, previewExchangeBusy, quoteExchangeBusy, formExchangeBusy])
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
@@ -381,7 +420,7 @@ export default function PortalPage() {
 
   useEffect(() => {
     const token = sessionToken.trim()
-    if (!token || previewExchangeBusy || quoteExchangeBusy) return
+    if (!token || previewExchangeBusy || quoteExchangeBusy || formExchangeBusy) return
     void (async () => {
       setBusy(true)
       setErr(null)
@@ -395,7 +434,7 @@ export default function PortalPage() {
         setBusy(false)
       }
     })()
-  }, [sessionToken, refreshSession, previewExchangeBusy, quoteExchangeBusy])
+  }, [sessionToken, refreshSession, previewExchangeBusy, quoteExchangeBusy, formExchangeBusy])
 
   useEffect(() => {
     const token = sessionToken.trim()
@@ -849,11 +888,11 @@ export default function PortalPage() {
     setBrowseSubfolder(crumbs.slice(0, index + 1).join('/'))
   }
 
-  if (previewExchangeBusy || quoteExchangeBusy) {
+  if (previewExchangeBusy || quoteExchangeBusy || formExchangeBusy) {
     return (
       <PortalLayout config={portalConfig} wide={false}>
         <div className="muted" style={{ marginTop: 12 }}>
-          {quoteExchangeBusy ? 'Opening quote…' : 'Opening preview…'}
+          {formExchangeBusy ? 'Opening form…' : quoteExchangeBusy ? 'Opening quote…' : 'Opening preview…'}
         </div>
       </PortalLayout>
     )

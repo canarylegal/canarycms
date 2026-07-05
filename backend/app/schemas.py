@@ -2584,6 +2584,10 @@ class PortalQuoteExchangeIn(BaseModel):
     exchange_token: str = Field(min_length=10, max_length=4096)
 
 
+class PortalFormExchangeIn(BaseModel):
+    exchange_token: str = Field(min_length=10, max_length=4096)
+
+
 class PortalQuoteDeliveryViewOut(BaseModel):
     id: uuid.UUID
     file_id: uuid.UUID
@@ -2611,6 +2615,13 @@ class PortalQuoteExchangeOut(BaseModel):
     contact_name: str
     grants: list[PortalGrantSummaryOut]
     quote: PortalQuoteDeliveryViewOut
+
+
+class PortalFormExchangeOut(BaseModel):
+    session_token: str
+    contact_name: str
+    grants: list[PortalGrantSummaryOut]
+    form: PortalFormPendingOut
 
 
 class QuotePortalSendPreflightOut(BaseModel):

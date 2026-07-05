@@ -953,6 +953,13 @@ export type PortalQuoteExchangeOut = {
   quote: PortalQuoteDeliveryViewOut
 }
 
+export type PortalFormExchangeOut = {
+  session_token: string
+  contact_name: string
+  grants: PortalGrantSummaryOut[]
+  form: PortalFormPendingOut
+}
+
 /** Response from ``POST /cases/{id}/files/email-drafts/m365`` (Microsoft Graph draft). */
 export type CaseEmailDraftM365AttachmentOut = {
   file_id: string
