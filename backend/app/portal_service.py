@@ -366,12 +366,14 @@ def ensure_upload_folder_allowed(*, grant: ContactPortalGrant, folder: str) -> s
 
 
 def grant_folder_display_name(grant: ContactPortalGrant) -> str:
+    from .file_storage import decode_folder_path_segment
+
     if grant.label and grant.label.strip():
         return grant.label.strip()
     folder = sanitize_folder_path(grant.folder_path)
     if not folder:
         return "Documents"
-    return folder.split("/")[-1]
+    return decode_folder_path_segment(folder.split("/")[-1])
 
 
 def resolve_matter_contact_email(db: Session, *, case_id: uuid.UUID, contact_id: uuid.UUID) -> str:
