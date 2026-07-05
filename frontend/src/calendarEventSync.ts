@@ -45,7 +45,13 @@ export function defaultWritableCalendarId(
 }
 
 export function writableCalendarPickerOptions(
-  calendars: { id: string; name: string; source: string; owner: { display_name: string } }[],
+  calendars: {
+    id: string
+    name: string
+    source: string
+    access: string
+    owner: { display_name: string }
+  }[],
 ) {
   return writableCalendars(calendars).map((c) => ({
     value: c.id,
