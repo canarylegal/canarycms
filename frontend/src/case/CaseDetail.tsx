@@ -458,6 +458,7 @@ export function CaseDetail({
   >(null)
   // Multi-selection: each entry is a file ID or "folder:<path>"
   const [selectedDocSet, setSelectedDocSet] = useState<Set<string>>(new Set())
+  const [docFocusKey, setDocFocusKey] = useState<string | null>(null)
   const docAnchorRef = useRef<string | null>(null)
   const [docSortKey, setDocSortKey] = useState<'description' | 'size' | 'created' | 'user'>('created')
   const [docSortDir, setDocSortDir] = useState<'asc' | 'desc'>('desc')
@@ -602,6 +603,8 @@ export function CaseDetail({
   const [precedentChoices, setPrecedentChoices] = useState<PrecedentOut[]>([])
   const [precedentCategories, setPrecedentCategories] = useState<PrecedentCategoryOut[]>([])
   const [precedentPickerCategoryId, setPrecedentPickerCategoryId] = useState<string | null>(null)
+  const [precedentPickerIncludeSiblingSubTypes, setPrecedentPickerIncludeSiblingSubTypes] = useState(false)
+  const [siblingPrecedentChoices, setSiblingPrecedentChoices] = useState<PrecedentOut[]>([])
   const [precedentSearch, setPrecedentSearch] = useState('')
   const [precedentChosenId, setPrecedentChosenId] = useState<string | null>(null)
   const [contactPickModal, setContactPickModal] = useState<
@@ -1075,6 +1078,8 @@ export function CaseDetail({
       setPrecedentChoices([])
       setPrecedentCategories([])
       setPrecedentPickerCategoryId(null)
+      setPrecedentPickerIncludeSiblingSubTypes(false)
+      setSiblingPrecedentChoices([])
       setPrecedentSearch('')
       return
     }
@@ -1126,7 +1131,7 @@ export function CaseDetail({
           preferReference ? list.find((p) => p.reference === preferReference)?.id ?? null : null,
         )
         setPrecedentSearch('')
-        setPrecedentPickerCategoryId(cats.length > 0 ? cats[0].id : null)
+        setPrecedentPickerCategoryId(null)
       } catch {
         if (!cancelled) {
           setPrecedentCategories([])
@@ -1140,6 +1145,67 @@ export function CaseDetail({
       cancelled = true
     }
   }, [precedentPicker, token, caseDetail?.matter_sub_type_id, caseDetail?.matter_head_type_id, caseDetail?.id])
+
+  const precedentPickerSiblingSubTypes = useMemo(() => {
+    const headId = caseDetail?.matter_head_type_id
+    const subId = caseDetail?.matter_sub_type_id
+    if (!headId || !subId) return []
+    const head = matterHeadTypes.find((h) => h.id === headId)
+    if (!head) return []
+    return head.sub_types.filter((s) => s.id !== subId)
+  }, [matterHeadTypes, caseDetail?.matter_head_type_id, caseDetail?.matter_sub_type_id])
+
+  useEffect(() => {
+    if (
+      !precedentPicker ||
+      !precedentPickerIncludeSiblingSubTypes ||
+      !caseDetail?.matter_sub_type_id ||
+      precedentPickerSiblingSubTypes.length === 0
+    ) {
+      setSiblingPrecedentChoices([])
+      return
+    }
+    const kind = precedentPicker.kind
+    let cancelled = false
+    async function load() {
+      try {
+        const lists = await Promise.all(
+          precedentPickerSiblingSubTypes.map((s) =>
+            apiFetch<PrecedentOut[]>(`/precedents?kind=${kind}&matter_sub_type_id=${s.id}`, { token }),
+          ),
+        )
+        if (cancelled) return
+        const currentIds = new Set(precedentChoices.map((p) => p.id))
+        const merged: PrecedentOut[] = []
+        const seen = new Set<string>()
+        lists.forEach((list, idx) => {
+          const subName = precedentPickerSiblingSubTypes[idx]?.name ?? ''
+          for (const p of list) {
+            if (currentIds.has(p.id) || seen.has(p.id)) continue
+            seen.add(p.id)
+            merged.push({
+              ...p,
+              matter_sub_type_name: p.matter_sub_type_name ?? subName,
+            })
+          }
+        })
+        setSiblingPrecedentChoices(merged)
+      } catch {
+        if (!cancelled) setSiblingPrecedentChoices([])
+      }
+    }
+    void load()
+    return () => {
+      cancelled = true
+    }
+  }, [
+    precedentPicker,
+    precedentPickerIncludeSiblingSubTypes,
+    precedentPickerSiblingSubTypes,
+    token,
+    precedentChoices,
+    caseDetail?.matter_sub_type_id,
+  ])
 
   const filteredPrecedentChoices = useMemo(() => {
     const headOnly =
@@ -1157,7 +1223,7 @@ export function CaseDetail({
       return filterBySearch(precedentChoices)
     }
     if (precedentPickerCategoryId === null) {
-      return precedentChoices
+      return filterBySearch(precedentChoices)
     }
     const base = precedentChoices.filter(
       (p) => !p.category_id || p.category_id === precedentPickerCategoryId,
@@ -1171,6 +1237,14 @@ export function CaseDetail({
     caseDetail?.matter_sub_type_id,
     caseDetail?.matter_head_type_id,
   ])
+
+  const filteredSiblingPrecedentChoices = useMemo(() => {
+    const s = precedentSearch.trim().toLowerCase()
+    if (!s) return siblingPrecedentChoices
+    return siblingPrecedentChoices.filter(
+      (p) => p.name.toLowerCase().includes(s) || p.reference.toLowerCase().includes(s),
+    )
+  }, [siblingPrecedentChoices, precedentSearch])
 
   const filteredFiles = useMemo(() => {
     const s = docSearch.trim().toLowerCase()
@@ -1344,6 +1418,51 @@ export function CaseDetail({
     ...sortedRegularInFolder.map((f) => f.id),
   ], [sortedPinnedInFolder, sortedChildFolders, sortedRegularInFolder, docFolder])
 
+  useEffect(() => {
+    setDocFocusKey((prev) => {
+      if (prev && allDocKeys.includes(prev)) return prev
+      return allDocKeys[0] ?? null
+    })
+  }, [allDocKeys])
+
+  function activateDocFocusKey(key: string) {
+    if (key.startsWith('folder:')) {
+      setDocFolder(key.slice('folder:'.length))
+      return
+    }
+    const f = files.find((x) => x.id === key)
+    if (!f) return
+    if (isEmlLikeFileSummary(f)) void previewEmlFile(f)
+    else void openCaseFile(f)
+  }
+
+  function handleDocsKeyDown(e: React.KeyboardEvent) {
+    if (caseDocPanel !== 'documents') return
+    if (docMenu || commentOpen || precedentPicker || contactPickModal) return
+    const target = e.target as HTMLElement
+    if (target.closest('input, textarea, select, button')) return
+    if (allDocKeys.length === 0) return
+
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault()
+      const currentIdx = docFocusKey ? allDocKeys.indexOf(docFocusKey) : -1
+      const delta = e.key === 'ArrowDown' ? 1 : -1
+      let nextIdx = currentIdx + delta
+      if (nextIdx < 0) nextIdx = 0
+      if (nextIdx >= allDocKeys.length) nextIdx = allDocKeys.length - 1
+      const nextKey = allDocKeys[nextIdx]!
+      setDocFocusKey(nextKey)
+      setSelectedDocSet(new Set([nextKey]))
+      docAnchorRef.current = nextKey
+      return
+    }
+
+    if (e.key === 'Enter' && docFocusKey) {
+      e.preventDefault()
+      activateDocFocusKey(docFocusKey)
+    }
+  }
+
   function handleDocItemClick(key: string, e: React.MouseEvent) {
     e.stopPropagation()
     if (e.shiftKey && docAnchorRef.current) {
@@ -1364,6 +1483,7 @@ export function CaseDetail({
     } else {
       setSelectedDocSet(new Set([key]))
       docAnchorRef.current = key
+      setDocFocusKey(key)
     }
   }
 
@@ -2597,6 +2717,8 @@ export function CaseDetail({
               className={
                 caseDocPanel === 'documents' ? 'caseDocsScroll' : 'caseDocsScroll caseDocsScroll--panelOnly'
               }
+              tabIndex={caseDocPanel === 'documents' ? 0 : undefined}
+              onKeyDown={handleDocsKeyDown}
             >
               {caseDocPanel === 'documents' ? (
               <>
@@ -2840,7 +2962,7 @@ export function CaseDetail({
               {sortedPinnedInFolder.map((f) => (
                 <div
                   key={f.id}
-                  className={`docsTr rowbtn ${f.parent_file_id ? 'attachmentChild' : ''} ${selectedDocSet.has(f.id) ? 'active' : ''}`}
+                  className={`docsTr rowbtn ${f.parent_file_id ? 'attachmentChild' : ''} ${selectedDocSet.has(f.id) ? 'active' : ''} ${docFocusKey === f.id ? 'docsTr--focused' : ''}`}
                   onMouseDown={(e) => { if (e.shiftKey) e.preventDefault() }}
                   onClick={(e) => handleDocItemClick(f.id, e)}
                   onDoubleClick={(e) => {
@@ -2867,7 +2989,7 @@ export function CaseDetail({
                 return (
                   <div
                     key={next}
-                    className={`docsTr rowbtn ${selectedDocSet.has(folderKey) ? 'active' : ''}`}
+                    className={`docsTr rowbtn ${selectedDocSet.has(folderKey) ? 'active' : ''} ${docFocusKey === folderKey ? 'docsTr--focused' : ''}`}
                     onMouseDown={(e) => { if (e.shiftKey) e.preventDefault() }}
                     onClick={(e) => handleDocItemClick(folderKey, e)}
                     onDoubleClick={() => setDocFolder(next)}
@@ -2891,7 +3013,7 @@ export function CaseDetail({
               {sortedRegularInFolder.map((f) => (
                 <div
                   key={f.id}
-                  className={`docsTr rowbtn ${f.parent_file_id ? 'attachmentChild' : ''} ${selectedDocSet.has(f.id) ? 'active' : ''}`}
+                  className={`docsTr rowbtn ${f.parent_file_id ? 'attachmentChild' : ''} ${selectedDocSet.has(f.id) ? 'active' : ''} ${docFocusKey === f.id ? 'docsTr--focused' : ''}`}
                   onMouseDown={(e) => { if (e.shiftKey) e.preventDefault() }}
                   onClick={(e) => handleDocItemClick(f.id, e)}
                   onDoubleClick={(e) => {
@@ -3783,19 +3905,31 @@ export function CaseDetail({
                   <div className="precedentPickerCatList">
                     {caseDetail?.matter_sub_type_id ? (
                       precedentCategories.length > 0 ? (
-                        precedentCategories.map((c) => (
+                        <>
                           <button
-                            key={c.id}
                             type="button"
-                            className={`precedentPickerCatBtn ${precedentPickerCategoryId === c.id ? 'active' : ''}`}
+                            className={`precedentPickerCatBtn ${precedentPickerCategoryId === null ? 'active' : ''}`}
                             onClick={() => {
-                              setPrecedentPickerCategoryId(c.id)
+                              setPrecedentPickerCategoryId(null)
                               setPrecedentChosenId(null)
                             }}
                           >
-                            {c.name}
+                            All
                           </button>
-                        ))
+                          {precedentCategories.map((c) => (
+                            <button
+                              key={c.id}
+                              type="button"
+                              className={`precedentPickerCatBtn ${precedentPickerCategoryId === c.id ? 'active' : ''}`}
+                              onClick={() => {
+                                setPrecedentPickerCategoryId(c.id)
+                                setPrecedentChosenId(null)
+                              }}
+                            >
+                              {c.name}
+                            </button>
+                          ))}
+                        </>
                       ) : (
                         <div className="muted" style={{ padding: '8px 0' }}>
                           No categories — head / sub-wide templates below (add categories under Admin → Matters to group
@@ -3810,6 +3944,19 @@ export function CaseDetail({
                   </div>
                 </div>
                 <div className="precedentPickerMain">
+                  {caseDetail?.matter_sub_type_id && precedentPickerSiblingSubTypes.length > 0 ? (
+                    <label className="row precedentPickerSiblingToggle" style={{ marginBottom: 8, gap: 8 }}>
+                      <input
+                        type="checkbox"
+                        checked={precedentPickerIncludeSiblingSubTypes}
+                        onChange={(e) => {
+                          setPrecedentPickerIncludeSiblingSubTypes(e.target.checked)
+                          setPrecedentChosenId(null)
+                        }}
+                      />
+                      <span>Include templates from other sub-types under this matter type</span>
+                    </label>
+                  ) : null}
                   <label className="field" style={{ marginBottom: 8 }}>
                     <span>Search by name or reference</span>
                     <SearchInput
@@ -3817,24 +3964,13 @@ export function CaseDetail({
                       value={precedentSearch}
                       onChange={(e) => setPrecedentSearch(e.target.value)}
                       onClear={() => setPrecedentSearch('')}
-                      disabled={
-                        (!caseDetail?.matter_sub_type_id && !caseDetail?.matter_head_type_id) ||
-                        (!!caseDetail?.matter_sub_type_id &&
-                          precedentCategories.length > 0 &&
-                          precedentPickerCategoryId === null)
-                      }
+                      disabled={!caseDetail?.matter_sub_type_id && !caseDetail?.matter_head_type_id}
                       aria-label="Search precedents"
                     />
                   </label>
                   {!caseDetail?.matter_sub_type_id && !caseDetail?.matter_head_type_id ? (
                     <div className="muted precedentPickerEmpty">
                       Set a matter type on this case (practice head or sub-type) to use scoped precedents.
-                    </div>
-                  ) : caseDetail?.matter_sub_type_id &&
-                    precedentCategories.length > 0 &&
-                    precedentPickerCategoryId === null ? (
-                    <div className="muted precedentPickerEmpty">
-                      Select a category on the left.
                     </div>
                   ) : (
                     <>
@@ -3877,6 +4013,33 @@ export function CaseDetail({
                           <div className="muted precedentPickerEmpty">
                             No precedents match this category and search.
                           </div>
+                        ) : null}
+                        {precedentPickerIncludeSiblingSubTypes && filteredSiblingPrecedentChoices.length > 0 ? (
+                          <>
+                            <div className="precedentPickerSectionTitle">Other sub-types</div>
+                            {filteredSiblingPrecedentChoices.map((p) => (
+                              <label
+                                key={p.id}
+                                className={`precedentPickerRow rowbtn row ${precedentChosenId === p.id ? 'active' : ''}`}
+                              >
+                                <span className="precedentPickerColPick">
+                                  <input
+                                    type="radio"
+                                    name="precedentChoice"
+                                    checked={precedentChosenId === p.id}
+                                    onChange={() => setPrecedentChosenId(p.id)}
+                                  />
+                                </span>
+                                <span className="precedentPickerColName">
+                                  {p.name}
+                                  {p.matter_sub_type_name ? (
+                                    <span className="precedentPickerSubTypeBadge">{p.matter_sub_type_name}</span>
+                                  ) : null}
+                                </span>
+                                <span className="precedentPickerColRef mono">{p.reference}</span>
+                              </label>
+                            ))}
+                          </>
                         ) : null}
                       </div>
                     </>

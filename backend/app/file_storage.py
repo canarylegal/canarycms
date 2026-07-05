@@ -47,6 +47,26 @@ def sanitize_folder_path(folder_path: str) -> str:
     return _sanitize_folder_path(folder_path)
 
 
+def decode_folder_path_segment(segment: str) -> str:
+    from urllib.parse import unquote
+
+    cur = segment
+    for _ in range(6):
+        try:
+            nxt = unquote(cur)
+            if nxt == cur:
+                break
+            cur = nxt
+        except Exception:
+            break
+    return cur
+
+
+def decode_folder_path_for_display(path: str) -> str:
+    parts = [p for p in (path or "").split("/") if p]
+    return "/".join(decode_folder_path_segment(p) for p in parts)
+
+
 def firm_letterhead_file_paths(*, file_id: uuid.UUID, original_filename: str) -> StoredFilePaths:
     safe_name = Path(original_filename).name
     rel = Path("firm") / "letterhead" / f"{file_id}__{safe_name}"

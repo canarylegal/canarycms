@@ -474,6 +474,8 @@ def portal_download_quote_delivery_file(
 
 
 def _file_out(grant: ContactPortalGrant, row: File) -> PortalFileOut:
+    from ..file_storage import decode_folder_path_for_display
+
     rel = relative_folder_under_grant(grant_folder=grant.folder_path or "", absolute_folder=row.folder_path or "")
     display = rel.split("/")[-1] if rel else (row.folder_path or "Documents")
     if rel and "/" in rel:
@@ -482,6 +484,8 @@ def _file_out(grant: ContactPortalGrant, row: File) -> PortalFileOut:
         display = rel
     else:
         display = ""
+    if display:
+        display = decode_folder_path_for_display(display)
     return PortalFileOut(
         id=row.id,
         original_filename=row.original_filename,

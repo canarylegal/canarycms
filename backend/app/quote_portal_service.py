@@ -514,6 +514,10 @@ def portal_quote_delivery_view(
             )
         else:
             folder_display = row.folder_path or ""
+    if folder_display:
+        from .file_storage import decode_folder_path_for_display
+
+        folder_display = decode_folder_path_for_display(folder_display)
     return {
         "id": delivery.id,
         "file_id": delivery.file_id,

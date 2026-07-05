@@ -13,7 +13,15 @@ import type { ApiError } from './api'
 import { CASE_MENU_OPTIONS } from './caseMenuOptions'
 import { useDialogs } from './DialogProvider'
 import { SingleSelectDropdown } from './SingleSelectDropdown'
+import { FeeScaleScaleRows, FeeScaleThreadGroup } from './FeeScaleThreadTree'
 import { openOnlyOfficeFirmLetterheadEditor, openOnlyOfficePrecedentEditor } from './onlyofficeEditorWindow'
+import {
+  buildPrecedentTree,
+  countFilteredCustomPrecedents,
+  SYSTEM_PRECEDENT_REFERENCES,
+  type PrecedentKindFilter,
+} from './precedentGrouping'
+import { SearchInput } from './SearchInput'
 import type {
   AdminSendPasswordResetResponse,
   AdminUserPublic,
@@ -39,6 +47,8 @@ function AdminMatters({ token }: { token: string }) {
   const [err, setErr] = useState<string | null>(null)
   const [subPrecCats, setSubPrecCats] = useState<PrecedentCategoryOut[]>([])
   const [newPrecCatName, setNewPrecCatName] = useState('')
+  const [editingPrecCatId, setEditingPrecCatId] = useState<string | null>(null)
+  const [editingPrecCatName, setEditingPrecCatName] = useState('')
 
   // Sub type form state
   const [newSubName, setNewSubName] = useState('')
@@ -82,6 +92,7 @@ function AdminMatters({ token }: { token: string }) {
     setNewPrecCatName('')
     setNewMenuName('')
     setEditingMenuId(null)
+    setEditingPrecCatId(null)
   }, [selectedSubId, selectedHead])
 
   // Clear sub selection when head changes
@@ -121,6 +132,31 @@ function AdminMatters({ token }: { token: string }) {
       setNewSubName('')
       await loadHeads()
     } catch (e: any) { setErr(e?.message ?? 'Failed') } finally { setBusy(false) }
+  }
+
+  async function savePrecCatRename(categoryId: string) {
+    const name = editingPrecCatName.trim()
+    if (!name || !selectedSubId) return
+    setBusy(true)
+    setErr(null)
+    try {
+      await apiFetch(`/matter-types/sub-types/${selectedSubId}/precedent-categories/${categoryId}`, {
+        token,
+        method: 'PATCH',
+        json: { name },
+      })
+      const next = await apiFetch<PrecedentCategoryOut[]>(
+        `/matter-types/sub-types/${selectedSubId}/precedent-categories`,
+        { token },
+      )
+      setSubPrecCats(next)
+      setEditingPrecCatId(null)
+      setEditingPrecCatName('')
+    } catch (e: any) {
+      setErr(e?.message ?? 'Failed to rename category')
+    } finally {
+      setBusy(false)
+    }
   }
 
   async function saveSubRename(id: string) {
@@ -419,7 +455,7 @@ function AdminMatters({ token }: { token: string }) {
           <div style={{ marginTop: 24, paddingTop: 20, borderTop: '1px solid var(--border)' }}>
             <div style={{ fontWeight: 600, marginBottom: 6 }}>Precedent categories</div>
             <div className="muted" style={{ marginBottom: 8, fontSize: '0.9em' }}>
-              Letter, document, and e-mail precedents for cases of this sub-type are grouped under these categories. The first category is selected by default in the precedent picker.
+              Letter, document, and e-mail precedents for cases of this sub-type are grouped under these categories. The precedent picker defaults to All.
             </div>
             <div className="row" style={{ gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
               <input
@@ -487,41 +523,94 @@ function AdminMatters({ token }: { token: string }) {
             <div className="list" style={{ maxHeight: 200, overflow: 'auto' }}>
               {subPrecCats.map((c) => (
                 <div key={c.id} className="listCard row" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span className="listTitle">{c.name}</span>
-                  <button
-                    type="button"
-                    className="btn danger"
-                    style={{ fontSize: 12, padding: '4px 10px' }}
-                    disabled={busy}
-                    onClick={async () => {
-                      const ok = await askConfirm({
-                        title: 'Remove category',
-                        message: `Remove category “${c.name}”? You cannot remove a category that still has precedents.`,
-                        danger: true,
-                        confirmLabel: 'Remove',
-                      })
-                      if (!ok) return
-                      setBusy(true)
-                      setErr(null)
-                      try {
-                        await apiFetch(`/matter-types/sub-types/${selectedSubId}/precedent-categories/${c.id}`, {
-                          token,
-                          method: 'DELETE',
-                        })
-                        const next = await apiFetch<PrecedentCategoryOut[]>(
-                          `/matter-types/sub-types/${selectedSubId}/precedent-categories`,
-                          { token },
-                        )
-                        setSubPrecCats(next)
-                      } catch (e: any) {
-                        setErr(e?.message ?? 'Failed to remove category')
-                      } finally {
-                        setBusy(false)
-                      }
-                    }}
-                  >
-                    Remove
-                  </button>
+                  {editingPrecCatId === c.id ? (
+                    <input
+                      style={inlineInput}
+                      value={editingPrecCatName}
+                      onChange={(e) => setEditingPrecCatName(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') void savePrecCatRename(c.id)
+                        if (e.key === 'Escape') setEditingPrecCatId(null)
+                      }}
+                      autoFocus
+                      disabled={busy}
+                    />
+                  ) : (
+                    <span className="listTitle">{c.name}</span>
+                  )}
+                  <div className="row" style={{ gap: 4 }}>
+                    {editingPrecCatId === c.id ? (
+                      <>
+                        <button
+                          type="button"
+                          className="btn"
+                          style={smallBtn}
+                          disabled={busy}
+                          onClick={() => void savePrecCatRename(c.id)}
+                        >
+                          Save
+                        </button>
+                        <button
+                          type="button"
+                          className="btn"
+                          style={smallBtn}
+                          disabled={busy}
+                          onClick={() => setEditingPrecCatId(null)}
+                        >
+                          Cancel
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <button
+                          type="button"
+                          className="btn"
+                          style={smallBtn}
+                          disabled={busy}
+                          onClick={() => {
+                            setEditingPrecCatId(c.id)
+                            setEditingPrecCatName(c.name)
+                          }}
+                        >
+                          Rename
+                        </button>
+                        <button
+                          type="button"
+                          className="btn danger"
+                          style={smallBtn}
+                          disabled={busy}
+                          onClick={async () => {
+                            const ok = await askConfirm({
+                              title: 'Remove category',
+                              message: `Remove category “${c.name}”? You cannot remove a category that still has precedents.`,
+                              danger: true,
+                              confirmLabel: 'Remove',
+                            })
+                            if (!ok) return
+                            setBusy(true)
+                            setErr(null)
+                            try {
+                              await apiFetch(`/matter-types/sub-types/${selectedSubId}/precedent-categories/${c.id}`, {
+                                token,
+                                method: 'DELETE',
+                              })
+                              const next = await apiFetch<PrecedentCategoryOut[]>(
+                                `/matter-types/sub-types/${selectedSubId}/precedent-categories`,
+                                { token },
+                              )
+                              setSubPrecCats(next)
+                            } catch (e: any) {
+                              setErr(e?.message ?? 'Failed to remove category')
+                            } finally {
+                              setBusy(false)
+                            }
+                          }}
+                        >
+                          Remove
+                        </button>
+                      </>
+                    )}
+                  </div>
                 </div>
               ))}
               {subPrecCats.length === 0 ? (
@@ -575,7 +664,7 @@ function precedentDisplayNameFromFile(file: File): string {
 function AdminPrecedents({ token }: { token: string }) {
   const { askConfirm } = useDialogs()
   /** Reserved references — edit in OnlyOffice; do not delete from Admin. */
-  const systemPrecedentReferences = new Set(['BLANK_LETTER', 'BLANK_EMAIL', 'INVOICE_TEMPLATE', 'COMPLETION_STATEMENT', 'QUOTE_TEMPLATE', 'QUOTE_EMAIL'])
+  const systemPrecedentReferences = SYSTEM_PRECEDENT_REFERENCES
   const [items, setItems] = useState<PrecedentOut[]>([])
   const [matterHeads, setMatterHeads] = useState<MatterHeadTypeOut[]>([])
   const [uploadHeadTypeId, setUploadHeadTypeId] = useState('')
@@ -616,6 +705,23 @@ function AdminPrecedents({ token }: { token: string }) {
   const [lhFileKey, setLhFileKey] = useState(0)
   const [qlhBusy, setQlhBusy] = useState(false)
   const [qlhFileKey, setQlhFileKey] = useState(0)
+  const [listSearch, setListSearch] = useState('')
+  const [listKindFilter, setListKindFilter] = useState<PrecedentKindFilter>('all')
+
+  const listFilters = useMemo(
+    () => ({ search: listSearch, kind: listKindFilter }),
+    [listSearch, listKindFilter],
+  )
+
+  const precedentTree = useMemo(
+    () => buildPrecedentTree(items, matterHeads, listFilters),
+    [items, matterHeads, listFilters],
+  )
+
+  const filteredCustomCount = useMemo(
+    () => countFilteredCustomPrecedents(items, listFilters),
+    [items, listFilters],
+  )
 
   const matterTypeOptions = useMemo(
     () => matterHeads.map((h) => ({ id: h.id, label: h.name })),
@@ -1091,6 +1197,236 @@ function AdminPrecedents({ token }: { token: string }) {
     }
   }
 
+  function renderPrecedentCard(p: PrecedentOut) {
+    return (
+      <div
+        className="listCard row precedentListCardRow"
+        style={{ justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}
+      >
+        <div style={{ flex: '1 1 200px', minWidth: 0 }}>
+          {nameEditId === p.id ? (
+            <div className="precedentNameRow precedentNameRow--edit">
+              <input
+                ref={precedentNameInputRef}
+                className="precedentAdminNameInput"
+                value={nameDraft}
+                disabled={busy}
+                maxLength={300}
+                aria-label="Precedent name"
+                onChange={(e) => setNameDraft(e.target.value)}
+                onBlur={() => void commitPrecedentNameEdit(p)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault()
+                    void commitPrecedentNameEdit(p)
+                  }
+                  if (e.key === 'Escape') {
+                    e.preventDefault()
+                    setNameEditId(null)
+                    setErr(null)
+                  }
+                }}
+              />
+            </div>
+          ) : (
+            <div className="precedentNameRow">
+              <span className="listTitle precedentNameText">{p.name}</span>
+              <button
+                type="button"
+                className="btn precedentNameEditBtn"
+                disabled={busy}
+                title="Edit name"
+                aria-label="Edit precedent name"
+                onClick={() => {
+                  setNameEditId(p.id)
+                  setNameDraft(p.name)
+                }}
+              >
+                <PrecedentNamePencilIcon />
+              </button>
+            </div>
+          )}
+          <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>
+            {referenceEditId === p.id ? (
+              <div className="row" style={{ gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                <input
+                  ref={precedentReferenceInputRef}
+                  className="mono precedentAdminNameInput"
+                  value={referenceDraft}
+                  disabled={busy}
+                  maxLength={200}
+                  aria-label="Precedent reference"
+                  onChange={(e) => setReferenceDraft(e.target.value)}
+                  onBlur={() => void commitPrecedentReferenceEdit(p)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault()
+                      void commitPrecedentReferenceEdit(p)
+                    }
+                    if (e.key === 'Escape') {
+                      e.preventDefault()
+                      setReferenceEditId(null)
+                    }
+                  }}
+                />
+              </div>
+            ) : (
+              <span className="row" style={{ gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+                <span className="mono">{p.reference}</span>
+                {!systemPrecedentReferences.has(p.reference) ? (
+                  <button
+                    type="button"
+                    className="btn precedentNameEditBtn"
+                    disabled={busy}
+                    title="Edit reference"
+                    aria-label="Edit precedent reference"
+                    onClick={() => {
+                      setReferenceEditId(p.id)
+                      setReferenceDraft(p.reference)
+                    }}
+                  >
+                    <PrecedentNamePencilIcon />
+                  </button>
+                ) : null}
+              </span>
+            )}{' '}
+            · {p.kind}
+          </div>
+          <div className="muted" style={{ fontSize: 12 }}>
+            {p.original_filename}
+          </div>
+          <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+            {scopeEditId === p.id ? (
+              <div className="stack" style={{ gap: 8, marginTop: 4 }}>
+                <SingleSelectDropdown
+                  label="Matter type"
+                  options={uploadHeadTypeDropdownOptions}
+                  value={scopeEditHead}
+                  onChange={(v) => {
+                    setScopeEditHead(v)
+                    setScopeEditSub('')
+                    setScopeEditCat(GLOBAL_PRECEDENT_SCOPE)
+                  }}
+                  disabled={busy}
+                />
+                <SingleSelectDropdown
+                  label="Sub-type"
+                  options={
+                    !scopeEditHead
+                      ? [{ value: '', label: 'Select a matter type first' }]
+                      : scopeEditHeadIsGlobal
+                        ? [{ value: GLOBAL_PRECEDENT_SCOPE, label: 'Global' }]
+                        : [
+                            { value: '', label: '— select —' },
+                            { value: GLOBAL_PRECEDENT_SCOPE, label: 'Global (all sub-types under this matter type)' },
+                            ...scopeEditSubOptions.map((o) => ({ value: o.id, label: o.label })),
+                          ]
+                  }
+                  value={scopeEditSub}
+                  onChange={(v) => {
+                    setScopeEditSub(v)
+                    setScopeEditCat(GLOBAL_PRECEDENT_SCOPE)
+                  }}
+                  disabled={busy || !scopeEditHead || scopeEditHeadIsGlobal}
+                />
+                {scopeEditHead &&
+                !scopeEditHeadIsGlobal &&
+                scopeEditSub &&
+                scopeEditSub !== GLOBAL_PRECEDENT_SCOPE ? (
+                  scopeEditCatsLoading ? (
+                    <div className="muted">Loading categories…</div>
+                  ) : (
+                    <SingleSelectDropdown
+                      label="Precedent category"
+                      options={[
+                        { value: GLOBAL_PRECEDENT_SCOPE, label: 'Global (all categories under this sub-type)' },
+                        ...scopeEditCats.map((c) => ({ value: c.id, label: c.name })),
+                      ]}
+                      value={scopeEditCat}
+                      onChange={setScopeEditCat}
+                      disabled={busy}
+                    />
+                  )
+                ) : null}
+                <div className="row" style={{ gap: 8 }}>
+                  <button type="button" className="btn primary" disabled={busy} onClick={() => void commitScopeEdit(p)}>
+                    Save scope
+                  </button>
+                  <button type="button" className="btn" disabled={busy} onClick={() => setScopeEditId(null)}>
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <span className="row" style={{ gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+                <span>{p.scope_summary || p.category_name || '—'}</span>
+                {!systemPrecedentReferences.has(p.reference) ? (
+                  <button
+                    type="button"
+                    className="btn precedentNameEditBtn"
+                    disabled={busy}
+                    title="Edit scope / category"
+                    aria-label="Edit precedent scope"
+                    onClick={() => beginScopeEdit(p)}
+                  >
+                    <PrecedentNamePencilIcon />
+                  </button>
+                ) : null}
+              </span>
+            )}
+          </div>
+        </div>
+        <div className="row" style={{ gap: 8 }}>
+          <button
+            type="button"
+            className="btn"
+            disabled={busy}
+            onClick={() => openOnlyOfficePrecedentEditor(p.id)}
+          >
+            Edit in OnlyOffice
+          </button>
+          {systemPrecedentReferences.has(p.reference) ? null : (
+            <button
+              type="button"
+              className="btn"
+              disabled={busy}
+              onClick={() => {
+                void (async () => {
+                  const ok = await askConfirm({
+                    title: 'Delete precedent',
+                    message: `Delete precedent "${p.name}"?`,
+                    danger: true,
+                    confirmLabel: 'Delete',
+                  })
+                  if (!ok) return
+                  setBusy(true)
+                  apiFetch(`/precedents/${p.id}`, { token, method: 'DELETE' })
+                    .then(() => load())
+                    .catch((e: any) => setErr(e?.message ?? 'Delete failed'))
+                    .finally(() => setBusy(false))
+                })()
+              }}
+            >
+              Remove
+            </button>
+          )}
+        </div>
+      </div>
+    )
+  }
+
+  function renderPrecedentRows(precedents: PrecedentOut[], depth: 0 | 1 | 2) {
+    return (
+      <FeeScaleScaleRows
+        depth={depth}
+        scales={precedents.map((p) => ({
+          id: p.id,
+          render: () => renderPrecedentCard(p),
+        }))}
+      />
+    )
+  }
+
   return (
     <div className="stack">
       <div className="paneHead">
@@ -1260,8 +1596,9 @@ function AdminPrecedents({ token }: { token: string }) {
         <div className="muted" style={{ marginBottom: 8 }}>
           Universal templates (e.g. <strong>Blank (no precedent)</strong> for letters,{' '}
           <strong>Blank e-mail (no precedent)</strong> for e-mails, <strong>Invoice template</strong>,{' '}
-          <strong>Completion statement template</strong>) ship with Canary and appear in the precedent list below.
-          Edit them in OnlyOffice like any other precedent. Firm-specific letterheads are configured in the cards above.
+          <strong>Completion statement template</strong>) ship with Canary and are always shown at the top of the
+          precedent library below. Edit them in OnlyOffice like any other precedent. Firm-specific letterheads are
+          configured in the cards above.
         </div>
         <div className="muted" style={{ marginBottom: 8 }}>
           Upload a template. Choose <strong>Global</strong> at any level to widen availability: <strong>Matter type</strong>{' '}
@@ -1704,224 +2041,102 @@ function AdminPrecedents({ token }: { token: string }) {
           </div>
         ) : null}
       </div>
-      <div className="list">
-        {items.map((p) => (
-          <div
-            key={p.id}
-            className="listCard row precedentListCardRow"
-            style={{ justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}
-          >
-            <div style={{ flex: '1 1 200px', minWidth: 0 }}>
-              {nameEditId === p.id ? (
-                <div className="precedentNameRow precedentNameRow--edit">
-                  <input
-                    ref={precedentNameInputRef}
-                    className="precedentAdminNameInput"
-                    value={nameDraft}
-                    disabled={busy}
-                    maxLength={300}
-                    aria-label="Precedent name"
-                    onChange={(e) => setNameDraft(e.target.value)}
-                    onBlur={() => void commitPrecedentNameEdit(p)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        e.preventDefault()
-                        void commitPrecedentNameEdit(p)
-                      }
-                      if (e.key === 'Escape') {
-                        e.preventDefault()
-                        setNameEditId(null)
-                        setErr(null)
-                      }
-                    }}
-                  />
-                </div>
-              ) : (
-                <div className="precedentNameRow">
-                  <span className="listTitle precedentNameText">{p.name}</span>
-                  <button
-                    type="button"
-                    className="btn precedentNameEditBtn"
-                    disabled={busy}
-                    title="Edit name"
-                    aria-label="Edit precedent name"
-                    onClick={() => {
-                      setNameEditId(p.id)
-                      setNameDraft(p.name)
-                    }}
-                  >
-                    <PrecedentNamePencilIcon />
-                  </button>
-                </div>
-              )}
-              <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>
-                {referenceEditId === p.id ? (
-                  <div className="row" style={{ gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-                    <input
-                      ref={precedentReferenceInputRef}
-                      className="mono precedentAdminNameInput"
-                      value={referenceDraft}
-                      disabled={busy}
-                      maxLength={200}
-                      aria-label="Precedent reference"
-                      onChange={(e) => setReferenceDraft(e.target.value)}
-                      onBlur={() => void commitPrecedentReferenceEdit(p)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') {
-                          e.preventDefault()
-                          void commitPrecedentReferenceEdit(p)
-                        }
-                        if (e.key === 'Escape') {
-                          e.preventDefault()
-                          setReferenceEditId(null)
-                        }
-                      }}
-                    />
-                  </div>
-                ) : (
-                  <span className="row" style={{ gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
-                    <span className="mono">{p.reference}</span>
-                    {!systemPrecedentReferences.has(p.reference) ? (
-                      <button
-                        type="button"
-                        className="btn precedentNameEditBtn"
-                        disabled={busy}
-                        title="Edit reference"
-                        aria-label="Edit precedent reference"
-                        onClick={() => {
-                          setReferenceEditId(p.id)
-                          setReferenceDraft(p.reference)
-                        }}
-                      >
-                        <PrecedentNamePencilIcon />
-                      </button>
-                    ) : null}
-                  </span>
-                )}{' '}
-                · {p.kind}
-              </div>
-              <div className="muted" style={{ fontSize: 12 }}>
-                {p.original_filename}
-              </div>
-              <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
-                {scopeEditId === p.id ? (
-                  <div className="stack" style={{ gap: 8, marginTop: 4 }}>
-                    <SingleSelectDropdown
-                      label="Matter type"
-                      options={uploadHeadTypeDropdownOptions}
-                      value={scopeEditHead}
-                      onChange={(v) => {
-                        setScopeEditHead(v)
-                        setScopeEditSub('')
-                        setScopeEditCat(GLOBAL_PRECEDENT_SCOPE)
-                      }}
-                      disabled={busy}
-                    />
-                    <SingleSelectDropdown
-                      label="Sub-type"
-                      options={
-                        !scopeEditHead
-                          ? [{ value: '', label: 'Select a matter type first' }]
-                          : scopeEditHeadIsGlobal
-                            ? [{ value: GLOBAL_PRECEDENT_SCOPE, label: 'Global' }]
-                            : [
-                                { value: '', label: '— select —' },
-                                { value: GLOBAL_PRECEDENT_SCOPE, label: 'Global (all sub-types under this matter type)' },
-                                ...scopeEditSubOptions.map((o) => ({ value: o.id, label: o.label })),
-                              ]
-                      }
-                      value={scopeEditSub}
-                      onChange={(v) => {
-                        setScopeEditSub(v)
-                        setScopeEditCat(GLOBAL_PRECEDENT_SCOPE)
-                      }}
-                      disabled={busy || !scopeEditHead || scopeEditHeadIsGlobal}
-                    />
-                    {scopeEditHead &&
-                    !scopeEditHeadIsGlobal &&
-                    scopeEditSub &&
-                    scopeEditSub !== GLOBAL_PRECEDENT_SCOPE ? (
-                      scopeEditCatsLoading ? (
-                        <div className="muted">Loading categories…</div>
-                      ) : (
-                        <SingleSelectDropdown
-                          label="Precedent category"
-                          options={[
-                            { value: GLOBAL_PRECEDENT_SCOPE, label: 'Global (all categories under this sub-type)' },
-                            ...scopeEditCats.map((c) => ({ value: c.id, label: c.name })),
-                          ]}
-                          value={scopeEditCat}
-                          onChange={setScopeEditCat}
-                          disabled={busy}
-                        />
-                      )
-                    ) : null}
-                    <div className="row" style={{ gap: 8 }}>
-                      <button type="button" className="btn primary" disabled={busy} onClick={() => void commitScopeEdit(p)}>
-                        Save scope
-                      </button>
-                      <button type="button" className="btn" disabled={busy} onClick={() => setScopeEditId(null)}>
-                        Cancel
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <span className="row" style={{ gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
-                    <span>{p.scope_summary || p.category_name || '—'}</span>
-                    {!systemPrecedentReferences.has(p.reference) ? (
-                      <button
-                        type="button"
-                        className="btn precedentNameEditBtn"
-                        disabled={busy}
-                        title="Edit scope / category"
-                        aria-label="Edit precedent scope"
-                        onClick={() => beginScopeEdit(p)}
-                      >
-                        <PrecedentNamePencilIcon />
-                      </button>
-                    ) : null}
-                  </span>
-                )}
-              </div>
-            </div>
-            <div className="row" style={{ gap: 8 }}>
+      <div className="card" style={{ padding: 12, marginTop: 16 }}>
+        <h4 style={{ marginTop: 0 }}>Precedent library</h4>
+        <div className="precedentLibraryToolbar stack" style={{ gap: 10, marginBottom: 16 }}>
+          <SearchInput
+            placeholder="Search by name or reference…"
+            value={listSearch}
+            onChange={(e) => setListSearch(e.target.value)}
+            onClear={() => setListSearch('')}
+            aria-label="Search precedents"
+          />
+          <div className="precedentKindTabs row" role="tablist" aria-label="Precedent kind">
+            {(
+              [
+                ['all', 'All'],
+                ['letter', 'Letters'],
+                ['email', 'E-mails'],
+                ['document', 'Documents'],
+              ] as const
+            ).map(([value, label]) => (
               <button
+                key={value}
                 type="button"
-                className="btn"
-                disabled={busy}
-                onClick={() => openOnlyOfficePrecedentEditor(p.id)}
+                role="tab"
+                aria-selected={listKindFilter === value}
+                className={`btn precedentKindTab ${listKindFilter === value ? 'active' : ''}`}
+                onClick={() => setListKindFilter(value)}
               >
-                Edit in OnlyOffice
+                {label}
               </button>
-              {systemPrecedentReferences.has(p.reference) ? null : (
-              <button
-                type="button"
-                className="btn"
-                disabled={busy}
-                onClick={() => {
-                  void (async () => {
-                    const ok = await askConfirm({
-                      title: 'Delete precedent',
-                      message: `Delete precedent "${p.name}"?`,
-                      danger: true,
-                      confirmLabel: 'Delete',
-                    })
-                    if (!ok) return
-                    setBusy(true)
-                    apiFetch(`/precedents/${p.id}`, { token, method: 'DELETE' })
-                      .then(() => load())
-                      .catch((e: any) => setErr(e?.message ?? 'Delete failed'))
-                      .finally(() => setBusy(false))
-                  })()
-                }}
-              >
-                Remove
-              </button>
-              )}
-            </div>
+            ))}
           </div>
-        ))}
-        {items.length === 0 ? <div className="muted">No precedents yet.</div> : null}
+        </div>
+
+        <div className="feeScaleTree precedentTree stack" style={{ gap: 24 }}>
+          {precedentTree.map((block) => {
+            if (block.kind === 'system') {
+              return (
+                <section key="system" className="feeScaleTreeBlock precedentTreeBlock--system">
+                  <h4 className="feeScaleTreeBlockTitle">System templates</h4>
+                  <p className="muted precedentTreeBlockHint">
+                    Built-in Canary templates — always shown here regardless of search or kind filters.
+                  </p>
+                  {renderPrecedentRows(block.precedents, 0)}
+                </section>
+              )
+            }
+            if (block.kind === 'global') {
+              return (
+                <section key="global" className="feeScaleTreeBlock">
+                  <h4 className="feeScaleTreeBlockTitle">Global — all cases</h4>
+                  {renderPrecedentRows(block.precedents, 0)}
+                </section>
+              )
+            }
+            if (block.kind === 'orphan') {
+              return (
+                <section key="orphan" className="feeScaleTreeBlock">
+                  <h4 className="feeScaleTreeBlockTitle">Other</h4>
+                  {renderPrecedentRows(block.precedents, 1)}
+                </section>
+              )
+            }
+            return (
+              <section key={block.headId} className="feeScaleTreeBlock feeScaleTreeBlock--matter">
+                <h4 className="feeScaleTreeBlockTitle">{block.headName}</h4>
+                {block.headPrecedents.length ? (
+                  <FeeScaleThreadGroup depth={1} label="All sub-types">
+                    {renderPrecedentRows(block.headPrecedents, 1)}
+                  </FeeScaleThreadGroup>
+                ) : null}
+                {block.subGroups.map((sg) => (
+                  <FeeScaleThreadGroup key={sg.subId} depth={2} label={sg.subName}>
+                    {sg.uncategorised.length ? (
+                      <div className="precedentTreeSubGroup">
+                        <div className="feeScaleThreadGroupLabel">Uncategorised</div>
+                        {renderPrecedentRows(sg.uncategorised, 2)}
+                      </div>
+                    ) : null}
+                    {sg.categoryGroups.map((cg) => (
+                      <div key={cg.categoryId} className="precedentTreeSubGroup">
+                        <div className="feeScaleThreadGroupLabel">{cg.categoryName}</div>
+                        {renderPrecedentRows(cg.precedents, 2)}
+                      </div>
+                    ))}
+                  </FeeScaleThreadGroup>
+                ))}
+              </section>
+            )
+          })}
+          {items.length === 0 ? <div className="muted">No precedents yet — upload one above.</div> : null}
+          {items.length > 0 &&
+          filteredCustomCount === 0 &&
+          items.some((p) => !systemPrecedentReferences.has(p.reference)) ? (
+            <div className="muted">No firm precedents match your search or kind filter.</div>
+          ) : null}
+        </div>
       </div>
     </div>
   )

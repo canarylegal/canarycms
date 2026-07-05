@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { applyAuthHeaders, apiUrl, formatApiErrorDetail } from './api'
 import { DocMimeIcon } from './case/DocCells'
+import { decodeFolderPathForDisplay, decodeFolderPathSegment } from './case/folderPathCodec'
 import { PortalFormFillPanel } from './PortalFormFillPanel'
 import { PortalQuotePdfViewer } from './PortalQuotePdfViewer'
 import { PortalLayout, type PortalBrandingConfig } from './portal/PortalBranding'
@@ -60,6 +61,12 @@ async function portalFetch<T>(
     throw new Error(formatApiErrorDetail(parsed, res.statusText, apiUrl(path)))
   }
   return parsed as T
+}
+
+function portalFolderLabel(path: string | null | undefined): string {
+  const raw = (path ?? '').trim()
+  if (!raw) return '—'
+  return decodeFolderPathForDisplay(raw)
 }
 
 function formatBytes(n: number): string {
@@ -1262,7 +1269,7 @@ export default function PortalPage() {
                 <span key={`${part}-${idx}`} style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
                   <span aria-hidden>/</span>
                   <button type="button" className="btnLink" onClick={() => navigateBreadcrumb(idx)}>
-                    {part}
+                    {decodeFolderPathSegment(part)}
                   </button>
                 </span>
               ))}
@@ -1315,7 +1322,7 @@ export default function PortalPage() {
                             </span>
                           </div>
                           <div className="td">{d.original_filename}</div>
-                          <div className="td muted">{d.folder_display?.trim() || '—'}</div>
+                          <div className="td muted">{portalFolderLabel(d.folder_display)}</div>
                           <div className="td muted">{formatBytes(d.size_bytes ?? 0)}</div>
                           <div className="td row" style={{ gap: 6, flexWrap: 'wrap' }}>
                             {activeGrant?.can_download ? (
@@ -1407,7 +1414,7 @@ export default function PortalPage() {
                   <div className="td portalFilesTableIconCol">
                     <span className="docsTypeIcon" aria-hidden>📁</span>
                   </div>
-                  <div className="td">{name}</div>
+                  <div className="td">{decodeFolderPathSegment(name)}</div>
                   <div className="td muted">—</div>
                   <div className="td muted">—</div>
                   <div className="td muted">Folder</div>
@@ -1421,7 +1428,7 @@ export default function PortalPage() {
                     </span>
                   </div>
                   <div className="td">{f.original_filename}</div>
-                  <div className="td muted">{f.folder_display || '—'}</div>
+                  <div className="td muted">{portalFolderLabel(f.folder_display)}</div>
                   <div className="td muted">{formatBytes(f.size_bytes)}</div>
                   <div className="td row" style={{ gap: 6, flexWrap: 'wrap' }}>
                     {activeGrant?.can_download ? (
