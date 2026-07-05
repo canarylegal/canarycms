@@ -87,6 +87,16 @@ def firm_portal_logo_file_paths(*, file_id: uuid.UUID, original_filename: str) -
     return StoredFilePaths(abs_path=abs_path, rel_path=str(rel), folder_path="")
 
 
+def firm_default_signature_file_paths(*, file_id: uuid.UUID, original_filename: str) -> StoredFilePaths:
+    safe_name = Path(original_filename).name
+    rel = Path("firm") / "default-signature" / f"{file_id}__{safe_name}"
+    abs_path = (FILES_ROOT / rel).resolve()
+    if not str(abs_path).startswith(str(FILES_ROOT)):
+        raise RuntimeError("Resolved path escaped FILES_ROOT")
+    abs_path.parent.mkdir(parents=True, exist_ok=True)
+    return StoredFilePaths(abs_path=abs_path, rel_path=str(rel), folder_path="")
+
+
 def precedent_file_paths(*, precedent_id: uuid.UUID, file_id: uuid.UUID, original_filename: str) -> StoredFilePaths:
     safe_name = Path(original_filename).name
     rel = Path("precedents") / str(precedent_id) / f"{file_id}__{safe_name}"

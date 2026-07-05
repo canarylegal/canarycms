@@ -406,6 +406,10 @@ class FirmSettings(Base):
     portal_logo_file_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("file.id", ondelete="SET NULL"), nullable=True
     )
+    default_signature_file_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("file.id", ondelete="SET NULL"), nullable=True
+    )
+    default_signature_scale: Mapped[int] = mapped_column(Integer, nullable=False, default=7)
     invoice_template_file_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("file.id", ondelete="SET NULL"), nullable=True
     )
@@ -906,6 +910,7 @@ class FileCategory(str, enum.Enum):
     system = "system"
     firm_letterhead = "firm_letterhead"
     firm_portal_logo = "firm_portal_logo"
+    firm_default_signature = "firm_default_signature"
     user_signature = "user_signature"
 
 

@@ -150,6 +150,9 @@ export type FirmSettingsOut = {
   quote_letterhead_original_filename?: string | null
   portal_logo_configured?: boolean
   portal_logo_original_filename?: string | null
+  default_signature_configured?: boolean
+  default_signature_original_filename?: string | null
+  default_signature_scale?: number
   mandate_two_factor?: boolean
   mandate_password_rotation?: boolean
   password_rotation_days?: number | null

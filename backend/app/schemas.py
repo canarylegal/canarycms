@@ -463,6 +463,9 @@ class FirmSettingsOut(BaseModel):
     quote_letterhead_original_filename: str | None = None
     portal_logo_configured: bool = False
     portal_logo_original_filename: str | None = None
+    default_signature_configured: bool = False
+    default_signature_original_filename: str | None = None
+    default_signature_scale: int = Field(default=7, ge=1, le=10)
     mandate_two_factor: bool = False
     mandate_password_rotation: bool = False
     password_rotation_days: int | None = None
@@ -504,6 +507,7 @@ class FirmSettingsUpdate(BaseModel):
     postcode: str | None = Field(default=None, max_length=50)
     letterhead_style: LetterheadStyle | None = None
     quote_letterhead_style: LetterheadStyle | None = None
+    default_signature_scale: int | None = Field(default=None, ge=1, le=10)
     mandate_two_factor: bool | None = None
     mandate_password_rotation: bool | None = None
     password_rotation_days: int | None = Field(default=None, ge=1, le=3650)
