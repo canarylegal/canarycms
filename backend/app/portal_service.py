@@ -323,13 +323,15 @@ def get_portal_grant_file(
 
 
 def default_grant_label(db: Session, grant: ContactPortalGrant) -> str:
+    from .file_storage import decode_folder_path_for_display, decode_folder_path_segment
+
     if grant.label and grant.label.strip():
-        return grant.label.strip()
+        return decode_folder_path_for_display(grant.label.strip())
     case = db.get(Case, grant.case_id)
     matter = case.title.strip() if case and case.title else "Documents"
     folder = sanitize_folder_path(grant.folder_path)
     if folder:
-        leaf = folder.split("/")[-1]
+        leaf = decode_folder_path_segment(folder.split("/")[-1])
         return f"{matter} — {leaf}"
     return matter
 
@@ -366,10 +368,10 @@ def ensure_upload_folder_allowed(*, grant: ContactPortalGrant, folder: str) -> s
 
 
 def grant_folder_display_name(grant: ContactPortalGrant) -> str:
-    from .file_storage import decode_folder_path_segment
+    from .file_storage import decode_folder_path_for_display, decode_folder_path_segment
 
     if grant.label and grant.label.strip():
-        return grant.label.strip()
+        return decode_folder_path_for_display(grant.label.strip())
     folder = sanitize_folder_path(grant.folder_path)
     if not folder:
         return "Documents"
