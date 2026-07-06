@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 from app.db import get_db
 from app.deps import get_current_user
 from app.docx_util import write_client_account_reconcile_report_docx
+from app.download_headers import attachment_content_disposition_headers
 from app.models import User
 from app.permission_checks import user_may_approve_ledger
 from app.reconciliation_service import (
@@ -178,5 +179,5 @@ def download_reconciliation_report(
     return StreamingResponse(
         bio,
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        headers=attachment_content_disposition_headers(filename),
     )
