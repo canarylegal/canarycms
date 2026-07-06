@@ -104,36 +104,35 @@ def build_update_check_payload() -> dict[str, Any]:
             prev = (base.get("note") or "").strip()
             base["note"] = f"{prev} {extra}".strip() if prev else extra
         else:
-            base["update_available"] = not _same_commit(current, remote_sha)
-
-        # Latest release (optional human notes)
-        rel = client.get(f"{GITHUB_API}/repos/{owner}/{repo}/releases/latest", headers=headers)
-        if rel.status_code == 200:
-            rj = rel.json()
-            base["latest_release_tag"] = rj.get("tag_name")
-            base["latest_release_name"] = rj.get("name")
-            body = rj.get("body")
-            if isinstance(body, str) and body.strip():
-                base["latest_release_body"] = body.strip()[:8000]
-
-        if base["update_available"] and current != "unknown":
             cmp = client.get(
                 f"{GITHUB_API}/repos/{owner}/{repo}/compare/{current}...{remote_sha}",
                 headers=headers,
             )
             if cmp.status_code == 200:
                 cj = cmp.json()
-                base["compare_html_url"] = cj.get("html_url")
-                msgs: list[str] = []
-                for c in cj.get("commits") or []:
-                    if len(msgs) >= 40:
-                        break
-                    commit = (c or {}).get("commit") or {}
-                    msg = commit.get("message")
-                    if isinstance(msg, str) and msg.strip():
-                        msgs.append(msg.strip().split("\n", 1)[0].strip()[:500])
-                base["commit_messages"] = msgs
+                ahead_by = int(cj.get("ahead_by") or 0)
+                base["update_available"] = ahead_by > 0
+                if base["update_available"]:
+                    base["compare_html_url"] = cj.get("html_url")
+                    msgs: list[str] = []
+                    for c in cj.get("commits") or []:
+                        if len(msgs) >= 40:
+                            break
+                        commit = (c or {}).get("commit") or {}
+                        msg = commit.get("message")
+                        if isinstance(msg, str) and msg.strip():
+                            msgs.append(msg.strip().split("\n", 1)[0].strip()[:500])
+                    base["commit_messages"] = msgs
+                elif int(cj.get("behind_by") or 0) > 0:
+                    prev = (base.get("note") or "").strip()
+                    tail = (
+                        f"This deployment ({_short_sha(current)}) is ahead of GitHub {_short_sha(remote_sha)} "
+                        "with unpublished local commits. Push from your dev machine, or use Reset to GitHub if you "
+                        "intend to discard local changes."
+                    )
+                    base["note"] = f"{prev} {tail}".strip() if prev else tail
             else:
+                base["update_available"] = not _same_commit(current, remote_sha)
                 prev = (base.get("note") or "").strip()
                 tail = f"Could not load commit list (compare {cmp.status_code})."
                 tip_cur = client.get(
@@ -147,6 +146,17 @@ def build_update_check_payload() -> dict[str, Any]:
                         f"({_short_sha(remote_sha)}). Point CANARY_GITHUB_DEPLOY_OWNER / REPO / REF at the remote "
                         "that contains this commit, or push your checkout to the configured repository."
                     )
+                    base["update_available"] = False
                 base["note"] = f"{prev} {tail}".strip() if prev else tail
+
+        # Latest release (optional human notes)
+        rel = client.get(f"{GITHUB_API}/repos/{owner}/{repo}/releases/latest", headers=headers)
+        if rel.status_code == 200:
+            rj = rel.json()
+            base["latest_release_tag"] = rj.get("tag_name")
+            base["latest_release_name"] = rj.get("name")
+            body = rj.get("body")
+            if isinstance(body, str) and body.strip():
+                base["latest_release_body"] = body.strip()[:8000]
 
     return base

@@ -426,10 +426,11 @@ def _run_git_sync(cfg: ComposeUpdateConfig, journal: MutableSequence[str] | None
     trust = _git_trust_repo_args(cfg.project_dir)
 
     if strategy == "ff-only":
-        _journal(journal, "git: pull --ff-only (starting)")
+        ref = cfg.git_ref
+        _journal(journal, f"git: pull --ff-only origin {ref} (starting)")
         try:
             subprocess.run(
-                [git, *trust, "pull", "--ff-only"],
+                [git, *trust, "pull", "--ff-only", "origin", ref],
                 check=True,
                 timeout=300,
                 capture_output=True,
@@ -438,7 +439,7 @@ def _run_git_sync(cfg: ComposeUpdateConfig, journal: MutableSequence[str] | None
         except subprocess.CalledProcessError as e:
             err = _git_sync_error_detail(e)
             raise RuntimeError(f"git pull failed: {err or e.returncode}") from e
-        _journal(journal, "git: pull finished")
+        _journal(journal, f"git: pull finished (origin/{ref})")
         return
 
     ref = cfg.git_ref

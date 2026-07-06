@@ -33,8 +33,11 @@ def test_run_git_sync_ff_only(compose_cfg: ComposeUpdateConfig) -> None:
             run.return_value = MagicMock(returncode=0)
             _run_git_sync(compose_cfg, journal, "ff-only")
     assert run.call_count == 1
-    assert "pull" in run.call_args[0][0]
-    assert "ff-only" in run.call_args[0][0]
+    args = run.call_args[0][0]
+    assert "pull" in args
+    assert "--ff-only" in args
+    assert "origin" in args
+    assert "main" in args
     assert journal[0].startswith("git: pull")
 
 
