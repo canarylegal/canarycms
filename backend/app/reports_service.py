@@ -543,6 +543,81 @@ def report_ledger_activity(
     return out
 
 
+@dataclass
+class LedgerLegActivityRow:
+    entry_id: uuid.UUID
+    pair_id: uuid.UUID
+    case_id: uuid.UUID
+    case_number: str
+    client_name: str | None
+    matter_description: str
+    fee_earner_name: str
+    posted_at: datetime
+    posted_by_name: str
+    description: str
+    reference: str | None
+    direction: str
+    amount_pence: int
+    is_approved: bool
+    contact_label: str | None
+
+
+def report_ledger_leg_activity(
+    fee_earner_user_ids: list[uuid.UUID],
+    db: Session,
+    *,
+    account_type: LedgerAccountType,
+    date_from: date | None = None,
+    date_to: date | None = None,
+    approved_only: bool = False,
+) -> list[LedgerLegActivityRow]:
+    """Ledger postings for one account type (client or office), one row per entry."""
+    q = (
+        select(LedgerEntry, LedgerAccount, Case, User)
+        .join(LedgerAccount, LedgerEntry.account_id == LedgerAccount.id)
+        .join(Case, LedgerAccount.case_id == Case.id)
+        .outerjoin(User, LedgerEntry.posted_by_user_id == User.id)
+        .where(
+            Case.fee_earner_user_id.in_(fee_earner_user_ids),
+            Case.fee_earner_user_id.isnot(None),
+            LedgerAccount.account_type == account_type,
+        )
+        .order_by(LedgerEntry.posted_at.desc(), Case.case_number.asc())
+    )
+    if date_from is not None:
+        q = q.where(LedgerEntry.posted_at >= _utc_day_start(date_from))
+    if date_to is not None:
+        q = q.where(LedgerEntry.posted_at < _utc_day_end_exclusive(date_to))
+    if approved_only:
+        q = q.where(LedgerEntry.is_approved.is_(True))
+
+    out: list[LedgerLegActivityRow] = []
+    for entry, _account, case, poster in db.execute(q).all():
+        poster_name = _fee_earner_label(db, entry.posted_by_user_id) if entry.posted_by_user_id else "—"
+        if poster and poster.display_name:
+            poster_name = poster.display_name.strip() or poster.email
+        out.append(
+            LedgerLegActivityRow(
+                entry_id=entry.id,
+                pair_id=entry.pair_id,
+                case_id=case.id,
+                case_number=display_case_number(case.case_number, case.status),
+                client_name=case.client_name,
+                matter_description=case.title,
+                fee_earner_name=_fee_earner_label(db, case.fee_earner_user_id),
+                posted_at=entry.posted_at,
+                posted_by_name=poster_name,
+                description=entry.description or "",
+                reference=entry.reference,
+                direction=entry.direction.value,
+                amount_pence=int(entry.amount_pence),
+                is_approved=entry.is_approved,
+                contact_label=entry.contact_label,
+            )
+        )
+    return out
+
+
 def _age_bucket_label(age_days: int) -> str:
     if age_days <= 30:
         return "0-30"
@@ -937,10 +1012,13 @@ def pence_to_pounds_str(p: int) -> str:
 def rows_to_workbook(sheet_title: str, headers: list[str], row_values: list[list[Any]]) -> Any:
     from openpyxl import Workbook
 
+    from app.xlsx_util import autofit_workbook
+
     wb = Workbook()
     ws = wb.active
     ws.title = sheet_title[:31] if sheet_title else "Report"
     ws.append(headers)
     for rv in row_values:
         ws.append(rv)
+    autofit_workbook(wb)
     return wb

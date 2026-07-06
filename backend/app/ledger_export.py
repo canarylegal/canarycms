@@ -10,6 +10,7 @@ from openpyxl import Workbook
 from app.models import Case
 from app.reports_service import pence_to_pounds_str
 from app.schemas import LedgerEntryOut, LedgerOut
+from app.xlsx_util import autofit_workbook
 
 _PENDING_SUFFIX = re.compile(r"\s*\(pending approval\)\s*", re.IGNORECASE)
 
@@ -106,4 +107,5 @@ def build_case_ledger_workbook(case: Case, ledger: LedgerOut) -> Workbook:
                 "Pending" if _entry_pending(entry) else "Approved",
             ]
         )
+    autofit_workbook(wb)
     return wb
