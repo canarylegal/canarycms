@@ -9,6 +9,7 @@ from typing import Any, Mapping
 
 from openpyxl import Workbook, load_workbook
 from openpyxl.cell.cell import MergedCell
+from openpyxl.utils import get_column_letter
 
 _MERGE_TOKEN_RE = re.compile(r"\[(?:[biu]+:)?([A-Z0-9_]+)\]", re.IGNORECASE)
 
@@ -71,6 +72,44 @@ def _cell_display(value: Any) -> str:
     if isinstance(value, float) and value.is_integer():
         return str(int(value))
     return str(value)
+
+
+def _cell_display_width(value: Any) -> int:
+    return len(_cell_display(value))
+
+
+def autofit_worksheet_columns(
+    ws: Any,
+    *,
+    min_width: float = 8.0,
+    max_width: float = 60.0,
+    padding: float = 2.0,
+) -> None:
+    """Set column widths from cell contents (openpyxl has no Excel auto-fit)."""
+    if ws.max_column == 0 or ws.max_row == 0:
+        return
+    for col_idx in range(1, ws.max_column + 1):
+        max_len = 0
+        for row_idx in range(1, ws.max_row + 1):
+            max_len = max(max_len, _cell_display_width(ws.cell(row=row_idx, column=col_idx).value))
+        letter = get_column_letter(col_idx)
+        ws.column_dimensions[letter].width = min(max(max_len + padding, min_width), max_width)
+
+
+def autofit_workbook(
+    wb: Any,
+    *,
+    min_width: float = 8.0,
+    max_width: float = 60.0,
+    padding: float = 2.0,
+) -> None:
+    for ws in wb.worksheets:
+        autofit_worksheet_columns(
+            ws,
+            min_width=min_width,
+            max_width=max_width,
+            padding=padding,
+        )
 
 
 def extract_xlsx_grid(xlsx_bytes: bytes, *, sheet_index: int = 0) -> XlsxGrid:

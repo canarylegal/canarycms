@@ -15,17 +15,19 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.xlsx_util import autofit_workbook
 from app.docx_util import write_client_account_reconcile_report_docx
-from app.models import ClientAccountReconciliation, ReconciliationStatus, User
+from app.models import ClientAccountReconciliation, LedgerAccountType, ReconciliationStatus, User
 from app.reconciliation_service import firm_settings_for_report, get_reconciliation_for_period, reconciliation_to_dict
 from app.reports_service import (
     ExceptionsReport,
+    LedgerLegActivityRow,
     pence_to_pounds_str,
     report_aged_debt,
     report_billing,
     report_client_office_balances,
     report_exceptions,
-    report_ledger_activity,
+    report_ledger_leg_activity,
 )
 
 
@@ -121,11 +123,31 @@ def preview_accountant_pack(
         )
 
     if include_ledger_activity:
-        rows = report_ledger_activity(
-            fee_earner_user_ids, db, date_from=act_from, date_to=act_to, approved_only=False
+        client_rows = report_ledger_leg_activity(
+            fee_earner_user_ids,
+            db,
+            account_type=LedgerAccountType.client,
+            date_from=act_from,
+            date_to=act_to,
+            approved_only=False,
+        )
+        office_rows = report_ledger_leg_activity(
+            fee_earner_user_ids,
+            db,
+            account_type=LedgerAccountType.office,
+            date_from=act_from,
+            date_to=act_to,
+            approved_only=False,
         )
         sections.append(
-            AccountantPackSectionPreview("ledger_activity", "Ledger activity", True, len(rows), None)
+            AccountantPackSectionPreview(
+                "client_ledger_activity", "Client ledger activity", True, len(client_rows), None
+            )
+        )
+        sections.append(
+            AccountantPackSectionPreview(
+                "office_ledger_activity", "Office ledger activity", True, len(office_rows), None
+            )
         )
 
     if include_aged_debt:
@@ -188,6 +210,42 @@ def _add_sheet(wb: Any, title: str, headers: list[str], data_rows: list[list[Any
     ws.append(headers)
     for row in data_rows:
         ws.append(row)
+
+
+_LEDGER_LEG_HEADERS = [
+    "Posted (UTC)",
+    "Reference",
+    "Client",
+    "Matter",
+    "Fee earner",
+    "Description",
+    "Ledger ref",
+    "Amount (£)",
+    "Direction",
+    "Approved",
+    "Posted by",
+    "Contact",
+]
+
+
+def _ledger_leg_sheet_rows(rows: list[LedgerLegActivityRow]) -> list[list[Any]]:
+    return [
+        [
+            r.posted_at.strftime("%Y-%m-%d %H:%M"),
+            r.case_number,
+            r.client_name or "",
+            r.matter_description,
+            r.fee_earner_name,
+            r.description,
+            r.reference or "",
+            float(pence_to_pounds_str(r.amount_pence)),
+            r.direction,
+            "Yes" if r.is_approved else "Pending",
+            r.posted_by_name,
+            r.contact_label or "",
+        ]
+        for r in rows
+    ]
 
 
 def _build_summary_sheet(
@@ -332,49 +390,33 @@ def _build_workbook(
         )
 
     if include_ledger_activity:
-        rows = report_ledger_activity(
+        client_rows = report_ledger_leg_activity(
             fee_earner_user_ids,
             db,
+            account_type=LedgerAccountType.client,
+            date_from=activity_date_from,
+            date_to=activity_date_to,
+            approved_only=False,
+        )
+        office_rows = report_ledger_leg_activity(
+            fee_earner_user_ids,
+            db,
+            account_type=LedgerAccountType.office,
             date_from=activity_date_from,
             date_to=activity_date_to,
             approved_only=False,
         )
         _add_sheet(
             wb,
-            "Ledger activity",
-            [
-                "Posted (UTC)",
-                "Reference",
-                "Client",
-                "Matter",
-                "Fee earner",
-                "Description",
-                "Ledger ref",
-                "Amount (£)",
-                "Client leg",
-                "Office leg",
-                "Approved",
-                "Posted by",
-                "Contact",
-            ],
-            [
-                [
-                    r.posted_at.strftime("%Y-%m-%d %H:%M"),
-                    r.case_number,
-                    r.client_name or "",
-                    r.matter_description,
-                    r.fee_earner_name,
-                    r.description,
-                    r.reference or "",
-                    float(pence_to_pounds_str(r.amount_pence)),
-                    r.client_direction or "",
-                    r.office_direction or "",
-                    "Yes" if r.is_approved else "Pending",
-                    r.posted_by_name,
-                    r.contact_label or "",
-                ]
-                for r in rows
-            ],
+            "Client ledger activity",
+            _LEDGER_LEG_HEADERS,
+            _ledger_leg_sheet_rows(client_rows),
+        )
+        _add_sheet(
+            wb,
+            "Office ledger activity",
+            _LEDGER_LEG_HEADERS,
+            _ledger_leg_sheet_rows(office_rows),
         )
 
     if include_aged_debt:
@@ -623,6 +665,7 @@ def build_accountant_pack(
     docx_name = f"Client account reconcile report — {period_label}.docx"
 
     xlsx_bio = BytesIO()
+    autofit_workbook(wb)
     wb.save(xlsx_bio)
     xlsx_bytes = xlsx_bio.getvalue()
 

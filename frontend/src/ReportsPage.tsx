@@ -2349,7 +2349,8 @@ export function ReportsPage({
           <section className="reportsSection">
             <p className="muted" style={{ marginTop: 0 }}>
               Download a ZIP containing a multi-sheet Excel workbook plus the approved client account reconcile report
-              (Word) for the period end date. Run month-end reconcile first if you need the Word document included.
+              (Word) for the period end date. Ledger activity is exported on separate client and office worksheets.
+              Run month-end reconcile first if you need the Word document included.
             </p>
             <div className="card" style={{ padding: 16, marginTop: 12 }}>
               <div style={{ fontWeight: 600, marginBottom: 8 }}>Include in pack</div>
@@ -2385,7 +2386,7 @@ export function ReportsPage({
                       setPackPreview(null)
                     }}
                   />
-                  <span>Ledger activity</span>
+                  <span>Client &amp; office ledger activity</span>
                 </label>
                 <label className="reportsCheckbox">
                   <input

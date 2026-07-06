@@ -10,6 +10,8 @@ from fastapi.responses import StreamingResponse
 from openpyxl import Workbook
 from sqlalchemy.orm import Session
 
+from app.xlsx_util import autofit_workbook
+
 from app.accountant_pack_service import build_accountant_pack, preview_accountant_pack
 from app.db import get_db
 from app.deps import get_current_user
@@ -52,6 +54,7 @@ ReportFormat = Literal["json", "xlsx"]
 
 
 def _wb_response(wb: Workbook, download_name: str) -> StreamingResponse:
+    autofit_workbook(wb)
     bio = BytesIO()
     wb.save(bio)
     bio.seek(0)
