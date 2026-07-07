@@ -190,109 +190,18 @@ function isClientMatterContact(c: CaseContactOut) {
   return (c.matter_contact_type || '').trim().toLowerCase() === CLIENT_TYPE_SLUG
 }
 
-const CASE_DOC_PANEL_ZOOM_MIN = 0.12
-
-/**
- * Scale panel content so it fits the documents card without scrollbars.
- * Uses CSS `zoom` when effective (Chromium); otherwise `transform: scale(...)`.
- */
-function CaseDocPanelZoomFit({
+/** Matter sub-menu panel body: fit width, scroll vertically (no zoom shrinking). */
+function CaseDocPanelScroll({
   children,
-  /** Stretch inner wrapper to host height (flex layouts e.g. case calendar). */
+  /** Stretch direct child to host height when content is short (e.g. embedded calendar). */
   fillHost = false,
 }: {
   children: React.ReactNode
   fillHost?: boolean
 }) {
-  const hostRef = useRef<HTMLDivElement>(null)
-  const innerRef = useRef<HTMLDivElement>(null)
-
-  const runFit = useCallback(() => {
-    const host = hostRef.current
-    const inner = innerRef.current
-    if (!host || !inner) return
-    const cw = host.clientWidth
-    const ch = host.clientHeight
-    if (cw < 4 || ch < 4) return
-
-    const st = inner.style as CSSStyleDeclaration & { zoom?: string }
-    st.zoom = ''
-    inner.style.removeProperty('transform')
-    inner.style.transformOrigin = 'top left'
-
-    const fitsZoom = (z: number) => {
-      st.zoom = String(z)
-      void inner.offsetHeight
-      return inner.scrollHeight <= ch + 2 && inner.scrollWidth <= cw + 2
-    }
-
-    const applyTransformScale = () => {
-      st.zoom = ''
-      const ih = inner.scrollHeight
-      const iw = inner.scrollWidth
-      if (ih < 1 || iw < 1) return
-      const s = Math.max(CASE_DOC_PANEL_ZOOM_MIN, Math.min(1, cw / iw, ch / ih))
-      inner.style.transformOrigin = 'top left'
-      inner.style.transform = s < 0.998 ? `scale(${s})` : ''
-    }
-
-    if (fitsZoom(1)) {
-      st.zoom = '1'
-      return
-    }
-
-    if (!fitsZoom(CASE_DOC_PANEL_ZOOM_MIN)) {
-      applyTransformScale()
-      return
-    }
-
-    let lo = CASE_DOC_PANEL_ZOOM_MIN
-    let hi = 1
-    for (let i = 0; i < 20; i++) {
-      const mid = (lo + hi) / 2
-      if (fitsZoom(mid)) lo = mid
-      else hi = mid
-    }
-    st.zoom = String(lo)
-    void inner.offsetHeight
-    if (inner.scrollHeight > ch + 3 || inner.scrollWidth > cw + 3) {
-      applyTransformScale()
-    }
-  }, [])
-
-  useLayoutEffect(() => {
-    runFit()
-    const ro = new ResizeObserver(() => {
-      requestAnimationFrame(() => runFit())
-    })
-    if (hostRef.current) ro.observe(hostRef.current)
-    if (innerRef.current) ro.observe(innerRef.current)
-    const t0 = window.setTimeout(runFit, 0)
-    const t1 = window.setTimeout(runFit, 120)
-    const t2 = window.setTimeout(runFit, 400)
-    return () => {
-      clearTimeout(t0)
-      clearTimeout(t1)
-      clearTimeout(t2)
-      ro.disconnect()
-    }
-  }, [runFit, children, fillHost])
-
   return (
-    <div ref={hostRef} className="caseDocPanelZoomFitHost">
-      <div
-        ref={innerRef}
-        className={`caseDocPanelZoomFitContent${fillHost ? ' caseDocPanelZoomFitContent--fillHost' : ''}`}
-      >
-        {children}
-      </div>
-    </div>
+    <div className={`caseDocPanelScrollHost${fillHost ? ' caseDocPanelScrollHost--fillHost' : ''}`}>{children}</div>
   )
-}
-
-/** Panel body that scrolls vertically when content exceeds the documents card. */
-function CaseDocPanelScroll({ children }: { children: React.ReactNode }) {
-  return <div className="caseDocPanelScrollHost">{children}</div>
 }
 
 export type CaseOpenDocPanel = 'accounts'
@@ -3069,7 +2978,7 @@ export function CaseDetail({
                       ← Documents
                     </button>
                   </div>
-                  <CaseDocPanelZoomFit fillHost>
+                  <CaseDocPanelScroll fillHost>
                     <EventsPage
                       caseId={caseId}
                       token={token}
@@ -3086,7 +2995,7 @@ export function CaseDetail({
                         void apiFetch<CaseEventsOut>(`/cases/${caseId}/events`, { token }).then(setEventsPreview).catch(() => {})
                       }}
                     />
-                  </CaseDocPanelZoomFit>
+                  </CaseDocPanelScroll>
                 </div>
               ) : caseDocPanel === 'finance' && caseId ? (
                 <div
@@ -3125,7 +3034,7 @@ export function CaseDetail({
                       Close
                     </button>
                   </div>
-                  <CaseDocPanelZoomFit>
+                  <CaseDocPanelScroll>
                     <div className="card caseDocEditEmbed">
                       <div className="muted" style={{ marginBottom: 12 }}>
                         Reference is immutable and generated automatically. Client name comes from matter contacts with type
@@ -3277,7 +3186,7 @@ export function CaseDetail({
                         </button>
                       </div>
                     </div>
-                  </CaseDocPanelZoomFit>
+                  </CaseDocPanelScroll>
                 </div>
               ) : caseDocPanel === 'portal-hub' && caseId && portalEnabled ? (
                 <div
@@ -3311,7 +3220,7 @@ export function CaseDetail({
                       Close
                     </button>
                   </div>
-                  <CaseDocPanelZoomFit>
+                  <CaseDocPanelScroll>
                     <PortalFolderSharePanel
                       token={token}
                       caseId={caseId}
@@ -3321,7 +3230,7 @@ export function CaseDetail({
                         onRefresh()
                       }}
                     />
-                  </CaseDocPanelZoomFit>
+                  </CaseDocPanelScroll>
                 </div>
               ) : caseDocPanel === 'accounts' && caseId ? (
                 <div
@@ -3443,7 +3352,7 @@ export function CaseDetail({
                       Clear completed tasks
                     </button>
                   </div>
-                  <CaseDocPanelZoomFit>
+                  <CaseDocPanelScroll>
                     <TasksTable
                       token={token}
                       currentUserId={currentUser?.id ?? ''}
@@ -3475,7 +3384,7 @@ export function CaseDetail({
                       embedded
                       suppressCaseOpen
                     />
-                  </CaseDocPanelZoomFit>
+                  </CaseDocPanelScroll>
                 </div>
               ) : caseDocPanel === 'property' && propertyDraft ? (
                 <div
@@ -3562,7 +3471,7 @@ export function CaseDetail({
                       ← Documents
                     </button>
                   </div>
-                  <CaseDocPanelZoomFit>
+                  <CaseDocPanelScroll>
                   <div className="card caseDocPropertyEmbed" style={{ maxWidth: '100%' }}>
                     {contactAddOpen ? (
                       <>
@@ -3638,7 +3547,7 @@ export function CaseDetail({
                       </>
                     ) : null}
                   </div>
-                  </CaseDocPanelZoomFit>
+                  </CaseDocPanelScroll>
                 </div>
               ) : null}
             </div>

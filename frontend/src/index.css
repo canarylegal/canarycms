@@ -3469,14 +3469,14 @@ select {
   -webkit-overflow-scrolling: touch;
 }
 
-/* Left-menu panels: no outer scroll; CaseDocPanelZoomFit scales content inside the card. */
+/* Left-menu sub-panels: toolbar fixed; body scrolls vertically (no zoom shrinking). */
 .caseDocsScroll--panelOnly {
   overflow: hidden;
   display: flex;
   flex-direction: column;
 }
 
-/* Non-documents panels: fill the card, let CaseDocPanelZoomFit shrink content (no inner scroll). */
+/* Non-documents sub-panels: fill the card below the toolbar. */
 .caseDocPanelHost {
   flex: 1;
   min-height: 0;
@@ -3484,14 +3484,6 @@ select {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-}
-
-.caseDocPanelZoomFitHost {
-  flex: 1;
-  min-height: 0;
-  min-width: 0;
-  overflow: hidden;
-  position: relative;
 }
 
 .caseDocPanelScrollHost {
@@ -3503,10 +3495,29 @@ select {
   -webkit-overflow-scrolling: touch;
 }
 
+.caseDocPanelScrollHost > * {
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.caseDocPanelScrollHost--fillHost {
+  display: flex;
+  flex-direction: column;
+}
+
+.caseDocPanelScrollHost--fillHost > .eventsPageEmbed {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
 .caseDocPanelScrollHost .caseDocPropertyEmbed,
-.caseDocPanelScrollHost .caseDocLedgerEmbed {
+.caseDocPanelScrollHost .caseDocLedgerEmbed,
+.caseDocPanelScrollHost .caseDocEditEmbed {
   flex: none;
   min-height: min-content;
+  overflow: visible;
 }
 
 .caseDocPanelScrollHost .ledgerShell {
@@ -3518,21 +3529,6 @@ select {
   max-height: none;
 }
 
-.caseDocPanelZoomFitContent {
-  width: 100%;
-  max-width: 100%;
-  box-sizing: border-box;
-  overflow: hidden;
-  min-height: 0;
-  min-width: 0;
-}
-
-.caseDocPanelZoomFitContent--fillHost {
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-}
-
 /* Case documents panel: calendar fills space below toolbar / composer. */
 .eventsPageEmbed > *:not(.eventsPageEmbedGrow) {
   flex-shrink: 0;
@@ -3541,18 +3537,6 @@ select {
 .eventsPageEmbed .eventsPageEmbedGrow {
   flex: 1;
   min-height: 0;
-}
-
-/* Avoid nested scroll areas fighting the zoom-fit goal (tables still scale with the wrapper). */
-.caseDocPanelZoomFitContent .casesTableScroll,
-.caseDocPanelZoomFitContent .tasksTableScroll,
-.caseDocPanelZoomFitContent .modalBodyScroll {
-  overflow: hidden !important;
-  max-height: none;
-}
-
-.caseDocPanelZoomFitContent .ledgerTableWrap {
-  overflow: hidden !important;
 }
 
 .caseDocEditEmbed,
