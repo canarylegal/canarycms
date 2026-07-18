@@ -205,16 +205,14 @@ export function QuoteWizard({
     setBusy(true)
     setErr(null)
     try {
-      let label = 'Quote'
       let caseContactId: string | null = null
       let mergeAll = false
       if (pickMatterCcId === 'all_clients') {
         mergeAll = true
-        label = 'All clients'
       } else if (pickMatterCcId && pickMatterCcId !== 'none') {
         caseContactId = pickMatterCcId
-        label = caseContacts.find((c) => c.id === pickMatterCcId)?.name ?? 'Quote'
       }
+      const matterDescription = selectedCase?.matter_description.trim() || 'Matter'
       const amount_overrides: Record<string, number> = {}
       for (const [key, s] of Object.entries(composeAmountOverrides)) {
         const p = poundsToPence(s)
@@ -223,7 +221,7 @@ export function QuoteWizard({
       const res = await apiFetch<{ id: string }>(`/cases/${caseId}/files/compose-quote`, {
         token,
         json: {
-          original_filename: `Quote — ${label.replace(/[/\\]/g, '_').slice(0, 120)}.docx`,
+          original_filename: `Quote — ${matterDescription.replace(/[/\\]/g, '_').slice(0, 120)}.docx`,
           folder: '',
           fee_scale_id: feeScaleId === 'none' ? null : feeScaleId,
           case_contact_id: caseContactId,
