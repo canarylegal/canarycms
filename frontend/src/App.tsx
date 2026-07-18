@@ -871,7 +871,7 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
   }, [])
 
   const setView = useCallback(
-    (next: View) => {
+    async (next: View): Promise<boolean> => {
       if (next === 'admin-console' && !canAdminConsoleRef.current) {
         next = 'main-menu'
       }
@@ -881,24 +881,34 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
       if (next === 'docusign' && docusignEnabledRef.current !== true) {
         next = 'main-menu'
       }
+      if (viewRef.current === 'case-menu' && next !== 'case-menu') {
+        const ok = await askConfirm({
+          title: 'Exit matter',
+          message: 'Are you sure you want to exit this matter?',
+          confirmLabel: 'Exit matter',
+          cancelLabel: 'Stay here',
+        })
+        if (!ok) return false
+      }
       setViewState(next)
       syncNavFromState({ view: next, caseId: next === 'case-menu' ? selectedCaseIdRef.current : null })
+      return true
     },
-    [syncNavFromState],
+    [askConfirm, syncNavFromState],
   )
 
-  const goMainMenu = useCallback(() => {
+  const goMainMenu = useCallback(async () => {
+    if (!(await setView('main-menu'))) return
     if (userIsCashierAccountsHome(auth.me)) {
       setCashierMainMenuExplicit(true)
     }
-    setView('main-menu')
   }, [auth.me, setView])
 
   const primaryNavHandlers = useMemo(
     (): Record<PrimaryNavId, () => void> => ({
       'main-menu': goMainMenu,
-      quotes: () => {
-        setView('quotes')
+      quotes: async () => {
+        if (!(await setView('quotes'))) return
         setQuotesSubPanel('list')
       },
       calendar: () => setView('calendar'),
