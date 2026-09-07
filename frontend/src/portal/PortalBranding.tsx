@@ -49,22 +49,34 @@ export function PortalLayout({
   config,
   subtitle,
   wide = true,
+  headerActions,
   children,
 }: {
   config: PortalBrandingConfig
   subtitle?: string | null
   wide?: boolean
+  headerActions?: ReactNode
   children: ReactNode
 }) {
   return (
     <div className="portalShell">
-      <div className="portalLayout">
-        <div className={`portalCard card${wide ? ' portalCardWide' : ''}`}>
-          <PortalBrandHeader config={config} subtitle={subtitle} />
-          {children}
-        </div>
-        <PortalPoweredBy config={config} />
+      <div className={`portalLayout${wide ? ' portalLayout--wide' : ' portalLayout--narrow'}`}>
+        {wide ? (
+          <>
+            <div className="portalWideTop">
+              <PortalBrandHeader config={config} subtitle={subtitle} />
+              {headerActions ? <div className="portalWideTopActions">{headerActions}</div> : null}
+            </div>
+            <div className="portalCard card portalCardWide">{children}</div>
+          </>
+        ) : (
+          <div className="portalCard card">
+            <PortalBrandHeader config={config} subtitle={subtitle} />
+            {children}
+          </div>
+        )}
       </div>
+      <PortalPoweredBy config={config} />
     </div>
   )
 }

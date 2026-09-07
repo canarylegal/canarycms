@@ -10,6 +10,10 @@ const KEYS = {
 } as const
 
 export const DEFAULT_ACCENT = '#2563eb'
+/** Stored in ``appearance_accent`` to select slate navigation chrome (primary buttons stay blue). */
+export const SLATE_CHROME_ACCENT = '#1e293b'
+export type ChromeStyle = 'canary' | 'slate'
+
 /** Default light-theme page backdrop (matches `index.css` :root). */
 export const DEFAULT_PAGE_BG = '#1e3a8a'
 /** Default dark-theme page backdrop (matches `index.css` `html.dark`). */
@@ -21,6 +25,30 @@ export type ThemePreferences = {
   mode: 'light' | 'dark'
   pageBg: string
 }
+
+export function chromeStyleFromAccent(accent: string): ChromeStyle {
+  return accent.trim().toLowerCase() === SLATE_CHROME_ACCENT.toLowerCase() ? 'slate' : 'canary'
+}
+
+export function accentForChromeStyle(chrome: ChromeStyle): string {
+  return chrome === 'slate' ? SLATE_CHROME_ACCENT : DEFAULT_ACCENT
+}
+
+/** Quick picks restored in Appearance — navigation chrome only (buttons stay Canary blue). */
+export const CHROME_STYLE_OPTIONS: { id: ChromeStyle; label: string; swatch: string; hint: string }[] = [
+  {
+    id: 'canary',
+    label: 'Canary blue',
+    swatch: '#172554',
+    hint: 'Current navigation and ribbon colour',
+  },
+  {
+    id: 'slate',
+    label: 'Slate',
+    swatch: '#1e293b',
+    hint: 'Earlier darker grey-blue chrome',
+  },
+]
 
 function hexToRgb(hex: string): { r: number; g: number; b: number } | null {
   const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim())
@@ -57,8 +85,13 @@ export function themeFromAppearance(a: UserAppearanceOut): ThemePreferences {
 
 export function applyThemePreferences(p: ThemePreferences): void {
   const root = document.documentElement
-  const accent = p.accent.trim() || DEFAULT_ACCENT
   const mode = p.mode === 'dark' ? 'dark' : 'light'
+  // Dark mode always uses slate chrome; Canary blue is light-mode only.
+  const chrome: ChromeStyle = mode === 'dark' ? 'slate' : chromeStyleFromAccent(p.accent)
+  // Keep action buttons on Canary blue for both chrome packs.
+  const accent = DEFAULT_ACCENT
+
+  root.dataset.canaryChrome = chrome
 
   root.style.setProperty('--primary', accent)
   const rgb = hexToRgb(accent)
@@ -114,7 +147,7 @@ export function saveThemePreferences(p: ThemePreferences): void {
 }
 
 export const FONT_OPTIONS: { value: string; label: string }[] = [
-  { value: '', label: 'App default (DM Sans)' },
+  { value: '', label: 'App default (System UI)' },
   { value: '"DM Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif', label: 'DM Sans' },
   { value: 'system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif', label: 'System UI' },
   { value: '"Open Sans", "Helvetica Neue", Helvetica, Arial, sans-serif', label: 'Open Sans (if installed)' },

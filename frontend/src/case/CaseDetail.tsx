@@ -84,7 +84,7 @@ import { TASKS_MENU_COLUMN_COUNT, TASKS_MENU_COLUMN_WIDTHS_DEFAULT } from '../us
 import { CaseContactsAddDocForm, CaseContactsEditDocForm, LAWYER_CLIENTS_REQUIRED_MSG } from './CaseContactsDocForms'
 import { computeDocContextMenuStyle } from './docContextMenu'
 import { dndEventHasFiles, docListPrimaryDate, formatDocFileSize, formatDocModified, matterTypeDisplayLine } from './docFormat'
-import { DocsFileDescCell, DocsFolderDescCell } from './DocCells'
+import { DocsFileDescCell, DocsFolderDescCell, folderContentsSummary } from './DocCells'
 import { financeCaseTotals, penceGb } from './financeTotals'
 import { matterContactTypeLabel } from './matterLabels'
 import { PropertyDetailsForm } from './PropertyDetailsForm'
@@ -106,6 +106,7 @@ import {
 } from './portalFolderAccess'
 import { CasePortalPanel } from './CasePortalPanel'
 import { PortalFolderSharePanel } from './PortalFolderSharePanel'
+import { NavIcon, type NavIconName } from '../NavIcon'
 
 function fileDocOwnerLabel(f: FileSummary): string {
   return f.owner_initials ?? f.owner_display_name ?? f.owner_email ?? '—'
@@ -204,6 +205,114 @@ function CaseDocPanelScroll({
   )
 }
 
+/** Dark header chrome for case sub-menus — matches New matter modal paneHead. */
+function CaseDocPanelChrome({
+  title,
+  subtitle,
+  onClose,
+  closeLabel = 'Close',
+  closeDisabled,
+  actions,
+}: {
+  title: string
+  subtitle?: string
+  onClose: () => void
+  closeLabel?: string
+  closeDisabled?: boolean
+  actions?: React.ReactNode
+}) {
+  return (
+    <div className="caseDocPanelBar">
+      <div className="caseDocPanelBarTitle">
+        <h2>{title}</h2>
+        {subtitle ? <div className="muted">{subtitle}</div> : null}
+      </div>
+      <div className="caseDocPanelBarActions">
+        {actions}
+        <button type="button" className="btn" onClick={onClose} disabled={closeDisabled}>
+          {closeLabel}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function CaseDocsToolbarBtnIcon({ d }: { d: string }) {
+  return (
+    <svg className="caseDocsToolbarBtnIcon" width={16} height={16} viewBox="0 0 24 24" aria-hidden>
+      <path fill="currentColor" d={d} />
+    </svg>
+  )
+}
+
+const CASE_DOCS_TOOLBAR_ICONS = {
+  import: 'M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z',
+  export: 'M9 16h6v-6h4l-7-7-7 7h4zm-4 2v2h14v-2H5z',
+  portal:
+    'M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z',
+  refresh:
+    'M17.65 6.35A7.958 7.958 0 0 0 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0 1 12 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z',
+} as const
+
+type CaseLeftMenuIconName =
+  | 'overview'
+  | 'contacts'
+  | 'accounts'
+  | 'tasks'
+  | 'property'
+  | 'events'
+  | 'finance'
+
+/** Case left sub-menu icons — reuse main-nav glyphs where the same section exists. */
+function CaseLeftMenuIcon({ name }: { name: CaseLeftMenuIconName }) {
+  const navName: NavIconName | null =
+    name === 'contacts'
+      ? 'contacts'
+      : name === 'accounts'
+        ? 'accounts'
+        : name === 'tasks'
+          ? 'tasks'
+          : name === 'events'
+            ? 'calendar'
+            : name === 'finance'
+              ? 'reports'
+              : null
+  if (navName) {
+    return <NavIcon name={navName} className="caseLeftNavIcon" />
+  }
+
+  const common = {
+    className: 'caseLeftNavIcon',
+    width: 16,
+    height: 16,
+    viewBox: '0 0 24 24',
+    fill: 'none' as const,
+    xmlns: 'http://www.w3.org/2000/svg',
+    'aria-hidden': true as const,
+  }
+  if (name === 'overview') {
+    return (
+      <svg {...common}>
+        <rect x="4" y="4" width="7" height="7" rx="1.5" stroke="currentColor" strokeWidth="2" />
+        <rect x="13" y="4" width="7" height="7" rx="1.5" stroke="currentColor" strokeWidth="2" />
+        <rect x="4" y="13" width="7" height="7" rx="1.5" stroke="currentColor" strokeWidth="2" />
+        <rect x="13" y="13" width="7" height="7" rx="1.5" stroke="currentColor" strokeWidth="2" />
+      </svg>
+    )
+  }
+  // Property — no main-nav counterpart
+  return (
+    <svg {...common}>
+      <path
+        d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5.5v-6h-5v6H4a1 1 0 0 1-1-1v-9.5Z"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinejoin="round"
+      />
+    </svg>
+  )
+}
+
 export type CaseOpenDocPanel = 'accounts'
 
 export function CaseDetail({
@@ -224,6 +333,7 @@ export function CaseDetail({
   onOpenDocPanelConsumed,
   pendingComposeKind,
   onPendingComposeConsumed,
+  onBackToMainMenu,
 }: {
   token: string
   caseDetail: CaseOut | null
@@ -244,6 +354,8 @@ export function CaseDetail({
   /** After quote wizard: open letter or e-mail precedent picker once the matter has loaded. */
   pendingComposeKind?: PendingCaseCompose | null
   onPendingComposeConsumed?: () => void
+  /** Leave the matter and return to the cases main menu. */
+  onBackToMainMenu?: () => void
 }) {
   void _notes
   void _tasks
@@ -470,6 +582,17 @@ export function CaseDetail({
   const [caseDocPanel, setCaseDocPanel] = useState<CaseDocPanel>(() =>
     openDocPanel === 'accounts' ? 'accounts' : 'documents',
   )
+  const goToOverview = useCallback(() => {
+    setLeftOpen({
+      contacts: false,
+      accounts: false,
+      tasks: false,
+      property: false,
+      events: false,
+      finance: false,
+    })
+    setCaseDocPanel('documents')
+  }, [])
   const [accountsSubTab, setAccountsSubTab] = useState<'ledger' | 'time'>('ledger')
   const [portalShareFolderPath, setPortalShareFolderPath] = useState<string | null>(null)
   const [portalQuoteSend, setPortalQuoteSend] = useState<{ fileId: string; fileName: string; folderPath: string } | null>(
@@ -2122,47 +2245,50 @@ export function CaseDetail({
           e.stopPropagation()
         }}
       >
-        <div className="caseLeft">
-          <div className="card caseDetailsCard">
-            <div className="caseDetailsCardHeader">
-              <h3>Case details</h3>
-              <button
-                type="button"
-                className="btn btnCaseChrome"
-                disabled={busy}
-                onClick={() => {
-                  setActionErr(null)
-                  setEditCaseErr(null)
-                  setCaseDocPanel('edit-details')
-                }}
-              >
-                Edit details
-              </button>
+        <div className="caseLeft caseLeft--rail">
+          <div className="caseMatterHero">
+            <div className="caseMatterHeroTop">
+              <span className="caseMatterHeroRef mono">{caseDetail.case_number}</span>
+              {onBackToMainMenu ? (
+                <button
+                  type="button"
+                  className="btn caseMatterHeroBack"
+                  onClick={() => onBackToMainMenu()}
+                  aria-label="Back to main menu"
+                  title="Back to main menu"
+                >
+                  <svg
+                    className="caseMatterHeroBackIcon"
+                    width="16"
+                    height="16"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    xmlns="http://www.w3.org/2000/svg"
+                    aria-hidden="true"
+                  >
+                    <path
+                      d="M19 12H5"
+                      stroke="currentColor"
+                      strokeWidth="2.25"
+                      strokeLinecap="round"
+                    />
+                    <path
+                      d="M12 5 5 12l7 7"
+                      stroke="currentColor"
+                      strokeWidth="2.25"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                </button>
+              ) : null}
             </div>
-            <dl className="caseDetailsList">
-              <div className="caseDetailRow">
-                <dt>Reference</dt>
-                <dd>
-                  <span className="mono">{caseDetail.case_number}</span>
-                </dd>
-              </div>
+            <h2 className="caseMatterHeroClient">{caseDetail.matter_description || 'No description'}</h2>
+            <p className="caseMatterHeroType">{matterTypeDisplayLine(caseDetail)}</p>
+            <dl className="caseDetailsList caseMatterHeroDetails">
               <div className="caseDetailRow">
                 <dt>Client</dt>
                 <dd>{caseDetail.client_name ?? '—'}</dd>
-              </div>
-              <div className="caseDetailRow">
-                <dt>Matter type</dt>
-                <dd>{matterTypeDisplayLine(caseDetail)}</dd>
-              </div>
-              <div className="caseDetailRow">
-                <dt>Description</dt>
-                <dd>{caseDetail.matter_description}</dd>
-              </div>
-              <div className="caseDetailRow">
-                <dt>Status</dt>
-                <dd>
-                  {formatCaseStatusLabel(caseDetail.status)}
-                </dd>
               </div>
               <div className="caseDetailRow">
                 <dt>Fee earner</dt>
@@ -2175,15 +2301,48 @@ export function CaseDetail({
                 </div>
               ) : null}
               <div className="caseDetailRow">
+                <dt>Status</dt>
+                <dd className={`caseMatterHeroStatusText caseMatterHeroStatusText--${caseDetail.status}`}>
+                  {formatCaseStatusLabel(caseDetail.status)}
+                </dd>
+              </div>
+              <div className="caseDetailRow">
                 <dt>Lock</dt>
                 <dd>{caseHasRevokedUserAccess(caseDetail) ? 'Locked' : 'Unlocked'}</dd>
               </div>
             </dl>
+            <button
+              type="button"
+              className="btn primary caseMatterHeroEdit"
+              disabled={busy}
+              onClick={() => {
+                setActionErr(null)
+                setEditCaseErr(null)
+                setCaseDocPanel('edit-details')
+              }}
+            >
+              Matter details
+            </button>
           </div>
 
-          <div className="card">
+          <div className="card caseMatterSections">
+            <button
+              type="button"
+              className={`accHead caseLeftNavItem${caseDocPanel === 'documents' ? ' is-active' : ''}`}
+              aria-current={caseDocPanel === 'documents' ? 'page' : undefined}
+              onClick={goToOverview}
+            >
+              <CaseLeftMenuIcon name="overview" />
+              <span>Overview</span>
+            </button>
             <div className="accordion">
-              <button className="accHead" onClick={() => toggleLeftAccordion('contacts')}>
+              <button
+                className={`accHead${caseDocPanel === 'contacts' ? ' is-active' : ''}`}
+                aria-expanded={leftOpen.contacts}
+                aria-current={caseDocPanel === 'contacts' ? 'page' : undefined}
+                onClick={() => toggleLeftAccordion('contacts')}
+              >
+                <CaseLeftMenuIcon name="contacts" />
                 <span>Contacts</span>
                 <span className="muted">{leftOpen.contacts ? '▾' : '▸'}</span>
               </button>
@@ -2286,9 +2445,12 @@ export function CaseDetail({
           <div className="card">
             <div className="accordion">
               <button
-                className="accHead"
+                className={`accHead${caseDocPanel === 'accounts' ? ' is-active' : ''}`}
+                aria-expanded={leftOpen.accounts}
+                aria-current={caseDocPanel === 'accounts' ? 'page' : undefined}
                 onClick={() => toggleLeftAccordion('accounts')}
               >
+                <CaseLeftMenuIcon name="accounts" />
                 <span>Accounts</span>
                 <span className="muted">{leftOpen.accounts ? '▾' : '▸'}</span>
               </button>
@@ -2332,9 +2494,12 @@ export function CaseDetail({
             <div className="card">
               <div className="accordion">
                 <button
-                  className="accHead"
+                  className={`accHead${caseDocPanel === 'tasks' ? ' is-active' : ''}`}
+                  aria-expanded={leftOpen.tasks}
+                  aria-current={caseDocPanel === 'tasks' ? 'page' : undefined}
                   onClick={() => toggleLeftAccordion('tasks')}
                 >
+                  <CaseLeftMenuIcon name="tasks" />
                   <span>Tasks</span>
                   <span className="muted">{leftOpen.tasks ? '▾' : '▸'}</span>
                 </button>
@@ -2362,9 +2527,12 @@ export function CaseDetail({
             <div className="card">
               <div className="accordion">
                 <button
-                  className="accHead"
+                  className={`accHead${caseDocPanel === 'property' ? ' is-active' : ''}`}
+                  aria-expanded={leftOpen.property}
+                  aria-current={caseDocPanel === 'property' ? 'page' : undefined}
                   onClick={() => toggleLeftAccordion('property')}
                 >
+                  <CaseLeftMenuIcon name="property" />
                   <span>Property</span>
                   <span className="muted">{leftOpen.property ? '▾' : '▸'}</span>
                 </button>
@@ -2473,12 +2641,13 @@ export function CaseDetail({
             <div className="card">
               <div className="accordion">
                 <button
-                  className="accHead"
+                  className={`accHead${caseDocPanel === 'events' ? ' is-active' : ''}`}
+                  aria-expanded={leftOpen.events}
+                  aria-current={caseDocPanel === 'events' ? 'page' : undefined}
                   onClick={() => toggleLeftAccordion('events')}
                 >
-                  <span className="row" style={{ gap: 8, alignItems: 'center' }}>
-                    <span>Calendar</span>
-                  </span>
+                  <CaseLeftMenuIcon name="events" />
+                  <span>Calendar</span>
                   <span className="muted">{leftOpen.events ? '▾' : '▸'}</span>
                 </button>
                 {leftOpen.events ? (
@@ -2539,9 +2708,12 @@ export function CaseDetail({
             <div className="card">
               <div className="accordion">
                 <button
-                  className="accHead"
+                  className={`accHead${caseDocPanel === 'finance' ? ' is-active' : ''}`}
+                  aria-expanded={leftOpen.finance}
+                  aria-current={caseDocPanel === 'finance' ? 'page' : undefined}
                   onClick={() => toggleLeftAccordion('finance')}
                 >
+                  <CaseLeftMenuIcon name="finance" />
                   <span>Finance</span>
                   <span className="muted">{leftOpen.finance ? '▾' : '▸'}</span>
                 </button>
@@ -2560,7 +2732,11 @@ export function CaseDetail({
                             <div>
                               Debits: <strong>{penceGb(dr)}</strong>
                             </div>
-                            <div style={{ color: creditBal ? 'var(--text)' : 'var(--danger)' }}>
+                            <div
+                              className={
+                                creditBal ? 'caseFinanceBalance caseFinanceBalance--ok' : 'caseFinanceBalance caseFinanceBalance--dr'
+                              }
+                            >
                               Balance:{' '}
                               <strong>
                                 {creditBal ? penceGb(net) : `-${penceGb(-net)}`}
@@ -2590,74 +2766,15 @@ export function CaseDetail({
         </div>
 
         <div className="caseRight">
-          <div
-            className={`card caseDocsCard${docsDragOver ? ' caseDocsCard--dragOver' : ''}`}
-            onDragEnter={(e) => {
-              if (caseDocPanel !== 'documents') return
-              e.preventDefault()
-              e.stopPropagation()
-              if (!dndEventHasFiles(e)) return
-              setDocsDragOver(true)
-            }}
-            onDragLeave={(e) => {
-              if (caseDocPanel !== 'documents') return
-              const cur = e.currentTarget as HTMLElement
-              const rel = e.relatedTarget as Node | null
-              if (rel && cur.contains(rel)) return
-              setDocsDragOver(false)
-            }}
-            onDragOver={(e) => {
-              if (caseDocPanel !== 'documents') return
-              e.preventDefault()
-              e.stopPropagation()
-              if (dndEventHasFiles(e)) {
-                e.dataTransfer.dropEffect = 'copy'
-              } else {
-                e.dataTransfer.dropEffect = 'none'
-              }
-            }}
-            onClick={() => {
-              if (caseDocPanel === 'documents') setSelectedDocSet(new Set())
-            }}
-            onContextMenu={(e) => {
-              if (caseDocPanel !== 'documents') return
-              e.preventDefault()
-              e.stopPropagation()
-              setDocMenu({ kind: 'surface', x: e.clientX, y: e.clientY })
-            }}
-            onDrop={async (e) => {
-              if (caseDocPanel !== 'documents') return
-              e.preventDefault()
-              e.stopPropagation()
-              setDocsDragOver(false)
-              if (!dndEventHasFiles(e)) return
-              const droppedFiles = [...e.dataTransfer.files]
-              if (droppedFiles.some(isEmlLikeUploadFile)) {
-                setActionErr(
-                  'To file an e-mail in Canary, please use the add-in appropriate to your e-mail client.',
-                )
-                return
-              }
-              await uploadFilesToCurrentFolder(droppedFiles)
-            }}
-          >
+          {caseDocPanel === 'documents' ? (
             <div
-              className={
-                caseDocPanel === 'documents' ? 'caseDocsScroll' : 'caseDocsScroll caseDocsScroll--panelOnly'
-              }
-              tabIndex={caseDocPanel === 'documents' ? 0 : undefined}
-              onKeyDown={handleDocsKeyDown}
+              className="caseDocsToolbarBar"
+              role="toolbar"
+              aria-label="Documents actions"
+              onClick={(e) => e.stopPropagation()}
+              onContextMenu={(e) => e.stopPropagation()}
             >
-              {caseDocPanel === 'documents' ? (
-              <>
-              <div className="caseDocsStickyHead">
-              <div
-                className="caseDocsToolbar"
-                role="toolbar"
-                aria-label="Documents actions"
-                onClick={(e) => e.stopPropagation()}
-                onContextMenu={(e) => e.stopPropagation()}
-              >
+              <div className="caseDocsToolbar">
                 <div className="caseDocsToolbarMain">
                   <div className="caseToolbarDropdownWrap" ref={newMenuRef}>
                     <button
@@ -2778,23 +2895,42 @@ export function CaseDetail({
                       </div>
                     ) : null}
                   </div>
-                  <button type="button" className="btn btnCaseChrome" disabled={busy} onClick={() => importInputRef.current?.click()}>
+                  <button
+                    type="button"
+                    className="btn btnCaseChrome caseDocsToolbarActionBtn"
+                    disabled={busy}
+                    onClick={() => importInputRef.current?.click()}
+                  >
+                    <CaseDocsToolbarBtnIcon d={CASE_DOCS_TOOLBAR_ICONS.import} />
                     Import
                   </button>
                   <button
                     type="button"
-                    className="btn btnCaseChrome"
+                    className="btn btnCaseChrome caseDocsToolbarActionBtn"
                     disabled={busy || !caseDetail}
                     onClick={() => void downloadCaseExportZip()}
                   >
+                    <CaseDocsToolbarBtnIcon d={CASE_DOCS_TOOLBAR_ICONS.export} />
                     Export
                   </button>
                   {portalEnabled ? (
-                    <button type="button" className="btn btnCaseChrome" disabled={busy} onClick={() => setCaseDocPanel('portal-hub')}>
+                    <button
+                      type="button"
+                      className="btn btnCaseChrome caseDocsToolbarActionBtn"
+                      disabled={busy}
+                      onClick={() => setCaseDocPanel('portal-hub')}
+                    >
+                      <CaseDocsToolbarBtnIcon d={CASE_DOCS_TOOLBAR_ICONS.portal} />
                       Portal
                     </button>
                   ) : null}
-                  <button type="button" className="btn btnCaseChrome" disabled={busy} onClick={() => onRefresh()}>
+                  <button
+                    type="button"
+                    className="btn btnCaseChrome caseDocsToolbarActionBtn"
+                    disabled={busy}
+                    onClick={() => onRefresh()}
+                  >
+                    <CaseDocsToolbarBtnIcon d={CASE_DOCS_TOOLBAR_ICONS.refresh} />
                     Refresh
                   </button>
                 </div>
@@ -2807,6 +2943,69 @@ export function CaseDetail({
                   aria-label="Search documents"
                 />
               </div>
+            </div>
+          ) : null}
+          <div
+            className={`card caseDocsCard${docsDragOver ? ' caseDocsCard--dragOver' : ''}`}
+            onDragEnter={(e) => {
+              if (caseDocPanel !== 'documents') return
+              e.preventDefault()
+              e.stopPropagation()
+              if (!dndEventHasFiles(e)) return
+              setDocsDragOver(true)
+            }}
+            onDragLeave={(e) => {
+              if (caseDocPanel !== 'documents') return
+              const cur = e.currentTarget as HTMLElement
+              const rel = e.relatedTarget as Node | null
+              if (rel && cur.contains(rel)) return
+              setDocsDragOver(false)
+            }}
+            onDragOver={(e) => {
+              if (caseDocPanel !== 'documents') return
+              e.preventDefault()
+              e.stopPropagation()
+              if (dndEventHasFiles(e)) {
+                e.dataTransfer.dropEffect = 'copy'
+              } else {
+                e.dataTransfer.dropEffect = 'none'
+              }
+            }}
+            onClick={() => {
+              if (caseDocPanel === 'documents') setSelectedDocSet(new Set())
+            }}
+            onContextMenu={(e) => {
+              if (caseDocPanel !== 'documents') return
+              e.preventDefault()
+              e.stopPropagation()
+              setDocMenu({ kind: 'surface', x: e.clientX, y: e.clientY })
+            }}
+            onDrop={async (e) => {
+              if (caseDocPanel !== 'documents') return
+              e.preventDefault()
+              e.stopPropagation()
+              setDocsDragOver(false)
+              if (!dndEventHasFiles(e)) return
+              const droppedFiles = [...e.dataTransfer.files]
+              if (droppedFiles.some(isEmlLikeUploadFile)) {
+                setActionErr(
+                  'To file an e-mail in Canary, please use the add-in appropriate to your e-mail client.',
+                )
+                return
+              }
+              await uploadFilesToCurrentFolder(droppedFiles)
+            }}
+          >
+            <div
+              className={
+                caseDocPanel === 'documents' ? 'caseDocsScroll' : 'caseDocsScroll caseDocsScroll--panelOnly'
+              }
+              tabIndex={caseDocPanel === 'documents' ? 0 : undefined}
+              onKeyDown={handleDocsKeyDown}
+            >
+              {caseDocPanel === 'documents' ? (
+              <>
+              <div className="caseDocsListHead">
               <div className="docsTr docsTh">
                 <button
                   type="button"
@@ -2930,6 +3129,7 @@ export function CaseDetail({
                     <DocsFolderDescCell
                       name={decodeFolderPathSegment(folderName)}
                       shared={portalEnabled && isPortalSharedFolder(next, portalFolderGrants)}
+                      contentsSummary={folderContentsSummary(files, next)}
                     />
                     <div className="td muted docsCenter">—</div>
                     <div className="td muted docsCenter">—</div>
@@ -2969,15 +3169,8 @@ export function CaseDetail({
               ) : null}
               </>
               ) : caseDocPanel === 'events' && caseId ? (
-                <div
-                  className="caseDocPanelInset caseDocPanelHost stack"
-                  style={{ gap: 12, padding: '8px 12px 16px', minHeight: 0 }}
-                >
-                  <div className="row caseDocPanelBar" style={{ alignItems: 'center', gap: 8 }}>
-                    <button type="button" className="btn" onClick={backToDocuments}>
-                      ← Documents
-                    </button>
-                  </div>
+                <div className="caseDocPanelInset caseDocPanelHost stack">
+                  <CaseDocPanelChrome title="Calendar" onClose={backToDocuments} />
                   <CaseDocPanelScroll fillHost>
                     <EventsPage
                       caseId={caseId}
@@ -2998,15 +3191,8 @@ export function CaseDetail({
                   </CaseDocPanelScroll>
                 </div>
               ) : caseDocPanel === 'finance' && caseId ? (
-                <div
-                  className="caseDocPanelInset caseDocPanelHost stack"
-                  style={{ gap: 12, padding: '8px 12px 16px', minHeight: 0 }}
-                >
-                  <div className="row caseDocPanelBar" style={{ alignItems: 'center', gap: 8 }}>
-                    <button type="button" className="btn" onClick={backToDocuments}>
-                      ← Documents
-                    </button>
-                  </div>
+                <div className="caseDocPanelInset caseDocPanelHost stack">
+                  <CaseDocPanelChrome title="Finance" onClose={backToDocuments} />
                   <CaseDocPanelScroll>
                     <FinancePage
                       caseId={caseId}
@@ -3021,19 +3207,13 @@ export function CaseDetail({
                   </CaseDocPanelScroll>
                 </div>
               ) : caseDocPanel === 'edit-details' && caseId ? (
-                <div
-                  className="caseDocPanelInset caseDocPanelHost stack"
-                  style={{ gap: 12, padding: '8px 12px 16px', minHeight: 0 }}
-                >
-                  <div className="row caseDocPanelBar" style={{ alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                    <button type="button" className="btn" onClick={backToDocuments}>
-                      ← Documents
-                    </button>
-                    <span className="muted">Edit case</span>
-                    <button className="btn" style={{ marginLeft: 'auto' }} onClick={backToDocuments} disabled={busy}>
-                      Close
-                    </button>
-                  </div>
+                <div className="caseDocPanelInset caseDocPanelHost stack">
+                  <CaseDocPanelChrome
+                    title="Case details"
+                    subtitle="Reference is immutable. Client name comes from Client contacts."
+                    onClose={backToDocuments}
+                    closeDisabled={busy}
+                  />
                   <CaseDocPanelScroll>
                     <div className="card caseDocEditEmbed">
                       <div className="muted" style={{ marginBottom: 12 }}>
@@ -3189,37 +3369,15 @@ export function CaseDetail({
                   </CaseDocPanelScroll>
                 </div>
               ) : caseDocPanel === 'portal-hub' && caseId && portalEnabled ? (
-                <div
-                  className="caseDocPanelInset caseDocPanelHost stack"
-                  style={{ gap: 12, padding: '8px 12px 16px', minHeight: 0 }}
-                >
-                  <div className="row caseDocPanelBar" style={{ alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                    <button type="button" className="btn" onClick={backToDocuments}>
-                      ← Documents
-                    </button>
-                    <span className="muted">Portal</span>
-                    <button className="btn" style={{ marginLeft: 'auto' }} onClick={backToDocuments} disabled={busy}>
-                      Close
-                    </button>
-                  </div>
+                <div className="caseDocPanelInset caseDocPanelHost stack">
+                  <CaseDocPanelChrome title="Portal" onClose={backToDocuments} closeDisabled={busy} />
                   <CaseDocPanelScroll>
                     <CasePortalPanel token={token} caseId={caseId} onFilesChanged={onRefresh} />
                   </CaseDocPanelScroll>
                 </div>
               ) : caseDocPanel === 'portal-share' && caseId && portalEnabled && portalShareFolderPath !== null ? (
-                <div
-                  className="caseDocPanelInset caseDocPanelHost stack"
-                  style={{ gap: 12, padding: '8px 12px 16px', minHeight: 0 }}
-                >
-                  <div className="row caseDocPanelBar" style={{ alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                    <button type="button" className="btn" onClick={backToDocuments}>
-                      ← Documents
-                    </button>
-                    <span className="muted">Portal — Share folder</span>
-                    <button className="btn" style={{ marginLeft: 'auto' }} onClick={backToDocuments} disabled={busy}>
-                      Close
-                    </button>
-                  </div>
+                <div className="caseDocPanelInset caseDocPanelHost stack">
+                  <CaseDocPanelChrome title="Share folder" subtitle="Portal folder access" onClose={backToDocuments} closeDisabled={busy} />
                   <CaseDocPanelScroll>
                     <PortalFolderSharePanel
                       token={token}
@@ -3233,31 +3391,29 @@ export function CaseDetail({
                   </CaseDocPanelScroll>
                 </div>
               ) : caseDocPanel === 'accounts' && caseId ? (
-                <div
-                  className="caseDocPanelInset caseDocPanelHost stack"
-                  style={{ gap: 12, padding: '8px 12px 16px', minHeight: 0 }}
-                >
-                  <div className="row caseDocPanelBar" style={{ alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                    <button type="button" className="btn" onClick={backToDocuments}>
-                      ← Documents
-                    </button>
-                    <div className="row" style={{ gap: 6 }}>
-                      <button
-                        type="button"
-                        className={`btn${accountsSubTab === 'ledger' ? ' primary' : ''}`}
-                        onClick={() => setAccountsSubTab('ledger')}
-                      >
-                        Ledger
-                      </button>
-                      <button
-                        type="button"
-                        className={`btn${accountsSubTab === 'time' ? ' primary' : ''}`}
-                        onClick={() => setAccountsSubTab('time')}
-                      >
-                        Time
-                      </button>
-                    </div>
-                  </div>
+                <div className="caseDocPanelInset caseDocPanelHost stack">
+                  <CaseDocPanelChrome
+                    title="Accounts"
+                    onClose={backToDocuments}
+                    actions={
+                      <>
+                        <button
+                          type="button"
+                          className={`btn${accountsSubTab === 'ledger' ? ' primary' : ''}`}
+                          onClick={() => setAccountsSubTab('ledger')}
+                        >
+                          Ledger
+                        </button>
+                        <button
+                          type="button"
+                          className={`btn${accountsSubTab === 'time' ? ' primary' : ''}`}
+                          onClick={() => setAccountsSubTab('time')}
+                        >
+                          Time
+                        </button>
+                      </>
+                    }
+                  />
                   <div className="caseDocLedgerEmbed">
                     <CaseDocPanelScroll>
                       {accountsSubTab === 'ledger' ? (
@@ -3279,79 +3435,79 @@ export function CaseDetail({
                   </div>
                 </div>
               ) : caseDocPanel === 'tasks' && caseId ? (
-                <div
-                  className="caseDocPanelInset caseDocPanelHost stack"
-                  style={{ gap: 12, padding: '8px 12px 16px', minHeight: 0 }}
-                >
-                  <div className="row caseDocPanelBar" style={{ alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-                    <button type="button" className="btn" onClick={backToDocuments}>
-                      ← Documents
-                    </button>
-                    <button type="button" className="btn primary" disabled={busy} onClick={() => openTaskCreateModal()}>
-                      New task
-                    </button>
-                    <div className="tasksToolbarLayoutGroup">
-                      <span className="tasksToolbarLayoutLabel">View</span>
-                      <SingleSelectDropdown
-                        hideLabel
-                        label="Task layout"
-                        options={[
-                          { value: 'list', label: 'List' },
-                          { value: 'kanban', label: 'Kanban' },
-                        ]}
-                        value={uiPrefs.case_tasks_layout}
-                        onChange={(v) => setUiPreference('case_tasks_layout', v as 'list' | 'kanban')}
-                        open={caseTasksLayoutOpen}
-                        onOpenChange={setCaseTasksLayoutOpen}
-                      />
-                    </div>
-                    <SearchInput
-                      placeholder="Search tasks…"
-                      value={caseTasksSearch}
-                      onChange={(e) => setCaseTasksSearch(e.target.value)}
-                      onClear={() => setCaseTasksSearch('')}
-                      style={{ flex: 1, minWidth: 160 }}
-                      aria-label="Search tasks for this matter"
-                    />
-                    <button
-                      type="button"
-                      className="btn"
-                      onClick={() => {
-                        void apiFetch<TaskMenuRow[]>(`/tasks?case_id=${encodeURIComponent(caseId)}`, { token })
-                          .then((data) => setCaseTaskMenuRows(Array.isArray(data) ? data : []))
-                          .catch(() => setCaseTaskMenuRows([]))
-                      }}
-                    >
-                      Refresh
-                    </button>
-                    <button
-                      type="button"
-                      className="btn"
-                      onClick={() => void (async () => {
-                        const ok = await askConfirm({
-                          title: 'Clear completed tasks',
-                          message:
-                            'Remove all completed tasks for this matter from the list? Only tasks on this matter are affected.',
-                        })
-                        if (!ok) return
-                        try {
-                          await apiFetch(`/tasks/completed?case_id=${encodeURIComponent(caseId)}`, {
-                            token,
-                            method: 'DELETE',
-                          })
-                          void apiFetch<TaskMenuRow[]>(`/tasks?case_id=${encodeURIComponent(caseId)}`, { token })
-                            .then((data) => setCaseTaskMenuRows(Array.isArray(data) ? data : []))
-                            .catch(() => setCaseTaskMenuRows([]))
-                          onRefresh()
-                          onTaskMenuInvalidate?.()
-                        } catch {
-                          // ignore
-                        }
-                      })()}
-                    >
-                      Clear completed tasks
-                    </button>
-                  </div>
+                <div className="caseDocPanelInset caseDocPanelHost stack">
+                  <CaseDocPanelChrome
+                    title="Tasks"
+                    onClose={backToDocuments}
+                    actions={
+                      <>
+                        <button type="button" className="btn primary" disabled={busy} onClick={() => openTaskCreateModal()}>
+                          New task
+                        </button>
+                        <div className="tasksToolbarLayoutGroup">
+                          <span className="tasksToolbarLayoutLabel">View</span>
+                          <SingleSelectDropdown
+                            hideLabel
+                            label="Task layout"
+                            options={[
+                              { value: 'list', label: 'List' },
+                              { value: 'kanban', label: 'Kanban' },
+                            ]}
+                            value={uiPrefs.case_tasks_layout}
+                            onChange={(v) => setUiPreference('case_tasks_layout', v as 'list' | 'kanban')}
+                            open={caseTasksLayoutOpen}
+                            onOpenChange={setCaseTasksLayoutOpen}
+                          />
+                        </div>
+                        <SearchInput
+                          placeholder="Search tasks…"
+                          value={caseTasksSearch}
+                          onChange={(e) => setCaseTasksSearch(e.target.value)}
+                          onClear={() => setCaseTasksSearch('')}
+                          style={{ flex: 1, minWidth: 160 }}
+                          aria-label="Search tasks for this matter"
+                        />
+                        <button
+                          type="button"
+                          className="btn"
+                          onClick={() => {
+                            void apiFetch<TaskMenuRow[]>(`/tasks?case_id=${encodeURIComponent(caseId)}`, { token })
+                              .then((data) => setCaseTaskMenuRows(Array.isArray(data) ? data : []))
+                              .catch(() => setCaseTaskMenuRows([]))
+                          }}
+                        >
+                          Refresh
+                        </button>
+                        <button
+                          type="button"
+                          className="btn"
+                          onClick={() => void (async () => {
+                            const ok = await askConfirm({
+                              title: 'Clear completed tasks',
+                              message:
+                                'Remove all completed tasks for this matter from the list? Only tasks on this matter are affected.',
+                            })
+                            if (!ok) return
+                            try {
+                              await apiFetch(`/tasks/completed?case_id=${encodeURIComponent(caseId)}`, {
+                                token,
+                                method: 'DELETE',
+                              })
+                              void apiFetch<TaskMenuRow[]>(`/tasks?case_id=${encodeURIComponent(caseId)}`, { token })
+                                .then((data) => setCaseTaskMenuRows(Array.isArray(data) ? data : []))
+                                .catch(() => setCaseTaskMenuRows([]))
+                              onRefresh()
+                              onTaskMenuInvalidate?.()
+                            } catch {
+                              // ignore
+                            }
+                          })()}
+                        >
+                          Clear completed
+                        </button>
+                      </>
+                    }
+                  />
                   <CaseDocPanelScroll>
                     <TasksTable
                       token={token}
@@ -3387,22 +3543,13 @@ export function CaseDetail({
                   </CaseDocPanelScroll>
                 </div>
               ) : caseDocPanel === 'property' && propertyDraft ? (
-                <div
-                  className="caseDocPanelInset caseDocPanelHost stack"
-                  style={{ gap: 12, padding: '8px 12px 16px', minHeight: 0 }}
-                >
-                  <div className="row caseDocPanelBar" style={{ alignItems: 'center', gap: 8 }}>
-                    <button type="button" className="btn" onClick={backToDocuments}>
-                      ← Documents
-                    </button>
-                  </div>
-                  <CaseDocPanelScroll>
-                    <div className="card caseDocPropertyEmbed">
-                    <div className="paneHead">
-                      <div>
-                        <h2 style={{ margin: 0, fontSize: 18 }}>Property details</h2>
-                      </div>
-                      <div className="row" style={{ gap: 8 }}>
+                <div className="caseDocPanelInset caseDocPanelHost stack">
+                  <CaseDocPanelChrome
+                    title="Property details"
+                    onClose={backToDocuments}
+                    closeDisabled={busy}
+                    actions={
+                      <>
                         <button
                           type="button"
                           className="btn"
@@ -3414,12 +3561,11 @@ export function CaseDetail({
                             setCaseDocPanel('documents')
                           }}
                         >
-                          Discard changes
+                          Discard
                         </button>
                         <button
                           type="button"
-                          className="btn"
-                          style={{ background: 'var(--primary)', color: '#fff', borderColor: 'var(--primary)' }}
+                          className="btn primary"
                           disabled={busy}
                           onClick={async () => {
                             if (!caseId) return
@@ -3447,8 +3593,11 @@ export function CaseDetail({
                         >
                           Save and close
                         </button>
-                      </div>
-                    </div>
+                      </>
+                    }
+                  />
+                  <CaseDocPanelScroll>
+                    <div className="card caseDocPropertyEmbed">
                     <PropertyDetailsForm
                       draft={propertyDraft}
                       onChange={setPropertyDraft}
@@ -3462,37 +3611,26 @@ export function CaseDetail({
                   </CaseDocPanelScroll>
                 </div>
               ) : caseDocPanel === 'contacts' && caseId && (contactAddOpen || editSnapshot) ? (
-                <div
-                  className="caseDocPanelInset caseDocPanelHost stack"
-                  style={{ gap: 12, padding: '8px 12px 16px', minHeight: 0 }}
-                >
-                  <div className="row caseDocPanelBar" style={{ alignItems: 'center', gap: 8 }}>
-                    <button type="button" className="btn" onClick={backToDocuments}>
-                      ← Documents
-                    </button>
-                  </div>
+                <div className="caseDocPanelInset caseDocPanelHost stack">
+                  <CaseDocPanelChrome
+                    title={contactAddOpen ? 'Add contact' : 'Edit contact'}
+                    subtitle={
+                      contactAddOpen
+                        ? 'Link an existing global contact or create a new one.'
+                        : 'Update the snapshot on this matter.'
+                    }
+                    onClose={() => {
+                      if (contactAddOpen) {
+                        setContactAddErr(null)
+                      }
+                      backToDocuments()
+                    }}
+                    closeDisabled={busy}
+                  />
                   <CaseDocPanelScroll>
                   <div className="card caseDocPropertyEmbed" style={{ maxWidth: '100%' }}>
                     {contactAddOpen ? (
-                      <>
-                        <div className="paneHead">
-                          <div>
-                            <h2 style={{ margin: 0, fontSize: 18 }}>Add contact</h2>
-                            <div className="muted">Link an existing global contact or create a new one.</div>
-                          </div>
-                          <button
-                            type="button"
-                            className="btn"
-                            onClick={() => {
-                              setContactAddErr(null)
-                              backToDocuments()
-                            }}
-                            disabled={busy}
-                          >
-                            Close
-                          </button>
-                        </div>
-                        <CaseContactsAddDocForm
+                      <CaseContactsAddDocForm
                           token={token}
                           caseId={caseId}
                           busy={busy}
@@ -3513,20 +3651,7 @@ export function CaseDetail({
                           setActionErr={setActionErr}
                           onGlobalContactsUpdated={() => {}}
                         />
-                      </>
                     ) : editSnapshot ? (
-                      <>
-                        <div className="paneHead">
-                          <div>
-                            <h2 id="edit-contact-title" style={{ margin: 0, fontSize: 18 }}>
-                              Edit contact
-                            </h2>
-                            <div className="muted">Update the snapshot on this matter.</div>
-                          </div>
-                          <button type="button" className="btn" onClick={backToDocuments} disabled={busy}>
-                            Close
-                          </button>
-                        </div>
                         <CaseContactsEditDocForm
                           token={token}
                           caseId={caseId}
@@ -3544,7 +3669,6 @@ export function CaseDetail({
                           onDone={finishContactsDoc}
                           setActionErr={setActionErr}
                         />
-                      </>
                     ) : null}
                   </div>
                   </CaseDocPanelScroll>

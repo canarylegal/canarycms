@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react'
-import { useModalDrag } from './useModalDrag'
 
 type Props = {
   title: string
@@ -7,6 +6,9 @@ type Props = {
   initial: string
   confirmLabel: string
   fieldLabel?: string
+  /** HTML input type (e.g. password for re-auth prompts). */
+  inputType?: 'text' | 'password'
+  autoComplete?: string
   busy?: boolean
   onConfirm: (value: string) => void
   onCancel: () => void
@@ -19,13 +21,13 @@ export function TextPromptModal({
   initial,
   confirmLabel,
   fieldLabel = 'Name',
+  inputType = 'text',
+  autoComplete,
   busy,
   onConfirm,
   onCancel,
 }: Props) {
   const [val, setVal] = useState(initial)
-  const drag = useModalDrag(true)
-  const { style: dragTitleStyle, ...dragTitleRest } = drag.handleProps
   useEffect(() => {
     setVal(initial)
   }, [initial])
@@ -41,44 +43,44 @@ export function TextPromptModal({
       }}
     >
       <div
-        className="modal card textPromptModal modalSurfaceDraggable"
-        style={{ maxWidth: 440, width: 'min(440px, 100%)', ...drag.surfaceStyle }}
+        className="modal card modal--scrollBody textPromptModal"
+        style={{ maxWidth: 440, width: 'min(440px, 100%)' }}
         onClick={(e) => e.stopPropagation()}
       >
-        <h2
-          id="text-prompt-title"
-          className="modalDragHandle"
-          {...dragTitleRest}
-          style={{ ...dragTitleStyle, margin: 0, fontSize: 18 }}
-        >
-          {title}
-        </h2>
-        {hint ? (
-          <p className="muted" style={{ marginTop: 8, marginBottom: 0 }}>
-            {hint}
-          </p>
-        ) : null}
-        <label className="field" style={{ marginTop: 12 }}>
-          <span>{fieldLabel}</span>
-          <input
-            className="allow-select"
-            value={val}
-            autoFocus
-            disabled={busy}
-            onChange={(e) => setVal(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !busy) onConfirm(val)
-              if (e.key === 'Escape' && !busy) onCancel()
-            }}
-          />
-        </label>
-        <div className="row" style={{ justifyContent: 'flex-end', gap: 8, marginTop: 16 }}>
+        <div className="paneHead">
+          <div>
+            <h2 id="text-prompt-title">{title}</h2>
+            {hint ? <div className="muted">{hint}</div> : null}
+          </div>
           <button type="button" className="btn" disabled={busy} onClick={onCancel}>
-            Cancel
+            Close
           </button>
-          <button type="button" className="btn primary" disabled={busy} onClick={() => onConfirm(val)}>
-            {busy ? '…' : confirmLabel}
-          </button>
+        </div>
+        <div className="modalBodyScroll">
+          <label className="field" style={{ marginTop: 4 }}>
+            <span>{fieldLabel}</span>
+            <input
+              className="allow-select"
+              type={inputType}
+              autoComplete={autoComplete}
+              value={val}
+              autoFocus
+              disabled={busy}
+              onChange={(e) => setVal(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !busy) onConfirm(val)
+                if (e.key === 'Escape' && !busy) onCancel()
+              }}
+            />
+          </label>
+          <div className="row" style={{ justifyContent: 'flex-end', gap: 8 }}>
+            <button type="button" className="btn" disabled={busy} onClick={onCancel}>
+              Cancel
+            </button>
+            <button type="button" className="btn primary" disabled={busy} onClick={() => onConfirm(val)}>
+              {busy ? '…' : confirmLabel}
+            </button>
+          </div>
         </div>
       </div>
     </div>

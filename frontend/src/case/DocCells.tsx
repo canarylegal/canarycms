@@ -201,19 +201,51 @@ export function DocsFileDescCell({ f, showPin }: { f: FileSummary; showPin: bool
   )
 }
 
-export function DocsFolderDescCell({ name, shared = false }: { name: string; shared?: boolean }) {
+export function DocsFolderDescCell({
+  name,
+  shared = false,
+  contentsSummary,
+}: {
+  name: string
+  shared?: boolean
+  /** Second line, e.g. ``6 items, 1 subfolder``. */
+  contentsSummary?: string | null
+}) {
+  const hasSub = Boolean(contentsSummary)
   return (
-    <div className="docsDescWrapper">
+    <div className={hasSub ? 'docsDescWrapper docsDescWrapper--hasSub' : 'docsDescWrapper'}>
       <div className="docsDescCell">
-        <div className="docsDescRow">
+        <div className={hasSub ? 'docsDescRow docsDescRow--hasSub' : 'docsDescRow'}>
           <span className="docsTypeIcon" aria-hidden>
             <DocFolderIcon shared={shared} />
           </span>
           <div className="docsDescTextBlock">
             <span className="docsDescName">{name}</span>
+            {contentsSummary ? <div className="docsDescSub muted">{contentsSummary}</div> : null}
           </div>
         </div>
       </div>
     </div>
   )
+}
+
+/** Count top-level files and immediate subfolders under ``folderPath`` (excludes system markers). */
+export function folderContentsSummary(files: FileSummary[], folderPath: string): string {
+  const prefix = folderPath ? `${folderPath}/` : ''
+  let items = 0
+  const subfolders = new Set<string>()
+  for (const f of files) {
+    if (f.category === 'system') continue
+    const fp = (f.folder_path ?? '').trim()
+    if (fp === folderPath && !f.parent_file_id) items += 1
+    if (!folderPath) continue
+    if (!fp.startsWith(prefix)) continue
+    const rest = fp.slice(prefix.length)
+    const [first] = rest.split('/').filter(Boolean)
+    if (first) subfolders.add(first)
+  }
+  const itemLabel = items === 1 ? '1 item' : `${items} items`
+  const subCount = subfolders.size
+  const subLabel = subCount === 1 ? '1 subfolder' : `${subCount} subfolders`
+  return `${itemLabel}, ${subLabel}`
 }

@@ -2591,44 +2591,44 @@ export function AdminConsole({ token, refreshMe }: { token: string; refreshMe: (
           <h2 style={{ margin: 0 }}>Admin Settings</h2>
           <div className="muted" style={{ marginTop: 4 }}>{adminSubtitle}</div>
         </div>
-        <div className="row" style={{ alignItems: 'center', flexWrap: 'wrap', gap: 4 }}>
-          <button type="button" className={`navBtn ${tab === 'firm' ? 'active' : ''}`} onClick={() => setTab('firm')}>
+        <div className="adminTabStrip" role="tablist" aria-label="Admin sections">
+          <button type="button" role="tab" aria-selected={tab === 'firm'} className={`adminTab${tab === 'firm' ? ' is-active' : ''}`} onClick={() => setTab('firm')}>
             Firm details
           </button>
-          <button type="button" className={`navBtn ${tab === 'users' ? 'active' : ''}`} onClick={() => setTab('users')}>
+          <button type="button" role="tab" aria-selected={tab === 'users'} className={`adminTab${tab === 'users' ? ' is-active' : ''}`} onClick={() => setTab('users')}>
             Users
           </button>
-          <button type="button" className={`navBtn ${tab === 'matters' ? 'active' : ''}`} onClick={() => setTab('matters')}>
+          <button type="button" role="tab" aria-selected={tab === 'matters'} className={`adminTab${tab === 'matters' ? ' is-active' : ''}`} onClick={() => setTab('matters')}>
             Matters
           </button>
-          <button type="button" className={`navBtn ${tab === 'billing' ? 'active' : ''}`} onClick={() => setTab('billing')}>
+          <button type="button" role="tab" aria-selected={tab === 'billing'} className={`adminTab${tab === 'billing' ? ' is-active' : ''}`} onClick={() => setTab('billing')}>
             Billing
           </button>
-          <button type="button" className={`navBtn ${tab === 'email' ? 'active' : ''}`} onClick={() => setTab('email')}>
+          <button type="button" role="tab" aria-selected={tab === 'email'} className={`adminTab${tab === 'email' ? ' is-active' : ''}`} onClick={() => setTab('email')}>
             E-mail
           </button>
-          <button type="button" className={`navBtn ${tab === 'docusign' ? 'active' : ''}`} onClick={() => setTab('docusign')}>
+          <button type="button" role="tab" aria-selected={tab === 'docusign'} className={`adminTab${tab === 'docusign' ? ' is-active' : ''}`} onClick={() => setTab('docusign')}>
             DocuSign
           </button>
-          <button type="button" className={`navBtn ${tab === 'portalForms' ? 'active' : ''}`} onClick={() => setTab('portalForms')}>
+          <button type="button" role="tab" aria-selected={tab === 'portalForms'} className={`adminTab${tab === 'portalForms' ? ' is-active' : ''}`} onClick={() => setTab('portalForms')}>
             Portal forms
           </button>
-          <button type="button" className={`navBtn ${tab === 'deploy' ? 'active' : ''}`} onClick={() => setTab('deploy')}>
+          <button type="button" role="tab" aria-selected={tab === 'deploy'} className={`adminTab${tab === 'deploy' ? ' is-active' : ''}`} onClick={() => setTab('deploy')}>
             Deploy
           </button>
-          <button type="button" className={`navBtn ${tab === 'submenus' ? 'active' : ''}`} onClick={() => setTab('submenus')}>
+          <button type="button" role="tab" aria-selected={tab === 'submenus'} className={`adminTab${tab === 'submenus' ? ' is-active' : ''}`} onClick={() => setTab('submenus')}>
             Sub-Menus
           </button>
-          <button type="button" className={`navBtn ${tab === 'tasks' ? 'active' : ''}`} onClick={() => setTab('tasks')}>
+          <button type="button" role="tab" aria-selected={tab === 'tasks'} className={`adminTab${tab === 'tasks' ? ' is-active' : ''}`} onClick={() => setTab('tasks')}>
             Tasks
           </button>
-          <button type="button" className={`navBtn ${tab === 'contacts' ? 'active' : ''}`} onClick={() => setTab('contacts')}>
+          <button type="button" role="tab" aria-selected={tab === 'contacts'} className={`adminTab${tab === 'contacts' ? ' is-active' : ''}`} onClick={() => setTab('contacts')}>
             Contacts
           </button>
-          <button type="button" className={`navBtn ${tab === 'precedents' ? 'active' : ''}`} onClick={() => setTab('precedents')}>
+          <button type="button" role="tab" aria-selected={tab === 'precedents'} className={`adminTab${tab === 'precedents' ? ' is-active' : ''}`} onClick={() => setTab('precedents')}>
             Precedents
           </button>
-          <button type="button" className={`navBtn ${tab === 'audit' ? 'active' : ''}`} onClick={() => setTab('audit')}>
+          <button type="button" role="tab" aria-selected={tab === 'audit'} className={`adminTab${tab === 'audit' ? ' is-active' : ''}`} onClick={() => setTab('audit')}>
             Audit
           </button>
         </div>

@@ -176,13 +176,19 @@ class UserCalDAVStatusOut(BaseModel):
     caldav_username: str
 
 
+class UserCalDAVRevealIn(BaseModel):
+    """Confirm Canary login password before revealing the stored CalDAV app password."""
+
+    current_password: str = Field(min_length=1)
+
+
 class UserCalDAVProvisionOut(BaseModel):
     caldav_url: str
     caldav_username: str
     caldav_password: str
     note: str = (
-        "Save this password now — it will not be shown again. "
-        "Use it as the CalDAV password in your calendar app (not your Canary login)."
+        "Save this password for your calendar app (not your Canary login). "
+        "You can show it again later from User settings by confirming your Canary password."
     )
 
 

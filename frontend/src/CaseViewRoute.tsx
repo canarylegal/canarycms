@@ -24,6 +24,7 @@ type Props = {
   onCaseListInvalidate: () => void
   onTaskMenuInvalidate: () => void
   onCaseDetailChange: (detail: CaseOut | null) => void
+  onBackToMainMenu: () => void
 }
 
 /** Loads and renders an open matter — isolated from App so other menus do not pay case state costs. */
@@ -38,6 +39,7 @@ export function CaseViewRoute({
   onCaseListInvalidate,
   onTaskMenuInvalidate,
   onCaseDetailChange,
+  onBackToMainMenu,
 }: Props) {
   const [caseDetail, setCaseDetail] = useState<CaseOut | null>(null)
   const [notes, setNotes] = useState<CaseNoteOut[]>([])
@@ -163,6 +165,7 @@ export function CaseViewRoute({
       onRefresh={refreshCaseDetailWithCrossTabSignal}
       onCaseListInvalidate={onCaseListInvalidate}
       onTaskMenuInvalidate={onTaskMenuInvalidate}
+      onBackToMainMenu={onBackToMainMenu}
     />
   )
 }

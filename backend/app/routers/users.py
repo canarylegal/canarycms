@@ -15,7 +15,7 @@ from app.calendar_service import ensure_default_calendar
 from app.case_time_service import user_has_charge_rate
 from app.db import get_db
 from app.deps import get_current_user
-from app.email_crypt import encrypt_password
+from app.email_crypt import decrypt_password, encrypt_password
 from app.email_integration_settings import build_user_public
 from app.file_storage import FILES_ROOT, ensure_files_root, user_signature_file_paths
 from app.models import File as DbFile
@@ -34,12 +34,14 @@ from app.schemas import (
     LedgerPermissionsOut,
     UserAppearanceUpdate,
     UserCalDAVProvisionOut,
+    UserCalDAVRevealIn,
     UserCalDAVStatusOut,
     UserEmailHandlingUpdate,
     UserPublic,
     UserSignatureUpdate,
     UserUiPreferencesUpdate,
 )
+from app.security import verify_password
 from app.user_appearance import normalize_appearance_update
 from app.user_ui_preferences import UserUiPreferencesPatch, merge_ui_preferences_patch, user_ui_preferences_out
 
@@ -219,6 +221,39 @@ def reset_my_caldav_password(
         caldav_url=_caldav_principal_url(user.id),
         caldav_username=_caldav_username(user),
         caldav_password=plain,
+    )
+
+
+@router.post("/me/calendar/reveal-password", response_model=UserCalDAVProvisionOut)
+def reveal_my_caldav_password(
+    body: UserCalDAVRevealIn,
+    user: User = Depends(get_current_user),
+) -> UserCalDAVProvisionOut:
+    """Return the stored CalDAV app password after confirming the Canary login password."""
+    if not user.caldav_password_enc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="CalDAV is not enabled")
+    if not verify_password(body.current_password, user.password_hash):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Canary password is incorrect")
+    try:
+        plain = decrypt_password(user.caldav_password_enc)
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Could not decrypt CalDAV password",
+        ) from e
+    if not plain:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Stored CalDAV password is empty — use Reset app password.",
+        )
+    return UserCalDAVProvisionOut(
+        caldav_url=_caldav_principal_url(user.id),
+        caldav_username=_caldav_username(user),
+        caldav_password=plain,
+        note=(
+            "This is your current CalDAV app password. "
+            "Use it in your calendar app (not your Canary login)."
+        ),
     )
 
 
