@@ -203,7 +203,7 @@ export function AppSidebar({
           aria-label="Sign out"
           title={expanded ? undefined : 'Sign out'}
         >
-          <svg className="appSidebarSignOutIcon" width={24} height={24} viewBox="0 0 24 24" fill="none" aria-hidden>
+          <svg className="appSidebarSignOutIcon" width={16} height={16} viewBox="0 0 24 24" fill="none" aria-hidden>
             <path
               d="M10 17l5-5-5-5M15 12H4M20 4v16"
               stroke="currentColor"
@@ -222,7 +222,7 @@ export function AppSidebar({
           title={expanded ? 'Collapse sidebar' : 'Expand sidebar'}
           onClick={toggleExpanded}
         >
-          <svg className="appSidebarToggleIcon" width={24} height={24} viewBox="0 0 24 24" fill="none" aria-hidden>
+          <svg className="appSidebarToggleIcon" width={16} height={16} viewBox="0 0 24 24" fill="none" aria-hidden>
               {expanded ? (
                 <path d="M15 6l-6 6 6 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
               ) : (
