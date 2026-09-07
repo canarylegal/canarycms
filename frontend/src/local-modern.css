@@ -139,6 +139,23 @@ body {
   background: rgba(255, 255, 255, 0.05) !important;
   color: #d5dbe8 !important;
   border-radius: 12px !important;
+  /* Match primary nav row footprint */
+  padding: 12px 0 !important;
+  font-size: 0.92rem !important;
+  font-weight: 650 !important;
+  min-height: 0;
+}
+
+.appSidebar .appSidebarSignOutIcon,
+.appSidebar .appSidebarToggleIcon {
+  width: 16px;
+  height: 16px;
+}
+
+.appSidebarSignOut:hover,
+.appSidebarToggle:hover {
+  background: rgba(255, 255, 255, 0.07) !important;
+  color: #fff !important;
 }
 
 .appMainColumn {
