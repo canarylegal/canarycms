@@ -1054,13 +1054,15 @@ export default function PortalPage() {
   }
 
   return (
-    <PortalLayout config={portalConfig} subtitle={contactName ? `Signed in as ${contactName}` : null}>
-        <div className="portalUserBar row" style={{ justifyContent: 'flex-end', marginTop: 8, marginBottom: 4 }}>
-          <button type="button" className="btn" onClick={signOut}>
-            Sign out
-          </button>
-        </div>
-
+    <PortalLayout
+      config={portalConfig}
+      subtitle={contactName ? `Signed in as ${contactName}` : null}
+      headerActions={
+        <button type="button" className="btn portalSignOutBtn" onClick={signOut}>
+          Sign out
+        </button>
+      }
+    >
         {err ? <div className="error" style={{ marginTop: 12 }}>{err}</div> : null}
         {info ? <div className="notice" style={{ marginTop: 12 }}>{info}</div> : null}
 

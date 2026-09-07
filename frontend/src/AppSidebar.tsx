@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { CanaryMark } from './AppBrand'
 import { PrimaryNavButton } from './NavIcon'
 
@@ -6,7 +6,11 @@ const SIDEBAR_EXPANDED_KEY = 'canary-sidebar-expanded'
 
 function readSidebarExpanded(): boolean {
   try {
-    return localStorage.getItem(SIDEBAR_EXPANDED_KEY) === '1'
+    const raw = localStorage.getItem(SIDEBAR_EXPANDED_KEY)
+    // Explicit preference only — default collapsed until the user expands once.
+    if (raw === '1') return true
+    if (raw === '0') return false
+    return false
   } catch {
     return false
   }
@@ -70,6 +74,19 @@ export function AppSidebar({
   onLogout,
 }: Props) {
   const [expanded, setExpanded] = useState(readSidebarExpanded)
+
+  // Keep preference in sync across remounts / other tabs.
+  useEffect(() => {
+    function syncFromStorage() {
+      setExpanded(readSidebarExpanded())
+    }
+    window.addEventListener('storage', syncFromStorage)
+    window.addEventListener('focus', syncFromStorage)
+    return () => {
+      window.removeEventListener('storage', syncFromStorage)
+      window.removeEventListener('focus', syncFromStorage)
+    }
+  }, [])
 
   const toggleExpanded = useCallback(() => {
     setExpanded((prev) => {

@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react'
-import { useModalDrag } from './useModalDrag'
 import { poundsToPence } from './FeeScaleEditor'
 
 type Props = {
@@ -15,8 +14,6 @@ export function FeeScaleBandRowModal({ bandSetName, busy, onConfirm, onCancel }:
   const [maxStr, setMaxStr] = useState('')
   const [feeStr, setFeeStr] = useState('')
   const [err, setErr] = useState<string | null>(null)
-  const drag = useModalDrag(true)
-  const { style: dragTitleStyle, ...dragTitleRest } = drag.handleProps
 
   useEffect(() => {
     setMinStr('0')
@@ -63,64 +60,66 @@ export function FeeScaleBandRowModal({ bandSetName, busy, onConfirm, onCancel }:
       }}
     >
       <div
-        className="modal card textPromptModal modalSurfaceDraggable"
-        style={{ maxWidth: 440, width: 'min(440px, 100%)', ...drag.surfaceStyle }}
+        className="modal card modal--scrollBody textPromptModal"
+        style={{ maxWidth: 440, width: 'min(440px, 100%)' }}
         onClick={(e) => e.stopPropagation()}
       >
-        <h2
-          id="fee-band-row-title"
-          className="modalDragHandle"
-          {...dragTitleRest}
-          style={{ ...dragTitleStyle, margin: 0, fontSize: 18 }}
-        >
-          Add band
-        </h2>
-        <p className="muted" style={{ marginTop: 8, marginBottom: 0, fontSize: 13 }}>
-          Band set: <strong>{bandSetName}</strong>
-        </p>
-        <div className="stack" style={{ marginTop: 12, gap: 10 }}>
-          <label className="field">
-            <span>Minimum property value (£)</span>
-            <input
-              className="allow-select"
-              value={minStr}
-              autoFocus
-              disabled={busy}
-              onChange={(e) => setMinStr(e.target.value)}
-            />
-          </label>
-          <label className="field">
-            <span>Maximum property value (£)</span>
-            <input
-              className="allow-select"
-              value={maxStr}
-              disabled={busy}
-              placeholder="No upper limit"
-              onChange={(e) => setMaxStr(e.target.value)}
-            />
-          </label>
-          <label className="field">
-            <span>Fee amount (£)</span>
-            <input
-              className="allow-select"
-              value={feeStr}
-              disabled={busy}
-              onChange={(e) => setFeeStr(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !busy) submit()
-                if (e.key === 'Escape' && !busy) onCancel()
-              }}
-            />
-          </label>
-        </div>
-        {err ? <div className="error" style={{ marginTop: 10 }}>{err}</div> : null}
-        <div className="row" style={{ justifyContent: 'flex-end', gap: 8, marginTop: 16 }}>
+        <div className="paneHead">
+          <div>
+            <h2 id="fee-band-row-title">Add band</h2>
+            <div className="muted">
+              Band set: <strong>{bandSetName}</strong>
+            </div>
+          </div>
           <button type="button" className="btn" disabled={busy} onClick={onCancel}>
-            Cancel
+            Close
           </button>
-          <button type="button" className="btn primary" disabled={busy} onClick={submit}>
-            {busy ? '…' : 'Add band'}
-          </button>
+        </div>
+        <div className="modalBodyScroll">
+          <div className="stack" style={{ gap: 10 }}>
+            <label className="field">
+              <span>Minimum property value (£)</span>
+              <input
+                className="allow-select"
+                value={minStr}
+                autoFocus
+                disabled={busy}
+                onChange={(e) => setMinStr(e.target.value)}
+              />
+            </label>
+            <label className="field">
+              <span>Maximum property value (£)</span>
+              <input
+                className="allow-select"
+                value={maxStr}
+                disabled={busy}
+                placeholder="No upper limit"
+                onChange={(e) => setMaxStr(e.target.value)}
+              />
+            </label>
+            <label className="field">
+              <span>Fee amount (£)</span>
+              <input
+                className="allow-select"
+                value={feeStr}
+                disabled={busy}
+                onChange={(e) => setFeeStr(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !busy) submit()
+                  if (e.key === 'Escape' && !busy) onCancel()
+                }}
+              />
+            </label>
+          </div>
+          {err ? <div className="error" style={{ marginTop: 10 }}>{err}</div> : null}
+          <div className="row" style={{ justifyContent: 'flex-end', gap: 8 }}>
+            <button type="button" className="btn" disabled={busy} onClick={onCancel}>
+              Cancel
+            </button>
+            <button type="button" className="btn primary" disabled={busy} onClick={submit}>
+              {busy ? '…' : 'Add band'}
+            </button>
+          </div>
         </div>
       </div>
     </div>

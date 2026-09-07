@@ -43,11 +43,12 @@ import { releaseAllBodyCursorLocks } from './bodyCursorLock'
 import { apiFetch, type ApiError } from './api'
 import { fetchContactSearch } from './apiSearch'
 import {
-  ACCENT_COLOR_PRESETS,
+  accentForChromeStyle,
+  CHROME_STYLE_OPTIONS,
+  chromeStyleFromAccent,
   DEFAULT_ACCENT,
-  DEFAULT_PAGE_BG,
   FONT_OPTIONS,
-  PAGE_BG_COLOR_PRESETS,
+  SLATE_CHROME_ACCENT,
 } from './theme'
 import { persistUserAppearance, useAppearanceFormState, useServerAppearance } from './useServerAppearance'
 import { useUserUiPreferences } from './useUserUiPreferences'
@@ -81,6 +82,7 @@ import {
   OUTLOOK_WEB_WITHOUT_GRAPH_CONFIRM_MESSAGE,
 } from './emailLauncher'
 import { useDialogs } from './DialogProvider'
+import { TextPromptModal } from './TextPromptModal'
 import { ContactSearchPicker } from './ContactSearchPicker'
 import { SingleSelectDropdown } from './SingleSelectDropdown'
 import { SearchInput } from './SearchInput'
@@ -545,6 +547,8 @@ function LoginForm({
 }) {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [showPassword, setShowPassword] = useState(false)
+  const [capsLockOn, setCapsLockOn] = useState(false)
   const [faCode, setFaCode] = useState('')
   const [step, setStep] = useState<'password' | '2fa' | 'forgot'>('password')
   const [busy, setBusy] = useState(false)
@@ -583,12 +587,12 @@ function LoginForm({
       <div className="loginBrandRow">
         <AppLogo />
       </div>
-      <div className="card" style={{ maxWidth: 520, margin: '24px auto 0' }}>
+      <div className="card loginCard" style={{ maxWidth: 580, margin: '8px auto 0' }}>
         {step === 'password' ? (
           <>
             <form className="stack loginForm" style={{ marginTop: 16 }} onSubmit={handlePasswordSubmit}>
               <label className="field">
-                <span>Login id</span>
+                <span>Email address</span>
                 <input
                   value={email}
                   onChange={(e) => {
@@ -601,15 +605,50 @@ function LoginForm({
               </label>
               <label className="field">
                 <span>Password</span>
-                <input
-                  type="password"
-                  value={password}
-                  onChange={(e) => {
-                    onClearError()
-                    setPassword(e.target.value)
-                  }}
-                  autoComplete="current-password"
-                />
+                <div className="loginPasswordField">
+                  <input
+                    type={showPassword ? 'text' : 'password'}
+                    value={password}
+                    onChange={(e) => {
+                      onClearError()
+                      setPassword(e.target.value)
+                    }}
+                    onKeyDown={(e) => setCapsLockOn(e.getModifierState('CapsLock'))}
+                    onKeyUp={(e) => setCapsLockOn(e.getModifierState('CapsLock'))}
+                    onBlur={() => setCapsLockOn(false)}
+                    autoComplete="current-password"
+                  />
+                  <button
+                    type="button"
+                    className="loginPasswordToggle"
+                    tabIndex={0}
+                    aria-label={showPassword ? 'Hide password' : 'Show password'}
+                    aria-pressed={showPassword}
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => setShowPassword((v) => !v)}
+                  >
+                    {showPassword ? (
+                      <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden>
+                        <path
+                          fill="currentColor"
+                          d="M12 7c2.76 0 5 2.24 5 5 0 .65-.13 1.26-.36 1.83l2.92 2.92c1.51-1.26 2.7-2.89 3.43-4.75-1.73-4.39-6-7.5-11-7.5-1.4 0-2.74.25-3.98.7l2.16 2.16C10.74 7.13 11.35 7 12 7zM2 4.27l2.28 2.28.46.46C3.08 8.3 1.78 10.02 1 12c1.73 4.39 6 7.5 11 7.5 1.55 0 3.03-.3 4.38-.84l.42.42L19.73 22 21 20.73 3.27 3 2 4.27zM7.53 9.8l1.55 1.55c-.05.21-.08.43-.08.65 0 1.66 1.34 3 3 3 .22 0 .44-.03.65-.08l1.55 1.55c-.67.33-1.41.53-2.2.53-2.76 0-5-2.24-5-5 0-.79.2-1.53.53-2.2zm4.31-.78 3.15 3.15.02-.16c0-1.66-1.34-3-3-3l-.17.01z"
+                        />
+                      </svg>
+                    ) : (
+                      <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden>
+                        <path
+                          fill="currentColor"
+                          d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"
+                        />
+                      </svg>
+                    )}
+                  </button>
+                </div>
+                {capsLockOn ? (
+                  <div className="loginCapsWarning" role="status">
+                    Caps Lock is on
+                  </div>
+                ) : null}
               </label>
               {error ? <div className="error">{error}</div> : null}
               <div className="loginActionsRow">
@@ -618,7 +657,7 @@ function LoginForm({
                 </button>
                 <button
                   type="button"
-                  className="btn"
+                  className="btn loginPasskeyBtn"
                   disabled={busy}
                   onClick={() =>
                     void (async () => {
@@ -632,6 +671,12 @@ function LoginForm({
                     })()
                   }
                 >
+                  <svg className="loginPasskeyIcon" width="16" height="16" viewBox="0 0 24 24" aria-hidden>
+                    <path
+                      fill="currentColor"
+                      d="M12.65 10C11.83 7.67 9.61 6 7 6c-3.31 0-6 2.69-6 6s2.69 6 6 6c2.61 0 4.83-1.67 5.65-4H17v4h4v-4h2v-4H12.65zM7 14c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2z"
+                    />
+                  </svg>
                   Sign in with passkey
                 </button>
               </div>
@@ -871,7 +916,7 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
   }, [])
 
   const setView = useCallback(
-    async (next: View): Promise<boolean> => {
+    async (next: View, opts?: { skipExitConfirm?: boolean }): Promise<boolean> => {
       if (next === 'admin-console' && !canAdminConsoleRef.current) {
         next = 'main-menu'
       }
@@ -881,7 +926,7 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
       if (next === 'docusign' && docusignEnabledRef.current !== true) {
         next = 'main-menu'
       }
-      if (viewRef.current === 'case-menu' && next !== 'case-menu') {
+      if (viewRef.current === 'case-menu' && next !== 'case-menu' && !opts?.skipExitConfirm) {
         const ok = await askConfirm({
           title: 'Exit matter',
           message: 'Are you sure you want to exit this matter?',
@@ -897,8 +942,8 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
     [askConfirm, syncNavFromState],
   )
 
-  const goMainMenu = useCallback(async () => {
-    if (!(await setView('main-menu'))) return
+  const goMainMenu = useCallback(async (opts?: { skipExitConfirm?: boolean }) => {
+    if (!(await setView('main-menu', opts))) return
     if (userIsCashierAccountsHome(auth.me)) {
       setCashierMainMenuExplicit(true)
     }
@@ -1410,6 +1455,7 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
           onCaseListInvalidate={onCaseListInvalidate}
           onTaskMenuInvalidate={onTaskMenuInvalidate}
           onCaseDetailChange={onCaseTitleDetailChange}
+          onBackToMainMenu={() => void goMainMenu({ skipExitConfirm: true })}
         />
       )
     }
@@ -1723,7 +1769,7 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
   if (auth.me && userIsMasterRecovery(auth.me) && auth.token) {
     return (
       <div className="appShell">
-        <header className="topbar">
+        <header className="topbar topbar--content">
           <div className="topbarMain">
             <nav className="topNav" aria-label="Recovery console">
               <span className="muted" style={{ padding: '6px 10px' }}>
@@ -1768,7 +1814,21 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
         docusignEnabled={docusignEnabled === true}
         onLogout={confirmLogout}
       />
-      <div className="appMainColumn">
+      <div
+        className={`appMainColumn${
+          view === 'case-menu'
+            ? ' appMainColumn--caseView'
+            : view === 'main-menu' ||
+                view === 'quotes' ||
+                view === 'contacts' ||
+                view === 'tasks' ||
+                view === 'docusign' ||
+                view === 'accounts' ||
+                view === 'reports'
+              ? ' appMainColumn--mainMenu'
+              : ''
+        }`}
+      >
         <main
           className={
             view === 'case-menu'
@@ -2826,7 +2886,11 @@ function CasesTable({
               {showSourceColumn ? (
                 <div className="td">{c.source_name ?? '—'}</div>
               ) : (
-                <div className="td">{formatCaseStatusLabel(c.status)}</div>
+                <div className="td">
+                  <span className={`caseStatusBadge caseStatusBadge--${c.status}`}>
+                    {formatCaseStatusLabel(c.status)}
+                  </span>
+                </div>
               )}
             </button>
           )
@@ -3141,11 +3205,9 @@ function UserSettingsPage({
     setAppFont,
     appAccent,
     setAppAccent,
-    appPageBg,
     setAppPageBg,
     appMode,
     setAppMode,
-    prefs: appearancePrefs,
   } = useAppearanceFormState(account)
   const [themeSavedHint, setThemeSavedHint] = useState(false)
   const [columnsResetHint, setColumnsResetHint] = useState(false)
@@ -3159,6 +3221,7 @@ function UserSettingsPage({
   const [caldavBusy, setCaldavBusy] = useState(false)
   const [caldavProvision, setCaldavProvision] = useState<UserCalDAVProvisionOut | null>(null)
   const [caldavCopyHint, setCaldavCopyHint] = useState<string | null>(null)
+  const [caldavRevealOpen, setCaldavRevealOpen] = useState(false)
 
   const [pwdCurrent, setPwdCurrent] = useState('')
   const [pwdNew, setPwdNew] = useState('')
@@ -3592,10 +3655,10 @@ function UserSettingsPage({
         <section className="card" style={{ padding: 16 }}>
           <h3 style={{ marginTop: 0 }}>Appearance</h3>
           <p className="muted" style={{ marginTop: 0 }}>
-            Font, accent colour, page background, and light or dark mode are saved to your account and follow you on any
-            device or browser when you sign in.
+            Font, navigation colour, and light or dark mode are saved to your account and follow you on any device when
+            you sign in.
           </p>
-          <div className="stack" style={{ maxWidth: 480, gap: 12 }}>
+          <div className="stack" style={{ maxWidth: 520, gap: 12 }}>
             <SingleSelectDropdown
               label="Font"
               options={FONT_OPTIONS.map((o) => ({ value: o.value, label: o.label }))}
@@ -3605,129 +3668,69 @@ function UserSettingsPage({
                 setThemeSavedHint(false)
               }}
             />
-            <label className="field">
-              <span>Accent colour</span>
-              <div className="row" style={{ gap: 8, alignItems: 'center' }}>
-                <input
-                  type="color"
-                  value={/^#[0-9a-fA-F]{6}$/.test(appAccent.trim()) ? appAccent.trim() : DEFAULT_ACCENT}
-                  onChange={(e) => {
-                    setAppAccent(e.target.value)
-                    setThemeSavedHint(false)
-                  }}
-                  aria-label="Accent colour"
-                  style={{ width: 44, height: 32, padding: 0, border: 'none', cursor: 'pointer' }}
-                />
-                <input
-                  className="allow-select"
-                  value={appAccent}
-                  onChange={(e) => {
-                    setAppAccent(e.target.value)
-                    setThemeSavedHint(false)
-                  }}
-                  placeholder={DEFAULT_ACCENT}
-                  spellCheck={false}
-                  style={{ flex: 1, minWidth: 0 }}
-                />
+            <fieldset className="field" style={{ border: 'none', margin: 0, padding: 0 }}>
+              <legend style={{ marginBottom: 6 }}>Navigation colour</legend>
+              <p className="muted" style={{ margin: '0 0 8px', fontSize: 13 }}>
+                {appMode === 'dark'
+                  ? 'Dark mode always uses slate for sidebar and ribbons. Primary buttons stay Canary blue.'
+                  : 'Sidebar and ribbons. Primary buttons stay Canary blue.'}
+              </p>
+              <div className="stack" style={{ gap: 10 }}>
+                {(appMode === 'dark' ? CHROME_STYLE_OPTIONS.filter((o) => o.id === 'slate') : CHROME_STYLE_OPTIONS).map(
+                  (opt) => {
+                  const selected =
+                    appMode === 'dark' ? opt.id === 'slate' : chromeStyleFromAccent(appAccent) === opt.id
+                  return (
+                    <label
+                      key={opt.id}
+                      className="row"
+                      style={{
+                        gap: 8,
+                        cursor: 'pointer',
+                        padding: '8px 10px',
+                        borderRadius: 10,
+                        border: selected ? '2px solid var(--primary)' : '2px solid var(--border)',
+                        background: selected ? 'rgba(37, 99, 235, 0.06)' : 'transparent',
+                        width: '100%',
+                        boxSizing: 'border-box',
+                        alignItems: 'flex-start',
+                      }}
+                    >
+                      <input
+                        type="radio"
+                        name="canary-chrome"
+                        checked={selected}
+                        disabled={appMode === 'dark'}
+                        onChange={() => {
+                          setAppAccent(accentForChromeStyle(opt.id))
+                          setThemeSavedHint(false)
+                        }}
+                        style={{ marginTop: 3 }}
+                      />
+                      <span
+                        aria-hidden
+                        style={{
+                          width: 18,
+                          height: 18,
+                          borderRadius: 4,
+                          background: opt.swatch,
+                          border: '1px solid rgba(15, 23, 42, 0.2)',
+                          flexShrink: 0,
+                          marginTop: 2,
+                        }}
+                      />
+                      <span>
+                        <span style={{ display: 'block', fontWeight: 650 }}>{opt.label}</span>
+                        <span className="muted" style={{ fontSize: 12 }}>
+                          {opt.hint}
+                        </span>
+                      </span>
+                    </label>
+                  )
+                },
+                )}
               </div>
-              <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>
-                Presets
-              </div>
-              <div className="row" style={{ flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
-                {ACCENT_COLOR_PRESETS.map((p) => (
-                  <button
-                    key={p.label}
-                    type="button"
-                    title={p.label}
-                    aria-label={`Set accent to ${p.label}`}
-                    onClick={() => {
-                      setAppAccent(p.value)
-                      setThemeSavedHint(false)
-                    }}
-                    style={{
-                      width: 28,
-                      height: 28,
-                      borderRadius: 6,
-                      border: '2px solid var(--border)',
-                      background: p.value,
-                      cursor: 'pointer',
-                      padding: 0,
-                      boxSizing: 'border-box',
-                    }}
-                  />
-                ))}
-              </div>
-            </label>
-            <label className="field">
-              <span>Background colour</span>
-              <div className="muted" style={{ marginBottom: 6, fontSize: 12 }}>
-                Colour behind cards and toolbars. Leave blank to use the default blue (light) or slate (dark) for the current
-                mode.
-              </div>
-              <div className="row" style={{ gap: 8, alignItems: 'center' }}>
-                <input
-                  type="color"
-                  value={/^#[0-9a-fA-F]{6}$/.test(appPageBg.trim()) ? appPageBg.trim() : DEFAULT_PAGE_BG}
-                  onChange={(e) => {
-                    setAppPageBg(e.target.value)
-                    setThemeSavedHint(false)
-                  }}
-                  aria-label="Background colour"
-                  style={{ width: 44, height: 32, padding: 0, border: 'none', cursor: 'pointer' }}
-                />
-                <input
-                  className="allow-select"
-                  value={appPageBg}
-                  onChange={(e) => {
-                    setAppPageBg(e.target.value)
-                    setThemeSavedHint(false)
-                  }}
-                  placeholder={`${DEFAULT_PAGE_BG} or leave empty for default`}
-                  spellCheck={false}
-                  style={{ flex: 1, minWidth: 0 }}
-                />
-              </div>
-              <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>
-                Presets
-              </div>
-              <div className="row" style={{ flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
-                {PAGE_BG_COLOR_PRESETS.map((p) => (
-                  <button
-                    key={p.label}
-                    type="button"
-                    title={p.label}
-                    aria-label={p.value ? `Set background to ${p.label}` : 'Use built-in default background'}
-                    onClick={() => {
-                      setAppPageBg(p.value)
-                      setThemeSavedHint(false)
-                    }}
-                    style={
-                      p.value
-                        ? {
-                            width: 28,
-                            height: 28,
-                            borderRadius: 6,
-                            border: '2px solid var(--border)',
-                            background: p.value,
-                            cursor: 'pointer',
-                            padding: 0,
-                            boxSizing: 'border-box',
-                          }
-                        : {
-                            width: 28,
-                            height: 28,
-                            borderRadius: 6,
-                            border: '2px dashed var(--border)',
-                            background: 'var(--panel2)',
-                            cursor: 'pointer',
-                            padding: 0,
-                            boxSizing: 'border-box',
-                          }
-                    }
-                  />
-                ))}
-              </div>
-            </label>
+            </fieldset>
             <fieldset className="field" style={{ border: 'none', margin: 0, padding: 0 }}>
               <legend style={{ marginBottom: 6 }}>Colour mode</legend>
               <div className="row" style={{ gap: 16 }}>
@@ -3750,6 +3753,7 @@ function UserSettingsPage({
                     checked={appMode === 'dark'}
                     onChange={() => {
                       setAppMode('dark')
+                      setAppAccent(SLATE_CHROME_ACCENT)
                       setThemeSavedHint(false)
                     }}
                   />
@@ -3769,7 +3773,14 @@ function UserSettingsPage({
                     setThemeSaveErr(null)
                     setBusy(true)
                     try {
-                      await persistUserAppearance(token, appearancePrefs)
+                      await persistUserAppearance(token, {
+                        font: appFont,
+                        accent: appMode === 'dark' ? SLATE_CHROME_ACCENT : appAccent,
+                        mode: appMode,
+                        pageBg: '',
+                      })
+                      if (appMode === 'dark') setAppAccent(SLATE_CHROME_ACCENT)
+                      setAppPageBg('')
                       setThemeSavedHint(true)
                       await refreshMe()
                     } catch (e: unknown) {
@@ -4247,8 +4258,9 @@ function UserSettingsPage({
         <section className="card" style={{ padding: 16, marginTop: 16 }}>
           <h3 style={{ marginTop: 0 }}>Calendar (CalDAV)</h3>
           <p className="muted" style={{ marginTop: 0 }}>
-            Subscribe in Apple Calendar, Thunderbird, etc. Use the app password below — not your Canary login. Extra calendars
-            and sharing are managed in your client and on the server (Radicale).
+            Subscribe in Apple Calendar, Thunderbird, etc. Use the CalDAV app password — not your Canary login. You can show
+            the app password again anytime by confirming your Canary password. Extra calendars and sharing are managed in
+            your client and on the server (Radicale).
           </p>
           {caldavLoadErr ? <div className="error">{caldavLoadErr}</div> : null}
           {caldavActionErr ? <div className="error">{caldavActionErr}</div> : null}
@@ -4304,7 +4316,7 @@ function UserSettingsPage({
                 border: '1px solid rgba(139, 92, 246, 0.35)',
               }}
             >
-              <div style={{ fontWeight: 600, marginBottom: 8 }}>CalDAV app password (save it now)</div>
+              <div style={{ fontWeight: 600, marginBottom: 8 }}>CalDAV app password</div>
               <p className="muted" style={{ marginTop: 0, fontSize: 13 }}>
                 {caldavProvision.note}
               </p>
@@ -4325,7 +4337,7 @@ function UserSettingsPage({
                   Copy password
                 </button>
                 <button type="button" className="btn primary" onClick={() => setCaldavProvision(null)}>
-                  I’ve saved it
+                  Hide
                 </button>
               </div>
             </div>
@@ -4356,6 +4368,18 @@ function UserSettingsPage({
             ) : null}
             {caldav?.enabled ? (
               <>
+                <button
+                  type="button"
+                  className="btn"
+                  disabled={busy || caldavBusy}
+                  onClick={() => {
+                    setCaldavActionErr(null)
+                    setCaldavCopyHint(null)
+                    setCaldavRevealOpen(true)
+                  }}
+                >
+                  Show app password
+                </button>
                 <button
                   type="button"
                   className="btn"
@@ -4415,6 +4439,45 @@ function UserSettingsPage({
               </>
             ) : null}
           </div>
+          {caldavRevealOpen ? (
+            <TextPromptModal
+              title="Show CalDAV password"
+              hint="Enter your Canary login password to display the CalDAV app password."
+              fieldLabel="Canary password"
+              inputType="password"
+              autoComplete="current-password"
+              initial=""
+              confirmLabel="Show password"
+              busy={caldavBusy}
+              onCancel={() => {
+                if (caldavBusy) return
+                setCaldavRevealOpen(false)
+              }}
+              onConfirm={(pwd) => {
+                const currentPassword = pwd.trim()
+                if (!currentPassword) {
+                  setCaldavActionErr('Enter your Canary password.')
+                  return
+                }
+                setCaldavActionErr(null)
+                setCaldavCopyHint(null)
+                setCaldavBusy(true)
+                apiFetch<UserCalDAVProvisionOut>('/users/me/calendar/reveal-password', {
+                  method: 'POST',
+                  token,
+                  json: { current_password: currentPassword },
+                })
+                  .then((p) => {
+                    setCaldavProvision(p)
+                    setCaldavRevealOpen(false)
+                  })
+                  .catch((e: unknown) =>
+                    setCaldavActionErr((e as ApiError).message ?? 'Could not show CalDAV password'),
+                  )
+                  .finally(() => setCaldavBusy(false))
+              }}
+            />
+          ) : null}
         </section>
         ) : null}
       </div>

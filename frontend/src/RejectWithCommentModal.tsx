@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react'
-import { useModalDrag } from './useModalDrag'
 
 interface Props {
   open: boolean
@@ -30,7 +29,6 @@ export function RejectWithCommentModal({
   onConfirm,
   onCancel,
 }: Props) {
-  const drag = useModalDrag(open)
   const [comment, setComment] = useState('')
 
   useEffect(() => {
@@ -45,8 +43,6 @@ export function RejectWithCommentModal({
 
   if (!open) return null
 
-  const { style: dragTitleStyle, ...dragTitleRest } = drag.handleProps
-
   return (
     <div
       className="modalOverlay"
@@ -55,41 +51,43 @@ export function RejectWithCommentModal({
       aria-modal="true"
       aria-labelledby="rejectCommentModalTitle"
     >
-      <div className="modal card modalSurfaceDraggable" style={{ maxWidth: 460, padding: 20, ...drag.surfaceStyle }}>
-        <h2
-          id="rejectCommentModalTitle"
-          className="modalDragHandle"
-          {...dragTitleRest}
-          style={{ ...dragTitleStyle, margin: '0 0 12px', fontSize: 18 }}
-        >
-          {title}
-        </h2>
-        <p style={{ margin: '0 0 16px', lineHeight: 1.45, whiteSpace: 'pre-wrap' }}>{message}</p>
-        {showComment ? (
-          <label className="field" style={{ marginBottom: 16 }}>
-            <span>{commentLabel}</span>
-            <textarea
-              rows={3}
-              value={comment}
-              disabled={busy}
-              placeholder={commentPlaceholder}
-              onChange={(e) => setComment(e.target.value)}
-              style={{ width: '100%', resize: 'vertical' }}
-            />
-          </label>
-        ) : null}
-        <div className="row" style={{ justifyContent: 'flex-end', gap: 8 }}>
+      <div className="modal card" style={{ maxWidth: 460 }} onClick={(e) => e.stopPropagation()}>
+        <div className="paneHead">
+          <div>
+            <h2 id="rejectCommentModalTitle">{title}</h2>
+          </div>
           <button type="button" className="btn" onClick={onCancel} disabled={busy}>
-            {cancelLabel}
+            Close
           </button>
-          <button
-            type="button"
-            className={`btn${danger ? ' danger' : ' primary'}`}
-            onClick={() => onConfirm(comment.trim())}
-            disabled={busy}
-          >
-            {confirmLabel}
-          </button>
+        </div>
+        <div className="stack" style={{ padding: '16px 22px 8px' }}>
+          <p style={{ margin: 0, lineHeight: 1.45, whiteSpace: 'pre-wrap' }}>{message}</p>
+          {showComment ? (
+            <label className="field">
+              <span>{commentLabel}</span>
+              <textarea
+                rows={3}
+                value={comment}
+                disabled={busy}
+                placeholder={commentPlaceholder}
+                onChange={(e) => setComment(e.target.value)}
+                style={{ width: '100%', resize: 'vertical' }}
+              />
+            </label>
+          ) : null}
+          <div className="row" style={{ justifyContent: 'flex-end', gap: 8 }}>
+            <button type="button" className="btn" onClick={onCancel} disabled={busy}>
+              {cancelLabel}
+            </button>
+            <button
+              type="button"
+              className={`btn${danger ? ' danger' : ' primary'}`}
+              onClick={() => onConfirm(comment.trim())}
+              disabled={busy}
+            >
+              {confirmLabel}
+            </button>
+          </div>
         </div>
       </div>
     </div>

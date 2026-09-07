@@ -1,6 +1,7 @@
 import { Component, type ReactNode, StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'
+import './local-modern.css'
 import { applyStoredTheme } from './theme'
 import { DialogProvider } from './DialogProvider'
 
@@ -65,6 +66,12 @@ if (!el) {
 
   if (window.location.pathname === '/portal' || /^\/portal\/q\/[^/]+$/i.test(window.location.pathname) || /^\/portal\/f\/[^/]+$/i.test(window.location.pathname)) {
     document.documentElement.style.zoom = '1'
+    // Client portal must not inherit staff Appearance page-bg / dark mode.
+    document.documentElement.classList.remove('dark')
+    document.documentElement.style.removeProperty('--page-bg')
+    document.documentElement.style.removeProperty('--bg')
+    document.documentElement.style.removeProperty('--page-gradient')
+    document.documentElement.style.removeProperty('--text-on-page-bg')
     void import('./PortalPage.tsx').then(({ default: PortalPage }) => {
       root.render(<PortalPage />)
     })

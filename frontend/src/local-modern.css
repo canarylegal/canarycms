@@ -1,0 +1,1845 @@
+/**
+ * LOCAL-ONLY visual modernisation for this machine's Canary deploy.
+ * Do not push to GitHub. Loaded after index.css.
+ */
+
+:root {
+  --app-font-stack: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  /* Pale modern page wash */
+  --bg: #e8edf5;
+  --page-bg: #e8edf5;
+  --page-gradient: linear-gradient(165deg, #dce5f4 0%, #e8edf5 40%, #f2f5fa 100%);
+  --panel: #f7f9fc;
+  --panel2: #eef2f8;
+  --text: #0f172a;
+  --muted: #5b6b82;
+  --border: rgba(15, 23, 42, 0.12);
+  --card: #f7f9fc;
+  --sidebar-bg: #172554;
+  --primary: #1d4ed8;
+  --primary-rgb: 29, 78, 216;
+  --shadow: 0 18px 50px rgba(15, 23, 42, 0.12);
+  --shadow-soft: 0 8px 24px rgba(15, 23, 42, 0.08);
+  --local-ink: #0b1220;
+  /* Solid Canary chrome — darker end of the old blue gradient (default pack) */
+  --local-chrome: #172554;
+  --local-rail: var(--local-chrome);
+  --local-accent: #2563eb;
+  --local-accent-soft: rgba(37, 99, 235, 0.12);
+  --local-surface: #f3f6fb;
+  --local-surface-raised: #ffffff;
+  --local-surface-radius: 16px;
+  --local-surface-border: 1px solid rgba(15, 23, 42, 0.1);
+  --local-surface-shadow: 0 10px 28px rgba(15, 23, 42, 0.07);
+  --local-chip: #e7edf7;
+}
+
+/* Slate chrome pack — earlier darker grey-blue navigation / ribbons */
+html[data-canary-chrome='slate'] {
+  --local-chrome: #1e293b;
+  --sidebar-bg: #1e293b;
+  --local-rail: #1e293b;
+}
+
+html,
+body,
+button,
+input,
+select,
+textarea {
+  font-family: var(--app-font-stack);
+}
+
+body {
+  background: var(--page-gradient);
+  color: var(--text);
+}
+
+/* ── Floating sidebar ─────────────────────────────────────────── */
+.appShell--sidebar {
+  gap: 14px;
+  padding: 16px;
+  background: var(--page-gradient);
+}
+
+.appSidebar {
+  background: var(--local-chrome);
+  color: #dbe4f8;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 22px;
+  box-shadow: 0 24px 60px rgba(23, 37, 84, 0.28);
+  padding: 14px 8px 12px;
+  box-sizing: border-box;
+  /*
+   * Collapsed icon lane must account for this 1px border (index.css only subtracts padding).
+   * Otherwise the 44px mark is 2px too wide and reads as extra left padding.
+   */
+  --app-sidebar-content-width: calc(var(--app-sidebar-width-collapsed) - 16px - 2px);
+}
+
+.appSidebar .appBrandMark {
+  width: var(--app-sidebar-content-width);
+  height: var(--app-sidebar-content-width);
+}
+
+/*
+ * Collapsed polish only — do NOT re-center icons or display:none labels.
+ * index.css keeps a fixed icon column so width can animate without a jump.
+ */
+.appSidebar--collapsed {
+  overflow-x: hidden;
+  scrollbar-width: none;
+}
+
+.appSidebar--collapsed::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+.appSidebarBrandName {
+  color: #fff;
+  font-weight: 800;
+  letter-spacing: -0.04em;
+}
+
+.appSidebar .sidebarNavBtn.navBtn {
+  color: #aeb8cb;
+  background: transparent;
+  border-color: transparent;
+  border-radius: 12px;
+  /* Match case left-rail menu row height (16px icon + 12px vertical padding). */
+  min-height: 0;
+  padding: 12px 0;
+  font-size: 0.92rem;
+  font-weight: 650;
+}
+
+.appSidebar .navBtnIcon {
+  width: 16px;
+  height: 16px;
+}
+
+.appSidebar .sidebarNavBtn.navBtn:hover {
+  background: rgba(255, 255, 255, 0.07);
+  color: #fff;
+}
+
+.appSidebar .sidebarNavBtn.navBtn.active {
+  background: rgba(37, 99, 235, 0.18);
+  color: #fff;
+  border-color: transparent;
+  box-shadow: none;
+}
+
+/* Keep the index.css icon-lane grid in both states so icons don’t shift on expand/collapse. */
+
+.appSidebarSignOut,
+.appSidebarToggle {
+  border-color: rgba(255, 255, 255, 0.1) !important;
+  background: rgba(255, 255, 255, 0.05) !important;
+  color: #d5dbe8 !important;
+  border-radius: 12px !important;
+}
+
+.appMainColumn {
+  min-width: 0;
+  border-radius: 22px;
+  overflow: hidden;
+  /* Tint toward page wash so post-login isn’t a hard white slab */
+  background: rgba(232, 237, 245, 0.78);
+  backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.55);
+  box-shadow: var(--shadow-soft);
+}
+
+/* Case view / main menus: no frosted plate — panels float on the page wash */
+.appMainColumn.appMainColumn--caseView,
+.appMainColumn.appMainColumn--mainMenu {
+  border-radius: 0 !important;
+  background: transparent !important;
+  backdrop-filter: none !important;
+  border: 0 !important;
+  box-shadow: none !important;
+}
+
+/* ── Buttons ──────────────────────────────────────────────────── */
+.btn {
+  border-radius: 8px;
+  border: 1px solid rgba(15, 23, 42, 0.14);
+  background: #e8eef8;
+  color: var(--local-ink);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  box-shadow: none;
+  transition:
+    background 0.14s ease,
+    border-color 0.14s ease,
+    transform 0.14s ease,
+    box-shadow 0.14s ease;
+}
+
+.btn:hover:not(:disabled) {
+  background: #dce5f3;
+  border-color: rgba(15, 23, 42, 0.22);
+  transform: translateY(-1px);
+}
+
+/* Topbar secondary actions (e.g. recovery Sign out) — do not use page-wash text colour */
+.topbar .btn:not(.primary):not(.danger) {
+  background: #e8eef8 !important;
+  color: var(--local-ink) !important;
+  border-color: rgba(15, 23, 42, 0.14) !important;
+}
+
+.topbar .btn:not(.primary):not(.danger):hover:not(:disabled) {
+  background: #dce5f3 !important;
+  border-color: rgba(15, 23, 42, 0.22) !important;
+  color: var(--local-ink) !important;
+}
+
+.btn.primary {
+  background: linear-gradient(180deg, #2b6bed 0%, #1d4ed8 100%);
+  border-color: transparent;
+  color: #fff;
+  box-shadow: 0 8px 18px rgba(29, 78, 216, 0.28);
+}
+
+.btn.primary:hover:not(:disabled) {
+  background: linear-gradient(180deg, #3b78f2 0%, #1e40af 100%);
+  border-color: transparent;
+}
+
+.btn.danger {
+  background: #fff1f1;
+  border-color: rgba(185, 28, 28, 0.28);
+  color: #b91c1c;
+}
+
+.btn.btnCaseChrome {
+  border-radius: 8px;
+  background: var(--local-chrome);
+  border: 1px solid #12204a;
+  color: #f8fafc;
+  font-weight: 650;
+  box-shadow: 0 1px 2px rgba(23, 37, 84, 0.18);
+}
+
+.btn.btnCaseChrome:hover:not(:disabled) {
+  background: #12204a;
+  border-color: #0e1a3d;
+  color: #fff;
+  transform: none;
+}
+
+/* Case documents toolbar — floating chrome ribbon (same pattern as main menu filter bar) */
+.caseDocsToolbarBar {
+  flex-shrink: 0;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  background: var(--local-chrome) !important;
+  border: none !important;
+  border-radius: 22px !important;
+  box-shadow: none !important;
+  overflow: visible;
+}
+
+.caseDocsToolbar {
+  background: transparent !important;
+  border-bottom: none !important;
+  /* Case ribbon is the reference height — do not shrink this. */
+  padding: 14px 18px !important;
+  align-items: center !important;
+  border-radius: 22px;
+}
+
+.caseDocsToolbar .btn.btnCaseChrome {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.22);
+  color: #f8fafc;
+  box-shadow: none;
+}
+
+.caseDocsToolbar .btn.btnCaseChrome:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.16);
+  border-color: rgba(255, 255, 255, 0.32);
+  color: #fff;
+}
+
+.caseDocsToolbar .btn.btnCaseChrome.caseDocsNewMenuBtn {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #fff;
+  font-weight: 700;
+}
+
+.caseDocsToolbar .btn.btnCaseChrome.caseDocsNewMenuBtn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--primary) 88%, #0f172a);
+  border-color: color-mix(in srgb, var(--primary) 88%, #0f172a);
+  color: #fff;
+}
+
+.caseDocsToolbar .btn.btnCaseChrome.caseDocsToolbarActionBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.caseDocsToolbarBtnIcon {
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  opacity: 0.92;
+}
+
+.caseDocsToolbarSearch.searchInputWrap .searchInputField {
+  background: #fff;
+  border-color: rgba(255, 255, 255, 0.35);
+}
+
+.navBtn:not(.sidebarNavBtn) {
+  border-radius: 999px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--muted);
+  font-weight: 600;
+  padding: 8px 14px;
+  box-shadow: none;
+}
+
+.navBtn:not(.sidebarNavBtn):hover {
+  background: var(--local-accent-soft);
+  color: var(--local-ink);
+}
+
+.navBtn:not(.sidebarNavBtn).active {
+  background: var(--local-ink);
+  color: #fff;
+  border-color: var(--local-ink);
+}
+
+/* Admin tab strip — segmented control, not grey pills */
+.adminTabStrip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 5px;
+  border-radius: 14px;
+  background: #dfe7f4;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  max-width: 100%;
+}
+
+.adminTab {
+  appearance: none;
+  border: 0;
+  border-radius: 10px;
+  padding: 9px 13px;
+  background: transparent;
+  color: #425269;
+  font: inherit;
+  font-size: 0.88rem;
+  font-weight: 650;
+  cursor: pointer;
+  transition:
+    background 0.14s ease,
+    color 0.14s ease,
+    box-shadow 0.14s ease;
+}
+
+.adminTab:hover {
+  background: rgba(255, 255, 255, 0.55);
+  color: var(--local-ink);
+}
+
+.adminTab.is-active {
+  background: #fff;
+  color: var(--local-ink);
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.1);
+}
+
+/* ── Unified raised surfaces (matter rail + secondary panels) ─── */
+.card,
+.panel,
+.mainMenuShell--surface,
+.listCard,
+.reportsDdPanel,
+.mainMenuFilterDropdown,
+.caseToolbarDropdown,
+.singleSelectDropdownMenu,
+.docContextMenu,
+.caseFileSelectMenu {
+  background: var(--local-surface-raised);
+  border: var(--local-surface-border);
+  border-radius: var(--local-surface-radius);
+  box-shadow: var(--local-surface-shadow);
+}
+
+/* Nested form blocks inside settings / admin */
+.main .card > .card,
+.adminConsole .card,
+.auditToolbar.card {
+  border-radius: var(--local-surface-radius);
+  box-shadow: var(--local-surface-shadow);
+}
+
+/* ── Main menus: floating ribbon + list (Cases / Quotes / Tasks / Contacts) ── */
+.main.main--mainMenu {
+  padding: 0 !important;
+}
+
+.mainMenuShell {
+  gap: 14px;
+}
+
+.mainMenuShell--mainMenu {
+  --app-main-menu-section-gap: 14px;
+  gap: 14px;
+}
+
+/* Dark chrome ribbon — match case documents toolbar height */
+.mainMenuShell--mainMenu > .mainMenuFilterBar,
+.mainMenuFilterBar {
+  background: var(--local-chrome) !important;
+  border: none !important;
+  border-radius: 22px !important;
+  box-shadow: none !important;
+  width: 100%;
+  margin: 0 !important;
+  padding: 14px 18px !important;
+  box-sizing: border-box;
+}
+
+.mainMenuFilterBar .mainMenuFilterRow--toolbar {
+  min-height: 0;
+}
+
+/*
+ * Case docs toolbar uses fixed 34px controls (.btnCaseChrome + search).
+ * Main-menu .btn / inputs were taller (8–10px padding), which made this ribbon taller
+ * even with the same bar padding — lock them to the same footprint.
+ */
+.mainMenuFilterBar .btn {
+  box-sizing: border-box;
+  height: 34px;
+  min-height: 34px;
+  max-height: 34px;
+  padding-top: 0;
+  padding-bottom: 0;
+  display: inline-flex;
+  align-items: center;
+  line-height: 1;
+}
+
+.mainMenuFilterBar .mainMenuSearchInput .searchInputField {
+  box-sizing: border-box;
+  height: 34px;
+  min-height: 34px;
+  max-height: 34px;
+  padding-top: 0;
+  padding-bottom: 0;
+  padding-left: 10px;
+  padding-right: 36px;
+  line-height: 34px;
+}
+
+/* Tasks “View” layout dropdown was still on default trigger padding → taller ribbon. */
+.mainMenuFilterBar .tasksToolbarLayoutGroup .singleSelectDropdownTrigger {
+  box-sizing: border-box;
+  height: 34px;
+  min-height: 34px;
+  max-height: 34px;
+  padding-top: 0;
+  padding-bottom: 0;
+  padding-left: 10px;
+  padding-right: 10px;
+  align-items: center;
+}
+
+.mainMenuFilterBar .tasksToolbarLayoutLabel {
+  color: #c7d0e0;
+  line-height: 1;
+}
+
+/* List / table panel — separate rounded box below the ribbon */
+.mainMenuShell--mainMenu .casesTableCard {
+  border-radius: 22px;
+  border: 0;
+  margin: 0;
+  background: #fff;
+  box-shadow: none;
+  overflow: hidden;
+}
+
+/* Reports / surface shells also float as rounded panels */
+.mainMenuShell--mainMenu.mainMenuShell--surface,
+.mainMenuShell--mainMenu .reportsPageShell {
+  border-radius: 22px;
+  background: #fff;
+  border: 0;
+  box-shadow: none;
+  overflow: hidden;
+}
+
+.mainMenuShell--mainMenu .casesTableScroll .tr.th {
+  background: #d9e3f2;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.12);
+}
+
+/* Hairline row dividers instead of zebra striping */
+.mainMenuShell--mainMenu .casesTableScroll .tr.rowbtn {
+  background: transparent;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.mainMenuShell--mainMenu .casesTableScroll .tr.rowbtn:last-child {
+  border-bottom: none;
+}
+
+.mainMenuShell--mainMenu .casesTableScroll .tr.rowbtn:hover {
+  background: rgba(37, 99, 235, 0.06);
+}
+
+.mainMenuShell--mainMenu .casesTableScroll .tr.rowbtn.active {
+  background: rgba(37, 99, 235, 0.1);
+}
+
+/* Closed / archived: muted text, no zebra fill */
+.mainMenuShell--mainMenu .casesTableScroll .tr.rowbtn.casesRowInactive {
+  color: #64748b;
+  opacity: 1;
+  background: transparent;
+  text-decoration: none;
+}
+
+.mainMenuShell--mainMenu .casesTableScroll .tr.rowbtn.casesRowInactive .td,
+.mainMenuShell--mainMenu .casesTableScroll .tr.rowbtn.casesRowInactive .caseStatusBadge {
+  text-decoration: none;
+}
+
+.mainMenuShell--mainMenu .casesTableScroll .tr.rowbtn.casesRowInactive:hover {
+  background: rgba(148, 163, 184, 0.1);
+}
+
+.mainMenuShell--mainMenu .casesTableScroll .tr.rowbtn.casesRowInactive.active {
+  background: rgba(37, 99, 235, 0.08);
+  color: #475569;
+}
+
+/* ── Modals: overhaul ─────────────────────────────────────────── */
+.modalOverlay {
+  background:
+    radial-gradient(circle at 20% 10%, rgba(37, 99, 235, 0.28), transparent 36%),
+    rgba(8, 12, 22, 0.62);
+  backdrop-filter: blur(8px);
+}
+
+.modalOverlay > .modal,
+.modalOverlay > .card.modal {
+  padding: 0 !important;
+  overflow: hidden;
+  background: #edf1f8 !important;
+  color: #0f172a;
+  border: 1px solid rgba(255, 255, 255, 0.14) !important;
+  border-radius: 22px !important;
+  box-shadow: 0 40px 100px rgba(0, 0, 0, 0.4) !important;
+}
+
+html.dark .modalOverlay > .modal,
+html.dark .modalOverlay > .card.modal {
+  background: #1e293b !important;
+  color: #f1f5f9;
+  border-color: rgba(148, 163, 184, 0.22) !important;
+}
+
+/* Compact confirm / alert dialogs — not resizable, not padded like large forms */
+.modalOverlay > .modal.confirmModal,
+.modalOverlay > .card.confirmModal {
+  width: min(420px, calc(100vw - 32px)) !important;
+  max-width: 420px !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  height: auto !important;
+  max-height: none !important;
+  padding: 22px 22px 18px !important;
+  resize: none !important;
+  overflow: visible !important;
+  background: #ffffff !important;
+  border: 1px solid rgba(15, 23, 42, 0.12) !important;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.28) !important;
+}
+
+/* Prompt / small form modals — same chrome as New matter; never resizable */
+.modalOverlay > .modal.textPromptModal,
+.modalOverlay > .card.textPromptModal {
+  resize: none !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  height: auto !important;
+  max-height: min(90vh, 640px) !important;
+  overflow: hidden !important;
+}
+
+.modalOverlay > .modal.precedentPickerModal,
+.modalOverlay > .card.precedentPickerModal {
+  resize: none !important;
+  overflow: hidden !important;
+}
+
+.precedentPickerBody {
+  margin: 0 !important;
+  padding: 18px 22px 8px !important;
+  gap: 24px !important;
+  box-sizing: border-box;
+}
+
+.precedentPickerCats {
+  padding-right: 20px !important;
+}
+
+.precedentPickerCatsTitle {
+  padding-left: 2px;
+}
+
+.precedentPickerActions {
+  margin: 0 !important;
+  padding: 14px 22px !important;
+  border-top: 1px solid rgba(15, 23, 42, 0.08);
+  background: rgba(255, 255, 255, 0.62);
+  box-sizing: border-box;
+}
+
+.confirmModalTitle {
+  margin: 0 0 10px !important;
+  padding: 0 !important;
+  font-size: 1.15rem !important;
+  font-weight: 780;
+  letter-spacing: -0.03em;
+  color: var(--local-ink);
+  line-height: 1.25;
+}
+
+.confirmModalMessage {
+  margin: 0 0 18px !important;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  color: #334155;
+}
+
+.confirmModalActions {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+}
+
+.modalOverlay > .confirmModal > .paneHead,
+.modalOverlay > .card.confirmModal > .paneHead {
+  display: none;
+}
+
+.modalOverlay > .modal > .paneHead,
+.modalOverlay > .card.modal > .paneHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 !important;
+  padding: 18px 22px !important;
+  border: 0 !important;
+  background: var(--local-chrome);
+  color: #f8fafc;
+}
+
+.modalOverlay > .modal > .paneHead h2,
+.modalOverlay > .modal > .paneHead h3,
+.modalOverlay > .card.modal > .paneHead h2,
+.modalOverlay > .card.modal > .paneHead h3 {
+  margin: 0;
+  color: #fff;
+  font-size: 1.2rem;
+  font-weight: 750;
+  letter-spacing: -0.03em;
+}
+
+.modalOverlay > .modal > .paneHead .muted,
+.modalOverlay > .card.modal > .paneHead .muted {
+  color: #94a3b8;
+}
+
+.modalOverlay > .modal > .paneHead .btn,
+.modalOverlay > .card.modal > .paneHead .btn {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.18);
+  color: #e2e8f0;
+}
+
+.modalOverlay > .modal > .stack,
+.modalOverlay > .card.modal > .stack,
+.modalOverlay > .modal > form,
+.modalOverlay > .card.modal > form,
+.modalOverlay > .modal > .modalBodyScroll,
+.modalOverlay > .card.modal > .modalBodyScroll {
+  padding: 20px 22px 8px;
+}
+
+.modalOverlay > .modal .field span,
+.modalOverlay > .card.modal .field span {
+  color: #475569;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+}
+
+html.dark .modalOverlay > .modal .field span,
+html.dark .modalOverlay > .card.modal .field span {
+  color: #cbd5e1;
+}
+
+/* Footer action strip — only body/footer rows, never the dark paneHead button row */
+.modalOverlay > .modal > .modalBodyScroll .row:has(> .btn),
+.modalOverlay > .card.modal > .modalBodyScroll .row:has(> .btn),
+.modalOverlay > .modal > .stack:not(.paneHead) > .row:has(> .btn),
+.modalOverlay > .card.modal > .stack:not(.paneHead) > .row:has(> .btn),
+.modalOverlay .modalBodyScroll .row[style*='justify-content: flex-end'],
+.modalOverlay .modalBodyScroll .row[style*='justifyContent: flex-end'] {
+  margin: 16px -22px 0;
+  padding: 14px 22px;
+  border-top: 1px solid rgba(15, 23, 42, 0.08);
+  background: rgba(255, 255, 255, 0.62);
+  justify-content: flex-end;
+}
+
+html.dark .modalOverlay > .modal > .modalBodyScroll .row:has(> .btn),
+html.dark .modalOverlay > .card.modal > .modalBodyScroll .row:has(> .btn),
+html.dark .modalOverlay .modalBodyScroll .row[style*='justify-content: flex-end'],
+html.dark .modalOverlay .modalBodyScroll .row[style*='justifyContent: flex-end'] {
+  border-top-color: rgba(148, 163, 184, 0.18);
+  background: rgba(15, 23, 42, 0.45);
+}
+
+/* Nested tool rows (access code, portal actions) must not use the full-bleed footer strip */
+.modalOverlay .contactPortalPanel .row:has(> .btn),
+.modalOverlay .modalBodyScroll .card .row:has(> .btn),
+.modalOverlay .contactPortalPanel .row[style*='justify-content: flex-end'],
+.modalOverlay .contactPortalPanel .row[style*='justifyContent: flex-end'],
+.modalOverlay .modalBodyScroll .card .row[style*='justify-content: flex-end'],
+.modalOverlay .modalBodyScroll .card .row[style*='justifyContent: flex-end'] {
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+  justify-content: flex-start;
+}
+
+.modalOverlay > .modal > .paneHead .row,
+.modalOverlay > .card.modal > .paneHead .row {
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+  gap: 8px;
+}
+
+.modalOverlay > .confirmModal .row,
+.modalOverlay > .card.confirmModal .row,
+.modalOverlay > .confirmModal .confirmModalActions,
+.modalOverlay > .card.confirmModal .confirmModalActions {
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+}
+
+/* Contact portal section stays readable on the modal body */
+.contactPortalPanel,
+.contactPortalPanel h3,
+.contactPortalPanel h4,
+.contactPortalPanel .listTitle {
+  color: inherit;
+}
+
+.contactPortalPanel .muted {
+  color: var(--muted);
+}
+
+.contactPortalPanel > .card {
+  background: #ffffff;
+  border: 1px solid rgba(15, 23, 42, 0.1);
+  color: #0f172a;
+  overflow: hidden;
+  box-sizing: border-box;
+}
+
+.contactPortalPanel .card > .row {
+  flex-wrap: wrap;
+  max-width: 100%;
+}
+
+.contactPortalPanel > .card .muted,
+.contactPortalPanel > .card code {
+  color: #334155;
+}
+
+html.dark .contactPortalPanel > .card {
+  background: #0f172a;
+  border-color: rgba(148, 163, 184, 0.22);
+  color: #f1f5f9;
+}
+
+html.dark .contactPortalPanel > .card .muted,
+html.dark .contactPortalPanel > .card code {
+  color: #cbd5e1;
+}
+
+input,
+textarea,
+select {
+  background: #fff !important;
+  border: 1px solid rgba(15, 23, 42, 0.16) !important;
+  border-radius: 8px !important;
+  color: #0f172a !important;
+}
+
+html.dark input,
+html.dark textarea,
+html.dark select {
+  background: #334155 !important;
+  color: #f1f5f9 !important;
+  border-color: rgba(148, 163, 184, 0.28) !important;
+}
+
+input:focus,
+textarea:focus,
+select:focus {
+  border-color: rgba(37, 99, 235, 0.55) !important;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+}
+
+/* ── Login: modern form on Canary chrome blue (not pale page wash) ─ */
+.loginScreen {
+  position: relative;
+  min-height: 100vh;
+  min-height: 100dvh;
+  margin: 0 !important;
+  max-width: none !important;
+  width: 100%;
+  padding: 48px 16px !important;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  overflow: auto;
+  background: var(--local-chrome);
+}
+
+.loginScreen::before {
+  display: none;
+}
+
+.loginScreen > * {
+  position: relative;
+  z-index: 1;
+}
+
+.loginScreen .loginBrandRow {
+  margin-bottom: 0;
+}
+
+.loginScreen .appLogo--login {
+  max-width: min(560px, 92vw);
+  max-height: 280px;
+  width: auto;
+  height: auto;
+  filter: drop-shadow(0 12px 28px rgba(0, 0, 0, 0.35));
+}
+
+.loginScreen .card,
+.loginScreen .loginCard {
+  width: min(580px, 100%);
+  /* Positive gap so the wordmark never clips into the card */
+  margin-top: 8px !important;
+  padding: 28px 30px !important;
+  border-radius: 18px !important;
+  background: rgba(255, 255, 255, 0.96) !important;
+  border: 1px solid rgba(255, 255, 255, 0.14) !important;
+  box-shadow: 0 28px 70px rgba(0, 0, 0, 0.4) !important;
+}
+
+.loginScreen .field span {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #334155;
+  margin-bottom: 7px;
+}
+
+.loginScreen .field input:not([type='checkbox']):not([type='radio']),
+.loginScreen .field textarea {
+  padding-top: 13px;
+  padding-bottom: 13px;
+}
+
+.loginScreen .field input:not([type='checkbox']):not([type='radio']):focus,
+.loginScreen .field textarea:focus,
+.loginScreen .btn:focus-visible,
+.loginScreen .loginPasswordToggle:focus-visible,
+.loginScreen .loginForgotLink:focus-visible {
+  outline: none;
+  border-color: #2563eb !important;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.4);
+}
+
+.loginScreen .btn:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.28);
+}
+
+.loginScreen .loginForgotLink:focus-visible {
+  border-radius: 4px;
+  border: 1px solid #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.35);
+}
+
+.loginPasswordField {
+  position: relative;
+}
+
+.loginPasswordField input {
+  padding-right: 44px !important;
+}
+
+.loginPasswordToggle {
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: #475569;
+  cursor: pointer;
+}
+
+.loginPasswordToggle:hover {
+  color: #0f172a;
+  background: rgba(15, 23, 42, 0.06);
+}
+
+.loginCapsWarning {
+  margin-top: 8px;
+  font-size: 0.86rem;
+  font-weight: 600;
+  color: #b45309;
+}
+
+.loginPasskeyBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+}
+
+.loginPasskeyIcon {
+  flex-shrink: 0;
+  opacity: 0.9;
+}
+
+.loginScreen .loginForgotLink {
+  color: #1e293b;
+  font-weight: 550;
+}
+
+.loginScreen .loginForgotLink:hover {
+  color: #0f172a;
+}
+
+@media (max-width: 560px) {
+  .loginScreen {
+    padding: 28px 14px !important;
+    justify-content: flex-start;
+  }
+
+  .loginScreen .appLogo--login {
+    max-height: 200px;
+    max-width: min(420px, 88vw);
+  }
+
+  .loginActionsRow {
+    flex-direction: column;
+  }
+
+  .loginActionsRow .btn {
+    width: 100%;
+  }
+}
+
+/* ── Case left rail (radical alternative) ─────────────────────── */
+/* No light-grey “frame” behind the rail — it was only padding on a frosted panel. */
+.main.main--caseView {
+  padding: 0 !important;
+}
+
+.caseShell {
+  /* ~20% narrower than prior 340px local width */
+  --case-sidebar-width: 272px;
+  /* Match .appShell--sidebar gap between side ribbon and main column */
+  --case-main-gap: 14px;
+  gap: 0;
+  background: transparent;
+}
+
+.caseGrid {
+  gap: var(--case-main-gap) !important;
+  column-gap: var(--case-main-gap) !important;
+  padding: 0;
+  background: transparent;
+  min-height: 0;
+  box-sizing: border-box;
+}
+
+.caseLeft.caseLeft--rail {
+  gap: 0;
+  border-radius: 22px;
+  background: var(--local-chrome);
+  border: 0;
+  box-shadow: none;
+  overflow: hidden;
+  color: #dbe4f8;
+  align-self: stretch;
+  min-height: 0;
+}
+
+.caseRight {
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+  box-sizing: border-box;
+  /* Ribbon + documents card — same 14px wash gap as main menus */
+  gap: 14px;
+  /* Let the main-column wash show in the gap (same as shell gutter) */
+  background: transparent;
+}
+
+/* Column headers stick inside the documents card while the list scrolls */
+.caseDocsListHead {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  flex-shrink: 0;
+  background: #eef2f8;
+  box-shadow: none;
+}
+
+.caseLeft.caseLeft--rail > .card {
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  border-radius: 0;
+  padding: 0 10px !important;
+  margin: 0;
+}
+
+.caseLeft.caseLeft--rail > .caseMatterHero {
+  padding: 18px 16px 16px !important;
+  margin: 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 0;
+  background: var(--local-chrome);
+}
+
+.caseMatterHero {
+  padding: 18px 16px 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  background: var(--local-chrome);
+}
+
+.caseMatterHeroTop {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.caseMatterHeroRef {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace;
+  font-size: 0.78rem;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #93a4c3;
+}
+
+.caseMatterHeroBack {
+  flex: 0 0 auto;
+  width: 34px;
+  height: 34px;
+  min-width: 34px;
+  padding: 0 !important;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px !important;
+  background: rgba(255, 255, 255, 0.1) !important;
+  border-color: rgba(255, 255, 255, 0.18) !important;
+  color: #e2e8f0 !important;
+  box-shadow: none !important;
+}
+
+.caseMatterHeroBack:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.16) !important;
+  border-color: rgba(255, 255, 255, 0.28) !important;
+  color: #fff !important;
+  transform: none;
+}
+
+.caseMatterHeroBackIcon {
+  width: 16px;
+  height: 16px;
+}
+
+/* Cases / quotes list status pills */
+.caseStatusBadge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  line-height: 1.35;
+  white-space: nowrap;
+}
+
+.caseStatusBadge--open {
+  background: rgba(34, 197, 94, 0.14);
+  color: #15803d;
+}
+
+.caseStatusBadge--post_completion {
+  background: rgba(37, 99, 235, 0.12);
+  color: #1d4ed8;
+}
+
+.caseStatusBadge--quote {
+  background: rgba(245, 158, 11, 0.16);
+  color: #b45309;
+}
+
+.caseStatusBadge--closed,
+.caseStatusBadge--quote_closed,
+.caseStatusBadge--archived {
+  background: rgba(100, 116, 139, 0.14);
+  color: #475569;
+}
+
+.caseMatterHeroClient {
+  margin: 0;
+  font-size: 1rem;
+  line-height: 1.25;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  color: #fff;
+}
+
+.caseMatterHeroType {
+  margin: 8px 0 0;
+  color: #9aabc8;
+  font-size: 0.86rem;
+  font-weight: 600;
+}
+
+/* Client / Source / Lock — same label–value rows as the old case details card */
+.caseMatterHeroDetails {
+  margin-top: 12px;
+  gap: 6px;
+}
+
+.caseMatterHeroDetails .caseDetailRow {
+  grid-template-columns: minmax(4.5rem, 32%) 1fr;
+  gap: 4px 10px;
+}
+
+.caseMatterHeroDetails .caseDetailRow dt {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #8090ad;
+}
+
+.caseMatterHeroDetails .caseDetailRow dd {
+  font-size: 0.86rem;
+  font-weight: 600;
+  color: #edf2fb;
+}
+
+/* Status colour on the dark rail (same palette as before, without the meta boxes). */
+.caseMatterHeroDetails .caseDetailRow dd.caseMatterHeroStatusText--open {
+  color: #86efac;
+}
+
+.caseMatterHeroDetails .caseDetailRow dd.caseMatterHeroStatusText--post_completion {
+  color: #93c5fd;
+}
+
+.caseMatterHeroDetails .caseDetailRow dd.caseMatterHeroStatusText--quote {
+  color: #fde68a;
+}
+
+.caseMatterHeroDetails .caseDetailRow dd.caseMatterHeroStatusText--closed,
+.caseMatterHeroDetails .caseDetailRow dd.caseMatterHeroStatusText--quote_closed,
+.caseMatterHeroDetails .caseDetailRow dd.caseMatterHeroStatusText--archived {
+  color: #94a3b8;
+}
+
+.caseMatterHeroEdit {
+  width: 100%;
+  margin-top: 14px;
+  justify-content: center;
+}
+
+/* Equal space above/below the hero separator (must beat `.caseLeft… > .card` padding). */
+.caseLeft.caseLeft--rail > .card.caseMatterSections {
+  padding: 16px 10px 0 !important;
+}
+
+.caseLeft.caseLeft--rail .accordion {
+  margin-top: 0;
+  display: grid;
+  gap: 2px;
+  width: 100%;
+}
+
+.caseLeft.caseLeft--rail .accHead {
+  box-sizing: border-box;
+  width: 100%;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  color: #d5deee;
+  padding: 12px 10px;
+  font-weight: 650;
+  font-size: 0.92rem;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 10px;
+}
+
+.caseLeft.caseLeft--rail .caseLeftNavIcon {
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  opacity: 0.88;
+  color: inherit;
+}
+
+.caseLeft.caseLeft--rail .accHead.is-active .caseLeftNavIcon {
+  opacity: 1;
+}
+
+.caseLeft.caseLeft--rail .caseLeftNavItem {
+  margin-bottom: 2px;
+}
+
+.caseLeft.caseLeft--rail .accHead:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+/* Expanded accordion = chrome only (chevron); do not look like the current page. */
+.caseLeft.caseLeft--rail .accHead[aria-expanded='true']:not(.is-active) {
+  background: rgba(255, 255, 255, 0.04);
+  color: #e8eef9;
+}
+
+/* Current view only — blue pill (driven by caseDocPanel). */
+.caseLeft.caseLeft--rail .accHead.is-active,
+.caseLeft.caseLeft--rail .accHead[aria-current='page'] {
+  background: rgba(37, 99, 235, 0.18);
+  color: #fff;
+}
+
+.caseLeft.caseLeft--rail .accHead .muted {
+  margin-left: auto;
+  color: #8b9bb8;
+  font-size: 0.85rem;
+}
+
+.caseLeft.caseLeft--rail .accBody {
+  margin: 0 0 8px;
+  padding: 10px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  box-sizing: border-box;
+  width: 100%;
+  color: #c7d0e0;
+}
+
+.caseLeft.caseLeft--rail .accBody strong {
+  color: #edf2fb;
+}
+
+.caseLeft.caseLeft--rail .caseFinanceBalance--ok,
+.caseLeft.caseLeft--rail .caseFinanceBalance--ok strong {
+  color: #edf2fb;
+}
+
+.caseLeft.caseLeft--rail .caseFinanceBalance--dr,
+.caseLeft.caseLeft--rail .caseFinanceBalance--dr strong {
+  color: #fca5a5;
+}
+
+.caseLeft.caseLeft--rail .listTitle {
+  color: #edf2fb;
+}
+
+.caseLeft.caseLeft--rail .listCard {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+/* Docs / edit panels: own rounded panel on the page wash */
+.caseDocsCard,
+.caseRight .card {
+  background: var(--local-surface-raised);
+  border: 0;
+  border-radius: 22px;
+  box-shadow: none;
+  overflow: hidden;
+}
+
+.caseDocPanelInset.caseDocPanelHost {
+  background: var(--local-surface-raised);
+  border: 0;
+  border-radius: 22px;
+  box-shadow: none;
+  overflow: hidden;
+  gap: 0 !important;
+  padding: 0 !important;
+  min-height: 0;
+}
+
+.caseDocEditEmbed {
+  background: #ffffff;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.caseDocPanelBar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 0 !important;
+  padding: 16px 18px !important;
+  background: var(--local-chrome);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  color: #f8fafc;
+  flex-shrink: 0;
+}
+
+.caseDocPanelBarTitle {
+  min-width: 0;
+  flex: 1 1 160px;
+}
+
+.caseDocPanelBarTitle h2 {
+  margin: 0;
+  font-size: 1.15rem;
+  font-weight: 750;
+  letter-spacing: -0.03em;
+  color: #fff;
+  line-height: 1.25;
+}
+
+.caseDocPanelBarTitle .muted,
+.caseDocPanelBar .muted {
+  color: #94a3b8 !important;
+  margin-top: 2px;
+  font-size: 0.86rem;
+}
+
+.caseDocPanelBarActions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.caseDocPanelBar .btn {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.18);
+  color: #e2e8f0;
+}
+
+.caseDocPanelBar .btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.16);
+  border-color: rgba(255, 255, 255, 0.28);
+  color: #fff;
+}
+
+.caseDocPanelBar .btn.primary {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #fff;
+}
+
+.caseDocPanelBar .btn.primary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--primary) 88%, #0f172a);
+  border-color: color-mix(in srgb, var(--primary) 88%, #0f172a);
+  color: #fff;
+}
+
+.caseDocPanelBar .tasksToolbarLayoutLabel {
+  color: #94a3b8;
+}
+
+.caseDocPanelBar .searchInputWrap .searchInputField {
+  background: #fff;
+  border-color: rgba(255, 255, 255, 0.28);
+}
+
+.caseDocPanelInset > .caseDocPanelScrollHost,
+.caseDocPanelInset > .caseDocLedgerEmbed {
+  padding: 16px 18px;
+  box-sizing: border-box;
+}
+
+.caseDocPanelInset > .caseDocPanelScrollHost--fillHost {
+  padding: 10px 12px 12px;
+}
+
+.caseDocsCard .docsTr {
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.caseDocsCard .docsTr:last-child {
+  border-bottom: none;
+}
+
+.caseDocsCard .docsTr.docsTh {
+  border-bottom: 1px solid rgba(15, 23, 42, 0.12);
+}
+
+html.dark .caseDocsCard .docsTr {
+  border-bottom-color: rgba(148, 163, 184, 0.16);
+}
+
+html.dark .caseDocsCard .docsTr.docsTh {
+  border-bottom-color: rgba(148, 163, 184, 0.2);
+}
+
+.caseDocsCard .paneHead {
+  margin: 0 0 12px;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+}
+
+.caseDocsCard .paneHead h2,
+.caseDocsCard .paneHead h3 {
+  color: var(--local-ink);
+}
+
+.paneHead h2 {
+  letter-spacing: -0.03em;
+}
+
+@media (max-width: 1100px) {
+  .appShell--sidebar {
+    padding: 12px;
+    gap: 10px;
+  }
+
+  .portalWideTop {
+    grid-template-columns: 1fr;
+    justify-items: center;
+  }
+
+  .portalWideTop .portalBrandHeader,
+  .portalWideTopActions {
+    grid-column: 1;
+    justify-self: center;
+  }
+}
+
+/* Finance totals — never inherit unreadable ink on tinted cards */
+.finTotalValue {
+  color: var(--text);
+}
+
+.finTotalCr {
+  color: #15803d;
+}
+
+html.dark .finTotalCr {
+  color: #4ade80;
+}
+
+/* ── Client portal: modern layout on Canary chrome blue ────────── */
+html:has(.portalShell),
+html:has(.portalShell) body {
+  background: var(--local-chrome) !important;
+  background-attachment: fixed !important;
+}
+
+.portalShell {
+  position: relative;
+  isolation: isolate;
+  background: var(--local-chrome) !important;
+  background-attachment: fixed !important;
+  padding: 40px 20px 28px;
+  min-height: 100vh;
+  box-sizing: border-box;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start; /* base uses center; with column that mid-screens the portal */
+  gap: 18px;
+}
+
+.portalShell::before {
+  display: none;
+}
+
+.portalShell > * {
+  position: relative;
+  z-index: 1;
+}
+
+.portalLayout--wide {
+  width: min(920px, 100%);
+  gap: 22px;
+}
+
+.portalWideTop {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: start;
+  gap: 12px;
+}
+
+.portalWideTop .portalBrandHeader {
+  grid-column: 2;
+  text-align: center;
+  margin: 0;
+}
+
+.portalWideTopActions {
+  grid-column: 3;
+  justify-self: end;
+  display: flex;
+  align-items: center;
+  padding-top: 4px;
+}
+
+.portalSignOutBtn {
+  background: rgba(255, 255, 255, 0.1) !important;
+  border-color: rgba(255, 255, 255, 0.22) !important;
+  color: #e2e8f0 !important;
+  box-shadow: none !important;
+}
+
+.portalSignOutBtn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.16) !important;
+  border-color: rgba(255, 255, 255, 0.32) !important;
+  color: #fff !important;
+  transform: none;
+}
+
+.portalLayout--narrow {
+  width: min(480px, 100%);
+  margin: 0 auto;
+}
+
+.portalCard.card {
+  background: rgba(255, 255, 255, 0.96) !important;
+  border: 1px solid rgba(255, 255, 255, 0.14) !important;
+  border-radius: 18px !important;
+  box-shadow: 0 28px 70px rgba(0, 0, 0, 0.4) !important;
+}
+
+.portalCardWide {
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  padding: 24px !important;
+}
+
+.portalLayout--wide .portalBrandHeader {
+  text-align: center;
+  margin: 0;
+}
+
+.portalLayout--wide .portalBrandTitle,
+.portalBrandTitle {
+  color: #f8fafc;
+}
+
+.portalLayout--wide .portalBrandSubtitle,
+.portalBrandSubtitle {
+  color: rgba(226, 232, 240, 0.78);
+}
+
+/* Narrow (sign-in) keeps title inside the white card — dark ink */
+.portalLayout--narrow .portalBrandTitle {
+  color: #0f172a;
+}
+
+.portalLayout--narrow .portalBrandSubtitle {
+  color: #64748b;
+}
+
+/* Powered-by: canvas-only chrome — never compete with the white card */
+.portalPoweredBy {
+  display: flex;
+  justify-content: center;
+  margin: 0;
+  padding: 2px 8px 10px;
+}
+
+.portalCard .portalPoweredBy {
+  display: none;
+}
+
+.portalPoweredByLink {
+  color: rgba(255, 255, 255, 0.72) !important;
+  font-size: 0.82rem;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+}
+
+.portalPoweredByLink:hover {
+  color: rgba(255, 255, 255, 0.95) !important;
+}
+
+.portalPoweredByMark {
+  opacity: 0.9;
+}
+
+.portalQuotePanel.card,
+.portalPreviewSection {
+  background: var(--local-surface-raised);
+  border: var(--local-surface-border);
+  border-radius: var(--local-surface-radius);
+  box-shadow: var(--local-surface-shadow);
+}
+
+
+/* ── Dark mode: undo light-only local chrome ──────────────────── */
+html.dark {
+  --local-ink: #f1f5f9;
+  --local-surface: #1e293b;
+  --local-surface-raised: #334155;
+  --local-chip: #334155;
+  --local-accent-soft: rgba(37, 99, 235, 0.22);
+  --bg: #0f172a;
+  --page-bg: #0f172a;
+  --page-gradient: linear-gradient(165deg, #0b1220 0%, #152238 45%, #0f172a 100%);
+  --panel: #1e293b;
+  --panel2: #334155;
+  --text: #f1f5f9;
+  --muted: #94a3b8;
+  --border: rgba(148, 163, 184, 0.22);
+  --card: #1e293b;
+  --shadow-soft: 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+
+html.dark body,
+html.dark .appShell--sidebar {
+  background: var(--page-gradient);
+  color: var(--text);
+}
+
+html.dark .appMainColumn {
+  background: rgba(15, 23, 42, 0.78);
+  border-color: rgba(148, 163, 184, 0.18);
+  box-shadow: var(--shadow-soft);
+}
+
+html.dark .appMainColumn.appMainColumn--caseView,
+html.dark .appMainColumn.appMainColumn--mainMenu {
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+}
+
+html.dark .btn:not(.primary):not(.danger):not(.btnCaseChrome) {
+  background: #334155;
+  border-color: rgba(148, 163, 184, 0.28);
+  color: #f1f5f9;
+}
+
+html.dark .btn:not(.primary):not(.danger):not(.btnCaseChrome):hover:not(:disabled) {
+  background: #475569;
+  border-color: rgba(148, 163, 184, 0.4);
+  color: #fff;
+}
+
+html.dark .btn.danger {
+  background: rgba(127, 29, 29, 0.35);
+  border-color: rgba(248, 113, 113, 0.35);
+  color: #fecaca;
+}
+
+html.dark .card,
+html.dark .panel,
+html.dark .modal,
+html.dark .mainMenuShell--surface,
+html.dark .mainMenuShell--mainMenu .casesTableCard {
+  background: var(--panel);
+  border-color: rgba(148, 163, 184, 0.2);
+  box-shadow: none;
+}
+
+html.dark .caseRight {
+  background: transparent;
+}
+
+html.dark .caseDocsListHead {
+  background: #1e293b;
+}
+
+html.dark .caseDocsCard,
+html.dark .caseRight .card {
+  background: #1e293b;
+  border-color: rgba(148, 163, 184, 0.2);
+}
+
+html.dark .adminTabStrip {
+  background: #0f172a;
+  border-color: rgba(148, 163, 184, 0.2);
+}
+
+html.dark .adminTab {
+  color: #94a3b8;
+}
+
+html.dark .adminTab:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: #f8fafc;
+}
+
+html.dark .adminTab.is-active {
+  background: #334155;
+  color: #f8fafc;
+  box-shadow: none;
+}
+
+html.dark .navBtn:not(.sidebarNavBtn) {
+  color: #94a3b8;
+}
+
+html.dark .navBtn:not(.sidebarNavBtn):hover {
+  background: rgba(37, 99, 235, 0.2);
+  color: #f8fafc;
+}
+
+html.dark .navBtn:not(.sidebarNavBtn).active {
+  background: #2563eb;
+  color: #fff;
+  border-color: #2563eb;
+}
+
+html.dark input,
+html.dark textarea,
+html.dark select {
+  background: #334155 !important;
+  color: #f1f5f9 !important;
+  border-color: rgba(148, 163, 184, 0.28) !important;
+}
+
+html.dark .field span,
+html.dark label.field > span {
+  color: #cbd5e1;
+}
+
+html.dark .muted {
+  color: #94a3b8;
+}
+
+html.dark .mainMenuShell--mainMenu .casesTableScroll .tr.th {
+  background: #1e293b;
+  border-bottom-color: rgba(148, 163, 184, 0.2);
+  color: #e2e8f0;
+}
+
+html.dark .mainMenuShell--mainMenu .casesTableScroll .tr.rowbtn {
+  border-bottom-color: rgba(148, 163, 184, 0.16);
+}
+
+html.dark .mainMenuShell--mainMenu .casesTableScroll .tr.rowbtn:hover {
+  background: rgba(37, 99, 235, 0.18);
+}
+
+html.dark .mainMenuShell--mainMenu .casesTableScroll .tr.rowbtn.active {
+  background: rgba(37, 99, 235, 0.28);
+}
+
+html.dark .caseDocsCard .paneHead h2,
+html.dark .caseDocsCard .paneHead h3 {
+  color: #f8fafc;
+}
+
+html.dark .finTotalCard {
+  background: #0f172a;
+  border-color: rgba(148, 163, 184, 0.22);
+  box-shadow: none;
+}
+
+html.dark .loginScreen .card {
+  background: rgba(30, 41, 59, 0.96) !important;
+  border-color: rgba(148, 163, 184, 0.25) !important;
+  color: #f1f5f9;
+}
+
+html.dark .singleSelectDropdownTrigger,
+html.dark .mainMenuFilterSelectTrigger {
+  background: #334155;
+  color: #f1f5f9;
+  border-color: rgba(148, 163, 184, 0.28);
+}
+
+/* Reports filter chips used --page-bg + --text-on-page-bg (meant for dark chrome). */
+.reportsDdTrigger {
+  background: #ffffff !important;
+  color: var(--text) !important;
+  border-color: rgba(15, 23, 42, 0.14) !important;
+}
+
+.reportsDdTriggerLabel {
+  color: var(--muted) !important;
+}
+
+.reportsDdTriggerSummary {
+  color: var(--text) !important;
+}
+
+html.dark .reportsDdTrigger {
+  background: #334155 !important;
+  color: #f1f5f9 !important;
+  border-color: rgba(148, 163, 184, 0.28) !important;
+}
+
+html.dark .reportsDdTriggerLabel {
+  color: #94a3b8 !important;
+}
+
+html.dark .reportsDdTriggerSummary {
+  color: #f1f5f9 !important;
+}
