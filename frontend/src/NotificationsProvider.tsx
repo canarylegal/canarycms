@@ -4,6 +4,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from 'react'
@@ -24,14 +25,34 @@ type NotificationsContextValue = {
   clearAll: () => void
 }
 
-const STORAGE_KEY = 'canary-app-notifications'
+type NotificationsScopeValue = {
+  setUserId: (userId: string | null) => void
+}
+
+const LEGACY_STORAGE_KEY = 'canary-app-notifications'
 const MAX_ITEMS = 50
 
 const NotificationsContext = createContext<NotificationsContextValue | null>(null)
+const NotificationsScopeContext = createContext<NotificationsScopeValue | null>(null)
 
-function loadStored(): AppNotification[] {
+function notificationsStorageKey(userId: string | null | undefined): string | null {
+  if (!userId) return null
+  return `canary-app-notifications.${userId}.v1`
+}
+
+function loadStored(userId: string | null | undefined): AppNotification[] {
+  const key = notificationsStorageKey(userId)
+  if (!key) return []
   try {
-    const raw = localStorage.getItem(STORAGE_KEY)
+    let raw = localStorage.getItem(key)
+    if (!raw) {
+      const legacy = localStorage.getItem(LEGACY_STORAGE_KEY)
+      if (legacy) {
+        raw = legacy
+        localStorage.setItem(key, legacy)
+        localStorage.removeItem(LEGACY_STORAGE_KEY)
+      }
+    }
     if (!raw) return []
     const parsed = JSON.parse(raw) as unknown
     if (!Array.isArray(parsed)) return []
@@ -77,9 +98,11 @@ function shouldSeedDemoNotifications(): boolean {
   }
 }
 
-function persist(items: AppNotification[]) {
+function persist(userId: string | null | undefined, items: AppNotification[]) {
+  const key = notificationsStorageKey(userId)
+  if (!key) return
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(items.slice(0, MAX_ITEMS)))
+    localStorage.setItem(key, JSON.stringify(items.slice(0, MAX_ITEMS)))
   } catch {
     // ignore quota / private mode
   }
@@ -106,19 +129,39 @@ export function useNotificationsOptional(): NotificationsContextValue | null {
   return useContext(NotificationsContext)
 }
 
+/** Bind notifications localStorage to the signed-in user (call from App on me.id change). */
+export function useNotificationsUserScope(): NotificationsScopeValue {
+  const v = useContext(NotificationsScopeContext)
+  if (!v) {
+    throw new Error('useNotificationsUserScope must be used within NotificationsProvider')
+  }
+  return v
+}
+
 export function NotificationsProvider({ children }: { children: ReactNode }) {
+  const [userId, setUserId] = useState<string | null>(null)
+  const userIdRef = useRef(userId)
   const [notifications, setNotifications] = useState<AppNotification[]>(() => {
     if (typeof window !== 'undefined' && shouldSeedDemoNotifications()) {
-      const demo = demoNotifications()
-      persist(demo)
-      return demo
+      return demoNotifications()
     }
-    return loadStored()
+    return []
   })
 
   useEffect(() => {
+    if (userIdRef.current === userId) return
+    userIdRef.current = userId
+    if (typeof window !== 'undefined' && shouldSeedDemoNotifications()) {
+      const demo = demoNotifications()
+      persist(userId, demo)
+      setNotifications(demo)
+      return
+    }
+    setNotifications(loadStored(userId))
+  }, [userId])
+
+  useEffect(() => {
     if (!shouldSeedDemoNotifications()) return
-    // Strip the query flag so a normal refresh does not keep re-seeding.
     try {
       const url = new URL(window.location.href)
       if (url.searchParams.has('demoNotifications')) {
@@ -131,8 +174,8 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
   }, [])
 
   useEffect(() => {
-    persist(notifications)
-  }, [notifications])
+    persist(userId, notifications)
+  }, [userId, notifications])
 
   const push = useCallback((message: string) => {
     const text = String(message || '').trim()
@@ -170,5 +213,11 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
     [notifications, unreadCount, push, markAllRead, markRead, clearAll],
   )
 
-  return <NotificationsContext.Provider value={value}>{children}</NotificationsContext.Provider>
+  const scope = useMemo(() => ({ setUserId }), [])
+
+  return (
+    <NotificationsScopeContext.Provider value={scope}>
+      <NotificationsContext.Provider value={value}>{children}</NotificationsContext.Provider>
+    </NotificationsScopeContext.Provider>
+  )
 }

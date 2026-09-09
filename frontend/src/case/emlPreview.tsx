@@ -309,30 +309,93 @@ function headerDisplay(headers: Record<string, string>, key: string): string {
   return decodeMimeHeaderValue((headers[key.toLowerCase()] ?? '').trim())
 }
 
-let domPurifyLinkHookAdded = false
+let domPurifyEmlHooksAdded = false
+/** Set only while sanitizeEmlHtml runs — controls remote resource stripping. */
+let emlSanitizeAllowRemote = false
 
-function sanitizeEmlHtml(html: string): string {
+function isSafeLocalOrSchemeUrl(raw: string): boolean {
+  const u = raw.trim().toLowerCase()
+  if (!u) return true
+  if (
+    u.startsWith('data:') ||
+    u.startsWith('blob:') ||
+    u.startsWith('cid:') ||
+    u.startsWith('#') ||
+    u.startsWith('mailto:') ||
+    u.startsWith('tel:')
+  ) {
+    return true
+  }
+  return false
+}
+
+function stripCssRemoteUrls(css: string): string {
+  return css.replace(/url\s*\(\s*(['"]?)([^)'"]+)\1\s*\)/gi, (full, _q: string, inner: string) => {
+    return isSafeLocalOrSchemeUrl(inner) ? full : 'url(about:blank)'
+  })
+}
+
+function ensureDomPurifyEmlHooks(): void {
+  if (domPurifyEmlHooksAdded) return
+  DOMPurify.addHook('uponSanitizeElement', (node, data) => {
+    if (emlSanitizeAllowRemote) return
+    if (data.tagName === 'style' && node.nodeType === Node.ELEMENT_NODE) {
+      const el = node as HTMLStyleElement
+      el.textContent = stripCssRemoteUrls(el.textContent || '')
+    }
+  })
+  DOMPurify.addHook('afterSanitizeAttributes', (node) => {
+    if (node.nodeType !== Node.ELEMENT_NODE) return
+    const el = node as Element
+    if (el.nodeName === 'A' && el.hasAttribute('href')) {
+      el.setAttribute('target', '_blank')
+      el.setAttribute('rel', 'noopener noreferrer')
+    }
+    if (emlSanitizeAllowRemote) return
+    for (const attr of ['src', 'srcset', 'poster', 'background', 'xlink:href'] as const) {
+      if (!el.hasAttribute(attr)) continue
+      const val = el.getAttribute(attr) || ''
+      if (attr === 'srcset') {
+        const kept = val
+          .split(',')
+          .map((part) => part.trim())
+          .filter((part) => {
+            const url = part.split(/\s+/)[0] || ''
+            return isSafeLocalOrSchemeUrl(url)
+          })
+        if (kept.length) el.setAttribute('srcset', kept.join(', '))
+        else el.removeAttribute('srcset')
+        continue
+      }
+      if (!isSafeLocalOrSchemeUrl(val)) el.removeAttribute(attr)
+    }
+    if (el.hasAttribute('style')) {
+      el.setAttribute('style', stripCssRemoteUrls(el.getAttribute('style') || ''))
+    }
+  })
+  domPurifyEmlHooksAdded = true
+}
+
+function sanitizeEmlHtml(html: string, allowRemote: boolean): string {
   if (typeof window === 'undefined' || !html.trim()) return ''
   if (html.length > MAX_HTML_SANITIZE_CHARS) {
     return '<p class="muted">HTML body is too large to preview safely. Use <strong>Download</strong> or <strong>Open</strong>.</p>'
   }
-  if (!domPurifyLinkHookAdded) {
-    DOMPurify.addHook('afterSanitizeAttributes', (node) => {
-      if (node.nodeType !== Node.ELEMENT_NODE || node.nodeName !== 'A') return
-      const el = node as Element
-      if (el.hasAttribute('href')) {
-        el.setAttribute('target', '_blank')
-        el.setAttribute('rel', 'noopener noreferrer')
-      }
-    })
-    domPurifyLinkHookAdded = true
+  ensureDomPurifyEmlHooks()
+  emlSanitizeAllowRemote = allowRemote
+  try {
+    /* Default allow-list keeps most mail tags; allow <style> blocks used by HTML e-mail. */
+    return DOMPurify.sanitize(html, { ADD_TAGS: ['style'], ADD_ATTR: ['target', 'rel'] })
+  } finally {
+    emlSanitizeAllowRemote = false
   }
-  /* Default allow-list keeps most mail tags; allow <style> blocks used by HTML e-mail. */
-  return DOMPurify.sanitize(html, { ADD_TAGS: ['style'], ADD_ATTR: ['target', 'rel'] })
 }
 
-function wrapEmailHtmlDocument(safeBodyHtml: string): string {
-  return `<!DOCTYPE html><html><head><meta charset="utf-8"><base target="_blank"><style>
+function wrapEmailHtmlDocument(safeBodyHtml: string, allowRemote: boolean): string {
+  const csp = allowRemote
+    ? "default-src 'none'; img-src https: http: data: blob: cid:; style-src 'unsafe-inline'; font-src data: https: http:; base-uri 'none'; form-action 'none'; frame-ancestors 'none';"
+    : "default-src 'none'; img-src data: blob: cid:; style-src 'unsafe-inline'; font-src data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none';"
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${csp}"><base target="_blank"><style>
 body{margin:0;padding:16px 18px;font-family:Segoe UI,Roboto,Helvetica,Arial,sans-serif;font-size:14px;line-height:1.55;color:#111827;background:#fff;word-wrap:break-word;overflow-wrap:break-word;}
 img{max-width:100%;height:auto;}
 table{max-width:100%;border-collapse:collapse;}
@@ -443,6 +506,11 @@ type EmlPreviewModalProps = {
 
 export function EmlPreviewModal({ file, data, loading, error, onClose, onOpenExternal }: EmlPreviewModalProps) {
   const [sidePx, setSidePx] = useState(() => computeEmlPreviewSidePx())
+  const [allowRemoteContent, setAllowRemoteContent] = useState(false)
+
+  useEffect(() => {
+    setAllowRemoteContent(false)
+  }, [file.id, data?.bodyHtml])
 
   useEffect(() => {
     function onResize() {
@@ -479,10 +547,13 @@ export function EmlPreviewModal({ file, data, loading, error, onClose, onOpenExt
 
   const safeHtml = useMemo(() => {
     if (!data?.bodyHtml?.trim()) return ''
-    return sanitizeEmlHtml(data.bodyHtml)
-  }, [data?.bodyHtml])
+    return sanitizeEmlHtml(data.bodyHtml, allowRemoteContent)
+  }, [data?.bodyHtml, allowRemoteContent])
 
-  const iframeDoc = useMemo(() => (safeHtml ? wrapEmailHtmlDocument(safeHtml) : ''), [safeHtml])
+  const iframeDoc = useMemo(
+    () => (safeHtml ? wrapEmailHtmlDocument(safeHtml, allowRemoteContent) : ''),
+    [safeHtml, allowRemoteContent],
+  )
 
   const title = data?.subject?.trim() || file.original_filename || 'E-mail preview'
 
@@ -554,6 +625,17 @@ export function EmlPreviewModal({ file, data, loading, error, onClose, onOpenExt
         ) : null}
 
         <div className="emlPreviewModalFooter">
+          {iframeDoc && !allowRemoteContent ? (
+            <button
+              type="button"
+              className="btn"
+              onClick={() => setAllowRemoteContent(true)}
+              disabled={loading}
+              title="Images and styles hosted on external servers may track that you opened this message"
+            >
+              Load remote content
+            </button>
+          ) : null}
           <button type="button" className="btn primary" onClick={onOpenExternal} disabled={loading}>
             Open
           </button>

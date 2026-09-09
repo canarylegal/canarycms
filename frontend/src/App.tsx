@@ -82,7 +82,7 @@ import {
   OUTLOOK_WEB_WITHOUT_GRAPH_CONFIRM_MESSAGE,
 } from './emailLauncher'
 import { useDialogs } from './DialogProvider'
-import { useNotifications } from './NotificationsProvider'
+import { useNotifications, useNotificationsUserScope } from './NotificationsProvider'
 import { TextPromptModal } from './TextPromptModal'
 import { ContactSearchPicker } from './ContactSearchPicker'
 import { SingleSelectDropdown } from './SingleSelectDropdown'
@@ -904,17 +904,20 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
   const taskMenuCaseFilterRef = useRef(taskMenuCaseFilter)
   taskMenuCaseFilterRef.current = taskMenuCaseFilter
 
-  const syncNavFromState = useCallback((patch: Partial<AppNavState> & { view?: View }) => {
-    const v = patch.view ?? viewRef.current
-    const next: AppNavState = {
-      view: v,
-      caseId:
-        patch.caseId !== undefined ? patch.caseId : v === 'case-menu' ? selectedCaseIdRef.current : null,
-      quotesSubPanel: patch.quotesSubPanel ?? quotesSubPanelRef.current,
-      tasksCaseFilter: patch.tasksCaseFilter ?? taskMenuCaseFilterRef.current,
-    }
-    syncAppNavigationUrl(next, 'replace')
-  }, [])
+  const syncNavFromState = useCallback(
+    (patch: Partial<AppNavState> & { view?: View }, mode: 'push' | 'replace' = 'push') => {
+      const v = patch.view ?? viewRef.current
+      const next: AppNavState = {
+        view: v,
+        caseId:
+          patch.caseId !== undefined ? patch.caseId : v === 'case-menu' ? selectedCaseIdRef.current : null,
+        quotesSubPanel: patch.quotesSubPanel ?? quotesSubPanelRef.current,
+        tasksCaseFilter: patch.tasksCaseFilter ?? taskMenuCaseFilterRef.current,
+      }
+      syncAppNavigationUrl(next, mode)
+    },
+    [],
+  )
 
   const setView = useCallback(
     async (next: View, opts?: { skipExitConfirm?: boolean }): Promise<boolean> => {
@@ -1154,7 +1157,7 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
   }, [view])
 
   useEffect(() => {
-    syncNavFromState({})
+    syncNavFromState({}, 'replace')
   }, [syncNavFromState])
 
   useEffect(() => {
@@ -1206,14 +1209,14 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
     const path = window.location.pathname.replace(/\/+$/, '') || '/'
     if (path !== '/' && path !== '/main') return
     setViewState('accounts')
-    syncNavFromState({ view: 'accounts', caseId: null })
+    syncNavFromState({ view: 'accounts', caseId: null }, 'replace')
   }, [auth.loading, auth.me, syncNavFromState])
 
   useEffect(() => {
     if (!auth.me || canAdminConsole) return
     if (viewRef.current !== 'admin-console') return
     setViewState('main-menu')
-    syncNavFromState({ view: 'main-menu', caseId: null })
+    syncNavFromState({ view: 'main-menu', caseId: null }, 'replace')
   }, [auth.me, canAdminConsole, syncNavFromState])
 
   useEffect(() => {
@@ -1231,14 +1234,14 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
     if (!auth.me || canAccessAccounts) return
     if (viewRef.current !== 'accounts') return
     setViewState('main-menu')
-    syncNavFromState({ view: 'main-menu', caseId: null })
+    syncNavFromState({ view: 'main-menu', caseId: null }, 'replace')
   }, [auth.me, canAccessAccounts, syncNavFromState])
 
   useEffect(() => {
     if (docusignEnabled !== false) return
     if (viewRef.current !== 'docusign') return
     setViewState('main-menu')
-    syncNavFromState({ view: 'main-menu', caseId: null })
+    syncNavFromState({ view: 'main-menu', caseId: null }, 'replace')
   }, [docusignEnabled, syncNavFromState])
 
   useEffect(() => {
@@ -1305,6 +1308,10 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
 
   const [quoteConvertCaseId, setQuoteConvertCaseId] = useState<string | null>(null)
   const { push: pushNotification } = useNotifications()
+  const { setUserId: setNotificationsUserId } = useNotificationsUserScope()
+  useEffect(() => {
+    setNotificationsUserId(auth.me?.id ?? null)
+  }, [auth.me?.id, setNotificationsUserId])
 
   const onQuoteConvert = useCallback(
     (caseId: string) => {
@@ -3842,7 +3849,7 @@ function UserSettingsPage({
                       setColumnsResetHint(false)
                       setBusy(true)
                       try {
-                        await resetMenuColumnWidths(token)
+                        await resetMenuColumnWidths(token, account?.id)
                         setColumnsResetHint(true)
                         await refreshMe()
                       } catch (e: unknown) {
@@ -4530,7 +4537,10 @@ function Contacts({ token, me }: { token: string; me?: UserPublic | null }) {
   const [contactCtx, setContactCtx] = useState<null | { x: number; y: number; c: ContactOut }>(null)
   const contactCtxRef = useRef<HTMLDivElement | null>(null)
 
+  const contactsSearchReqRef = useRef(0)
+
   async function load() {
+    const reqId = ++contactsSearchReqRef.current
     setBusy(true)
     setErr(null)
     try {
@@ -4542,16 +4552,22 @@ function Contacts({ token, me }: { token: string; me?: UserPublic | null }) {
         hasPhone:
           contactsFilterPhone === 'has' ? true : contactsFilterPhone === 'missing' ? false : undefined,
       })
+      if (reqId !== contactsSearchReqRef.current) return
       setContacts(data)
-    } catch (e: any) {
-      setErr(e?.message ?? 'Failed to load contacts')
+    } catch (e: unknown) {
+      if (reqId !== contactsSearchReqRef.current) return
+      setErr((e as { message?: string })?.message ?? 'Failed to load contacts')
     } finally {
-      setBusy(false)
+      if (reqId === contactsSearchReqRef.current) setBusy(false)
     }
   }
 
   useEffect(() => {
     void load()
+    return () => {
+      contactsSearchReqRef.current += 1
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- load closes over latest filter/search values
   }, [token, debouncedContactsSearch, contactsFilterType, contactsFilterEmail, contactsFilterPhone])
 
   useEffect(() => {
