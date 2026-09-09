@@ -8,7 +8,7 @@ import os
 import tempfile
 import uuid
 import zipfile
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File as FastAPIFile, Form, HTTPException, Query, Request, UploadFile, status
@@ -26,7 +26,7 @@ from app.security import (
     create_portal_file_open_token,
     decode_portal_file_open_token,
 )
-from app.file_storage import FILES_ROOT, case_file_paths, ensure_files_root, path_is_under_files_root, stream_upload_to_path
+from app.file_storage import FILES_ROOT, case_file_paths, ensure_files_root, path_is_under_files_root, stream_upload_to_path, unlink_stored_file
 from app.upload_limits import content_disposition_for_mime, max_upload_bytes
 from app.models import (
     Case,
@@ -737,10 +737,20 @@ async def portal_upload_form_file(
     session: PortalSessionPayload = Depends(get_portal_session),
     db: Session = Depends(get_db),
 ) -> dict[str, str]:
+    from pathlib import Path
+
+    from app.file_storage import unlink_stored_file
+
     require_portal_client_write(session)
     sub = get_submission_for_contact(db, submission_id, contact.id)
     result = await upload_submission_file(db, submission=sub, field_key=field_key, upload=upload, contact=contact)
-    db.commit()
+    abs_path = result.pop("abs_path", None)
+    try:
+        db.commit()
+    except Exception:
+        if abs_path:
+            unlink_stored_file(Path(abs_path))
+        raise
     return result
 
 
@@ -972,56 +982,64 @@ def portal_upload_file(
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail=str(e)) from e
 
-    mime = upload.content_type or (mimetypes.guess_type(original)[0] or "application/octet-stream")
-    row = File(
-        id=file_id,
-        case_id=grant.case_id,
-        owner_id=owner.id,
-        category=FileCategory.case_document,
-        storage_path=paths.rel_path,
-        folder_path=paths.folder_path,
-        is_pinned=False,
-        original_filename=Path(original).name,
-        mime_type=mime,
-        size_bytes=size,
-        version=1,
-        checksum=None,
-        parent_file_id=None,
-        uploaded_via_portal=True,
-        created_at=datetime.utcnow(),
-        updated_at=datetime.utcnow(),
-    )
-    db.add(row)
-    log_event(
-        db,
-        actor_user_id=None,
-        action="portal.file.upload",
-        entity_type="file",
-        entity_id=str(row.id),
-        meta={
-            "contact_id": str(contact.id),
-            "grant_id": str(grant.id),
-            "case_id": str(grant.case_id),
-            "folder_path": row.folder_path,
-            "filename": row.original_filename,
-        },
-    )
-    log_portal_activity(
-        db,
-        case_id=grant.case_id,
-        contact_id=contact.id,
-        grant_id=grant.id,
-        action="portal.file.upload",
-        summary=f"{contact_display_name(contact)} uploaded {row.original_filename}",
-    )
-    notify_portal_staff_client_upload(
-        db,
-        case_id=grant.case_id,
-        contact=contact,
-        grant=grant,
-        filename=row.original_filename,
-    )
-    db.commit()
+    disk_written = True
+    try:
+        mime = upload.content_type or (mimetypes.guess_type(original)[0] or "application/octet-stream")
+        now = datetime.now(timezone.utc)
+        row = File(
+            id=file_id,
+            case_id=grant.case_id,
+            owner_id=owner.id,
+            category=FileCategory.case_document,
+            storage_path=paths.rel_path,
+            folder_path=paths.folder_path,
+            is_pinned=False,
+            original_filename=Path(original).name,
+            mime_type=mime,
+            size_bytes=size,
+            version=1,
+            checksum=None,
+            parent_file_id=None,
+            uploaded_via_portal=True,
+            created_at=now,
+            updated_at=now,
+        )
+        db.add(row)
+        log_event(
+            db,
+            actor_user_id=None,
+            action="portal.file.upload",
+            entity_type="file",
+            entity_id=str(row.id),
+            meta={
+                "contact_id": str(contact.id),
+                "grant_id": str(grant.id),
+                "case_id": str(grant.case_id),
+                "folder_path": row.folder_path,
+                "filename": row.original_filename,
+            },
+        )
+        log_portal_activity(
+            db,
+            case_id=grant.case_id,
+            contact_id=contact.id,
+            grant_id=grant.id,
+            action="portal.file.upload",
+            summary=f"{contact_display_name(contact)} uploaded {row.original_filename}",
+        )
+        notify_portal_staff_client_upload(
+            db,
+            case_id=grant.case_id,
+            contact=contact,
+            grant=grant,
+            filename=row.original_filename,
+        )
+        db.commit()
+        disk_written = False
+    finally:
+        if disk_written:
+            unlink_stored_file(paths.abs_path)
+
     db.refresh(row)
     return _file_out(grant, row)
 

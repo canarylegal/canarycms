@@ -29,7 +29,7 @@ from app.compose_quote import merge_compose_quote_docx_bytes, quote_lines_snapsh
 from app.finance_service import sync_finance_from_quote
 from app.docx_util import extract_plain_text_from_docx_bytes, write_blank_docx
 from app.graph_mail import create_outlook_draft, graph_mail_configured
-from app.file_storage import FILES_ROOT, StoredFilePaths, case_file_paths, ensure_files_root, sanitize_folder_path, path_is_under_files_root, stream_upload_to_path
+from app.file_storage import FILES_ROOT, StoredFilePaths, case_file_paths, ensure_files_root, sanitize_folder_path, path_is_under_files_root, stream_upload_to_path, unlink_stored_file
 from app.upload_limits import content_disposition_for_mime, max_upload_bytes
 from app.models import Case as CaseRow
 from app.models import CaseContact, Contact as GlobalContactRow, ContactPortalGrant
@@ -426,107 +426,116 @@ def upload_case_file(
     original = upload.filename or "upload.bin"
     paths = case_file_paths(case_id=case_id, file_id=file_id, original_filename=original, folder_path=folder)
 
+    disk_written = False
     try:
-        size = stream_upload_to_path(paths.abs_path, upload.file, max_bytes=max_upload_bytes())
-    except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail=str(e)) from e
+        try:
+            size = stream_upload_to_path(paths.abs_path, upload.file, max_bytes=max_upload_bytes())
+        except ValueError as e:
+            raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail=str(e)) from e
+        disk_written = True
 
-    original, paths, size = convert_case_upload_msg_to_eml_if_applicable(
-        case_id=case_id,
-        file_id=file_id,
-        folder_path=folder,
-        original_filename=original,
-        paths=paths,
-    )
+        original, paths, size = convert_case_upload_msg_to_eml_if_applicable(
+            case_id=case_id,
+            file_id=file_id,
+            folder_path=folder,
+            original_filename=original,
+            paths=paths,
+        )
 
-    mime = upload.content_type or (mimetypes.guess_type(original)[0] or "application/octet-stream")
-    mime_base = mime.split(";", 1)[0].strip().lower()
-    guessed = mimetypes.guess_type(original)[0]
-    # Browsers often send application/octet-stream for Office files; prefer extension-based type.
-    if mime_base == "application/octet-stream" and guessed:
-        mime = guessed
-    mime_base = mime.split(";", 1)[0].strip().lower()
-    if original.lower().endswith(".eml"):
-        mime = "message/rfc822"
-        mime_base = "message/rfc822"
+        mime = upload.content_type or (mimetypes.guess_type(original)[0] or "application/octet-stream")
+        mime_base = mime.split(";", 1)[0].strip().lower()
+        guessed = mimetypes.guess_type(original)[0]
+        # Browsers often send application/octet-stream for Office files; prefer extension-based type.
+        if mime_base == "application/octet-stream" and guessed:
+            mime = guessed
+        mime_base = mime.split(";", 1)[0].strip().lower()
+        if original.lower().endswith(".eml"):
+            mime = "message/rfc822"
+            mime_base = "message/rfc822"
 
-    outlook_rest_id = (outlook_item_id or "").strip() or None
-    outlook_conv_id = (outlook_conversation_id or "").strip() or None
-    if parent_file_id is not None:
-        outlook_rest_id = None
-        outlook_conv_id = None
+        outlook_rest_id = (outlook_item_id or "").strip() or None
+        outlook_conv_id = (outlook_conversation_id or "").strip() or None
+        if parent_file_id is not None:
+            outlook_rest_id = None
+            outlook_conv_id = None
 
-    internet_mid: str | None = (source_internet_message_id or "").strip() or None
-    if parent_file_id is None and not internet_mid:
-        low = original.lower()
-        if mime_base == "message/rfc822" or low.endswith(".eml"):
-            internet_mid = _eml_parse_message_id_from_header(paths.abs_path)
+        internet_mid: str | None = (source_internet_message_id or "").strip() or None
+        if parent_file_id is None and not internet_mid:
+            low = original.lower()
+            if mime_base == "message/rfc822" or low.endswith(".eml"):
+                internet_mid = _eml_parse_message_id_from_header(paths.abs_path)
 
-    smbox = (source_imap_mbox or "").strip() or None
-    suid = (source_imap_uid or "").strip() or None
-    if parent_file_id is not None and (smbox is not None or suid is not None):
-        # Only the parent email row should carry IMAP pointers.
-        smbox = None
-        suid = None
+        smbox = (source_imap_mbox or "").strip() or None
+        suid = (source_imap_uid or "").strip() or None
+        if parent_file_id is not None and (smbox is not None or suid is not None):
+            # Only the parent email row should carry IMAP pointers.
+            smbox = None
+            suid = None
 
-    from_name: str | None = None
-    from_email_addr: str | None = None
-    mail_outbound: bool | None = None
-    mail_header_date: datetime | None = None
-    if parent_file_id is None:
-        low = original.lower()
-        if mime_base == "message/rfc822" or low.endswith(".eml"):
-            from_name, from_email_addr = _eml_parse_from_header(paths.abs_path)
-            mail_outbound = _infer_source_mail_is_outbound(smbox, from_email_addr, user.email)
-            mail_header_date = _eml_parse_date_header(paths.abs_path)
+        from_name: str | None = None
+        from_email_addr: str | None = None
+        mail_outbound: bool | None = None
+        mail_header_date: datetime | None = None
+        if parent_file_id is None:
+            low = original.lower()
+            if mime_base == "message/rfc822" or low.endswith(".eml"):
+                from_name, from_email_addr = _eml_parse_from_header(paths.abs_path)
+                mail_outbound = _infer_source_mail_is_outbound(smbox, from_email_addr, user.email)
+                mail_header_date = _eml_parse_date_header(paths.abs_path)
 
-    row = DbFile(
-        id=file_id,
-        case_id=case_id,
-        owner_id=user.id,
-        category=FileCategory.case_document,
-        storage_path=paths.rel_path,
-        folder_path=paths.folder_path,
-        parent_file_id=parent_file_id,
-        source_imap_mbox=smbox,
-        source_imap_uid=suid,
-        source_mail_from_name=from_name,
-        source_mail_from_email=from_email_addr,
-        source_mail_is_outbound=mail_outbound,
-        source_internet_message_id=internet_mid,
-        source_mail_date=mail_header_date,
-        source_outlook_conversation_id=outlook_conv_id,
-        source_outlook_item_id=outlook_rest_id,
-        outlook_graph_message_id=_outlook_graph_message_id_storable(outlook_rest_id),
-        outlook_web_link=None,
-        is_pinned=False,
-        original_filename=original,
-        mime_type=mime,
-        size_bytes=size,
-        version=1,
-        checksum=None,
-        created_at=datetime.utcnow(),
-        updated_at=datetime.utcnow(),
-    )
-    db.add(row)
-    log_event(
-        db,
-        actor_user_id=user.id,
-        action="case.file.upload",
-        entity_type="file",
-        entity_id=str(row.id),
-        meta={
-            "case_id": str(case_id),
-            "filename": row.original_filename,
-            "size_bytes": row.size_bytes,
-            "folder": paths.folder_path,
-            "parent_file_id": str(parent_file_id) if parent_file_id else None,
-            "compose_precedent_id": str(compose_precedent_id) if compose_precedent_id else None,
-            "compose_case_contact_id": str(compose_case_contact_id) if compose_case_contact_id else None,
-            "compose_global_contact_id": str(compose_global_contact_id) if compose_global_contact_id else None,
-        },
-    )
-    db.commit()
+        now = _utcnow()
+        row = DbFile(
+            id=file_id,
+            case_id=case_id,
+            owner_id=user.id,
+            category=FileCategory.case_document,
+            storage_path=paths.rel_path,
+            folder_path=paths.folder_path,
+            parent_file_id=parent_file_id,
+            source_imap_mbox=smbox,
+            source_imap_uid=suid,
+            source_mail_from_name=from_name,
+            source_mail_from_email=from_email_addr,
+            source_mail_is_outbound=mail_outbound,
+            source_internet_message_id=internet_mid,
+            source_mail_date=mail_header_date,
+            source_outlook_conversation_id=outlook_conv_id,
+            source_outlook_item_id=outlook_rest_id,
+            outlook_graph_message_id=_outlook_graph_message_id_storable(outlook_rest_id),
+            outlook_web_link=None,
+            is_pinned=False,
+            original_filename=original,
+            mime_type=mime,
+            size_bytes=size,
+            version=1,
+            checksum=None,
+            created_at=now,
+            updated_at=now,
+        )
+        db.add(row)
+        log_event(
+            db,
+            actor_user_id=user.id,
+            action="case.file.upload",
+            entity_type="file",
+            entity_id=str(row.id),
+            meta={
+                "case_id": str(case_id),
+                "filename": row.original_filename,
+                "size_bytes": row.size_bytes,
+                "folder": paths.folder_path,
+                "parent_file_id": str(parent_file_id) if parent_file_id else None,
+                "compose_precedent_id": str(compose_precedent_id) if compose_precedent_id else None,
+                "compose_case_contact_id": str(compose_case_contact_id) if compose_case_contact_id else None,
+                "compose_global_contact_id": str(compose_global_contact_id) if compose_global_contact_id else None,
+            },
+        )
+        db.commit()
+        disk_written = False
+    finally:
+        if disk_written:
+            unlink_stored_file(paths.abs_path)
+
     db.refresh(row)
     if notify_portal_contacts:
         notify_portal_contacts_files_added_batch(
@@ -581,7 +590,7 @@ def compose_office_document(
     paths = case_file_paths(case_id=case_id, file_id=file_id, original_filename=orig, folder_path=folder)
     paths.abs_path.write_bytes(src_bytes)
     size = len(src_bytes)
-    now = datetime.utcnow()
+    now = _utcnow()
     row = DbFile(
         id=file_id,
         case_id=case_id,
@@ -646,7 +655,7 @@ def compose_quote_spreadsheet(
     paths = case_file_paths(case_id=case_id, file_id=file_id, original_filename=orig, folder_path=folder)
     paths.abs_path.write_bytes(src_bytes)
     size = len(src_bytes)
-    now = datetime.utcnow()
+    now = _utcnow()
     row = DbFile(
         id=file_id,
         case_id=case_id,
