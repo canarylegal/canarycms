@@ -18,7 +18,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db import get_db
-from app.file_storage import FILES_ROOT, StoredFilePaths, ensure_files_root
+from app.file_storage import FILES_ROOT, StoredFilePaths, ensure_files_root, path_is_under_files_root
 from app.models import File as DbFile, FileCategory, FileEditSession, User
 from app.routers.files import convert_case_upload_msg_to_eml_if_applicable, refresh_root_eml_mail_metadata
 from app.audit import log_event
@@ -405,7 +405,7 @@ def webdav_get_file(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
     ensure_files_root()
     abs_path = (FILES_ROOT / frow.storage_path).resolve()
-    if not str(abs_path).startswith(str(FILES_ROOT)) or not abs_path.exists():
+    if not path_is_under_files_root(abs_path) or not abs_path.exists():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
     data = abs_path.read_bytes()
     media_type = _effective_webdav_media_type(frow)
@@ -500,7 +500,7 @@ async def webdav_put_file(
 
     ensure_files_root()
     abs_path = (FILES_ROOT / frow.storage_path).resolve()
-    if not str(abs_path).startswith(str(FILES_ROOT)):
+    if not path_is_under_files_root(abs_path):
         raise HTTPException(status_code=500, detail="Invalid storage path")
 
     abs_path.parent.mkdir(parents=True, exist_ok=True)

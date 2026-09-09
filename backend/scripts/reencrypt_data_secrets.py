@@ -57,6 +57,16 @@ def main() -> None:
                 if not args.dry_run:
                     user.caldav_password_enc = new_val
 
+        from app.totp_secrets import normalize_stored_totp_secret
+
+        for user in db.scalars(select(User).where(User.totp_secret.is_not(None))).all():
+            new_val, did = normalize_stored_totp_secret(user.totp_secret)
+            if did:
+                changed += 1
+                print(f"user {user.id} totp_secret")
+                if not args.dry_run:
+                    user.totp_secret = new_val
+
         for row in db.scalars(select(ContactPortalAccess).where(ContactPortalAccess.code_enc.is_not(None))).all():
             new_val, did = _maybe_reencrypt(row.code_enc, dry_run=args.dry_run)
             if did:

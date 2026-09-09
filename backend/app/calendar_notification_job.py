@@ -6,9 +6,12 @@ import logging
 import threading
 import time
 
+from sqlalchemy import text
+
 log = logging.getLogger(__name__)
 
 INTERVAL_SECONDS = 3600
+_ADVISORY_LOCK_KEY = 910017702
 
 _poller_thread: threading.Thread | None = None
 
@@ -18,7 +21,15 @@ def _run_once() -> None:
     from app.db import SessionLocal
 
     db = SessionLocal()
+    locked = False
     try:
+        try:
+            got = db.execute(text(f"SELECT pg_try_advisory_lock({_ADVISORY_LOCK_KEY})")).scalar()
+        except Exception:
+            got = True
+        if not got:
+            return
+        locked = bool(got)
         n = process_due_calendar_notifications(db)
         db.commit()
         if n:
@@ -27,6 +38,12 @@ def _run_once() -> None:
         log.exception("calendar_notification_job: run failed")
         db.rollback()
     finally:
+        if locked:
+            try:
+                db.execute(text(f"SELECT pg_advisory_unlock({_ADVISORY_LOCK_KEY})"))
+                db.commit()
+            except Exception:
+                db.rollback()
         db.close()
 
 

@@ -15,7 +15,7 @@ import pikepdf
 from PIL import Image, ImageDraw, ImageFont
 from sqlalchemy.orm import Session
 
-from app.file_storage import FILES_ROOT, ensure_files_root
+from app.file_storage import FILES_ROOT, ensure_files_root, path_is_under_files_root
 from app.models import File as DbFile, User
 from app.quote_portal_pdf import convert_case_file_to_pdf_bytes_via_onlyoffice
 
@@ -49,7 +49,7 @@ def ensure_snapshot_pdf_bytes(
     """Return PDF bytes for the source file (pass-through PDF, or OnlyOffice convert)."""
     ensure_files_root()
     abs_path = (FILES_ROOT / source.storage_path).resolve()
-    if not str(abs_path).startswith(str(FILES_ROOT)) or not abs_path.is_file():
+    if not path_is_under_files_root(abs_path) or not abs_path.is_file():
         raise FileNotFoundError("Source file missing on disk")
 
     ext = Path(source.original_filename or "").suffix.lower()

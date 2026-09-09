@@ -240,6 +240,7 @@ PORTAL_QUOTE_EXCHANGE_TTL_SECONDS = int(os.getenv("PORTAL_QUOTE_EXCHANGE_TTL_SEC
 class PortalSessionPayload:
     contact_id: str
     staff_preview: bool = False
+    session_version: int = 1
 
 
 @dataclass(frozen=True)
@@ -257,12 +258,18 @@ class PortalQuoteExchangePayload:
     delivery_id: str
 
 
-def create_portal_session_token(*, contact_id: str, staff_preview: bool = False) -> str:
+def create_portal_session_token(
+    *,
+    contact_id: str,
+    staff_preview: bool = False,
+    session_version: int = 1,
+) -> str:
     now = int(time.time())
     payload = {
         "sub": contact_id,
         "purpose": "portal",
         "staff_preview": bool(staff_preview),
+        "sv": int(session_version),
         "iat": now,
         "exp": now + PORTAL_SESSION_TTL_SECONDS,
     }
@@ -279,7 +286,18 @@ def decode_portal_session_token(token: str) -> PortalSessionPayload:
     sub = payload.get("sub")
     if not isinstance(sub, str) or not sub.strip():
         raise ValueError("Invalid session")
-    return PortalSessionPayload(contact_id=sub, staff_preview=bool(payload.get("staff_preview")))
+    sv_raw = payload.get("sv", 1)
+    if isinstance(sv_raw, int):
+        session_version = sv_raw
+    elif isinstance(sv_raw, str) and sv_raw.isdigit():
+        session_version = int(sv_raw)
+    else:
+        session_version = 1
+    return PortalSessionPayload(
+        contact_id=sub,
+        staff_preview=bool(payload.get("staff_preview")),
+        session_version=session_version,
+    )
 
 
 def create_portal_preview_exchange_token(*, contact_id: str, case_id: str, staff_user_id: str) -> str:

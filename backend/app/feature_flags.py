@@ -26,8 +26,16 @@ def open_pdf_in_onlyoffice() -> bool:
 
 
 def onlyoffice_callback_require_jwt() -> bool:
-    """When true, reject unsigned ONLYOFFICE Document Server save callbacks."""
-    return _truthy_env("ONLYOFFICE_CALLBACK_REQUIRE_JWT")
+    """Require JWT on ONLYOFFICE Document Server save callbacks (default on).
+
+    Set ``ONLYOFFICE_CALLBACK_REQUIRE_JWT=0`` only for legacy Document Server
+    builds that cannot sign callbacks.
+    """
+    if _falsy_env("ONLYOFFICE_CALLBACK_REQUIRE_JWT"):
+        return False
+    if _truthy_env("ONLYOFFICE_CALLBACK_REQUIRE_JWT"):
+        return True
+    return True
 
 
 def onlyoffice_editor_customization(*, file_type: str) -> dict[str, bool | str]:

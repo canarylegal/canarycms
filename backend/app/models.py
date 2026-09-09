@@ -744,6 +744,7 @@ class ContactPortalAccess(Base):
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     notify_files_added: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     notify_folder_shared: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    session_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     created_by_user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("user.id"), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
@@ -1146,6 +1147,7 @@ class LedgerAccount(Base):
     """One client account + one office account per case, created on first access."""
 
     __tablename__ = "ledger_account"
+    __table_args__ = (UniqueConstraint("case_id", "account_type", name="uq_ledger_account_case_type"),)
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     case_id: Mapped[uuid.UUID] = mapped_column(

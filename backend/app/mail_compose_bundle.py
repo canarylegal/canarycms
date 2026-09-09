@@ -9,7 +9,7 @@ from pathlib import Path
 from sqlalchemy.orm import Session
 
 from app.deps import require_case_access
-from app.file_storage import FILES_ROOT, ensure_files_root
+from app.file_storage import FILES_ROOT, ensure_files_root, path_is_under_files_root
 from app.models import File as DbFile
 from app.models import User
 from app.routers.files import _case_email_compose_bundle
@@ -34,7 +34,7 @@ def encode_compose_attachments(
         if not frow or frow.case_id != case_id:
             continue
         abs_p = (FILES_ROOT / frow.storage_path).resolve()
-        if not str(abs_p).startswith(str(FILES_ROOT)) or not abs_p.is_file():
+        if not path_is_under_files_root(abs_p) or not abs_p.is_file():
             continue
         raw = abs_p.read_bytes()
         if len(raw) > 100 * 1024 * 1024:
