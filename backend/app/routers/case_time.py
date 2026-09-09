@@ -78,8 +78,6 @@ def create_time_entry(
         updated_at=now,
     )
     db.add(row)
-    db.commit()
-    db.refresh(row)
     log_event(
         db,
         actor_user_id=user.id,
@@ -93,6 +91,8 @@ def create_time_entry(
             "duration_minutes": payload.duration_minutes,
         },
     )
+    db.commit()
+    db.refresh(row)
     return CaseTimeEntryOut.model_validate(time_entry_out(row, db))
 
 
@@ -133,8 +133,6 @@ def update_time_entry(
         setattr(row, key, val)
     row.updated_at = datetime.utcnow()
     db.add(row)
-    db.commit()
-    db.refresh(row)
     log_event(
         db,
         actor_user_id=user.id,
@@ -143,6 +141,8 @@ def update_time_entry(
         entity_id=str(row.id),
         meta={"case_id": str(case_id), **{k: str(v) if isinstance(v, uuid.UUID) else v for k, v in data.items()}},
     )
+    db.commit()
+    db.refresh(row)
     return CaseTimeEntryOut.model_validate(time_entry_out(row, db))
 
 
@@ -163,8 +163,6 @@ def write_off_time_entry(
     row.status = CaseTimeEntryStatus.written_off
     row.updated_at = datetime.utcnow()
     db.add(row)
-    db.commit()
-    db.refresh(row)
     log_event(
         db,
         actor_user_id=user.id,
@@ -173,6 +171,8 @@ def write_off_time_entry(
         entity_id=str(row.id),
         meta={"case_id": str(case_id)},
     )
+    db.commit()
+    db.refresh(row)
     return CaseTimeEntryOut.model_validate(time_entry_out(row, db))
 
 
@@ -191,7 +191,6 @@ def delete_time_entry(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not allowed to delete this entry")
     assert_entry_editable(row)
     db.delete(row)
-    db.commit()
     log_event(
         db,
         actor_user_id=user.id,
@@ -200,4 +199,5 @@ def delete_time_entry(
         entity_id=str(entry_id),
         meta={"case_id": str(case_id)},
     )
+    db.commit()
     return None

@@ -32,7 +32,7 @@ from sqlalchemy.orm import Session
 
 from app.db import get_db
 from app.deps import get_current_user
-from app.file_storage import FILES_ROOT, case_file_paths, ensure_files_root, path_is_under_files_root
+from app.file_storage import FILES_ROOT, case_file_paths, commit_keeping_stored_file, ensure_files_root, path_is_under_files_root
 from app.models import FeeScale, File as DbFile, FileCategory, FileEditSession, Precedent, User
 from app.audit import log_event
 from app.feature_flags import onlyoffice_callback_require_jwt
@@ -435,16 +435,6 @@ async def create_case_file_from_onlyoffice_pdf_export(
         source.updated_at = now
         db.add(source)
     db.add(row)
-    db.commit()
-    db.refresh(row)
-
-    log.info(
-        "oo-export-pdf: created file=%s from source=%s name=%s size=%s",
-        row.id,
-        source.id,
-        out_name,
-        len(data),
-    )
     log_event(
         db,
         actor_user_id=user.id,
@@ -458,6 +448,15 @@ async def create_case_file_from_onlyoffice_pdf_export(
             "size_bytes": len(data),
             "folder": paths.folder_path,
         },
+    )
+    commit_keeping_stored_file(db, paths.abs_path)
+    db.refresh(row)
+    log.info(
+        "oo-export-pdf: created file=%s from source=%s name=%s size=%s",
+        row.id,
+        source.id,
+        out_name,
+        len(data),
     )
     return row
 
@@ -515,14 +514,6 @@ async def persist_onlyoffice_browser_url_to_file(
 
         supersede_pending_quote_deliveries(db, row.id)
     db.add(row)
-    db.commit()
-
-    log.info(
-        "oo-persist: saved file=%s version=%s size=%s",
-        row.id,
-        row.version,
-        len(data),
-    )
     action, meta_extra = _oo_save_audit_action_meta(
         precedent_id=precedent_id,
         case_id=case_id,
@@ -535,6 +526,13 @@ async def persist_onlyoffice_browser_url_to_file(
         entity_type="file",
         entity_id=str(row.id),
         meta={**meta_extra, "version": row.version, "size_bytes": len(data), "via": "downloadAs"},
+    )
+    db.commit()
+    log.info(
+        "oo-persist: saved file=%s version=%s size=%s",
+        row.id,
+        row.version,
+        len(data),
     )
     return int(row.version)
 
@@ -730,13 +728,6 @@ def _oo_ack_unchanged_force_save(
 
         supersede_pending_quote_deliveries(db, row.id)
     db.add(row)
-    db.commit()
-    log.info(
-        "onlyoffice_callback: unchanged force-save ack file=%s callback_status=%s version=%s",
-        row.id,
-        status_code,
-        row.version,
-    )
     action, meta_extra = _oo_save_audit_action_meta(
         precedent_id=precedent_id,
         case_id=case_id,
@@ -749,6 +740,13 @@ def _oo_ack_unchanged_force_save(
         entity_type="file",
         entity_id=str(row.id),
         meta={**meta_extra, "callback_status": status_code, "version": row.version},
+    )
+    db.commit()
+    log.info(
+        "onlyoffice_callback: unchanged force-save ack file=%s callback_status=%s version=%s",
+        row.id,
+        status_code,
+        row.version,
     )
 
 
@@ -894,8 +892,6 @@ async def onlyoffice_callback(
 
             supersede_pending_quote_deliveries(db, row.id)
         db.add(row)
-        db.commit()
-
         action, meta_extra = _oo_save_audit_action_meta(
             precedent_id=precedent_id,
             case_id=case_id,
@@ -909,6 +905,7 @@ async def onlyoffice_callback(
             entity_id=str(row.id),
             meta={**meta_extra, "version": row.version, "size_bytes": len(data)},
         )
+        db.commit()
         return {"error": 0}
 
     # Force-save with no edits: DS may omit ``url`` (status 4 is “closed, no changes”; some builds also omit url on 2/6).

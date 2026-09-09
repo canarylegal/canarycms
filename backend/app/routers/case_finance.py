@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from app.completion_statement_service import build_completion_statement_docx_bytes
 from app.db import get_db
 from app.deps import get_current_user, require_case_access
-from app.file_storage import case_file_paths, ensure_files_root
+from app.file_storage import case_file_paths, commit_keeping_stored_file, ensure_files_root
 from app.finance_service import (
     apply_quote_to_finance,
     create_finance_category,
@@ -186,6 +186,6 @@ def generate_completion_statement(
         updated_at=now,
     )
     db.add(row)
-    db.commit()
+    commit_keeping_stored_file(db, paths.abs_path)
     db.refresh(row)
     return {"id": str(row.id)}

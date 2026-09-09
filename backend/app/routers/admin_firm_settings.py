@@ -286,10 +286,6 @@ def patch_firm_settings(
         setattr(row, k, v)
     row.updated_at = datetime.utcnow()
     db.add(row)
-    db.commit()
-    db.refresh(row)
-    if operator.is_master_recovery:
-        log.info("Master recovery updated firm security settings: %s", sorted(data.keys()))
     log_event(
         db,
         actor_user_id=operator.actor_user_id,
@@ -298,6 +294,10 @@ def patch_firm_settings(
         entity_id="1",
         meta={"keys": list(data.keys())},
     )
+    db.commit()
+    db.refresh(row)
+    if operator.is_master_recovery:
+        log.info("Master recovery updated firm security settings: %s", sorted(data.keys()))
     return _to_out(db, row)
 
 
@@ -356,8 +356,6 @@ async def upload_letterhead(
     row.updated_at = now
     db.add(frow)
     db.add(row)
-    db.commit()
-    db.refresh(row)
     log_event(
         db,
         actor_user_id=admin.id,
@@ -366,6 +364,8 @@ async def upload_letterhead(
         entity_id="1",
         meta={"file_id": str(file_id)},
     )
+    db.commit()
+    db.refresh(row)
     return _to_out(db, row)
 
 
@@ -375,8 +375,6 @@ def delete_letterhead(admin: User = Depends(require_firm_admin), db: Session = D
     _delete_letterhead_file(db, row)
     row.updated_at = datetime.utcnow()
     db.add(row)
-    db.commit()
-    db.refresh(row)
     log_event(
         db,
         actor_user_id=admin.id,
@@ -385,6 +383,8 @@ def delete_letterhead(admin: User = Depends(require_firm_admin), db: Session = D
         entity_id="1",
         meta={},
     )
+    db.commit()
+    db.refresh(row)
     return _to_out(db, row)
 
 
@@ -443,8 +443,6 @@ async def upload_quote_letterhead(
     row.updated_at = now
     db.add(frow)
     db.add(row)
-    db.commit()
-    db.refresh(row)
     log_event(
         db,
         actor_user_id=admin.id,
@@ -453,6 +451,8 @@ async def upload_quote_letterhead(
         entity_id="1",
         meta={"file_id": str(file_id)},
     )
+    db.commit()
+    db.refresh(row)
     return _to_out(db, row)
 
 
@@ -462,8 +462,6 @@ def delete_quote_letterhead(admin: User = Depends(require_firm_admin), db: Sessi
     _delete_quote_letterhead_file(db, row)
     row.updated_at = datetime.utcnow()
     db.add(row)
-    db.commit()
-    db.refresh(row)
     log_event(
         db,
         actor_user_id=admin.id,
@@ -472,6 +470,8 @@ def delete_quote_letterhead(admin: User = Depends(require_firm_admin), db: Sessi
         entity_id="1",
         meta={},
     )
+    db.commit()
+    db.refresh(row)
     return _to_out(db, row)
 
 
@@ -535,8 +535,6 @@ async def upload_portal_logo(
     row.updated_at = now
     db.add(frow)
     db.add(row)
-    db.commit()
-    db.refresh(row)
     log_event(
         db,
         actor_user_id=admin.id,
@@ -545,6 +543,8 @@ async def upload_portal_logo(
         entity_id="1",
         meta={"file_id": str(file_id)},
     )
+    db.commit()
+    db.refresh(row)
     return _to_out(db, row)
 
 
@@ -554,8 +554,6 @@ def delete_portal_logo(admin: User = Depends(require_firm_admin), db: Session = 
     _delete_portal_logo_file(db, row)
     row.updated_at = datetime.utcnow()
     db.add(row)
-    db.commit()
-    db.refresh(row)
     log_event(
         db,
         actor_user_id=admin.id,
@@ -564,6 +562,8 @@ def delete_portal_logo(admin: User = Depends(require_firm_admin), db: Session = 
         entity_id="1",
         meta={},
     )
+    db.commit()
+    db.refresh(row)
     return _to_out(db, row)
 
 
@@ -627,8 +627,6 @@ async def upload_default_signature(
     row.updated_at = now
     db.add(frow)
     db.add(row)
-    db.commit()
-    db.refresh(row)
     log_event(
         db,
         actor_user_id=admin.id,
@@ -637,6 +635,8 @@ async def upload_default_signature(
         entity_id="1",
         meta={"file_id": str(file_id)},
     )
+    db.commit()
+    db.refresh(row)
     return _to_out(db, row)
 
 
@@ -649,8 +649,6 @@ def delete_default_signature(
     _delete_default_signature_file(db, row)
     row.updated_at = datetime.utcnow()
     db.add(row)
-    db.commit()
-    db.refresh(row)
     log_event(
         db,
         actor_user_id=admin.id,
@@ -659,6 +657,8 @@ def delete_default_signature(
         entity_id="1",
         meta={},
     )
+    db.commit()
+    db.refresh(row)
     return _to_out(db, row)
 
 

@@ -121,8 +121,6 @@ def upsert_rule(
         existing.mode = payload.mode
         db.add(existing)
         _sync_case_access_flags(case_id, db)
-        db.commit()
-        db.refresh(existing)
         log_event(
             db,
             actor_user_id=user.id,
@@ -131,13 +129,13 @@ def upsert_rule(
             entity_id=str(existing.id),
             meta={"case_id": str(case_id), "user_id": str(payload.user_id), "mode": payload.mode.value},
         )
+        db.commit()
+        db.refresh(existing)
         return CaseAccessRuleOut.model_validate(existing, from_attributes=True)
 
     rule = CaseAccessRule(case_id=case_id, user_id=payload.user_id, mode=payload.mode)
     db.add(rule)
     _sync_case_access_flags(case_id, db)
-    db.commit()
-    db.refresh(rule)
     log_event(
         db,
         actor_user_id=user.id,
@@ -146,6 +144,8 @@ def upsert_rule(
         entity_id=str(rule.id),
         meta={"case_id": str(case_id), "user_id": str(payload.user_id), "mode": payload.mode.value},
     )
+    db.commit()
+    db.refresh(rule)
     return CaseAccessRuleOut.model_validate(rule, from_attributes=True)
 
 
@@ -166,7 +166,6 @@ def delete_rule(
     if res.rowcount == 0:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Rule not found")
     _sync_case_access_flags(case_id, db)
-    db.commit()
     log_event(
         db,
         actor_user_id=user.id,
@@ -175,4 +174,5 @@ def delete_rule(
         entity_id=f"{case_id}:{user_id}",
         meta={"case_id": str(case_id), "user_id": str(user_id)},
     )
+    db.commit()
     return None

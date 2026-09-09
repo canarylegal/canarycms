@@ -21,7 +21,7 @@ from app.audit import log_event
 from app.db import get_db
 from app.deps import get_current_user, require_admin
 from app.docx_util import validate_docx_package_bytes
-from app.file_storage import FILES_ROOT, ensure_files_root, precedent_file_paths, path_is_under_files_root
+from app.file_storage import FILES_ROOT, commit_keeping_stored_file, ensure_files_root, precedent_file_paths, path_is_under_files_root
 from app.onlyoffice_force_save import (
     OoForceSavePhase,
     oo_force_save_arm,
@@ -402,8 +402,6 @@ def upload_precedent(
     )
     db.add(frow)
     db.add(prow)
-    db.commit()
-    db.refresh(prow)
     log_event(
         db,
         actor_user_id=admin.id,
@@ -412,6 +410,8 @@ def upload_precedent(
         entity_id=str(prow.id),
         meta={"kind": kind.value, "name": prow.name},
     )
+    commit_keeping_stored_file(db, paths.abs_path)
+    db.refresh(prow)
     return _precedent_out(db, prow, frow)
 
 
@@ -661,12 +661,6 @@ def delete_precedent(
     if f:
         abs_path = (FILES_ROOT / f.storage_path).resolve()
         db.delete(f)
-    db.commit()
-    if f and path_is_under_files_root(abs_path) and abs_path.is_file():
-        try:
-            abs_path.unlink()
-        except OSError:
-            pass
     log_event(
         db,
         actor_user_id=admin.id,
@@ -675,3 +669,9 @@ def delete_precedent(
         entity_id=str(precedent_id),
         meta={},
     )
+    db.commit()
+    if f and path_is_under_files_root(abs_path) and abs_path.is_file():
+        try:
+            abs_path.unlink()
+        except OSError:
+            pass

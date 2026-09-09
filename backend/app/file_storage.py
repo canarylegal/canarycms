@@ -92,6 +92,46 @@ def unlink_stored_file(abs_path: Path) -> None:
         pass
 
 
+def commit_keeping_stored_file(db, abs_path: Path | None) -> None:
+    """Commit ``db``; if commit fails, unlink ``abs_path`` when set (disk/DB orphan guard)."""
+    try:
+        db.commit()
+    except Exception:
+        if abs_path is not None:
+            unlink_stored_file(abs_path)
+        raise
+
+
+def commit_keeping_file_row(db, row) -> None:
+    """Commit after creating a ``File`` row that already has bytes on disk under ``storage_path``."""
+    abs_path = None
+    rel = getattr(row, "storage_path", None)
+    if rel:
+        abs_path = FILES_ROOT / str(rel)
+    commit_keeping_stored_file(db, abs_path)
+
+
+class PendingStoredFile:
+    """Track a newly written file; unlink unless ``keep()`` after a successful DB commit."""
+
+    __slots__ = ("abs_path", "_keep")
+
+    def __init__(self, abs_path: Path) -> None:
+        self.abs_path = abs_path
+        self._keep = False
+
+    def keep(self) -> None:
+        self._keep = True
+
+    def __enter__(self) -> PendingStoredFile:
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> bool:
+        if not self._keep:
+            unlink_stored_file(self.abs_path)
+        return False
+
+
 def _sanitize_folder_path(folder_path: str) -> str:
     # Accept user-provided folder path as a slash-separated relative string.
     # We do not allow absolute paths, backtracking (..), or traversal components.

@@ -96,7 +96,6 @@ def delete_contact(
     if not contact:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Contact not found")
     db.delete(contact)
-    db.commit()
     log_event(
         db,
         actor_user_id=user.id,
@@ -105,4 +104,5 @@ def delete_contact(
         entity_id=str(contact_id),
         meta={},
     )
+    db.commit()
 

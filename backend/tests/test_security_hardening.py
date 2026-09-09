@@ -93,8 +93,6 @@ def test_get_db_commits_pending_work_on_success() -> None:
         def close(self) -> None:
             pass
 
-    gen = get_db.__wrapped__ if hasattr(get_db, "__wrapped__") else get_db
-    # get_db is a plain generator function
     import app.db as dbmod
 
     fake = FakeSession()
@@ -119,6 +117,40 @@ def test_get_db_commits_pending_work_on_success() -> None:
         assert commits == []
     finally:
         dbmod.SessionLocal = original
+
+
+def test_commit_keeping_stored_file_unlinks_on_commit_failure(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from pathlib import Path
+
+    from app import file_storage as fs
+
+    monkeypatch.setattr(fs, "FILES_ROOT", tmp_path.resolve())
+    target = tmp_path / "orphan.bin"
+    target.write_bytes(b"x")
+
+    class BoomDb:
+        def commit(self) -> None:
+            raise RuntimeError("db down")
+
+    with pytest.raises(RuntimeError, match="db down"):
+        fs.commit_keeping_stored_file(BoomDb(), target)
+    assert not target.exists()
+
+
+def test_pending_stored_file_keeps_after_keep(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from app import file_storage as fs
+
+    monkeypatch.setattr(fs, "FILES_ROOT", tmp_path.resolve())
+    target = tmp_path / "keep.bin"
+    target.write_bytes(b"y")
+    with fs.PendingStoredFile(target) as pending:
+        pending.keep()
+    assert target.exists()
+    target2 = tmp_path / "drop.bin"
+    target2.write_bytes(b"z")
+    with fs.PendingStoredFile(target2):
+        pass
+    assert not target2.exists()
 
 
 def test_totp_roundtrip(monkeypatch: pytest.MonkeyPatch) -> None:

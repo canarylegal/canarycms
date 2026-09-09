@@ -25,7 +25,7 @@ from app.canary_sign_pdf import (
     stamp_signed_pdf,
 )
 from app.deps import get_case_if_accessible
-from app.file_storage import FILES_ROOT, case_file_paths, ensure_files_root
+from app.file_storage import FILES_ROOT, case_file_paths, ensure_files_root, unlink_stored_file, unlink_stored_file
 from app.models import (
     CanarySignAuditEvent,
     CanarySignAuditEventType,
@@ -265,7 +265,11 @@ def _save_case_file(
         updated_at=now,
     )
     db.add(row)
-    db.flush()
+    try:
+        db.flush()
+    except Exception:
+        unlink_stored_file(paths.abs_path)
+        raise
     return row
 
 

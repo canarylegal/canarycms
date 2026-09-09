@@ -224,7 +224,6 @@ def create_contact_portal_access(
         row.updated_at = utcnow()
     store_portal_access_code(row, code)
     db.add(row)
-    db.commit()
     action = "contact.portal.access.create" if existing is None else "contact.portal.access.reactivate"
     log_event(
         db,
@@ -291,7 +290,6 @@ def rotate_contact_portal_access(
     row.locked_until = None
     row.updated_at = utcnow()
     db.add(row)
-    db.commit()
     log_event(
         db,
         actor_user_id=user.id,
@@ -331,8 +329,6 @@ def update_contact_portal_access(
         bump_portal_session_version(row)
     row.updated_at = utcnow()
     db.add(row)
-    db.commit()
-    db.refresh(row)
     log_event(
         db,
         actor_user_id=user.id,
@@ -342,6 +338,7 @@ def update_contact_portal_access(
         meta=data,
     )
     db.commit()
+    db.refresh(row)
     return _access_out(row)
 
 
@@ -361,7 +358,6 @@ def delete_contact_portal_access(
             db.commit()
         return
     db.delete(row)
-    db.commit()
     log_event(
         db,
         actor_user_id=user.id,
@@ -408,8 +404,6 @@ def create_contact_portal_grant(
         created_by_user_id=user.id,
     )
     db.add(grant)
-    db.commit()
-    db.refresh(grant)
     log_event(
         db,
         actor_user_id=user.id,
@@ -418,6 +412,8 @@ def create_contact_portal_grant(
         entity_id=str(grant.id),
         meta={"contact_id": str(contact_id), "case_id": str(payload.case_id), "folder_path": folder},
     )
+    db.commit()
+    db.refresh(grant)
     email_sent = False
     email_skip_reason: str | None = None
     if payload.send_email:
@@ -448,8 +444,6 @@ def update_contact_portal_grant(
         setattr(grant, key, value)
     grant.updated_at = utcnow()
     db.add(grant)
-    db.commit()
-    db.refresh(grant)
     log_event(
         db,
         actor_user_id=user.id,
@@ -458,6 +452,8 @@ def update_contact_portal_grant(
         entity_id=str(grant.id),
         meta=data,
     )
+    db.commit()
+    db.refresh(grant)
     return _grant_out(db, grant)
 
 
@@ -474,7 +470,6 @@ def delete_contact_portal_grant(
         return
     require_case_access(grant.case_id, user, db)
     db.delete(grant)
-    db.commit()
     log_event(
         db,
         actor_user_id=user.id,
@@ -482,3 +477,4 @@ def delete_contact_portal_grant(
         entity_type="contact_portal_grant",
         entity_id=str(grant_id),
     )
+    db.commit()
