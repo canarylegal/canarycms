@@ -84,6 +84,14 @@ def stream_upload_to_path(abs_path: Path, fileobj, *, max_bytes: int) -> int:
         raise
 
 
+def unlink_stored_file(abs_path: Path) -> None:
+    """Best-effort delete of a path that must stay under ``FILES_ROOT`` (orphan cleanup)."""
+    try:
+        assert_under_files_root(abs_path).unlink(missing_ok=True)
+    except (OSError, RuntimeError, ValueError):
+        pass
+
+
 def _sanitize_folder_path(folder_path: str) -> str:
     # Accept user-provided folder path as a slash-separated relative string.
     # We do not allow absolute paths, backtracking (..), or traversal components.

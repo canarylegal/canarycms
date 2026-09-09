@@ -17,7 +17,8 @@ from sqlalchemy.orm import Session
 from app.alert_dispatch import AlertKind, dispatch_alert, firm_alerts_configured, portal_public_url
 from app.audit import log_event
 from app.fee_scale_service import fee_scale_matches_case
-from app.file_storage import FILES_ROOT, case_file_paths, ensure_files_root
+from app.file_storage import FILES_ROOT, case_file_paths, ensure_files_root, unlink_stored_file, write_bytes_atomic
+from app.timeutil import utcnow
 from app.models import (
     Case,
     CaseContact,
@@ -547,6 +548,13 @@ async def upload_submission_file(
 
     original = Path(upload.filename or "upload").name
     mime = upload.content_type or "application/octet-stream"
+    owner = db.get(User, submission.sent_by_user_id) if submission.sent_by_user_id else None
+    if owner is None:
+        case = db.get(Case, submission.case_id)
+        owner = db.get(User, case.fee_earner_user_id) if case else None
+    if owner is None:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Could not resolve file owner")
+
     ensure_files_root()
     file_id = uuid.uuid4()
     parent_id = submission.snapshot_file_id
@@ -556,41 +564,47 @@ async def upload_submission_file(
         original_filename=original,
         folder_path="",
     )
-    paths.abs_path.write_bytes(raw)
-    owner = db.get(User, submission.sent_by_user_id) if submission.sent_by_user_id else None
-    if owner is None:
-        case = db.get(Case, submission.case_id)
-        owner = db.get(User, case.fee_earner_user_id) if case else None
-    if owner is None:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Could not resolve file owner")
+    disk_written = False
+    try:
+        write_bytes_atomic(paths.abs_path, raw)
+        disk_written = True
+        now = utcnow()
+        row = File(
+            id=file_id,
+            case_id=submission.case_id,
+            owner_id=owner.id,
+            category=FileCategory.case_document,
+            storage_path=paths.rel_path,
+            folder_path=paths.folder_path,
+            is_pinned=False,
+            original_filename=original,
+            mime_type=mime,
+            size_bytes=len(raw),
+            version=1,
+            checksum=None,
+            parent_file_id=parent_id,
+            uploaded_via_portal=True,
+            created_at=now,
+            updated_at=now,
+        )
+        db.add(row)
+        db.flush()
 
-    row = File(
-        id=file_id,
-        case_id=submission.case_id,
-        owner_id=owner.id,
-        category=FileCategory.case_document,
-        storage_path=paths.rel_path,
-        folder_path=paths.folder_path,
-        is_pinned=False,
-        original_filename=original,
-        mime_type=mime,
-        size_bytes=len(raw),
-        version=1,
-        checksum=None,
-        parent_file_id=parent_id,
-        uploaded_via_portal=True,
-        created_at=datetime.utcnow(),
-        updated_at=datetime.utcnow(),
-    )
-    db.add(row)
-    db.flush()
+        responses = dict(submission.responses or {})
+        responses[field_key] = {"file_id": str(file_id), "filename": original}
+        submission.responses = responses
+        db.add(submission)
+        db.flush()
+    except Exception:
+        if disk_written:
+            unlink_stored_file(paths.abs_path)
+        raise
 
-    responses = dict(submission.responses or {})
-    responses[field_key] = {"file_id": str(file_id), "filename": original}
-    submission.responses = responses
-    db.add(submission)
-    db.flush()
-    return {"file_id": str(file_id), "filename": original}
+    return {
+        "file_id": str(file_id),
+        "filename": original,
+        "abs_path": str(paths.abs_path),
+    }
 
 
 def complete_submission(

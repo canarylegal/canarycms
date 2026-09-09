@@ -361,11 +361,18 @@ def default_grant_label(db: Session, grant: ContactPortalGrant) -> str:
 
 
 def record_portal_auth_failure(db: Session, row: ContactPortalAccess) -> None:
+    now = utcnow()
+    last = row.updated_at
+    if last is not None:
+        if last.tzinfo is None:
+            last = last.replace(tzinfo=timezone.utc)
+        if (now - last) > timedelta(minutes=PORTAL_LOCKOUT_MINUTES):
+            row.failed_attempts = 0
     row.failed_attempts = int(row.failed_attempts or 0) + 1
     if row.failed_attempts >= PORTAL_MAX_FAILED_ATTEMPTS:
-        row.locked_until = utcnow() + timedelta(minutes=PORTAL_LOCKOUT_MINUTES)
+        row.locked_until = now + timedelta(minutes=PORTAL_LOCKOUT_MINUTES)
         row.failed_attempts = 0
-    row.updated_at = utcnow()
+    row.updated_at = now
     db.add(row)
     db.commit()
 

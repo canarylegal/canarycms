@@ -93,8 +93,22 @@ def portal_otp_verify_lockout_minutes() -> int:
     return _int_env("PORTAL_OTP_VERIFY_LOCKOUT_MINUTES", 15)
 
 
+def attempt_window_minutes(*, lockout_minutes: int) -> int:
+    """Failures older than this window do not count toward lockout.
+
+    Defaults to the lockout duration. Override with ``AUTH_RATE_LIMIT_WINDOW_MINUTES``.
+    """
+    return _int_env("AUTH_RATE_LIMIT_WINDOW_MINUTES", lockout_minutes)
+
+
 def _normalize_identifier(raw: str) -> str:
     return (raw or "").strip().lower()[:320]
+
+
+def _as_aware_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
 
 
 def _get_row(db: Session, *, scope: str, identifier: str) -> AuthRateLimitEntry | None:
@@ -201,6 +215,9 @@ def record_rate_limit_failure(
     active_lock = _locked_until_active(row, now=now)
     if active_lock is not None:
         return
+    window = timedelta(minutes=attempt_window_minutes(lockout_minutes=lockout_minutes))
+    if row.updated_at is not None and (now - _as_aware_utc(row.updated_at)) > window:
+        row.failed_attempts = 0
     row.failed_attempts = int(row.failed_attempts or 0) + 1
     if row.failed_attempts >= max_attempts:
         row.locked_until = now + timedelta(minutes=lockout_minutes)

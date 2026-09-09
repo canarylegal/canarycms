@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 from fastapi import HTTPException
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.auth_rate_limit import (
@@ -105,3 +105,41 @@ def test_portal_otp_verify_success_clears_email_counter(db: Session) -> None:
         identifier=email,
         action="sign-in code verification",
     )
+
+
+def test_stale_failures_outside_window_do_not_lock(db: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AUTH_RATE_LIMIT_WINDOW_MINUTES", "15")
+    email = "windowed@example.com"
+    for _ in range(4):
+        record_rate_limit_failure(
+            db,
+            scope=SCOPE_STAFF_LOGIN_EMAIL,
+            identifier=email,
+            max_attempts=5,
+            lockout_minutes=15,
+        )
+    row = db.execute(
+        select(AuthRateLimitEntry).where(
+            AuthRateLimitEntry.scope == SCOPE_STAFF_LOGIN_EMAIL,
+            AuthRateLimitEntry.identifier == email,
+        )
+    ).scalar_one()
+    row.updated_at = datetime.now(timezone.utc) - timedelta(minutes=20)
+    db.add(row)
+    db.commit()
+    record_rate_limit_failure(
+        db,
+        scope=SCOPE_STAFF_LOGIN_EMAIL,
+        identifier=email,
+        max_attempts=5,
+        lockout_minutes=15,
+    )
+    assert_not_rate_limited(db, scope=SCOPE_STAFF_LOGIN_EMAIL, identifier=email, action="sign-in")
+    row = db.execute(
+        select(AuthRateLimitEntry).where(
+            AuthRateLimitEntry.scope == SCOPE_STAFF_LOGIN_EMAIL,
+            AuthRateLimitEntry.identifier == email,
+        )
+    ).scalar_one()
+    assert row.failed_attempts == 1
+    assert row.locked_until is None
