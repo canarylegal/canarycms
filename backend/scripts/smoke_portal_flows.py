@@ -387,7 +387,14 @@ def main() -> int:
             files = browse.get("files") or []
             report.add("portal folder browse", True, f"files={len(files)} subfolders={len(browse.get('subfolders') or [])}")
             if files:
-                fid = files[0]["id"]
+                from app.upload_limits import content_disposition_for_mime
+
+                # Prefer a PDF when present so we exercise the happy-path inline case.
+                probe = next(
+                    (f for f in files if str(f.get("original_filename") or "").lower().endswith(".pdf")),
+                    files[0],
+                )
+                fid = probe["id"]
                 minted = api.json("POST", f"/portal/grants/{gid}/files/{fid}/open-token", token=portal)
                 open_res = api.request(
                     "GET",
@@ -397,11 +404,35 @@ def main() -> int:
                 )
                 ctype = open_res.headers.get("content-type", "")
                 cd = open_res.headers.get("content-disposition", "")
+                expected_disp = content_disposition_for_mime(ctype, download=False)
                 report.add(
-                    "portal file open (inline URL)",
-                    "attachment" not in cd.lower() or "inline" in cd.lower(),
-                    f"type={ctype} disposition={cd[:80]} bytes={len(open_res.content)}",
+                    "portal file open disposition matches MIME policy",
+                    expected_disp in cd.lower(),
+                    f"type={ctype} expected={expected_disp} disposition={cd[:80]} bytes={len(open_res.content)}",
                 )
+                # Explicitly check an unsafe type if one exists in the folder.
+                unsafe = next(
+                    (
+                        f
+                        for f in files
+                        if str(f.get("original_filename") or "").lower().endswith((".eml", ".zip", ".bin"))
+                    ),
+                    None,
+                )
+                if unsafe is not None and unsafe["id"] != fid:
+                    um = api.json("POST", f"/portal/grants/{gid}/files/{unsafe['id']}/open-token", token=portal)
+                    ures = api.request(
+                        "GET",
+                        f"/portal/grants/{gid}/files/{unsafe['id']}/open",
+                        params={"token": um["token"]},
+                        expected={200, 206},
+                    )
+                    ucd = ures.headers.get("content-disposition", "")
+                    report.add(
+                        "unsafe MIME forced to attachment",
+                        "attachment" in ucd.lower(),
+                        f"file={unsafe.get('original_filename')} disposition={ucd[:80]}",
+                    )
         else:
             report.add("portal folder browse", False, "no grants on session")
 
