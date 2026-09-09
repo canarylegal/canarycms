@@ -80,13 +80,6 @@ def create_task(
         is_private=bool(payload.is_private),
     )
     db.add(task)
-    try:
-        db.commit()
-    except DBAPIError as e:
-        db.rollback()
-        raise_if_missing_case_task_is_private(e)
-        raise
-    db.refresh(task)
     log_event(
         db,
         actor_user_id=user.id,
@@ -101,6 +94,13 @@ def create_task(
             "is_private": task.is_private,
         },
     )
+    try:
+        db.commit()
+    except DBAPIError as e:
+        db.rollback()
+        raise_if_missing_case_task_is_private(e)
+        raise
+    db.refresh(task)
     return _case_task_out(db, task)
 
 
@@ -167,13 +167,6 @@ def update_task(
     task.updated_at = datetime.utcnow()
 
     db.add(task)
-    try:
-        db.commit()
-    except DBAPIError as e:
-        db.rollback()
-        raise_if_missing_case_task_is_private(e)
-        raise
-    db.refresh(task)
     log_event(
         db,
         actor_user_id=user.id,
@@ -182,6 +175,13 @@ def update_task(
         entity_id=str(task.id),
         meta={"case_id": str(case_id), **data},
     )
+    try:
+        db.commit()
+    except DBAPIError as e:
+        db.rollback()
+        raise_if_missing_case_task_is_private(e)
+        raise
+    db.refresh(task)
     return _case_task_out(db, task)
 
 
@@ -205,12 +205,6 @@ def delete_task(
 
     task_title = task.title
     db.delete(task)
-    try:
-        db.commit()
-    except DBAPIError as e:
-        db.rollback()
-        raise_if_missing_case_task_is_private(e)
-        raise
     log_event(
         db,
         actor_user_id=user.id,
@@ -219,4 +213,10 @@ def delete_task(
         entity_id=str(task_id),
         meta={"case_id": str(case_id), "title": task_title},
     )
+    try:
+        db.commit()
+    except DBAPIError as e:
+        db.rollback()
+        raise_if_missing_case_task_is_private(e)
+        raise
     return None

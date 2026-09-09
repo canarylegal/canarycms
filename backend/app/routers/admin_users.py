@@ -88,10 +88,6 @@ def create_user(
         updated_at=datetime.utcnow(),
     )
     db.add(user)
-    db.commit()
-    db.refresh(user)
-    if operator.is_master_recovery:
-        log.info("Master recovery created user %s", user.email)
     log_event(
         db,
         actor_user_id=operator.actor_user_id,
@@ -100,6 +96,10 @@ def create_user(
         entity_id=str(user.id),
         meta={"email": user.email, "role": user.role.value, "is_active": user.is_active},
     )
+    db.commit()
+    db.refresh(user)
+    if operator.is_master_recovery:
+        log.info("Master recovery created user %s", user.email)
     return AdminUserPublic.model_validate(user, from_attributes=True)
 
 
@@ -158,10 +158,6 @@ def update_user(
         setattr(user, k, v)
     user.updated_at = datetime.utcnow()
     db.add(user)
-    db.commit()
-    db.refresh(user)
-    if operator.is_master_recovery:
-        log.info("Master recovery updated user %s", user.email)
     log_event(
         db,
         actor_user_id=operator.actor_user_id,
@@ -170,6 +166,10 @@ def update_user(
         entity_id=str(user.id),
         meta=payload.model_dump(exclude_unset=True),
     )
+    db.commit()
+    db.refresh(user)
+    if operator.is_master_recovery:
+        log.info("Master recovery updated user %s", user.email)
     return AdminUserPublic.model_validate(user, from_attributes=True)
 
 
@@ -192,9 +192,6 @@ def set_password(
     _clear_user_second_factors(db, user.id)
 
     db.add(user)
-    db.commit()
-    if operator.is_master_recovery:
-        log.info("Master recovery reset password for user %s (2FA and passkeys cleared)", user.email)
     log_event(
         db,
         actor_user_id=operator.actor_user_id,
@@ -202,6 +199,9 @@ def set_password(
         entity_type="user",
         entity_id=str(user.id),
     )
+    db.commit()
+    if operator.is_master_recovery:
+        log.info("Master recovery reset password for user %s (2FA and passkeys cleared)", user.email)
     return None
 
 
@@ -253,9 +253,6 @@ def disable_2fa(
     _clear_user_second_factors(db, user.id)
     user.updated_at = datetime.utcnow()
     db.add(user)
-    db.commit()
-    if operator.is_master_recovery:
-        log.info("Master recovery disabled 2FA/passkeys for user %s", user.email)
     log_event(
         db,
         actor_user_id=operator.actor_user_id,
@@ -263,4 +260,7 @@ def disable_2fa(
         entity_type="user",
         entity_id=str(user.id),
     )
+    db.commit()
+    if operator.is_master_recovery:
+        log.info("Master recovery disabled 2FA/passkeys for user %s", user.email)
     return None

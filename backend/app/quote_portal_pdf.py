@@ -15,7 +15,7 @@ import jwt
 from sqlalchemy.orm import Session
 
 from app.desktop_edit_session import acquire_file_edit_session
-from app.file_storage import FILES_ROOT, case_file_paths, ensure_files_root, path_is_under_files_root
+from app.file_storage import FILES_ROOT, case_file_paths, ensure_files_root, path_is_under_files_root, unlink_stored_file
 from app.models import File, FileCategory, QuotePortalDelivery, User
 from app.onlyoffice_ssrf_url import default_internal_base_for_ds
 from app.routers.onlyoffice import _rewrite_oo_download_url
@@ -217,11 +217,15 @@ def create_portal_quote_pdf_snapshot(
         created_at=now,
         updated_at=now,
     )
-    db.add(row)
-    db.flush()
-    delivery.portal_pdf_file_id = row.id
-    db.add(delivery)
-    db.flush()
+    try:
+        db.add(row)
+        db.flush()
+        delivery.portal_pdf_file_id = row.id
+        db.add(delivery)
+        db.flush()
+    except Exception:
+        unlink_stored_file(paths.abs_path)
+        raise
     log.info(
         "portal quote PDF snapshot delivery=%s source=%s pdf=%s bytes=%s",
         delivery.id,

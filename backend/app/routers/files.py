@@ -29,7 +29,7 @@ from app.compose_quote import merge_compose_quote_docx_bytes, quote_lines_snapsh
 from app.finance_service import sync_finance_from_quote
 from app.docx_util import extract_plain_text_from_docx_bytes, write_blank_docx
 from app.graph_mail import create_outlook_draft, graph_mail_configured
-from app.file_storage import FILES_ROOT, StoredFilePaths, case_file_paths, ensure_files_root, sanitize_folder_path, path_is_under_files_root, stream_upload_to_path, unlink_stored_file
+from app.file_storage import FILES_ROOT, StoredFilePaths, case_file_paths, commit_keeping_stored_file, ensure_files_root, sanitize_folder_path, path_is_under_files_root, stream_upload_to_path, unlink_stored_file
 from app.upload_limits import content_disposition_for_mime, max_upload_bytes
 from app.models import Case as CaseRow
 from app.models import CaseContact, Contact as GlobalContactRow, ContactPortalGrant
@@ -612,8 +612,6 @@ def compose_office_document(
         updated_at=now,
     )
     db.add(row)
-    db.commit()
-    db.refresh(row)
     log_event(
         db,
         actor_user_id=user.id,
@@ -622,6 +620,8 @@ def compose_office_document(
         entity_id=str(row.id),
         meta={"case_id": str(case_id), "precedent_id": str(body.precedent_id) if body.precedent_id else None},
     )
+    commit_keeping_stored_file(db, paths.abs_path)
+    db.refresh(row)
     return {
         "id": str(row.id),
         "case_id": str(row.case_id),
@@ -694,8 +694,6 @@ def compose_quote_spreadsheet(
             sync_finance_from_quote(case_id, db, overwrite_existing=True)
     except ValueError:
         pass
-    db.commit()
-    db.refresh(row)
     log_event(
         db,
         actor_user_id=user.id,
@@ -707,6 +705,8 @@ def compose_quote_spreadsheet(
             "fee_scale_id": str(body.fee_scale_id) if body.fee_scale_id else None,
         },
     )
+    commit_keeping_stored_file(db, paths.abs_path)
+    db.refresh(row)
     return {
         "id": str(row.id),
         "case_id": str(row.case_id),
@@ -1343,9 +1343,6 @@ def create_case_folder(
         return {"folder_path": folder_path}
 
     row = _insert_folder_marker(db, case_id, user.id, folder_path)
-    db.commit()
-    db.refresh(row)
-
     log_event(
         db,
         actor_user_id=user.id,
@@ -1354,6 +1351,8 @@ def create_case_folder(
         entity_id=str(row.id),
         meta={"case_id": str(case_id), "folder_path": row.folder_path, "folder_name": row.original_filename},
     )
+    db.commit()
+    db.refresh(row)
 
     return {"folder_path": row.folder_path}
 
@@ -1425,8 +1424,6 @@ def rename_case_folder(
     from app.portal_service import rename_portal_grants_for_folder
 
     rename_portal_grants_for_folder(db, case_id=case_id, old_folder_path=old_path, new_folder_path=new_path)
-    db.commit()
-
     log_event(
         db,
         actor_user_id=user.id,
@@ -1435,6 +1432,7 @@ def rename_case_folder(
         entity_id=str(case_id),
         meta={"old_folder_path": old_path, "new_folder_path": new_path},
     )
+    db.commit()
 
     return {"old_folder_path": old_path, "new_folder_path": new_path}
 
@@ -1477,8 +1475,6 @@ def delete_case_folder(
     from app.portal_service import revoke_portal_grants_for_deleted_folder
 
     removed_grants = revoke_portal_grants_for_deleted_folder(db, case_id=case_id, folder_path=folder_path)
-    db.commit()
-
     log_event(
         db,
         actor_user_id=user.id,
@@ -1487,6 +1483,7 @@ def delete_case_folder(
         entity_id=str(case_id),
         meta={"folder_path": folder_path, "deleted_count": len(rows), "portal_grants_removed": removed_grants},
     )
+    db.commit()
 
     return {"folder_path": folder_path, "deleted_count": len(rows)}
 
@@ -1829,9 +1826,6 @@ def set_file_pin(
 
     row.is_pinned = payload.is_pinned
     db.add(row)
-    db.commit()
-    db.refresh(row)
-
     log_event(
         db,
         actor_user_id=user.id,
@@ -1840,6 +1834,8 @@ def set_file_pin(
         entity_id=str(row.id),
         meta={"case_id": str(case_id), "is_pinned": payload.is_pinned, "filename": row.original_filename},
     )
+    db.commit()
+    db.refresh(row)
 
     return {"id": str(row.id), "is_pinned": row.is_pinned}
 
@@ -1908,9 +1904,6 @@ def rename_case_file(
     row.original_filename = new_name
     row.updated_at = datetime.utcnow()
     db.add(row)
-    db.commit()
-    db.refresh(row)
-
     log_event(
         db,
         actor_user_id=user.id,
@@ -1923,6 +1916,8 @@ def rename_case_file(
             "new_filename": row.original_filename,
         },
     )
+    db.commit()
+    db.refresh(row)
     return {"id": str(row.id), "original_filename": row.original_filename}
 
 
@@ -1976,9 +1971,6 @@ def update_comment_file(
     row.size_bytes = len(encoded)
     row.updated_at = datetime.utcnow()
     db.add(row)
-    db.commit()
-    db.refresh(row)
-
     log_event(
         db,
         actor_user_id=user.id,
@@ -1991,6 +1983,8 @@ def update_comment_file(
             "new_filename": row.original_filename,
         },
     )
+    db.commit()
+    db.refresh(row)
     return {"id": str(row.id), "original_filename": row.original_filename}
 
 
@@ -2042,12 +2036,6 @@ def move_case_file(
         r.updated_at = datetime.utcnow()
         db.add(r)
 
-    db.commit()
-    db.refresh(row)
-
-    if old_folder:
-        _ensure_folder_marker_if_empty(db, case_id, user.id, old_folder)
-
     log_event(
         db,
         actor_user_id=user.id,
@@ -2061,6 +2049,10 @@ def move_case_file(
             "new_folder_path": row.folder_path,
         },
     )
+    db.commit()
+    db.refresh(row)
+    if old_folder:
+        _ensure_folder_marker_if_empty(db, case_id, user.id, old_folder)
     return {"id": str(row.id), "folder_path": row.folder_path}
 
 
@@ -2496,7 +2488,6 @@ def publish_compose_office_file(
     row.oo_compose_pending = False
     row.updated_at = _utcnow()
     db.add(row)
-    db.commit()
     log_event(
         db,
         actor_user_id=user.id,
@@ -2505,6 +2496,7 @@ def publish_compose_office_file(
         entity_id=str(row.id),
         meta={"case_id": str(case_id)},
     )
+    db.commit()
     if payload and payload.notify_portal_contacts:
         notify_portal_contacts_files_added_batch(
             db,
@@ -2571,8 +2563,6 @@ def discard_onlyoffice_edit(
 
     sess.released_at = now
     db.add(sess)
-    db.commit()
-
     log_event(
         db,
         actor_user_id=user.id,
@@ -2581,6 +2571,7 @@ def discard_onlyoffice_edit(
         entity_id=str(row.id),
         meta={"case_id": str(case_id)},
     )
+    db.commit()
 
 
 @router.get("/{file_id}/edit-session", response_model=FileEditSessionStatusOut)
@@ -2656,7 +2647,6 @@ def release_desktop_edit(
     for s in sessions:
         s.released_at = now
         db.add(s)
-    db.commit()
     log_event(
         db,
         actor_user_id=user.id,
@@ -2665,6 +2655,7 @@ def release_desktop_edit(
         entity_id=str(file_id),
         meta={"case_id": str(case_id)},
     )
+    db.commit()
     return None
 
 

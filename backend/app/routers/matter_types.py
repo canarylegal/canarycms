@@ -295,8 +295,6 @@ def create_sub_precedent_category(
         updated_at=now,
     )
     db.add(row)
-    db.commit()
-    db.refresh(row)
     log_event(
         db,
         actor_user_id=admin.id,
@@ -305,6 +303,8 @@ def create_sub_precedent_category(
         entity_id=str(row.id),
         meta={"name": row.name, "matter_sub_type_id": str(sub_id)},
     )
+    db.commit()
+    db.refresh(row)
     return PrecedentCategoryOut.model_validate(row, from_attributes=True)
 
 
@@ -367,7 +367,6 @@ def delete_sub_precedent_category(
             detail="Cannot delete a category that still has precedents assigned",
         )
     db.delete(row)
-    db.commit()
     log_event(
         db,
         actor_user_id=admin.id,
@@ -376,6 +375,7 @@ def delete_sub_precedent_category(
         entity_id=str(category_id),
         meta={"matter_sub_type_id": str(sub_id)},
     )
+    db.commit()
 
 
 # ── Admin: sub type menu CRUD ────────────────────────────────────────────────

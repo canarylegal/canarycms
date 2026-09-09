@@ -235,12 +235,6 @@ def create_case(
     )
     db.add(counter)
     db.add(case)
-    try:
-        db.commit()
-    except Exception:
-        db.rollback()
-        raise
-    db.refresh(case)
     log_event(
         db,
         actor_user_id=user.id,
@@ -249,6 +243,12 @@ def create_case(
         entity_id=str(case.id),
         meta={"case_number": case.case_number, "client_name": case.client_name, "matter_description": case.title},
     )
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    db.refresh(case)
     return _case_out(case, db)
 
 
@@ -487,8 +487,6 @@ def update_case(
     case.updated_at = datetime.utcnow()
 
     db.add(case)
-    db.commit()
-    db.refresh(case)
     log_event(
         db,
         actor_user_id=user.id,
@@ -497,4 +495,6 @@ def update_case(
         entity_id=str(case.id),
         meta=payload.model_dump(exclude_unset=True),
     )
+    db.commit()
+    db.refresh(case)
     return _case_out(case, db)

@@ -214,9 +214,6 @@ def webauthn_login_finish(
 
     cred_row.sign_count = verification.new_sign_count
     db.add(cred_row)
-    db.commit()
-
-    token = login_access_token(db, user, mfa_verified=True)
     log_event(
         db,
         actor_user_id=user.id,
@@ -225,6 +222,8 @@ def webauthn_login_finish(
         entity_id=str(user.id),
         meta={"email": user.email},
     )
+    db.commit()
+    token = login_access_token(db, user, mfa_verified=True)
     return TokenResponse(access_token=token)
 
 
@@ -299,7 +298,6 @@ def webauthn_register_finish(
         created_at=datetime.now(timezone.utc),
     )
     db.add(row)
-    db.commit()
     log_event(
         db,
         actor_user_id=user.id,
@@ -308,6 +306,7 @@ def webauthn_register_finish(
         entity_id=str(user.id),
         meta={"credential_id_prefix": _b64url_encode(cred_id)[:16]},
     )
+    db.commit()
     access_token = create_access_token(
         user_id=str(user.id),
         role=user.role.value,
@@ -355,7 +354,6 @@ def delete_my_passkey(
         )
 
     db.delete(row)
-    db.commit()
     log_event(
         db,
         actor_user_id=user.id,
@@ -364,4 +362,5 @@ def delete_my_passkey(
         entity_id=str(user.id),
         meta={"credential_row_id": str(credential_id)},
     )
+    db.commit()
     return None

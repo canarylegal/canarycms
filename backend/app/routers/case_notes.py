@@ -26,8 +26,6 @@ def create_note(
     require_case_access(case_id, user, db)
     note = CaseNote(case_id=case_id, author_user_id=user.id, body=payload.body)
     db.add(note)
-    db.commit()
-    db.refresh(note)
     log_event(
         db,
         actor_user_id=user.id,
@@ -36,6 +34,8 @@ def create_note(
         entity_id=str(note.id),
         meta={"case_id": str(case_id)},
     )
+    db.commit()
+    db.refresh(note)
     return CaseNoteOut.model_validate(note, from_attributes=True)
 
 
@@ -73,8 +73,6 @@ def update_note(
     note.body = payload.body
     note.updated_at = datetime.utcnow()
     db.add(note)
-    db.commit()
-    db.refresh(note)
     log_event(
         db,
         actor_user_id=user.id,
@@ -83,6 +81,8 @@ def update_note(
         entity_id=str(note.id),
         meta={"case_id": str(case_id)},
     )
+    db.commit()
+    db.refresh(note)
     return CaseNoteOut.model_validate(note, from_attributes=True)
 
 
@@ -102,7 +102,6 @@ def delete_note(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only author or admin can delete")
 
     db.delete(note)
-    db.commit()
     log_event(
         db,
         actor_user_id=user.id,
@@ -111,5 +110,6 @@ def delete_note(
         entity_id=str(note.id),
         meta={"case_id": str(case_id)},
     )
+    db.commit()
     return None
 

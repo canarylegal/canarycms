@@ -637,9 +637,6 @@ def set_portal_quote_tag(
     row.is_portal_quote = is_portal_quote
     row.updated_at = datetime.now(timezone.utc)
     db.add(row)
-    db.commit()
-    db.refresh(row)
-
     log_event(
         db,
         actor_user_id=actor_user_id,
@@ -652,4 +649,6 @@ def set_portal_quote_tag(
             "folder_path": row.folder_path,
         },
     )
+    db.commit()
+    db.refresh(row)
     return row

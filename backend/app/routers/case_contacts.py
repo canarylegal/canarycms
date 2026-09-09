@@ -102,10 +102,9 @@ def add_contact_snapshot_from_global(
         letter_salutation_custom=letter_salutation_custom,
     )
     db.add(cc)
-    db.commit()
+    db.flush()
     db.refresh(cc)
     sync_case_client_name(db, case_id)
-    db.commit()
     log_event(
         db,
         actor_user_id=user.id,
@@ -114,6 +113,7 @@ def add_contact_snapshot_from_global(
         entity_id=str(cc.id),
         meta={"case_id": str(case_id), "contact_id": str(contact.id)},
     )
+    db.commit()
     return CaseContactOut.model_validate(cc, from_attributes=True)
 
 
@@ -192,10 +192,9 @@ def update_case_contact(
             db.add(contact)
 
     db.add(cc)
-    db.commit()
+    db.flush()
     db.refresh(cc)
     sync_case_client_name(db, case_id)
-    db.commit()
     log_event(
         db,
         actor_user_id=user.id,
@@ -204,6 +203,7 @@ def update_case_contact(
         entity_id=str(cc.id),
         meta={"case_id": str(case_id), "push_to_global": push_to_global},
     )
+    db.commit()
     return CaseContactOut.model_validate(cc, from_attributes=True)
 
 
@@ -219,9 +219,7 @@ def remove_case_contact(
     if not cc or cc.case_id != case_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Case contact not found")
     db.delete(cc)
-    db.commit()
     sync_case_client_name(db, case_id)
-    db.commit()
     log_event(
         db,
         actor_user_id=user.id,
@@ -230,4 +228,5 @@ def remove_case_contact(
         entity_id=str(case_contact_id),
         meta={"case_id": str(case_id)},
     )
+    db.commit()
 

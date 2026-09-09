@@ -271,9 +271,9 @@ def create_fee_scale(
         updated_at=now,
     )
     db.add(row)
+    log_event(db, actor_user_id=user.id, action="fee_scale.create", entity_type="fee_scale", entity_id=str(row.id))
     db.commit()
     db.refresh(row)
-    log_event(db, actor_user_id=user.id, action="fee_scale.create", entity_type="fee_scale", entity_id=str(row.id))
     scale, cats, lines_by_cat, band_sets, rows_by_set = load_scale_graph(db, row.id)
     return _detail_out(db, scale, cats, lines_by_cat, band_sets, rows_by_set)
 
@@ -369,8 +369,8 @@ def delete_fee_scale(
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Fee scale not found")
     db.delete(row)
-    db.commit()
     log_event(db, actor_user_id=user.id, action="fee_scale.delete", entity_type="fee_scale", entity_id=str(fee_scale_id))
+    db.commit()
 
 
 @router.post("/{fee_scale_id}/preview", response_model=QuotePreviewOut)

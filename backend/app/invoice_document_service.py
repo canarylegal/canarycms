@@ -19,7 +19,7 @@ from app.docx_util import (
     strip_empty_invoice_table_rows,
     write_invoice_docx,
 )
-from app.file_storage import FILES_ROOT, case_file_paths, ensure_files_root, path_is_under_files_root
+from app.file_storage import FILES_ROOT, case_file_paths, ensure_files_root, path_is_under_files_root, unlink_stored_file
 from app.global_precedent_loader import load_global_precedent_docx_bytes
 from app.models import Case, CaseInvoice, CaseInvoiceLine, Contact, File as DbFile, FileCategory, FirmSettings, User
 from app.precedent_constants import INVOICE_TEMPLATE_PRECEDENT_REFERENCE
@@ -208,7 +208,11 @@ def save_invoice_document_to_case(
     db.add(row)
     inv.document_file_id = file_id
     db.add(inv)
-    db.flush()
+    try:
+        db.flush()
+    except Exception:
+        unlink_stored_file(paths.abs_path)
+        raise
     return file_id
 
 

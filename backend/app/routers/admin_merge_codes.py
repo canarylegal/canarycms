@@ -90,13 +90,6 @@ def bulk_update_merge_codes(
         row.updated_at = datetime.utcnow()
         db.add(row)
 
-    db.commit()
-
-    rows = (
-        db.execute(select(MergeCodeCatalog).order_by(MergeCodeCatalog.sort_order.asc(), MergeCodeCatalog.code.asc()))
-        .scalars()
-        .all()
-    )
     log_event(
         db,
         actor_user_id=admin.id,
@@ -104,6 +97,12 @@ def bulk_update_merge_codes(
         entity_type="merge_code_catalog",
         entity_id="*",
         meta={"count": len(payload.items)},
+    )
+    db.commit()
+    rows = (
+        db.execute(select(MergeCodeCatalog).order_by(MergeCodeCatalog.sort_order.asc(), MergeCodeCatalog.code.asc()))
+        .scalars()
+        .all()
     )
     return [MergeCodeCatalogOut.model_validate(r, from_attributes=True) for r in rows]
 
@@ -150,7 +149,6 @@ async def import_merge_codes_xlsx(
         db.add(cat)
         updated += 1
 
-    db.commit()
     log_event(
         db,
         actor_user_id=admin.id,
@@ -159,4 +157,5 @@ async def import_merge_codes_xlsx(
         entity_id="import.xlsx",
         meta={"updated": updated, "skipped_unknown": skipped_unknown},
     )
+    db.commit()
     return MergeCodeCatalogImportResult(updated=updated, skipped_unknown=skipped_unknown)
