@@ -992,8 +992,6 @@ def portal_upload_file(
         updated_at=datetime.utcnow(),
     )
     db.add(row)
-    db.commit()
-    db.refresh(row)
     log_event(
         db,
         actor_user_id=None,
@@ -1024,6 +1022,7 @@ def portal_upload_file(
         filename=row.original_filename,
     )
     db.commit()
+    db.refresh(row)
     return _file_out(grant, row)
 
 

@@ -416,6 +416,12 @@ def upload_case_file(
     require_case_access(case_id, user, db)
     ensure_files_root()
 
+    parent: DbFile | None = None
+    if parent_file_id is not None:
+        parent = db.get(DbFile, parent_file_id)
+        if not parent or parent.case_id != case_id:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="parent_file_id is invalid")
+
     file_id = uuid.uuid4()
     original = upload.filename or "upload.bin"
     paths = case_file_paths(case_id=case_id, file_id=file_id, original_filename=original, folder_path=folder)
@@ -443,12 +449,6 @@ def upload_case_file(
     if original.lower().endswith(".eml"):
         mime = "message/rfc822"
         mime_base = "message/rfc822"
-
-    parent: DbFile | None = None
-    if parent_file_id is not None:
-        parent = db.get(DbFile, parent_file_id)
-        if not parent or parent.case_id != case_id:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="parent_file_id is invalid")
 
     outlook_rest_id = (outlook_item_id or "").strip() or None
     outlook_conv_id = (outlook_conversation_id or "").strip() or None
@@ -509,8 +509,6 @@ def upload_case_file(
         updated_at=datetime.utcnow(),
     )
     db.add(row)
-    db.commit()
-    db.refresh(row)
     log_event(
         db,
         actor_user_id=user.id,
@@ -528,6 +526,8 @@ def upload_case_file(
             "compose_global_contact_id": str(compose_global_contact_id) if compose_global_contact_id else None,
         },
     )
+    db.commit()
+    db.refresh(row)
     if notify_portal_contacts:
         notify_portal_contacts_files_added_batch(
             db,

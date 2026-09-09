@@ -20,12 +20,7 @@ def max_upload_bytes() -> int:
     return _int_env("CANARY_UPLOAD_MAX_BYTES", 25 * 1024 * 1024)
 
 
-# Browsers may safely render these inline; everything else forces attachment.
-_SAFE_INLINE_MIME_PREFIXES = (
-    "image/",
-    "text/plain",
-    "text/csv",
-)
+# Raster images only — SVG is script-capable and must never render inline.
 _SAFE_INLINE_MIME_EXACT = frozenset(
     {
         "application/pdf",
@@ -35,7 +30,7 @@ _SAFE_INLINE_MIME_EXACT = frozenset(
         "image/jpeg",
         "image/gif",
         "image/webp",
-        "image/svg+xml",
+        "image/avif",
     }
 )
 
@@ -45,7 +40,5 @@ def content_disposition_for_mime(mime_type: str | None, *, download: bool) -> st
         return "attachment"
     mt = (mime_type or "").strip().lower().split(";", 1)[0].strip()
     if mt in _SAFE_INLINE_MIME_EXACT:
-        return "inline"
-    if any(mt.startswith(p) for p in _SAFE_INLINE_MIME_PREFIXES):
         return "inline"
     return "attachment"

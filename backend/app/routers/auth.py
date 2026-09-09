@@ -223,7 +223,6 @@ def reset_password(payload: ResetPasswordRequest, db: Session = Depends(get_db))
     if cleared_pending_setup:
         user.totp_secret = None
     db.add(user)
-    db.commit()
     log_event(
         db,
         actor_user_id=user.id,
@@ -235,6 +234,7 @@ def reset_password(payload: ResetPasswordRequest, db: Session = Depends(get_db))
             "cleared_pending_authenticator_setup": cleared_pending_setup,
         },
     )
+    db.commit()
     return None
 
 
@@ -289,8 +289,6 @@ def verify_2fa(
 
     user.is_2fa_enabled = True
     db.add(user)
-    db.commit()
-    db.refresh(user)
     log_event(
         db,
         actor_user_id=user.id,
@@ -298,6 +296,8 @@ def verify_2fa(
         entity_type="user",
         entity_id=str(user.id),
     )
+    db.commit()
+    db.refresh(user)
     access_token = login_access_token(db, user, mfa_verified=True)
     return Verify2FASessionResponse(access_token=access_token, user=build_user_public(user, db))
 
@@ -330,7 +330,6 @@ def disable_my_2fa(
     user.is_2fa_enabled = False
     user.updated_at = datetime.utcnow()
     db.add(user)
-    db.commit()
     log_event(
         db,
         actor_user_id=user.id,
@@ -338,6 +337,7 @@ def disable_my_2fa(
         entity_type="user",
         entity_id=str(user.id),
     )
+    db.commit()
     return None
 
 
@@ -369,7 +369,6 @@ def cancel_my_2fa_setup(
     user.totp_secret = None
     user.updated_at = datetime.utcnow()
     db.add(user)
-    db.commit()
     log_event(
         db,
         actor_user_id=user.id,
@@ -377,6 +376,7 @@ def cancel_my_2fa_setup(
         entity_type="user",
         entity_id=str(user.id),
     )
+    db.commit()
     return None
 
 
@@ -396,8 +396,6 @@ def change_password(
     bump_auth_token_version(user)
 
     db.add(user)
-    db.commit()
-    db.refresh(user)
     log_event(
         db,
         actor_user_id=user.id,
@@ -405,5 +403,7 @@ def change_password(
         entity_type="user",
         entity_id=str(user.id),
     )
+    db.commit()
+    db.refresh(user)
     access_token = login_access_token(db, user, mfa_verified=True)
     return ChangePasswordResponse(access_token=access_token, user=build_user_public(user, db))
