@@ -39,7 +39,7 @@ from app.precedent_constants import (
     INVOICE_TEMPLATE_PRECEDENT_REFERENCE,
     SYSTEM_DOCUMENT_TEMPLATE_REFERENCES,
 )
-from app.file_storage import FILES_ROOT
+from app.file_storage import FILES_ROOT, path_is_under_files_root
 from app.matter_contact_constants import CLIENT_SLUG, LAWYERS_SLUG, normalize_matter_contact_type_slug
 from app.models import Case as CaseModel
 from app.models import (
@@ -86,7 +86,7 @@ def _read_firm_letterhead_file_bytes(db: Session, file_id: uuid.UUID | None) -> 
     if lh_file is None:
         return None
     lh_abs = (FILES_ROOT / lh_file.storage_path).resolve()
-    if not str(lh_abs).startswith(str(FILES_ROOT)) or not lh_abs.is_file():
+    if not path_is_under_files_root(lh_abs) or not lh_abs.is_file():
         return None
     try:
         return lh_abs.read_bytes()
@@ -216,7 +216,7 @@ def _load_blank_letter_bytes(db: Session) -> bytes | None:
     if bfile is None:
         return None
     abs_path = (FILES_ROOT / bfile.storage_path).resolve()
-    if not str(abs_path).startswith(str(FILES_ROOT)) or not abs_path.is_file():
+    if not path_is_under_files_root(abs_path) or not abs_path.is_file():
         return None
     try:
         return abs_path.read_bytes()
@@ -247,7 +247,7 @@ def merge_compose_docx_bytes(
         if pfile is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Precedent file missing")
         prec_abs = (FILES_ROOT / pfile.storage_path).resolve()
-        if not str(prec_abs).startswith(str(FILES_ROOT)) or not prec_abs.is_file():
+        if not path_is_under_files_root(prec_abs) or not prec_abs.is_file():
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Precedent file missing on disk")
         src_bytes = prec_abs.read_bytes()
         mime = pfile.mime_type or "application/vnd.openxmlformats-officedocument.wordprocessingml.document"

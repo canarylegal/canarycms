@@ -21,7 +21,7 @@ from app.audit import log_event
 from app.db import get_db
 from app.deps import get_current_user, require_admin
 from app.docx_util import validate_docx_package_bytes
-from app.file_storage import FILES_ROOT, ensure_files_root, precedent_file_paths
+from app.file_storage import FILES_ROOT, ensure_files_root, precedent_file_paths, path_is_under_files_root
 from app.onlyoffice_force_save import (
     OoForceSavePhase,
     oo_force_save_arm,
@@ -662,7 +662,7 @@ def delete_precedent(
         abs_path = (FILES_ROOT / f.storage_path).resolve()
         db.delete(f)
     db.commit()
-    if f and str(abs_path).startswith(str(FILES_ROOT)) and abs_path.is_file():
+    if f and path_is_under_files_root(abs_path) and abs_path.is_file():
         try:
             abs_path.unlink()
         except OSError:

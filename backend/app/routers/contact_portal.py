@@ -234,6 +234,7 @@ def create_contact_portal_access(
         entity_id=str(contact_id),
         meta={"case_id": str(payload.case_id)} if payload.case_id else None,
     )
+    db.commit()
     email_sent = False
     email_skip_reason: str | None = None
     if payload.send_email:
@@ -299,6 +300,7 @@ def rotate_contact_portal_access(
         entity_id=str(contact_id),
         meta={"case_id": str(payload.case_id)} if payload.case_id else None,
     )
+    db.commit()
     email_sent = False
     email_skip_reason: str | None = None
     if payload.send_email:
@@ -320,8 +322,13 @@ def update_contact_portal_access(
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Portal access is not set up for this contact")
     data = payload.model_dump(exclude_unset=True)
+    disabling = "enabled" in data and data["enabled"] is False and bool(row.enabled)
     for key, value in data.items():
         setattr(row, key, value)
+    if disabling:
+        from app.portal_service import bump_portal_session_version
+
+        bump_portal_session_version(row)
     row.updated_at = utcnow()
     db.add(row)
     db.commit()
@@ -334,6 +341,7 @@ def update_contact_portal_access(
         entity_id=str(contact_id),
         meta=data,
     )
+    db.commit()
     return _access_out(row)
 
 
@@ -362,6 +370,7 @@ def delete_contact_portal_access(
         entity_id=str(contact_id),
         meta={"grants_removed": len(grants)},
     )
+    db.commit()
 
 
 @router.get("/grants", response_model=list[ContactPortalGrantOut])

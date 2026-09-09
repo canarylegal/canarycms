@@ -163,7 +163,16 @@ def record_rate_limit_failure(
     if not ident:
         return
     now = utcnow()
-    row = _get_row(db, scope=scope, identifier=ident)
+    from sqlalchemy.exc import IntegrityError
+
+    row = db.execute(
+        select(AuthRateLimitEntry)
+        .where(
+            AuthRateLimitEntry.scope == scope,
+            AuthRateLimitEntry.identifier == ident,
+        )
+        .with_for_update()
+    ).scalar_one_or_none()
     if row is None:
         row = AuthRateLimitEntry(
             id=uuid.uuid4(),
@@ -175,6 +184,20 @@ def record_rate_limit_failure(
             updated_at=now,
         )
         db.add(row)
+        try:
+            with db.begin_nested():
+                db.flush()
+        except IntegrityError:
+            row = db.execute(
+                select(AuthRateLimitEntry)
+                .where(
+                    AuthRateLimitEntry.scope == scope,
+                    AuthRateLimitEntry.identifier == ident,
+                )
+                .with_for_update()
+            ).scalar_one_or_none()
+            if row is None:
+                return
     active_lock = _locked_until_active(row, now=now)
     if active_lock is not None:
         return
@@ -190,7 +213,14 @@ def record_rate_limit_failure(
 def clear_rate_limit(db: Session, *, scope: str, identifier: str | None) -> None:
     if not identifier:
         return
-    row = _get_row(db, scope=scope, identifier=identifier)
+    row = db.execute(
+        select(AuthRateLimitEntry)
+        .where(
+            AuthRateLimitEntry.scope == scope,
+            AuthRateLimitEntry.identifier == _normalize_identifier(identifier),
+        )
+        .with_for_update()
+    ).scalar_one_or_none()
     if row is None:
         return
     row.failed_attempts = 0

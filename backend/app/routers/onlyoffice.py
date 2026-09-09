@@ -32,7 +32,7 @@ from sqlalchemy.orm import Session
 
 from app.db import get_db
 from app.deps import get_current_user
-from app.file_storage import FILES_ROOT, case_file_paths, ensure_files_root
+from app.file_storage import FILES_ROOT, case_file_paths, ensure_files_root, path_is_under_files_root
 from app.models import FeeScale, File as DbFile, FileCategory, FileEditSession, Precedent, User
 from app.audit import log_event
 from app.feature_flags import onlyoffice_callback_require_jwt
@@ -493,7 +493,7 @@ async def persist_onlyoffice_browser_url_to_file(
 
     ensure_files_root()
     abs_path = (FILES_ROOT / row.storage_path).resolve()
-    if not str(abs_path).startswith(str(FILES_ROOT.resolve())):
+    if not path_is_under_files_root(abs_path):
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Invalid storage path")
 
     abs_path.parent.mkdir(parents=True, exist_ok=True)
@@ -854,7 +854,7 @@ async def onlyoffice_callback(
 
         ensure_files_root()
         abs_path = (FILES_ROOT / row.storage_path).resolve()
-        if not str(abs_path).startswith(str(FILES_ROOT)):
+        if not path_is_under_files_root(abs_path):
             log.error("Invalid storage path for file %s", file_id)
             return {"error": 1}
 

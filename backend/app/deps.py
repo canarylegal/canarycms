@@ -322,4 +322,18 @@ def get_portal_contact(
     ).scalar_one_or_none()
     if access is None or not portal_access_is_active(access):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Portal access is disabled")
+    if int(getattr(access, "session_version", 1) or 1) != int(session.session_version or 1):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Session expired — sign in again.",
+        )
+    return contact
+
+
+def get_portal_write_contact(
+    session: PortalSessionPayload = Depends(get_portal_session),
+    contact: Contact = Depends(get_portal_contact),
+) -> Contact:
+    """Portal contact allowed to mutate (blocks staff preview sessions)."""
+    require_portal_client_write(session)
     return contact

@@ -6,7 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.docx_util import validate_docx_package_bytes
-from app.file_storage import FILES_ROOT
+from app.file_storage import FILES_ROOT, path_is_under_files_root
 from app.models import File as DbFile
 from app.models import Precedent
 
@@ -30,7 +30,7 @@ def load_global_precedent_docx_bytes(db: Session, reference: str) -> bytes | Non
     if frow is None or not frow.storage_path:
         return None
     path = (FILES_ROOT / frow.storage_path).resolve()
-    if not str(path).startswith(str(FILES_ROOT)) or not path.is_file():
+    if not path_is_under_files_root(path) or not path.is_file():
         return None
     raw = path.read_bytes()
     try:

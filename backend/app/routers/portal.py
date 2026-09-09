@@ -20,13 +20,14 @@ from starlette.background import BackgroundTask
 
 from app.audit import log_event
 from app.db import get_db
-from app.deps import get_portal_contact, get_portal_session, require_portal_client_write
+from app.deps import get_portal_contact, get_portal_session, get_portal_write_contact, require_portal_client_write
 from app.security import (
     PortalSessionPayload,
     create_portal_file_open_token,
     decode_portal_file_open_token,
 )
-from app.file_storage import FILES_ROOT, case_file_paths, ensure_files_root
+from app.file_storage import FILES_ROOT, case_file_paths, ensure_files_root, path_is_under_files_root, stream_upload_to_path
+from app.upload_limits import content_disposition_for_mime, max_upload_bytes
 from app.models import (
     Case,
     CanarySignRecipient,
@@ -57,6 +58,7 @@ from app.portal_activity import log_portal_activity
 from app.portal_notifications import notify_portal_staff_client_upload
 from app.portal_case import filter_grants_for_portal_enabled_cases
 from app.portal_service import (
+    portal_session_version,
     browse_grant_folder,
     client_matter_description,
     contact_display_name,
@@ -225,7 +227,7 @@ def portal_logo(db: Session = Depends(get_db)) -> FileResponse:
     if frow is None or frow.category != FileCategory.firm_portal_logo:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Portal logo not configured")
     abs_path = (FILES_ROOT / frow.storage_path).resolve()
-    if not abs_path.is_file() or not str(abs_path).startswith(str(FILES_ROOT.resolve())):
+    if not abs_path.is_file() or not path_is_under_files_root(abs_path):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Portal logo not found")
     media = (frow.mime_type or mimetypes.guess_type(frow.original_filename)[0] or "image/png").split(";", 1)[0]
     return FileResponse(abs_path, media_type=media, filename=frow.original_filename)
@@ -250,7 +252,10 @@ def portal_auth(payload: PortalAuthIn, request: Request, db: Session = Depends(g
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid access code")
     # Valid access code is enough to sign in; empty portal home is allowed (soft empty state).
     record_portal_auth_success(db, row)
-    token = create_portal_session_token(contact_id=str(contact.id))
+    token = create_portal_session_token(
+        contact_id=str(contact.id),
+        session_version=portal_session_version(row),
+    )
     log_event(
         db,
         actor_user_id=None,
@@ -259,6 +264,7 @@ def portal_auth(payload: PortalAuthIn, request: Request, db: Session = Depends(g
         entity_id=str(contact.id),
         meta={"contact_id": str(contact.id)},
     )
+    db.commit()
     return PortalAuthOut(
         session_token=token,
         contact_name=contact_display_name(contact),
@@ -306,8 +312,10 @@ def portal_verify_otp(payload: PortalOtpVerifyIn, request: Request, db: Session 
     ).scalar_one_or_none()
     if access_row:
         record_portal_auth_success(db, access_row)
-    db.commit()
-    token = create_portal_session_token(contact_id=str(contact.id))
+    token = create_portal_session_token(
+        contact_id=str(contact.id),
+        session_version=portal_session_version(access_row),
+    )
     log_event(
         db,
         actor_user_id=None,
@@ -316,6 +324,7 @@ def portal_verify_otp(payload: PortalOtpVerifyIn, request: Request, db: Session 
         entity_id=str(contact.id),
         meta={"contact_id": str(contact.id)},
     )
+    db.commit()
     return PortalAuthOut(
         session_token=token,
         contact_name=contact_display_name(contact),
@@ -354,7 +363,11 @@ def portal_preview_exchange(payload: PortalPreviewExchangeIn, db: Session = Depe
             status_code=status.HTTP_403_FORBIDDEN,
             detail="No portal content on this matter for this contact",
         )
-    token = create_portal_session_token(contact_id=str(contact.id), staff_preview=True)
+    token = create_portal_session_token(
+        contact_id=str(contact.id),
+        staff_preview=True,
+        session_version=portal_session_version(access_row),
+    )
     log_event(
         db,
         actor_user_id=staff_user_id,
@@ -402,7 +415,10 @@ def portal_quote_exchange(payload: PortalQuoteExchangeIn, db: Session = Depends(
 
     require_case_portal_enabled(db, case_id)
 
-    token = create_portal_session_token(contact_id=str(contact.id))
+    token = create_portal_session_token(
+        contact_id=str(contact.id),
+        session_version=portal_session_version(access_row),
+    )
     log_event(
         db,
         actor_user_id=None,
@@ -459,7 +475,10 @@ def portal_form_exchange(payload: PortalFormExchangeIn, db: Session = Depends(ge
 
     require_case_portal_enabled(db, case_id)
 
-    token = create_portal_session_token(contact_id=str(contact.id))
+    token = create_portal_session_token(
+        contact_id=str(contact.id),
+        session_version=portal_session_version(access_row),
+    )
     log_event(
         db,
         actor_user_id=None,
@@ -501,7 +520,7 @@ def portal_get_quote_delivery(
 def portal_respond_quote_delivery(
     delivery_id: uuid.UUID,
     payload: PortalQuoteRespondIn,
-    contact: Contact = Depends(get_portal_contact),
+    contact: Contact = Depends(get_portal_write_contact),
     db: Session = Depends(get_db),
 ) -> PortalQuoteDeliveryViewOut:
     delivery = get_delivery_for_contact(db, delivery_id, contact.id)
@@ -530,7 +549,7 @@ def portal_download_quote_delivery_file(
     )
     ensure_files_root()
     abs_path = (FILES_ROOT / row.storage_path).resolve()
-    if not str(abs_path).startswith(str(FILES_ROOT)) or not abs_path.exists():
+    if not path_is_under_files_root(abs_path) or not abs_path.exists():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File missing on disk")
     log_event(
         db,
@@ -557,7 +576,7 @@ def portal_download_quote_delivery_file(
         path=str(abs_path),
         media_type=row.mime_type,
         filename=row.original_filename,
-        content_disposition_type="attachment" if download else "inline",
+        content_disposition_type=content_disposition_for_mime(row.mime_type, download=download),
     )
 
 
@@ -760,7 +779,7 @@ def portal_download_grant_zip(
         with zipfile.ZipFile(tmp, "w", compression=zipfile.ZIP_DEFLATED) as zf:
             for row in rows:
                 abs_path = (FILES_ROOT / row.storage_path).resolve()
-                if not str(abs_path).startswith(str(FILES_ROOT)) or not abs_path.is_file():
+                if not path_is_under_files_root(abs_path) or not abs_path.is_file():
                     raise HTTPException(
                         status_code=status.HTTP_404_NOT_FOUND,
                         detail=f"File missing on disk: {row.original_filename}",
@@ -781,6 +800,7 @@ def portal_download_grant_zip(
             entity_id=str(grant.id),
             meta={"contact_id": str(contact.id), "case_id": str(grant.case_id), "file_count": len(rows)},
         )
+        db.commit()
         return FileResponse(
             path=tmp,
             media_type="application/zip",
@@ -812,7 +832,7 @@ def portal_download_file(
     row = get_portal_grant_file(db, grant, contact.id, file_id)
     ensure_files_root()
     abs_path = (FILES_ROOT / row.storage_path).resolve()
-    if not str(abs_path).startswith(str(FILES_ROOT)) or not abs_path.exists():
+    if not path_is_under_files_root(abs_path) or not abs_path.exists():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File missing on disk")
     log_event(
         db,
@@ -835,7 +855,7 @@ def portal_download_file(
         path=str(abs_path),
         media_type=row.mime_type,
         filename=row.original_filename,
-        content_disposition_type="attachment" if download else "inline",
+        content_disposition_type=content_disposition_for_mime(row.mime_type, download=download),
     )
 
 
@@ -888,7 +908,7 @@ def portal_open_file_with_token(
     row = get_portal_grant_file(db, grant, contact.id, file_id)
     ensure_files_root()
     abs_path = (FILES_ROOT / row.storage_path).resolve()
-    if not str(abs_path).startswith(str(FILES_ROOT)) or not abs_path.exists():
+    if not path_is_under_files_root(abs_path) or not abs_path.exists():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File missing on disk")
 
     log_event(
@@ -912,7 +932,7 @@ def portal_open_file_with_token(
         path=str(abs_path),
         media_type=row.mime_type or "application/octet-stream",
         filename=row.original_filename,
-        content_disposition_type="inline",
+        content_disposition_type=content_disposition_for_mime(row.mime_type, download=False),
     )
 
 
@@ -921,7 +941,7 @@ def portal_upload_file(
     grant_id: uuid.UUID,
     upload: UploadFile = FastAPIFile(...),
     folder: str = Form(default=""),
-    contact: Contact = Depends(get_portal_contact),
+    contact: Contact = Depends(get_portal_write_contact),
     db: Session = Depends(get_db),
 ) -> PortalFileOut:
     grant = get_grant_for_contact(db, contact_id=contact.id, grant_id=grant_id)
@@ -947,14 +967,10 @@ def portal_upload_file(
         original_filename=original,
         folder_path=target_folder,
     )
-    size = 0
-    with paths.abs_path.open("wb") as f:
-        while True:
-            chunk = upload.file.read(1024 * 1024)
-            if not chunk:
-                break
-            size += len(chunk)
-            f.write(chunk)
+    try:
+        size = stream_upload_to_path(paths.abs_path, upload.file, max_bytes=max_upload_bytes())
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail=str(e)) from e
 
     mime = upload.content_type or (mimetypes.guess_type(original)[0] or "application/octet-stream")
     row = File(
@@ -1032,7 +1048,7 @@ class PortalSignStartOut(BaseModel):
 @router.post("/signing-requests/{request_id}/start", response_model=PortalSignStartOut)
 def portal_start_signing(
     request_id: uuid.UUID,
-    contact: Contact = Depends(get_portal_contact),
+    contact: Contact = Depends(get_portal_write_contact),
     db: Session = Depends(get_db),
 ) -> PortalSignStartOut:
     req = db.get(DocusignSigningRequest, request_id)
@@ -1093,7 +1109,10 @@ def portal_canary_sign_exchange(
 
     require_case_portal_enabled(db, req.case_id)
 
-    token = create_portal_session_token(contact_id=str(contact.id))
+    token = create_portal_session_token(
+        contact_id=str(contact.id),
+        session_version=portal_session_version(access_row),
+    )
     log_event(
         db,
         actor_user_id=None,
@@ -1128,12 +1147,14 @@ def portal_get_canary_sign(
     request_id: uuid.UUID,
     request: Request,
     contact: Contact = Depends(get_portal_contact),
+    session: PortalSessionPayload = Depends(get_portal_session),
     db: Session = Depends(get_db),
 ) -> PortalCanarySignOut:
     req, recip = _canary_request_for_contact(db, request_id, contact.id)
-    ip = client_ip_from_request(request)
-    ua = request.headers.get("user-agent")
-    canary_record_view(db, req, recip, ip=ip, ua=ua)
+    if not session.staff_preview:
+        ip = client_ip_from_request(request)
+        ua = request.headers.get("user-agent")
+        canary_record_view(db, req, recip, ip=ip, ua=ua)
     return PortalCanarySignOut(**canary_portal_signing_view(db, req, recipient=recip))
 
 

@@ -16,7 +16,7 @@ from app.audit import log_event
 from app.auth_principal import AuthPrincipal
 from app.db import get_db
 from app.deps import require_firm_admin, require_recovery_operator
-from app.file_storage import (
+from app.file_storage import (, path_is_under_files_root
     FILES_ROOT,
     ensure_files_root,
     firm_default_signature_file_paths,
@@ -153,7 +153,7 @@ def _delete_letterhead_file(db: Session, settings: FirmSettings) -> None:
         abs_path = (FILES_ROOT / f.storage_path).resolve()
         db.delete(f)
         db.flush()
-        if str(abs_path).startswith(str(FILES_ROOT)) and abs_path.is_file():
+        if path_is_under_files_root(abs_path) and abs_path.is_file():
             try:
                 abs_path.unlink()
             except OSError:
@@ -170,7 +170,7 @@ def _delete_quote_letterhead_file(db: Session, settings: FirmSettings) -> None:
         abs_path = (FILES_ROOT / f.storage_path).resolve()
         db.delete(f)
         db.flush()
-        if str(abs_path).startswith(str(FILES_ROOT)) and abs_path.is_file():
+        if path_is_under_files_root(abs_path) and abs_path.is_file():
             try:
                 abs_path.unlink()
             except OSError:
@@ -221,7 +221,7 @@ def _delete_portal_logo_file(db: Session, settings: FirmSettings) -> None:
         abs_path = (FILES_ROOT / f.storage_path).resolve()
         db.delete(f)
         db.flush()
-        if str(abs_path).startswith(str(FILES_ROOT)) and abs_path.is_file():
+        if path_is_under_files_root(abs_path) and abs_path.is_file():
             try:
                 abs_path.unlink()
             except OSError:
@@ -238,7 +238,7 @@ def _delete_default_signature_file(db: Session, settings: FirmSettings) -> None:
         abs_path = (FILES_ROOT / f.storage_path).resolve()
         db.delete(f)
         db.flush()
-        if str(abs_path).startswith(str(FILES_ROOT)) and abs_path.is_file():
+        if path_is_under_files_root(abs_path) and abs_path.is_file():
             try:
                 abs_path.unlink()
             except OSError:

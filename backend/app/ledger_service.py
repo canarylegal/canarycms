@@ -3,10 +3,10 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass
-from datetime import datetime
 
 from fastapi import HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import case, func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.ledger_party import resolve_ledger_party
@@ -19,6 +19,7 @@ from app.permission_checks import (
     user_may_approve_ledger,
 )
 from app.schemas import LedgerAccountSummary, LedgerEntryOut, LedgerOut, LedgerPairUpdate, LedgerPostCreate
+from app.timeutil import utcnow
 
 
 @dataclass(frozen=True)
@@ -28,46 +29,82 @@ class LedgerPostResult:
     is_anticipated: bool
 
 
-def _get_or_create_accounts(case_id: uuid.UUID, db: Session) -> dict[str, LedgerAccount]:
-    """Return {account_type: LedgerAccount}, creating rows if they don't exist yet."""
-    rows = (
-        db.execute(
-            select(LedgerAccount).where(LedgerAccount.case_id == case_id)
-        )
-        .scalars()
-        .all()
-    )
-    by_type: dict[str, LedgerAccount] = {r.account_type.value: r for r in rows}
-    changed = False
-    for atype in (LedgerAccountType.client, LedgerAccountType.office):
-        if atype.value not in by_type:
-            acc = LedgerAccount(
-                id=uuid.uuid4(),
-                case_id=case_id,
-                account_type=atype,
-                created_at=datetime.utcnow(),
+def _get_or_create_accounts(case_id: uuid.UUID, db: Session, *, for_update: bool = False) -> dict[str, LedgerAccount]:
+    """Return {account_type: LedgerAccount}, creating rows if they don't exist yet.
+
+    When ``for_update`` is true, locks account rows (``SELECT … FOR UPDATE``) so concurrent
+    approved posts cannot both pass the SAR deficit check.
+    """
+
+    def _load() -> dict[str, LedgerAccount]:
+        q = select(LedgerAccount).where(LedgerAccount.case_id == case_id)
+        if for_update:
+            q = q.with_for_update()
+        rows = db.execute(q).scalars().all()
+        return {r.account_type.value: r for r in rows}
+
+    by_type = _load()
+    missing = [atype for atype in (LedgerAccountType.client, LedgerAccountType.office) if atype.value not in by_type]
+    if missing:
+        now = utcnow()
+        try:
+            with db.begin_nested():
+                for atype in missing:
+                    db.add(
+                        LedgerAccount(
+                            id=uuid.uuid4(),
+                            case_id=case_id,
+                            account_type=atype,
+                            created_at=now,
+                        )
+                    )
+                db.flush()
+        except IntegrityError:
+            pass
+        by_type = _load()
+        if any(atype.value not in by_type for atype in (LedgerAccountType.client, LedgerAccountType.office)):
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Could not initialise ledger accounts for this matter.",
             )
-            db.add(acc)
-            by_type[atype.value] = acc
-            changed = True
-    if changed:
-        db.flush()
     return by_type
 
 
 def _balance(account_id: uuid.UUID, db: Session, *, approved_only: bool = True) -> int:
     """Net balance in pence: sum(credits) - sum(debits)."""
-    q = select(LedgerEntry).where(LedgerEntry.account_id == account_id)
+    signed = case(
+        (LedgerEntry.direction == LedgerDirection.credit, LedgerEntry.amount_pence),
+        else_=-LedgerEntry.amount_pence,
+    )
+    q = select(func.coalesce(func.sum(signed), 0)).where(LedgerEntry.account_id == account_id)
     if approved_only:
         q = q.where(LedgerEntry.is_approved.is_(True))
-    entries = db.execute(q).scalars().all()
-    total = 0
-    for e in entries:
-        if e.direction == LedgerDirection.credit:
-            total += e.amount_pence
-        else:
-            total -= e.amount_pence
-    return total
+    return int(db.execute(q).scalar_one())
+
+
+def _projected_client_balance_after_debit(
+    *,
+    current_balance: int,
+    amount_pence: int,
+    client_direction: str | None,
+) -> int:
+    if client_direction == "debit":
+        return current_balance - amount_pence
+    if client_direction == "credit":
+        return current_balance + amount_pence
+    return current_balance
+
+
+def _reject_client_deficit(balance: int) -> None:
+    if balance < 0:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                "Posting rejected: client account would go into deficit "
+                f"(balance would be £{abs(balance)/100:.2f} DR). "
+                "SAR 2019 prohibits a debit balance on a client account."
+            ),
+        )
 
 
 def _maybe_activate_quote_case(db: Session, case_id: uuid.UUID) -> None:
@@ -76,7 +113,7 @@ def _maybe_activate_quote_case(db: Session, case_id: uuid.UUID) -> None:
     if case is None or case.status != CaseStatus.quote:
         return
     case.status = CaseStatus.open
-    case.updated_at = datetime.utcnow()
+    case.updated_at = utcnow()
     db.add(case)
 
 
@@ -117,9 +154,18 @@ def post_transaction(
 
     party = resolve_ledger_party(case_id, payload, db)
 
-    accounts = _get_or_create_accounts(case_id, db)
+    accounts = _get_or_create_accounts(case_id, db, for_update=is_approved)
+    if is_approved and payload.client_direction:
+        current = _balance(accounts["client"].id, db, approved_only=True)
+        projected = _projected_client_balance_after_debit(
+            current_balance=current,
+            amount_pence=payload.amount_pence,
+            client_direction=payload.client_direction,
+        )
+        _reject_client_deficit(projected)
+
     pair_id = uuid.uuid4()
-    now = datetime.utcnow()
+    now = utcnow()
     anticipated_for_date = payload.anticipated_for_date if is_anticipated else None
     legs: list[LedgerEntry] = []
 
@@ -168,19 +214,6 @@ def post_transaction(
     for leg in legs:
         db.add(leg)
     db.flush()
-
-    # SAR no-deficit check on client account (approved postings only affect balance).
-    client_balance = _balance(accounts["client"].id, db, approved_only=True)
-    if client_balance < 0:
-        db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=(
-                "Posting rejected: client account would go into deficit "
-                f"(balance would be £{abs(client_balance)/100:.2f} DR). "
-                "SAR 2019 prohibits a debit balance on a client account."
-            ),
-        )
 
     if is_approved:
         _maybe_activate_quote_case(db, case_id)
@@ -402,7 +435,7 @@ def get_ledger(case_id: uuid.UUID, db: Session) -> LedgerOut:
 
 def approve_ledger_pair(case_id: uuid.UUID, pair_id: uuid.UUID, user: User, db: Session) -> None:
     """Approve a pending posting; anticipated rows become actual and affect balances."""
-    accounts = _get_or_create_accounts(case_id, db)
+    accounts = _get_or_create_accounts(case_id, db, for_update=True)
     aid = {accounts["client"].id, accounts["office"].id}
     legs = (
         db.execute(
@@ -448,6 +481,22 @@ def approve_ledger_pair(case_id: uuid.UUID, pair_id: uuid.UUID, user: User, db: 
             detail="You do not have permission to approve ledger postings.",
         )
 
+    if client_direction:
+        current = _balance(accounts["client"].id, db, approved_only=True)
+        projected = _projected_client_balance_after_debit(
+            current_balance=current,
+            amount_pence=snap_amount_pence,
+            client_direction=client_direction,
+        )
+        if projected < 0:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=(
+                    "Approving this posting would put the client account into deficit "
+                    f"(balance would be £{abs(projected)/100:.2f} DR)."
+                ),
+            )
+
     for e in legs:
         e.is_approved = True
         e.is_anticipated = False
@@ -463,17 +512,6 @@ def approve_ledger_pair(case_id: uuid.UUID, pair_id: uuid.UUID, user: User, db: 
                 e.description = stripped
             db.add(e)
     db.flush()
-
-    client_balance = _balance(accounts["client"].id, db, approved_only=True)
-    if client_balance < 0:
-        db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=(
-                "Approving this posting would put the client account into deficit "
-                f"(balance would be £{abs(client_balance)/100:.2f} DR)."
-            ),
-        )
 
     if was_anticipated:
         from app.staff_workflow_notifications import notify_anticipated_payment_approved

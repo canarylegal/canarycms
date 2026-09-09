@@ -55,6 +55,18 @@ def store_portal_access_code(row: ContactPortalAccess, code: str) -> None:
     formatted = format_access_code(code)
     row.code_sha256 = hash_access_code(formatted)
     row.code_enc = encrypt_password(formatted)
+    bump_portal_session_version(row)
+
+
+def bump_portal_session_version(row: ContactPortalAccess) -> None:
+    row.session_version = int(getattr(row, "session_version", 1) or 1) + 1
+    row.updated_at = utcnow()
+
+
+def portal_session_version(row: ContactPortalAccess | None) -> int:
+    if row is None:
+        return 1
+    return int(getattr(row, "session_version", 1) or 1)
 
 
 def staff_portal_access_code(row: ContactPortalAccess) -> str | None:
@@ -470,11 +482,26 @@ def _otp_hash(code: str) -> str:
 
 
 def issue_portal_login_otp(db: Session, contact_id: uuid.UUID) -> str:
+    now = utcnow()
+    # Invalidate unused prior codes for this contact in the same transaction.
+    prior = (
+        db.execute(
+            select(PortalLoginOtp).where(
+                PortalLoginOtp.contact_id == contact_id,
+                PortalLoginOtp.used_at.is_(None),
+            )
+        )
+        .scalars()
+        .all()
+    )
+    for row in prior:
+        row.used_at = now
+        db.add(row)
     code = f"{secrets.randbelow(900000) + 100000:06d}"
     row = PortalLoginOtp(
         contact_id=contact_id,
         code_sha256=_otp_hash(code),
-        expires_at=utcnow() + timedelta(minutes=PORTAL_OTP_TTL_MINUTES),
+        expires_at=now + timedelta(minutes=PORTAL_OTP_TTL_MINUTES),
     )
     db.add(row)
     db.flush()
@@ -491,36 +518,39 @@ def verify_portal_login_otp(db: Session, contact_id: uuid.UUID, code: str) -> bo
                 PortalLoginOtp.contact_id == contact_id,
                 PortalLoginOtp.code_sha256 == digest,
                 PortalLoginOtp.used_at.is_(None),
+                PortalLoginOtp.expires_at > now,
             )
             .order_by(PortalLoginOtp.created_at.desc())
+            .with_for_update()
         )
         .scalars()
         .first()
     )
     if row is None:
         return False
-    exp = row.expires_at
-    if exp.tzinfo is None:
-        exp = exp.replace(tzinfo=timezone.utc)
-    if now >= exp:
-        return False
     row.used_at = now
     db.add(row)
+    db.flush()
     return True
 
 
 def find_portal_contact_by_email(db: Session, email: str) -> Contact | None:
+    from sqlalchemy import func
+
     addr = (email or "").strip().lower()
     if not addr:
         return None
-    rows = db.execute(select(Contact)).scalars().all()
-    for c in rows:
-        if (c.email or "").strip().lower() == addr:
-            access = db.execute(
-                select(ContactPortalAccess).where(ContactPortalAccess.contact_id == c.id)
-            ).scalar_one_or_none()
-            if access and portal_access_is_active(access):
-                return c
+    rows = (
+        db.execute(
+            select(Contact, ContactPortalAccess)
+            .join(ContactPortalAccess, ContactPortalAccess.contact_id == Contact.id)
+            .where(func.lower(Contact.email) == addr)
+        )
+        .all()
+    )
+    for contact, access in rows:
+        if portal_access_is_active(access):
+            return contact
     return None
 
 

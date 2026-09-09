@@ -15,7 +15,7 @@ import jwt
 from sqlalchemy.orm import Session
 
 from app.desktop_edit_session import acquire_file_edit_session
-from app.file_storage import FILES_ROOT, case_file_paths, ensure_files_root
+from app.file_storage import FILES_ROOT, case_file_paths, ensure_files_root, path_is_under_files_root
 from app.models import File, FileCategory, QuotePortalDelivery, User
 from app.onlyoffice_ssrf_url import default_internal_base_for_ds
 from app.routers.onlyoffice import _rewrite_oo_download_url
@@ -137,7 +137,7 @@ def _read_source_bytes(
 ) -> tuple[bytes, str]:
     ensure_files_root()
     abs_path = (FILES_ROOT / source.storage_path).resolve()
-    if not str(abs_path).startswith(str(FILES_ROOT)) or not abs_path.is_file():
+    if not path_is_under_files_root(abs_path) or not abs_path.is_file():
         raise FileNotFoundError("Quote source file missing on disk")
 
     ext = Path(source.original_filename).suffix.lower()

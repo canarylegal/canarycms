@@ -23,7 +23,7 @@ from app.docx_util import (
 )
 from app.fee_scale_calc import ComputedQuoteLine, quote_column_totals
 from app.fee_scale_service import fee_scale_matches_case, preview_quote_draft, preview_quote_lines
-from app.file_storage import FILES_ROOT
+from app.file_storage import FILES_ROOT, path_is_under_files_root
 from app.matter_contact_constants import CLIENT_SLUG, LAWYERS_SLUG, normalize_matter_contact_type_slug
 from app.models import Case as CaseModel
 from app.models import CaseContact, Contact as GlobalContact, FeeScale, File as DbFile, FirmSettings, User
@@ -39,7 +39,7 @@ def _load_quote_template_bytes(db: Session, firm_row: FirmSettings | None) -> by
         lh_file = db.get(DbFile, firm_row.quote_letterhead_file_id)
         if lh_file is not None:
             lh_abs = (FILES_ROOT / lh_file.storage_path).resolve()
-            if str(lh_abs).startswith(str(FILES_ROOT)) and lh_abs.is_file():
+            if path_is_under_files_root(lh_abs) and lh_abs.is_file():
                 raw = lh_abs.read_bytes()
                 try:
                     validate_docx_package_bytes(raw)

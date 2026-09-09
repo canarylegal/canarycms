@@ -52,6 +52,7 @@ from app.schemas import (
     Verify2FARequest,
     Verify2FASessionResponse,
 )
+from app.totp_secrets import decrypt_totp_secret, encrypt_totp_secret
 from app.security import (
     build_totp_uri,
     create_master_recovery_token,
@@ -105,10 +106,11 @@ def login(payload: LoginRequest, request: Request, db: Session = Depends(get_db)
     mandate = firm_mandates_second_factor(db)
 
     if user.is_2fa_enabled:
-        if not payload.totp_code or not user.totp_secret:
+        totp_plain = decrypt_totp_secret(user.totp_secret)
+        if not payload.totp_code or not totp_plain:
             record_staff_login_failure(db, email=login_id, ip=ip)
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="2FA required")
-        if not verify_totp(secret=user.totp_secret, code=payload.totp_code):
+        if not verify_totp(secret=totp_plain, code=payload.totp_code):
             record_staff_login_failure(db, email=login_id, ip=ip)
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid 2FA code")
 
@@ -137,6 +139,7 @@ def login(payload: LoginRequest, request: Request, db: Session = Depends(get_db)
         entity_id=str(user.id),
         meta={"email": user.email, "password_login_restricted": not mfa_verified},
     )
+    db.commit()
     return TokenResponse(access_token=token)
 
 
@@ -256,14 +259,19 @@ def setup_2fa(
             )
 
     if not user.totp_secret:
-        user.totp_secret = generate_totp_secret()
+        plain = generate_totp_secret()
+        user.totp_secret = encrypt_totp_secret(plain)
         db.add(user)
         db.commit()
         db.refresh(user)
+    else:
+        plain = decrypt_totp_secret(user.totp_secret)
+        if not plain:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="2FA not set up")
 
     issuer = os.getenv("TOTP_ISSUER", "Canary")
-    uri = build_totp_uri(secret=user.totp_secret, email=user.email, issuer=issuer)
-    return Setup2FAResponse(secret=user.totp_secret, otpauth_uri=uri)
+    uri = build_totp_uri(secret=plain, email=user.email, issuer=issuer)
+    return Setup2FAResponse(secret=plain, otpauth_uri=uri)
 
 
 @router.post("/2fa/verify", response_model=Verify2FASessionResponse)
@@ -276,7 +284,7 @@ def verify_2fa(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="2FA is already enabled")
     if not user.totp_secret:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="2FA not set up")
-    if not verify_totp(secret=user.totp_secret, code=payload.code):
+    if not verify_totp(secret=decrypt_totp_secret(user.totp_secret) or "", code=payload.code):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid code")
 
     user.is_2fa_enabled = True
@@ -306,7 +314,7 @@ def disable_my_2fa(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="2FA secret missing")
     if not verify_password(payload.password, user.password_hash):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Incorrect password")
-    if not verify_totp(secret=user.totp_secret, code=payload.totp_code.strip()):
+    if not verify_totp(secret=decrypt_totp_secret(user.totp_secret) or "", code=payload.totp_code.strip()):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid authenticator code")
 
     if firm_mandates_second_factor(db) and not user_has_any_passkey(db, user.id):

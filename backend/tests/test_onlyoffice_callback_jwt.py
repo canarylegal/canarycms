@@ -20,11 +20,20 @@ def _request() -> MagicMock:
 
 def test_plain_callback_allowed_when_jwt_not_required(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("ONLYOFFICE_JWT_SECRET", "test-onlyoffice-secret")
-    monkeypatch.delenv("ONLYOFFICE_CALLBACK_REQUIRE_JWT", raising=False)
+    monkeypatch.setenv("ONLYOFFICE_CALLBACK_REQUIRE_JWT", "0")
     body = {"status": 2, "key": "abc123", "url": "http://onlyoffice/cache/files/x"}
     out = _decode_callback_payload(_request(), body)
     assert out["status"] == 2
     assert out["key"] == "abc123"
+
+
+def test_plain_callback_rejected_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ONLYOFFICE_JWT_SECRET", "test-onlyoffice-secret")
+    monkeypatch.delenv("ONLYOFFICE_CALLBACK_REQUIRE_JWT", raising=False)
+    body = {"status": 2, "key": "abc123"}
+    with pytest.raises(HTTPException) as exc:
+        _decode_callback_payload(_request(), body)
+    assert exc.value.status_code == 401
 
 
 def test_plain_callback_rejected_when_jwt_required(monkeypatch: pytest.MonkeyPatch) -> None:

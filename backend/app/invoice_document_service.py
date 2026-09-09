@@ -19,7 +19,7 @@ from app.docx_util import (
     strip_empty_invoice_table_rows,
     write_invoice_docx,
 )
-from app.file_storage import FILES_ROOT, case_file_paths, ensure_files_root
+from app.file_storage import FILES_ROOT, case_file_paths, ensure_files_root, path_is_under_files_root
 from app.global_precedent_loader import load_global_precedent_docx_bytes
 from app.models import Case, CaseInvoice, CaseInvoiceLine, Contact, File as DbFile, FileCategory, FirmSettings, User
 from app.precedent_constants import INVOICE_TEMPLATE_PRECEDENT_REFERENCE
@@ -219,7 +219,7 @@ def read_invoice_document_bytes(inv: CaseInvoice, case: Case, db: Session) -> tu
         row = db.get(DbFile, inv.document_file_id)
         if row and row.case_id == case.id and row.storage_path:
             path = (FILES_ROOT / row.storage_path).resolve()
-            if str(path).startswith(str(FILES_ROOT)) and path.is_file():
+            if path_is_under_files_root(path) and path.is_file():
                 return path.read_bytes(), row.original_filename or filename
     firm = _firm_settings(db)
     return build_invoice_docx_bytes(inv, case, firm, db), filename

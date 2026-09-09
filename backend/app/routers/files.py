@@ -29,7 +29,8 @@ from app.compose_quote import merge_compose_quote_docx_bytes, quote_lines_snapsh
 from app.finance_service import sync_finance_from_quote
 from app.docx_util import extract_plain_text_from_docx_bytes, write_blank_docx
 from app.graph_mail import create_outlook_draft, graph_mail_configured
-from app.file_storage import FILES_ROOT, StoredFilePaths, case_file_paths, ensure_files_root, sanitize_folder_path
+from app.file_storage import FILES_ROOT, StoredFilePaths, case_file_paths, ensure_files_root, sanitize_folder_path, path_is_under_files_root, stream_upload_to_path
+from app.upload_limits import content_disposition_for_mime, max_upload_bytes
 from app.models import Case as CaseRow
 from app.models import CaseContact, Contact as GlobalContactRow, ContactPortalGrant
 from app.models import CaseLockMode, CaseQuoteSnapshot, CaseStatus, File as DbFile, FileCategory, FileEditSession, MatterHeadType, MatterSubType, Precedent, PrecedentKind, User
@@ -419,14 +420,10 @@ def upload_case_file(
     original = upload.filename or "upload.bin"
     paths = case_file_paths(case_id=case_id, file_id=file_id, original_filename=original, folder_path=folder)
 
-    size = 0
-    with paths.abs_path.open("wb") as f:
-        while True:
-            chunk = upload.file.read(1024 * 1024)
-            if not chunk:
-                break
-            size += len(chunk)
-            f.write(chunk)
+    try:
+        size = stream_upload_to_path(paths.abs_path, upload.file, max_bytes=max_upload_bytes())
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail=str(e)) from e
 
     original, paths, size = convert_case_upload_msg_to_eml_if_applicable(
         case_id=case_id,
@@ -785,7 +782,7 @@ def _case_email_compose_bundle(
         if frow.category == FileCategory.system:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot attach system items.")
         abs_p = (FILES_ROOT / frow.storage_path).resolve()
-        if not str(abs_p).startswith(str(FILES_ROOT)) or not abs_p.is_file():
+        if not path_is_under_files_root(abs_p) or not abs_p.is_file():
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Attachment file missing on disk")
         raw = abs_p.read_bytes()
         if len(raw) > 100 * 1024 * 1024:
@@ -827,7 +824,7 @@ def download_compose_handoff_attachment(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
     ensure_files_root()
     abs_path = (FILES_ROOT / row.storage_path).resolve()
-    if not str(abs_path).startswith(str(FILES_ROOT)) or not abs_path.is_file():
+    if not path_is_under_files_root(abs_path) or not abs_path.is_file():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File missing on disk")
     return FileResponse(
         path=str(abs_path),
@@ -1686,7 +1683,7 @@ def download_case_export_zip(
             zf.writestr(details_name, _case_details_export_text(case, db).encode("utf-8"))
             for row in file_rows:
                 abs_path = (FILES_ROOT / row.storage_path).resolve()
-                if not str(abs_path).startswith(str(FILES_ROOT)) or not abs_path.is_file():
+                if not path_is_under_files_root(abs_path) or not abs_path.is_file():
                     raise HTTPException(
                         status_code=status.HTTP_404_NOT_FOUND,
                         detail=f"File missing on disk: {row.original_filename}",
@@ -1767,7 +1764,7 @@ def download_case_folder_zip(
         with zipfile.ZipFile(tmp, "w", compression=zipfile.ZIP_DEFLATED) as zf:
             for row in file_rows:
                 abs_path = (FILES_ROOT / row.storage_path).resolve()
-                if not str(abs_path).startswith(str(FILES_ROOT)) or not abs_path.is_file():
+                if not path_is_under_files_root(abs_path) or not abs_path.is_file():
                     raise HTTPException(
                         status_code=status.HTTP_404_NOT_FOUND,
                         detail=f"File missing on disk: {row.original_filename}",
@@ -2713,7 +2710,7 @@ def download_eml_for_mail_client(
 
     ensure_files_root()
     abs_path = (FILES_ROOT / row.storage_path).resolve()
-    if not str(abs_path).startswith(str(FILES_ROOT)) or not abs_path.exists():
+    if not path_is_under_files_root(abs_path) or not abs_path.exists():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File missing on disk")
 
     fname = Path(row.original_filename).name
@@ -2842,13 +2839,13 @@ def download_case_file(
     from app.file_storage import FILES_ROOT
 
     abs_path = (FILES_ROOT / row.storage_path).resolve()
-    if not str(abs_path).startswith(str(FILES_ROOT)) or not abs_path.exists():
+    if not path_is_under_files_root(abs_path) or not abs_path.exists():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File missing on disk")
 
-    # Inline so a direct GET (or fetch → blob → window.open) does not imply a forced download.
+    # Safe MIME types may render inline; others force download.
     return FileResponse(
         path=str(abs_path),
         media_type=row.mime_type,
         filename=row.original_filename,
-        content_disposition_type="inline",
+        content_disposition_type=content_disposition_for_mime(row.mime_type, download=False),
     )
