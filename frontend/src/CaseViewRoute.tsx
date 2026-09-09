@@ -25,6 +25,7 @@ type Props = {
   onTaskMenuInvalidate: () => void
   onCaseDetailChange: (detail: CaseOut | null) => void
   onBackToMainMenu: () => void
+  backNavLabel?: string
 }
 
 /** Loads and renders an open matter — isolated from App so other menus do not pay case state costs. */
@@ -40,6 +41,7 @@ export function CaseViewRoute({
   onTaskMenuInvalidate,
   onCaseDetailChange,
   onBackToMainMenu,
+  backNavLabel,
 }: Props) {
   const [caseDetail, setCaseDetail] = useState<CaseOut | null>(null)
   const [notes, setNotes] = useState<CaseNoteOut[]>([])
@@ -166,6 +168,7 @@ export function CaseViewRoute({
       onCaseListInvalidate={onCaseListInvalidate}
       onTaskMenuInvalidate={onTaskMenuInvalidate}
       onBackToMainMenu={onBackToMainMenu}
+      backNavLabel={backNavLabel}
     />
   )
 }

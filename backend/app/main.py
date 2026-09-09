@@ -45,6 +45,7 @@ from app.routers import (
     fee_scales,
     task_menu,
     contacts,
+    canary_sign,
     docusign,
     files,
     matter_contact_types,
@@ -264,6 +265,8 @@ app.include_router(reconciliations.router)
 app.include_router(quote_portal.router)
 app.include_router(docusign.router)
 app.include_router(docusign.case_router)
+app.include_router(canary_sign.router)
+app.include_router(canary_sign.case_router)
 app.include_router(portal.router)
 
 @app.get("/health")

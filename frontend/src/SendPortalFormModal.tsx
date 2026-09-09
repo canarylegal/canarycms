@@ -55,7 +55,7 @@ export function SendPortalFormModal({ token, caseId, open, onClose, onSent }: Se
         const [tplRows, contactRows, preflight] = await Promise.all([
           apiFetch<PortalFormTemplateOut[]>(`/cases/${caseId}/portal/forms/templates`, { token }),
           apiFetch<CasePortalFolderShareContactOut[]>(
-            `/cases/${caseId}/portal/folder-share?grant_scope=matter`,
+            `/cases/${caseId}/portal/folder-share?grant_scope=matter&require_portal_access=false`,
             { token },
           ),
           apiFetch<QuotePortalSendPreflightOut>(`/cases/${caseId}/portal/forms/send-preflight`, { token }),
@@ -65,9 +65,7 @@ export function SendPortalFormModal({ token, caseId, open, onClose, onSent }: Se
         setRecipients(Array.isArray(contactRows) ? contactRows : [])
         setAlertsConfigured(preflight.alerts_configured)
         if (contactRows.length === 0) {
-          setErr(
-            'No contacts on this matter have active portal access. Enable portal access for a contact under Contacts first.',
-          )
+          setErr('No contacts on this matter. Add a contact under Contacts first.')
         } else {
           setContactId(contactRows[0]?.contact_id ?? '')
         }
@@ -93,9 +91,23 @@ export function SendPortalFormModal({ token, caseId, open, onClose, onSent }: Se
   )
 
   const recipientOptions = useMemo(
-    () => recipients.map((r) => ({ value: r.contact_id, label: r.contact_name })),
+    () =>
+      recipients.map((r) => ({
+        value: r.contact_id,
+        label:
+          r.portal_access_active === false
+            ? `${r.contact_name} (portal access will be enabled)`
+            : r.contact_name,
+      })),
     [recipients],
   )
+
+  const selectedRecipient = useMemo(
+    () => recipients.find((r) => r.contact_id === contactId) ?? null,
+    [recipients, contactId],
+  )
+  const willEnablePortal = selectedRecipient?.portal_access_active === false
+
 
   async function confirmSendWithoutEmail(): Promise<boolean> {
     return askConfirm({
@@ -170,9 +182,15 @@ export function SendPortalFormModal({ token, caseId, open, onClose, onSent }: Se
           {!loadBusy && recipientOptions.length > 0 ? (
             <>
               <p className="muted" style={{ margin: 0 }}>
-                Choose the contact who will complete the form on the portal. They need active portal access; sharing a
-                document folder is not required.
+                Choose the contact who will complete the form on the portal. Sharing a document folder is not required.
+                Contacts without portal access are enabled automatically when you send.
               </p>
+              {willEnablePortal ? (
+                <div className="notice">
+                  Portal access will be enabled for {selectedRecipient?.contact_name}. Their invite e-mail will include
+                  an access code.
+                </div>
+              ) : null}
               <SingleSelectDropdown
                 label="Portal contact"
                 options={recipientOptions}

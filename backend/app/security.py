@@ -192,6 +192,45 @@ def decode_eml_open_token(token: str) -> EmlOpenTokenPayload:
     return EmlOpenTokenPayload(user_id=sub, case_id=case_id, file_id=file_id)
 
 
+PORTAL_FILE_OPEN_TTL_SECONDS = int(os.getenv("PORTAL_FILE_OPEN_TTL_SECONDS", "120"))
+
+
+@dataclass(frozen=True)
+class PortalFileOpenTokenPayload:
+    contact_id: str
+    grant_id: str
+    file_id: str
+
+
+def create_portal_file_open_token(*, contact_id: str, grant_id: str, file_id: str) -> str:
+    """Short-lived JWT so the browser can navigate to an inline file URL (no blob: hand-off)."""
+    now = int(time.time())
+    payload = {
+        "sub": contact_id,
+        "purpose": "portal_file_open",
+        "grant_id": grant_id,
+        "file_id": file_id,
+        "iat": now,
+        "exp": now + PORTAL_FILE_OPEN_TTL_SECONDS,
+    }
+    return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALG)
+
+
+def decode_portal_file_open_token(token: str) -> PortalFileOpenTokenPayload:
+    try:
+        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALG])
+    except JWTError as e:
+        raise ValueError("Invalid or expired token") from e
+    if payload.get("purpose") != "portal_file_open":
+        raise ValueError("Invalid token")
+    sub = payload.get("sub")
+    grant_id = payload.get("grant_id")
+    file_id = payload.get("file_id")
+    if not isinstance(sub, str) or not isinstance(grant_id, str) or not isinstance(file_id, str):
+        raise ValueError("Invalid token payload")
+    return PortalFileOpenTokenPayload(contact_id=sub, grant_id=grant_id, file_id=file_id)
+
+
 PORTAL_SESSION_TTL_SECONDS = int(os.getenv("PORTAL_SESSION_TTL_SECONDS", "28800"))  # 8h
 PORTAL_PREVIEW_EXCHANGE_TTL_SECONDS = int(os.getenv("PORTAL_PREVIEW_EXCHANGE_TTL_SECONDS", "300"))  # 5m
 PORTAL_QUOTE_EXCHANGE_TTL_SECONDS = int(os.getenv("PORTAL_QUOTE_EXCHANGE_TTL_SECONDS", "1209600"))  # 14d

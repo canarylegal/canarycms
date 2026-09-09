@@ -140,10 +140,14 @@ def rename_portal_grants_for_folder(
     new_folder_path: str,
 ) -> int:
     """Keep portal grant paths aligned when staff rename a matter folder."""
+    from .file_storage import decode_folder_path_segment
+
     old_p = sanitize_folder_path(old_folder_path)
     new_p = sanitize_folder_path(new_folder_path)
     if not old_p:
         return 0
+    old_leaf = decode_folder_path_segment(old_p.split("/")[-1])
+    new_leaf = decode_folder_path_segment(new_p.split("/")[-1]) if new_p else None
     grants = db.execute(select(ContactPortalGrant).where(ContactPortalGrant.case_id == case_id)).scalars().all()
     updated = 0
     for grant in grants:
@@ -154,6 +158,12 @@ def rename_portal_grants_for_folder(
         elif gf.startswith(old_p + "/"):
             grant.folder_path = new_p + gf[len(old_p) :]
             updated += 1
+        else:
+            continue
+        # Drop or sync snapshot labels so portal display stays tied to the folder name.
+        label = (grant.label or "").strip()
+        if not label or label == old_leaf or label == old_p:
+            grant.label = new_leaf
     return updated
 
 
@@ -205,7 +215,7 @@ def contact_has_portal_content(db: Session, contact_id: uuid.UUID) -> bool:
 
 
 def contact_has_portal_delivery_content(db: Session, *, contact_id: uuid.UUID) -> bool:
-    """Pending quotes, forms, or DocuSign (folder grants not required)."""
+    """Pending quotes, forms, Canary Sign, or DocuSign (folder grants not required)."""
     from app.quote_portal_service import list_pending_quote_deliveries_for_contact
 
     if list_pending_quote_deliveries_for_contact(db, contact_id=contact_id):
@@ -213,6 +223,10 @@ def contact_has_portal_delivery_content(db: Session, *, contact_id: uuid.UUID) -
     from app.portal_form_service import list_pending_for_contact as list_pending_portal_forms
 
     if list_pending_portal_forms(db, contact_id):
+        return True
+    from app.canary_sign_service import list_pending_for_contact as list_pending_canary_sign
+
+    if list_pending_canary_sign(db, contact_id):
         return True
     from app.docusign_signing_service import list_pending_for_contact as list_pending_docusign
 
@@ -323,10 +337,8 @@ def get_portal_grant_file(
 
 
 def default_grant_label(db: Session, grant: ContactPortalGrant) -> str:
-    from .file_storage import decode_folder_path_for_display, decode_folder_path_segment
+    from .file_storage import decode_folder_path_segment
 
-    if grant.label and grant.label.strip():
-        return decode_folder_path_for_display(grant.label.strip())
     case = db.get(Case, grant.case_id)
     matter = case.title.strip() if case and case.title else "Documents"
     folder = sanitize_folder_path(grant.folder_path)
@@ -368,10 +380,9 @@ def ensure_upload_folder_allowed(*, grant: ContactPortalGrant, folder: str) -> s
 
 
 def grant_folder_display_name(grant: ContactPortalGrant) -> str:
-    from .file_storage import decode_folder_path_for_display, decode_folder_path_segment
+    """Client-facing folder name — always the Canary folder leaf, not a stale grant label."""
+    from .file_storage import decode_folder_path_segment
 
-    if grant.label and grant.label.strip():
-        return decode_folder_path_for_display(grant.label.strip())
     folder = sanitize_folder_path(grant.folder_path)
     if not folder:
         return "Documents"
@@ -511,3 +522,56 @@ def find_portal_contact_by_email(db: Session, email: str) -> Contact | None:
             if access and portal_access_is_active(access):
                 return c
     return None
+
+
+def ensure_contact_portal_access_for_delivery(
+    db: Session,
+    *,
+    contact_id: uuid.UUID,
+    actor_user_id: uuid.UUID,
+) -> tuple[ContactPortalAccess, bool, str | None]:
+    """Ensure the contact can sign in to the portal (create or re-enable access).
+
+    Used when sending quotes, forms, or Canary Sign so recipients are not blocked
+    by missing portal access. Returns ``(row, newly_provisioned, access_code)``.
+    ``access_code`` is set only when access was newly created or re-enabled.
+    """
+    contact = db.get(Contact, contact_id)
+    if contact is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Contact not found")
+
+    row = db.execute(
+        select(ContactPortalAccess).where(ContactPortalAccess.contact_id == contact_id)
+    ).scalar_one_or_none()
+    if row is not None and portal_access_is_active(row):
+        return row, False, None
+
+    code = generate_access_code()
+    created = row is None
+    if row is None:
+        row = ContactPortalAccess(
+            contact_id=contact_id,
+            enabled=True,
+            created_by_user_id=actor_user_id,
+        )
+        db.add(row)
+    else:
+        row.enabled = True
+        row.failed_attempts = 0
+        row.locked_until = None
+        row.updated_at = utcnow()
+    store_portal_access_code(row, code)
+    db.add(row)
+    db.flush()
+
+    from app.audit import log_event
+
+    log_event(
+        db,
+        actor_user_id=actor_user_id,
+        action="contact.portal.access.create" if created else "contact.portal.access.reactivate",
+        entity_type="contact",
+        entity_id=str(contact_id),
+        meta={"reason": "auto_provision_for_portal_delivery"},
+    )
+    return row, True, code

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { lockBodyWaitCursor, unlockBodyWaitCursor } from '../bodyCursorLock'
 import { CaseEventCreateModal } from '../CaseEventCreateModal'
 import { EventsPage } from '../EventsPage'
@@ -26,6 +27,7 @@ import {
 } from '../emailLauncher'
 import { ContactSearchPicker } from '../ContactSearchPicker'
 import { useDialogs } from '../DialogProvider'
+import { useNotifications } from '../NotificationsProvider'
 import { SearchInput } from '../SearchInput'
 import { SingleSelectDropdown } from '../SingleSelectDropdown'
 import {
@@ -36,6 +38,7 @@ import {
 import { SendQuoteViaPortalModal } from '../SendQuoteViaPortalModal'
 import { SendPortalFormModal } from '../SendPortalFormModal'
 import { SendDocusignModal } from '../SendDocusignModal'
+import { SendCanarySignModal } from '../SendCanarySignModal'
 import { TaskCreateModal } from '../TaskCreateModal'
 import { useExclusiveDropdownOpen } from '../useExclusiveDropdownOpen'
 import { QuoteWizard } from '../QuoteWizard'
@@ -334,6 +337,7 @@ export function CaseDetail({
   pendingComposeKind,
   onPendingComposeConsumed,
   onBackToMainMenu,
+  backNavLabel = 'Back to main menu',
 }: {
   token: string
   caseDetail: CaseOut | null
@@ -354,12 +358,14 @@ export function CaseDetail({
   /** After quote wizard: open letter or e-mail precedent picker once the matter has loaded. */
   pendingComposeKind?: PendingCaseCompose | null
   onPendingComposeConsumed?: () => void
-  /** Leave the matter and return to the cases main menu. */
+  /** Leave the matter and return to the cases or quotes list. */
   onBackToMainMenu?: () => void
+  backNavLabel?: string
 }) {
   void _notes
   void _tasks
   const { askConfirm } = useDialogs()
+  const { push: pushNotification } = useNotifications()
   const caseId = caseDetail?.id
   const portalEnabled = Boolean(caseDetail?.portal_enabled)
   /** Resolved matter id for API calls: null while ``caseDetail`` is stale vs. ``selectedCaseId``. */
@@ -393,6 +399,15 @@ export function CaseDetail({
       .catch(() => setDocusignEnabled(false))
   }, [token])
   useEffect(() => {
+    if (!token) {
+      setCanarySignEnabled(false)
+      return
+    }
+    void apiFetch<{ enabled: boolean }>('/canary-sign/options', { token })
+      .then((o) => setCanarySignEnabled(Boolean(o.enabled)))
+      .catch(() => setCanarySignEnabled(true))
+  }, [token])
+  useEffect(() => {
     if (!busy) return
     lockBodyWaitCursor()
     return () => unlockBodyWaitCursor()
@@ -413,7 +428,6 @@ export function CaseDetail({
   }, [])
 
   const [actionErr, setActionErr] = useState<string | null>(null)
-  const [actionNotice, setActionNotice] = useState<string | null>(null)
   const [textPrompt, setTextPrompt] = useState<
     | null
     | {
@@ -490,7 +504,10 @@ export function CaseDetail({
   const [docMenuStyle, setDocMenuStyle] = useState<{ left: number; top: number; maxHeight?: number } | null>(null)
   const importInputRef = useRef<HTMLInputElement | null>(null)
   const newMenuRef = useRef<HTMLDivElement | null>(null)
+  const newMenuBtnRef = useRef<HTMLButtonElement | null>(null)
+  const newMenuPortalRef = useRef<HTMLDivElement | null>(null)
   const [newMenuOpen, setNewMenuOpen] = useState(false)
+  const [newMenuPos, setNewMenuPos] = useState<{ top: number; left: number } | null>(null)
   const [quoteWizardOpen, setQuoteWizardOpen] = useState(false)
   const [formSendOpen, setFormSendOpen] = useState(false)
   const [quoteAwaitingSave, setQuoteAwaitingSave] = useState<QuoteAwaitingSaveContext | null>(null)
@@ -600,6 +617,12 @@ export function CaseDetail({
   )
   const [docusignEnabled, setDocusignEnabled] = useState(false)
   const [docusignSend, setDocusignSend] = useState<{
+    fileId: string
+    fileName: string
+    amendFromId?: string | null
+  } | null>(null)
+  const [canarySignEnabled, setCanarySignEnabled] = useState(true)
+  const [canarySignSend, setCanarySignSend] = useState<{
     fileId: string
     fileName: string
     amendFromId?: string | null
@@ -1091,12 +1114,32 @@ export function CaseDetail({
     return () => window.removeEventListener('mousedown', onDocMouseDown)
   }, [docMenu])
 
+  useLayoutEffect(() => {
+    if (!newMenuOpen) {
+      setNewMenuPos(null)
+      return
+    }
+    function updatePos() {
+      const btn = newMenuBtnRef.current
+      if (!btn) return
+      const rect = btn.getBoundingClientRect()
+      setNewMenuPos({ top: rect.bottom + 4, left: rect.left })
+    }
+    updatePos()
+    window.addEventListener('resize', updatePos)
+    window.addEventListener('scroll', updatePos, true)
+    return () => {
+      window.removeEventListener('resize', updatePos)
+      window.removeEventListener('scroll', updatePos, true)
+    }
+  }, [newMenuOpen])
+
   useEffect(() => {
     if (!newMenuOpen) return
     function onDocMouseDown(e: MouseEvent) {
-      if (newMenuRef.current && !newMenuRef.current.contains(e.target as Node)) {
-        setNewMenuOpen(false)
-      }
+      const t = e.target as Node
+      if (newMenuRef.current?.contains(t) || newMenuPortalRef.current?.contains(t)) return
+      setNewMenuOpen(false)
     }
     function onKey(e: KeyboardEvent) {
       if (e.key === 'Escape') setNewMenuOpen(false)
@@ -1581,9 +1624,9 @@ export function CaseDetail({
           },
         })
         if (notifyOut.alerts_skipped_reason) {
-          setActionNotice(notifyOut.alerts_skipped_reason)
+          pushNotification(notifyOut.alerts_skipped_reason)
         } else if (notifyOut.contacts_notified > 0) {
-          setActionNotice(
+          pushNotification(
             notifyOut.contacts_notified === 1
               ? 'Portal contact notified by e-mail.'
               : `${notifyOut.contacts_notified} portal contacts notified by e-mail.`,
@@ -1663,7 +1706,6 @@ export function CaseDetail({
     if (!caseId) return
     setBusy(true)
     setActionErr(null)
-    setActionNotice(null)
     try {
       const composePayload = {
         folder: docFolder,
@@ -1714,7 +1756,7 @@ export function CaseDetail({
               setActionErr('Your browser blocked opening Outlook. Allow pop-ups for this site.')
               return
             }
-            setActionNotice(
+            pushNotification(
               `Outlook draft created with ${attachLabel} attached. Review and send from the draft window.`,
             )
           } else {
@@ -1732,7 +1774,7 @@ export function CaseDetail({
                 /* Best-effort: user can open Drafts or use Compose from matter manually. */
               }
             }
-            setActionNotice(
+            pushNotification(
               `Draft created with ${attachLabel} attached. If Outlook is open with the Canary add-in signed in, a compose window should appear shortly — otherwise open Drafts in Outlook or use Compose from matter in the add-in.`,
             )
           }
@@ -1742,7 +1784,7 @@ export function CaseDetail({
           if (err.status !== 503) {
             throw e
           }
-          setActionNotice(
+          pushNotification(
             'Microsoft Graph drafts are unavailable — opening compose without automatic attachment.',
           )
         }
@@ -1869,8 +1911,7 @@ export function CaseDetail({
       if (pref === 'outlook_web') {
         setBusy(true)
         setActionErr(null)
-        setActionNotice(null)
-        try {
+            try {
           const owaBase = currentUser?.email_outlook_web_url ?? null
           const owaBaseQ = owaBase ? `?owa_base=${encodeURIComponent(owaBase)}` : ''
           let hints: {
@@ -1922,7 +1963,7 @@ export function CaseDetail({
             return
           }
           await previewEmlFile(file)
-          setActionNotice(
+          pushNotification(
             'Showing the Canary copy in preview. This filing has no live Outlook message link — file from Outlook read mode, or open the original from your Sent or Inbox.',
           )
         } catch (e: unknown) {
@@ -2232,8 +2273,6 @@ export function CaseDetail({
     <div className="caseShell">
       {error ? <div className="error">{error}</div> : null}
       {caseDocPanel !== 'edit-details' && actionErr ? <div className="error">{actionErr}</div> : null}
-      {caseDocPanel !== 'edit-details' && actionNotice ? <div className="notice">{actionNotice}</div> : null}
-
       <div
         className="caseGrid"
         onDragOver={(e) => {
@@ -2254,8 +2293,8 @@ export function CaseDetail({
                   type="button"
                   className="btn caseMatterHeroBack"
                   onClick={() => onBackToMainMenu()}
-                  aria-label="Back to main menu"
-                  title="Back to main menu"
+                  aria-label={backNavLabel}
+                  title={backNavLabel}
                 >
                   <svg
                     className="caseMatterHeroBackIcon"
@@ -2353,8 +2392,7 @@ export function CaseDetail({
                         {caseContactsMenuOrder.map((cc) => (
                           <div
                             key={cc.id}
-                            className="listCard row"
-                            style={{ justifyContent: 'space-between', alignItems: 'center' }}
+                            className="listCard caseLeftContactCard"
                             onDoubleClick={() => {
                               if (busy) return
                               setContactAddOpen(false)
@@ -2367,14 +2405,15 @@ export function CaseDetail({
                               setContactRowMenu({ cc, x: e.clientX, y: e.clientY })
                             }}
                           >
-                            <div style={{ minWidth: 0 }}>
+                            <div className="caseLeftContactMeta">
                               <div className="listTitle">{cc.name}</div>
-                              <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>
+                              <div className="muted">
                                 {matterContactTypeLabel(cc.matter_contact_type, matterTypeOptions)}
                               </div>
                             </div>
                             <button
-                              className="btn"
+                              type="button"
+                              className="btn caseLeftCompactBtn"
                               disabled={busy}
                               onClick={() => {
                                 setContactAddOpen(false)
@@ -2420,8 +2459,7 @@ export function CaseDetail({
                       ) : null}
                       <button
                         type="button"
-                        className="btn primary"
-                        style={{ marginTop: 8, width: '100%', boxSizing: 'border-box' }}
+                        className="btn primary caseLeftCompactBtn"
                         disabled={busy}
                         onClick={() => {
                           setEditSnapshot(null)
@@ -2778,6 +2816,7 @@ export function CaseDetail({
                 <div className="caseDocsToolbarMain">
                   <div className="caseToolbarDropdownWrap" ref={newMenuRef}>
                     <button
+                      ref={newMenuBtnRef}
                       type="button"
                       className="btn btnCaseChrome caseDocsNewMenuBtn"
                       disabled={busy}
@@ -2787,113 +2826,121 @@ export function CaseDetail({
                     >
                       New <span className="caseDocsNewMenuChevron" aria-hidden>▾</span>
                     </button>
-                    {newMenuOpen ? (
-                      <div className="caseToolbarDropdown" role="menu">
-                        <button
-                          type="button"
-                          className="caseToolbarDropdownItem"
-                          role="menuitem"
-                          onClick={() => {
-                            setNewMenuOpen(false)
-                            createFolderAtCurrentPath()
-                          }}
-                        >
-                          Folder
-                        </button>
-                        <button
-                          type="button"
-                          className="caseToolbarDropdownItem"
-                          role="menuitem"
-                          onClick={() => {
-                            setNewMenuOpen(false)
-                            openTaskCreateModal()
-                          }}
-                        >
-                          Task
-                        </button>
-                        <button
-                          type="button"
-                          className="caseToolbarDropdownItem"
-                          role="menuitem"
-                          onClick={() => {
-                            setNewMenuOpen(false)
-                            openCaseEventModal()
-                          }}
-                        >
-                          Event
-                        </button>
-                        <button
-                          type="button"
-                          className="caseToolbarDropdownItem"
-                          role="menuitem"
-                          onClick={() => {
-                            setNewMenuOpen(false)
-                            setQuoteWizardOpen(true)
-                          }}
-                        >
-                          Quote
-                        </button>
-                        {portalEnabled ? (
-                          <button
-                            type="button"
-                            className="caseToolbarDropdownItem"
-                            role="menuitem"
-                            onClick={() => {
-                              setNewMenuOpen(false)
-                              setFormSendOpen(true)
-                            }}
+                    {newMenuOpen && newMenuPos
+                      ? createPortal(
+                          <div
+                            ref={newMenuPortalRef}
+                            className="caseToolbarDropdown caseToolbarDropdown--portal"
+                            role="menu"
+                            style={{ top: newMenuPos.top, left: newMenuPos.left }}
                           >
-                            Portal form
-                          </button>
-                        ) : null}
-                        <button
-                          type="button"
-                          className="caseToolbarDropdownItem"
-                          role="menuitem"
-                          onClick={() => {
-                            setNewMenuOpen(false)
-                            setPrecedentPicker({ kind: 'letter' })
-                          }}
-                        >
-                          Letter
-                        </button>
-                        <button
-                          type="button"
-                          className="caseToolbarDropdownItem"
-                          role="menuitem"
-                          onClick={() => {
-                            setNewMenuOpen(false)
-                            setPrecedentPicker({ kind: 'document' })
-                          }}
-                        >
-                          Document
-                        </button>
-                        <button
-                          type="button"
-                          className="caseToolbarDropdownItem"
-                          role="menuitem"
-                          onClick={() => {
-                            setNewMenuOpen(false)
-                            setPrecedentPicker({ kind: 'email' })
-                          }}
-                        >
-                          E-mail
-                        </button>
-                        <button
-                          type="button"
-                          className="caseToolbarDropdownItem"
-                          role="menuitem"
-                          onClick={() => {
-                            setNewMenuOpen(false)
-                            setCommentText('')
-                            setCommentErr(null)
-                            setCommentOpen(true)
-                          }}
-                        >
-                          Comment
-                        </button>
-                      </div>
-                    ) : null}
+                            <button
+                              type="button"
+                              className="caseToolbarDropdownItem"
+                              role="menuitem"
+                              onClick={() => {
+                                setNewMenuOpen(false)
+                                createFolderAtCurrentPath()
+                              }}
+                            >
+                              Folder
+                            </button>
+                            <button
+                              type="button"
+                              className="caseToolbarDropdownItem"
+                              role="menuitem"
+                              onClick={() => {
+                                setNewMenuOpen(false)
+                                openTaskCreateModal()
+                              }}
+                            >
+                              Task
+                            </button>
+                            <button
+                              type="button"
+                              className="caseToolbarDropdownItem"
+                              role="menuitem"
+                              onClick={() => {
+                                setNewMenuOpen(false)
+                                openCaseEventModal()
+                              }}
+                            >
+                              Event
+                            </button>
+                            <button
+                              type="button"
+                              className="caseToolbarDropdownItem"
+                              role="menuitem"
+                              onClick={() => {
+                                setNewMenuOpen(false)
+                                setQuoteWizardOpen(true)
+                              }}
+                            >
+                              Quote
+                            </button>
+                            {portalEnabled ? (
+                              <button
+                                type="button"
+                                className="caseToolbarDropdownItem"
+                                role="menuitem"
+                                onClick={() => {
+                                  setNewMenuOpen(false)
+                                  setFormSendOpen(true)
+                                }}
+                              >
+                                Portal form
+                              </button>
+                            ) : null}
+                            <button
+                              type="button"
+                              className="caseToolbarDropdownItem"
+                              role="menuitem"
+                              onClick={() => {
+                                setNewMenuOpen(false)
+                                setPrecedentPicker({ kind: 'letter' })
+                              }}
+                            >
+                              Letter
+                            </button>
+                            <button
+                              type="button"
+                              className="caseToolbarDropdownItem"
+                              role="menuitem"
+                              onClick={() => {
+                                setNewMenuOpen(false)
+                                setPrecedentPicker({ kind: 'document' })
+                              }}
+                            >
+                              Document
+                            </button>
+                            <button
+                              type="button"
+                              className="caseToolbarDropdownItem"
+                              role="menuitem"
+                              onClick={() => {
+                                setNewMenuOpen(false)
+                                setPrecedentPicker({ kind: 'email' })
+                              }}
+                            >
+                              E-mail
+                            </button>
+                            <button
+                              type="button"
+                              className="caseToolbarDropdownItem"
+                              role="menuitem"
+                              onClick={() => {
+                                setNewMenuOpen(false)
+                                setCommentText('')
+                                setCommentErr(null)
+                                setCommentOpen(true)
+                              }}
+                            >
+                              Comment
+                            </button>
+                          </div>,
+                          document.body,
+                        )
+                      : null}
                   </div>
                   <button
                     type="button"
@@ -3210,7 +3257,6 @@ export function CaseDetail({
                 <div className="caseDocPanelInset caseDocPanelHost stack">
                   <CaseDocPanelChrome
                     title="Case details"
-                    subtitle="Reference is immutable. Client name comes from Client contacts."
                     onClose={backToDocuments}
                     closeDisabled={busy}
                   />
@@ -3655,6 +3701,7 @@ export function CaseDetail({
                         <CaseContactsEditDocForm
                           token={token}
                           caseId={caseId}
+                          portalEnabled={portalEnabled}
                           busy={busy}
                           setBusy={setBusy}
                           editSnapshot={editSnapshot}
@@ -3851,6 +3898,24 @@ export function CaseDetail({
             open
             onClose={() => setDocusignSend(null)}
             onSent={() => {
+              onRefresh()
+            }}
+          />
+        ) : null}
+
+        {caseId && canarySignSend ? (
+          <SendCanarySignModal
+            token={token}
+            caseId={caseId}
+            fileId={canarySignSend.fileId}
+            fileName={canarySignSend.fileName}
+            caseContacts={caseContacts}
+            amendFromId={canarySignSend.amendFromId ?? null}
+            existing={files.find((x) => x.id === canarySignSend.fileId)?.canary_signing ?? null}
+            open
+            onClose={() => setCanarySignSend(null)}
+            onSent={() => {
+              setCanarySignSend(null)
               onRefresh()
             }}
           />
@@ -4601,7 +4666,7 @@ export function CaseDetail({
                                         token,
                                         method: 'POST',
                                       })
-                                      setActionNotice('Signing reminders sent.')
+                                      pushNotification('Signing reminders sent.')
                                     } catch (e: any) {
                                       setActionErr(e?.message ?? 'Resend failed')
                                     } finally {
@@ -4664,6 +4729,90 @@ export function CaseDetail({
                               }}
                             >
                               Send for signature (DocuSign)
+                            </div>
+                          )}
+                        </>
+                      ) : null}
+                      {canarySignEnabled && portalEnabled && f.category !== 'system' ? (
+                        <>
+                          {f.canary_signing?.status === 'pending' ? (
+                            <>
+                              <div
+                                className="docContextItem"
+                                onClick={() => {
+                                  setDocMenu(null)
+                                  void (async () => {
+                                    if (!caseId || !f.canary_signing) return
+                                    setBusy(true)
+                                    try {
+                                      await apiFetch(`/cases/${caseId}/canary-sign/requests/${f.canary_signing.id}/remind`, {
+                                        token,
+                                        method: 'POST',
+                                      })
+                                      pushNotification('Signing reminders sent.')
+                                    } catch (e: any) {
+                                      setActionErr(e?.message ?? 'Remind failed')
+                                    } finally {
+                                      setBusy(false)
+                                    }
+                                  })()
+                                }}
+                              >
+                                Remind Canary Sign
+                              </div>
+                              <div
+                                className="docContextItem"
+                                onClick={() => {
+                                  setDocMenu(null)
+                                  setCanarySignSend({
+                                    fileId: f.id,
+                                    fileName: f.original_filename,
+                                    amendFromId: f.canary_signing!.id,
+                                  })
+                                }}
+                              >
+                                Amend & re-send (Canary Sign)
+                              </div>
+                              <div
+                                className="docContextItem"
+                                onClick={() => {
+                                  setDocMenu(null)
+                                  void (async () => {
+                                    if (!caseId || !f.canary_signing) return
+                                    const ok = await askConfirm({
+                                      title: 'Void Canary Sign request',
+                                      message: 'Void this signing request? Recipients will no longer be able to sign.',
+                                    })
+                                    if (!ok) return
+                                    setBusy(true)
+                                    try {
+                                      await apiFetch(`/cases/${caseId}/canary-sign/requests/${f.canary_signing.id}/void`, {
+                                        token,
+                                        method: 'POST',
+                                        json: { reason: 'Voided from Canary' },
+                                      })
+                                      pushNotification('Canary Sign request voided.')
+                                      onRefresh()
+                                    } catch (e: any) {
+                                      setActionErr(e?.message ?? 'Void failed')
+                                    } finally {
+                                      setBusy(false)
+                                    }
+                                  })()
+                                }}
+                              >
+                                Void Canary Sign
+                              </div>
+                            </>
+                          ) : (
+                            <div
+                              className="docContextItem"
+                              onClick={() => {
+                                setDocMenu(null)
+                                setCanarySignSend({ fileId: f.id, fileName: f.original_filename })
+                              }}
+                            >
+                              Send for signature (Canary Sign)
                             </div>
                           )}
                         </>

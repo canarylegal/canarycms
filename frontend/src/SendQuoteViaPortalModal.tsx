@@ -59,7 +59,7 @@ export function SendQuoteViaPortalModal({
       try {
         const [rows, preflight] = await Promise.all([
           apiFetch<CasePortalFolderShareContactOut[]>(
-            `/cases/${caseId}/portal/folder-share?grant_scope=matter`,
+            `/cases/${caseId}/portal/folder-share?grant_scope=matter&require_portal_access=false`,
             { token },
           ),
           apiFetch<QuotePortalSendPreflightOut>(
@@ -71,9 +71,7 @@ export function SendQuoteViaPortalModal({
         setRecipients(rows)
         setAlertsConfigured(preflight.alerts_configured)
         if (rows.length === 0) {
-          setErr(
-            'No contacts on this matter have active portal access. Enable portal access for a contact under Contacts first.',
-          )
+          setErr('No contacts on this matter. Add a contact under Contacts first.')
           return
         }
         const preferred =
@@ -93,9 +91,23 @@ export function SendQuoteViaPortalModal({
   }, [open, caseId, fileId, token, preferredContactId])
 
   const recipientOptions = useMemo(
-    () => recipients.map((r) => ({ value: r.contact_id, label: r.contact_name })),
+    () =>
+      recipients.map((r) => ({
+        value: r.contact_id,
+        label:
+          r.portal_access_active === false
+            ? `${r.contact_name} (portal access will be enabled)`
+            : r.contact_name,
+      })),
     [recipients],
   )
+
+  const selectedRecipient = useMemo(
+    () => recipients.find((r) => r.contact_id === contactId) ?? null,
+    [recipients, contactId],
+  )
+  const willEnablePortal = selectedRecipient?.portal_access_active === false
+
 
   async function confirmSendWithoutEmail(): Promise<boolean> {
     return askConfirm({
@@ -159,9 +171,15 @@ export function SendQuoteViaPortalModal({
           ) : (
             <>
               <p className="muted" style={{ margin: 0 }}>
-                Choose the contact who will receive the quote and can accept or decline it on the portal. They need
-                active portal access; sharing a document folder is not required.
+                Choose the contact who will receive the quote and can accept or decline it on the portal. Sharing a
+                document folder is not required. Contacts without portal access are enabled automatically when you send.
               </p>
+              {willEnablePortal ? (
+                <div className="notice">
+                  Portal access will be enabled for {selectedRecipient?.contact_name}. Their invite e-mail will include
+                  an access code.
+                </div>
+              ) : null}
               <SingleSelectDropdown
                 label="Portal contact"
                 options={recipientOptions}

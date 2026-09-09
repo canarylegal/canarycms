@@ -13,8 +13,9 @@ function buildPrimaryNavItems(canAccessAccounts: boolean, canAdminConsole: boole
   return items
 }
 
-function resolvePrimaryNavView(view: AppSidebarView): PrimaryNavId {
-  return view === 'case-menu' ? 'main-menu' : view
+function resolvePrimaryNavView(view: AppSidebarView, caseMenuQuoteContext = false): PrimaryNavId {
+  if (view === 'case-menu') return caseMenuQuoteContext ? 'quotes' : 'main-menu'
+  return view
 }
 
 type NavigateHandlers = Record<PrimaryNavId, () => void>
@@ -22,6 +23,7 @@ type NavigateHandlers = Record<PrimaryNavId, () => void>
 export function usePrimaryNavKeyboard({
   enabled,
   view,
+  caseMenuQuoteContext = false,
   canAccessAccounts,
   canAdminConsole,
   docusignEnabled,
@@ -29,6 +31,8 @@ export function usePrimaryNavKeyboard({
 }: {
   enabled: boolean
   view: AppSidebarView
+  /** When viewing a quote matter, treat sidebar focus as Quotes rather than Cases. */
+  caseMenuQuoteContext?: boolean
   canAccessAccounts: boolean
   canAdminConsole: boolean
   docusignEnabled: boolean
@@ -45,7 +49,7 @@ export function usePrimaryNavKeyboard({
       const items = buildPrimaryNavItems(canAccessAccounts, canAdminConsole, docusignEnabled)
       if (items.length === 0) return
 
-      const current = resolvePrimaryNavView(view)
+      const current = resolvePrimaryNavView(view, caseMenuQuoteContext)
       let index = items.indexOf(current)
       if (index < 0) index = 0
 
@@ -57,5 +61,5 @@ export function usePrimaryNavKeyboard({
 
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [enabled, view, canAccessAccounts, canAdminConsole, docusignEnabled, onNavigate])
+  }, [enabled, view, caseMenuQuoteContext, canAccessAccounts, canAdminConsole, docusignEnabled, onNavigate])
 }

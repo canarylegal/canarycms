@@ -82,6 +82,7 @@ import {
   OUTLOOK_WEB_WITHOUT_GRAPH_CONFIRM_MESSAGE,
 } from './emailLauncher'
 import { useDialogs } from './DialogProvider'
+import { useNotifications } from './NotificationsProvider'
 import { TextPromptModal } from './TextPromptModal'
 import { ContactSearchPicker } from './ContactSearchPicker'
 import { SingleSelectDropdown } from './SingleSelectDropdown'
@@ -89,7 +90,7 @@ import { SearchInput } from './SearchInput'
 import { CaseSourceField, resolveCaseSourcePayload, useCaseSources } from './CaseSourceField'
 import { copyTextToClipboard } from './copyToClipboard'
 import { canaryDocumentTitle } from './tabTitle'
-import { caseHasRevokedUserAccess, formatCaseStatusLabel, userCanAccessAccountsWorkspace, userCanAccessAdminConsole, userIsCashierAccountsHome, userIsMasterRecovery } from './types'
+import { caseHasRevokedUserAccess, formatCaseStatusLabel, isQuoteWorkflowStatus, userCanAccessAccountsWorkspace, userCanAccessAdminConsole, userIsCashierAccountsHome, userIsMasterRecovery } from './types'
 import type {
   CaseOut,
   CasePropertyPayload,
@@ -968,9 +969,19 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
     [goMainMenu, setView],
   )
 
+  const caseMenuQuoteContext = useMemo(() => {
+    if (view !== 'case-menu' || !selectedCaseId) return false
+    if (caseTitleDetail?.id === selectedCaseId) {
+      return isQuoteWorkflowStatus(caseTitleDetail.status)
+    }
+    const row = cases.find((c) => c.id === selectedCaseId)
+    return row ? isQuoteWorkflowStatus(row.status) : false
+  }, [view, selectedCaseId, caseTitleDetail, cases])
+
   usePrimaryNavKeyboard({
     enabled: Boolean(token),
     view,
+    caseMenuQuoteContext,
     canAccessAccounts,
     canAdminConsole,
     docusignEnabled: docusignEnabled === true,
@@ -1292,13 +1303,8 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
   }, [])
   const onRefreshCases = useCallback(() => refreshCases(), [token])
 
-  const [quotesNotice, setQuotesNotice] = useState<string | null>(null)
   const [quoteConvertCaseId, setQuoteConvertCaseId] = useState<string | null>(null)
-  useEffect(() => {
-    if (!quotesNotice) return
-    const tid = window.setTimeout(() => setQuotesNotice(null), 8000)
-    return () => window.clearTimeout(tid)
-  }, [quotesNotice])
+  const { push: pushNotification } = useNotifications()
 
   const onQuoteConvert = useCallback(
     (caseId: string) => {
@@ -1319,10 +1325,10 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
       setQuoteConvertCaseId(null)
       setCases((prev) => prev.map((c) => (c.id === caseId ? { ...c, status: 'open' as const } : c)))
       await refreshCases()
-      setQuotesNotice('Quote converted to Active.')
+      pushNotification('Quote converted to Active.')
       if (openAfter) openCaseView(caseId)
     },
-    [openCaseView, refreshCases],
+    [openCaseView, refreshCases, pushNotification],
   )
 
   const onQuoteClose = useCallback(
@@ -1455,7 +1461,11 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
           onCaseListInvalidate={onCaseListInvalidate}
           onTaskMenuInvalidate={onTaskMenuInvalidate}
           onCaseDetailChange={onCaseTitleDetailChange}
-          onBackToMainMenu={() => void goMainMenu({ skipExitConfirm: true })}
+          onBackToMainMenu={() => {
+            if (caseMenuQuoteContext) void setView('quotes', { skipExitConfirm: true })
+            else void goMainMenu({ skipExitConfirm: true })
+          }}
+          backNavLabel={caseMenuQuoteContext ? 'Back to quotes' : 'Back to main menu'}
         />
       )
     }
@@ -1796,6 +1806,7 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
       <AdminLoginUpdatePrompt token={auth.token} me={auth.me} canAdmin={canAdminConsole} />
       <AppSidebar
         view={view}
+        caseMenuQuoteContext={caseMenuQuoteContext}
         goMainMenu={goMainMenu}
         onQuotes={() => {
           setView('quotes')
@@ -1851,11 +1862,6 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
                 : 'mainMenuCasesHost mainMenuCasesHost--hidden'
             }
           >
-            {quotesNotice ? (
-              <div className="notice" style={{ margin: '0 0 10px' }}>
-                {quotesNotice}
-              </div>
-            ) : null}
             {quotesCasesPanel}
           </div>
         ) : null}

@@ -1,4 +1,4 @@
-import type { FileSummary, QuotePortalDeliverySummary, DocusignSigningRequestOut } from '../types'
+import type { FileSummary, QuotePortalDeliverySummary, DocusignSigningRequestOut, CanarySignSigningRequestOut } from '../types'
 import { portalFormStatusLabel } from '../portalFormFile'
 
 /** Vimix-doder (regular / non-dark theme) icons in `public/icons/vimix/`. */
@@ -162,12 +162,30 @@ function docusignStatusLabel(d: DocusignSigningRequestOut): string {
   }
 }
 
+function canarySignStatusLabel(d: CanarySignSigningRequestOut): string {
+  switch (d.status) {
+    case 'pending':
+      return 'Canary Sign — outstanding'
+    case 'completed':
+      return 'Canary Sign — complete'
+    case 'declined':
+      return 'Canary Sign — declined'
+    case 'voided':
+      return 'Canary Sign — cancelled'
+    case 'expired':
+      return 'Canary Sign — expired'
+    default:
+      return `Canary Sign — ${d.status}`
+  }
+}
+
 export function DocsFileDescCell({ f, showPin }: { f: FileSummary; showPin: boolean }) {
   const sub = fileMailFromSubline(f)
   const quoteSub = f.quote_portal_delivery ? quotePortalStatusLabel(f.quote_portal_delivery) : null
   const formSub = f.portal_form_submission ? portalFormStatusLabel(f.portal_form_submission) : null
   const docusignSub = f.docusign_signing ? docusignStatusLabel(f.docusign_signing) : null
-  const statusSub = quoteSub || formSub || docusignSub
+  const canarySub = f.canary_signing ? canarySignStatusLabel(f.canary_signing) : null
+  const statusSub = quoteSub || formSub || canarySub || docusignSub
   const mailRoot = isCaseMailRootFile(f)
   const displayName = f.parent_file_id ? `↳ ${docsListDisplayFilename(f)}` : docsListDisplayFilename(f)
   return (
@@ -191,7 +209,10 @@ export function DocsFileDescCell({ f, showPin }: { f: FileSummary; showPin: bool
             {sub ? <div className="docsDescSub muted">{sub}</div> : null}
             {quoteSub ? <div className="docsDescSub muted portalQuoteFileStatus">{quoteSub}</div> : null}
             {formSub && !quoteSub ? <div className="docsDescSub muted portalQuoteFileStatus">{formSub}</div> : null}
-            {docusignSub && !quoteSub && !formSub ? (
+            {canarySub && !quoteSub && !formSub ? (
+              <div className="docsDescSub muted portalQuoteFileStatus">{canarySub}</div>
+            ) : null}
+            {docusignSub && !quoteSub && !formSub && !canarySub ? (
               <div className="docsDescSub muted portalQuoteFileStatus">{docusignSub}</div>
             ) : null}
           </div>

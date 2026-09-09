@@ -6,12 +6,22 @@ import type { ContactPortalAccessCreateOut, ContactPortalAccessOut } from '../ty
 
 type Props = {
   token: string
+  caseId: string
+  /** Matter must have portal enabled before granting access from this screen. */
+  portalEnabled: boolean
   globalContactId: string | null
   contactName: string
   contactEmail?: string | null
 }
 
-export function CaseContactPortalSection({ token, globalContactId, contactName, contactEmail }: Props) {
+export function CaseContactPortalSection({
+  token,
+  caseId,
+  portalEnabled,
+  globalContactId,
+  contactName,
+  contactEmail,
+}: Props) {
   const { askConfirm } = useDialogs()
   const [access, setAccess] = useState<ContactPortalAccessOut | null>(null)
   const [busy, setBusy] = useState(false)
@@ -54,6 +64,10 @@ export function CaseContactPortalSection({ token, globalContactId, contactName, 
   }
 
   async function grantAccess() {
+    if (!portalEnabled) {
+      setErr('Enable the portal on this matter (Edit details) before granting portal access.')
+      return
+    }
     setBusy(true)
     setErr(null)
     setNotice(null)
@@ -71,7 +85,7 @@ export function CaseContactPortalSection({ token, globalContactId, contactName, 
       const out = await apiFetch<ContactPortalAccessCreateOut>(`/contacts/${globalContactId}/portal/access`, {
         token,
         method: 'POST',
-        json: { send_email: sendEmail },
+        json: { send_email: sendEmail, case_id: caseId },
       })
       if (sendEmail && out.email_sent) {
         setNotice(`Access e-mail sent to ${email}.`)
@@ -97,10 +111,20 @@ export function CaseContactPortalSection({ token, globalContactId, contactName, 
       <h4 style={{ margin: 0 }}>Canary Portal</h4>
       {err ? <div className="error">{err}</div> : null}
       {notice ? <div className="muted">{notice}</div> : null}
-      {!hasAccess ? (
-        <button type="button" className="btn primary" disabled={busy} onClick={() => void grantAccess()}>
-          Grant portal access
-        </button>
+      {!portalEnabled ? (
+        <p className="muted" style={{ margin: 0, lineHeight: 1.5 }}>
+          Portal is not enabled for this matter. Turn on <strong>Enable portal</strong> in Edit details before granting
+          portal access or sharing folders with {contactName}.
+        </p>
+      ) : !hasAccess ? (
+        <>
+          <button type="button" className="btn primary" disabled={busy} onClick={() => void grantAccess()}>
+            Grant portal access
+          </button>
+          <p className="muted" style={{ margin: 0, fontSize: '0.9rem' }}>
+            Portal login is per global contact ({contactName}). Folder sharing is managed per matter.
+          </p>
+        </>
       ) : (
         <div className="stack" style={{ gap: 8 }}>
           {code ? (
@@ -117,11 +141,6 @@ export function CaseContactPortalSection({ token, globalContactId, contactName, 
           </p>
         </div>
       )}
-      {!hasAccess ? (
-        <p className="muted" style={{ margin: 0, fontSize: '0.9rem' }}>
-          Portal login is per global contact ({contactName}). Folder sharing is managed per matter.
-        </p>
-      ) : null}
     </div>
   )
 }

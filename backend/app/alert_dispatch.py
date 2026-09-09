@@ -14,6 +14,11 @@ from app.alert_templates import (
     anticipated_payment_approved,
     anticipated_payment_rejected,
     calendar_event_reminder,
+    canary_sign_completed_staff,
+    canary_sign_declined_staff,
+    canary_sign_reminded,
+    canary_sign_requested,
+    canary_sign_sent_staff,
     docusign_sign_completed_staff,
     docusign_sign_requested,
     docusign_sign_sent_staff,
@@ -53,6 +58,11 @@ class AlertKind(str, enum.Enum):
     docusign_sign_requested = "docusign_sign_requested"
     docusign_sign_sent_staff = "docusign_sign_sent_staff"
     docusign_sign_completed_staff = "docusign_sign_completed_staff"
+    canary_sign_requested = "canary_sign_requested"
+    canary_sign_reminded = "canary_sign_reminded"
+    canary_sign_sent_staff = "canary_sign_sent_staff"
+    canary_sign_completed_staff = "canary_sign_completed_staff"
+    canary_sign_declined_staff = "canary_sign_declined_staff"
     anticipated_payment_approved = "anticipated_payment_approved"
     anticipated_payment_rejected = "anticipated_payment_rejected"
     anticipated_payment_amended = "anticipated_payment_amended"
@@ -142,6 +152,7 @@ def dispatch_alert(
             quote_filename=str(context.get("quote_filename") or "Quote"),
             matter_label=str(context.get("matter_label") or "your matter"),
             portal_url=str(context.get("portal_url") or portal_public_url()),
+            access_code=str(context.get("access_code") or "") or None,
         )
     elif kind == AlertKind.portal_quote_accepted:
         subject, body, body_html = portal_quote_accepted(
@@ -170,6 +181,7 @@ def dispatch_alert(
             form_name=str(context.get("form_name") or "Form"),
             matter_label=str(context.get("matter_label") or "your matter"),
             portal_url=str(context.get("portal_url") or portal_public_url()),
+            access_code=str(context.get("access_code") or "") or None,
         )
     elif kind == AlertKind.docusign_sign_requested:
         subject, body, body_html = docusign_sign_requested(
@@ -191,6 +203,44 @@ def dispatch_alert(
             firm_name=firm,
             staff_name=str(context.get("staff_name") or "Colleague"),
             document_name=str(context.get("document_name") or "Document"),
+        )
+    elif kind == AlertKind.canary_sign_requested:
+        subject, body, body_html = canary_sign_requested(
+            firm_name=firm,
+            recipient_name=str(context.get("recipient_name") or "Client"),
+            document_name=str(context.get("document_name") or "Document"),
+            matter_label=str(context.get("matter_label") or "your matter"),
+            sign_url=str(context.get("sign_url") or portal_public_url()),
+            access_code=str(context.get("access_code") or "") or None,
+        )
+    elif kind == AlertKind.canary_sign_reminded:
+        subject, body, body_html = canary_sign_reminded(
+            firm_name=firm,
+            recipient_name=str(context.get("recipient_name") or "Client"),
+            document_name=str(context.get("document_name") or "Document"),
+            matter_label=str(context.get("matter_label") or "your matter"),
+            sign_url=str(context.get("sign_url") or portal_public_url()),
+        )
+    elif kind == AlertKind.canary_sign_sent_staff:
+        subject, body, body_html = canary_sign_sent_staff(
+            firm_name=firm,
+            staff_name=str(context.get("staff_name") or "Colleague"),
+            document_name=str(context.get("document_name") or "Document"),
+            sender_name=str(context.get("sender_name") or "A colleague"),
+        )
+    elif kind == AlertKind.canary_sign_completed_staff:
+        subject, body, body_html = canary_sign_completed_staff(
+            firm_name=firm,
+            staff_name=str(context.get("staff_name") or "Colleague"),
+            document_name=str(context.get("document_name") or "Document"),
+        )
+    elif kind == AlertKind.canary_sign_declined_staff:
+        subject, body, body_html = canary_sign_declined_staff(
+            firm_name=firm,
+            staff_name=str(context.get("staff_name") or "Colleague"),
+            document_name=str(context.get("document_name") or "Document"),
+            recipient_name=str(context.get("recipient_name") or "Client"),
+            decline_reason=str(context.get("decline_reason") or ""),
         )
     elif kind == AlertKind.anticipated_payment_approved:
         subject, body, body_html = anticipated_payment_approved(

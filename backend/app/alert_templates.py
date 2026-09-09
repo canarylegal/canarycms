@@ -303,6 +303,27 @@ def portal_form_completed_staff(
     return subject, body, html
 
 
+def _optional_access_code_blocks(access_code: str | None) -> tuple[list[str], str]:
+    """Plain-text lines and HTML snippet when portal access was just provisioned."""
+    code = (access_code or "").strip()
+    if not code:
+        return [], ""
+    lines = [
+        "",
+        "Portal access has been enabled for you so you can open this link.",
+        f"Access code: {code}",
+        "Keep this code confidential. You can also request a one-time sign-in code by e-mail on the portal.",
+    ]
+    html = (
+        "<p>Portal access has been enabled for you so you can open this link.</p>"
+        f"{_html_highlight_code('Your access code', code)}"
+        "<p style=\"margin:12px 0 0;color:#64748b;font-size:13px;\">"
+        "Keep this code confidential. You can also request a one-time sign-in code by e-mail on the portal."
+        "</p>"
+    )
+    return lines, html
+
+
 def portal_form_sent(
     *,
     firm_name: str,
@@ -310,9 +331,11 @@ def portal_form_sent(
     form_name: str,
     matter_label: str,
     portal_url: str,
+    access_code: str | None = None,
 ) -> tuple[str, str, str]:
     subject = f"Form to complete — {matter_label}"
     cta_label = "Complete form"
+    code_lines, code_html = _optional_access_code_blocks(access_code)
     body = "\n".join(
         [
             f"Dear {contact_name},",
@@ -321,6 +344,7 @@ def portal_form_sent(
             f"Matter: {matter_label}",
             "",
             f"{cta_label}: {portal_url}",
+            *code_lines,
             "",
             f"— {_firm_line(firm_name)}",
         ]
@@ -333,6 +357,7 @@ def portal_form_sent(
             f'<p style="margin:0 0 4px;color:#64748b;">Matter: {_escape_html(matter_label)}</p>'
             f"{_html_cta_button(portal_url, cta_label)}"
             f"{_html_fallback_link(portal_url)}"
+            f"{code_html}"
         ),
     )
     return subject, body, html
@@ -345,9 +370,11 @@ def portal_quote_sent(
     quote_filename: str,
     matter_label: str,
     portal_url: str,
+    access_code: str | None = None,
 ) -> tuple[str, str, str]:
     subject = f"Quote — {matter_label}"
     cta_label = "View your quote"
+    code_lines, code_html = _optional_access_code_blocks(access_code)
     body = "\n".join(
         [
             f"Dear {contact_name},",
@@ -356,6 +383,7 @@ def portal_quote_sent(
             quote_filename,
             "",
             f"{cta_label}: {portal_url}",
+            *code_lines,
             "",
             f"— {_firm_line(firm_name)}",
         ]
@@ -368,6 +396,7 @@ def portal_quote_sent(
             f'<p style="margin:0 0 4px;color:#64748b;">{_escape_html(quote_filename)}</p>'
             f"{_html_cta_button(portal_url, cta_label)}"
             f"{_html_fallback_link(portal_url)}"
+            f"{code_html}"
         ),
     )
     return subject, body, html
@@ -542,6 +571,171 @@ def docusign_sign_completed_staff(
             f"The DocuSign envelope for {document_name} is complete.",
             "The signed document has been filed on the matter in Canary.",
         ],
+    )
+    return subject, body, html
+
+
+def canary_sign_requested(
+    *,
+    firm_name: str,
+    recipient_name: str,
+    document_name: str,
+    matter_label: str,
+    sign_url: str,
+    access_code: str | None = None,
+) -> tuple[str, str, str]:
+    subject = f"Please sign — {matter_label}"
+    cta_label = "Review and sign"
+    code_lines, code_html = _optional_access_code_blocks(access_code)
+    body = "\n".join(
+        [
+            f"Dear {recipient_name},",
+            "",
+            f"You have a document to sign for {matter_label}:",
+            document_name,
+            "",
+            f"{cta_label}: {sign_url}",
+            *code_lines,
+            "",
+            f"— {_firm_line(firm_name)}",
+        ]
+    )
+    html = _html_email_shell(
+        firm_name=firm_name,
+        inner_html=(
+            f"<p>Dear {_escape_html(recipient_name)},</p>"
+            f"<p>You have a document to sign for <strong>{_escape_html(matter_label)}</strong>:</p>"
+            f'<p style="margin:0 0 4px;color:#64748b;">{_escape_html(document_name)}</p>'
+            f"{_html_cta_button(sign_url, cta_label)}"
+            f"{_html_fallback_link(sign_url)}"
+            f"{code_html}"
+        ),
+    )
+    return subject, body, html
+
+
+def canary_sign_reminded(
+    *,
+    firm_name: str,
+    recipient_name: str,
+    document_name: str,
+    matter_label: str,
+    sign_url: str,
+) -> tuple[str, str, str]:
+    subject = f"Reminder: please sign — {matter_label}"
+    cta_label = "Review and sign"
+    body = "\n".join(
+        [
+            f"Dear {recipient_name},",
+            "",
+            "This is a reminder that you still have a document to sign:",
+            document_name,
+            f"Matter: {matter_label}",
+            "",
+            f"{cta_label}: {sign_url}",
+            "",
+            f"— {_firm_line(firm_name)}",
+        ]
+    )
+    html = _html_email_shell(
+        firm_name=firm_name,
+        inner_html=(
+            f"<p>Dear {_escape_html(recipient_name)},</p>"
+            f"<p>This is a reminder that you still have a document to sign for "
+            f"<strong>{_escape_html(matter_label)}</strong>:</p>"
+            f'<p style="margin:0 0 4px;color:#64748b;">{_escape_html(document_name)}</p>'
+            f"{_html_cta_button(sign_url, cta_label)}"
+            f"{_html_fallback_link(sign_url)}"
+        ),
+    )
+    return subject, body, html
+
+
+def canary_sign_sent_staff(
+    *,
+    firm_name: str,
+    staff_name: str,
+    document_name: str,
+    sender_name: str,
+) -> tuple[str, str, str]:
+    subject = f"Canary Sign sent: {document_name}"
+    body = "\n".join(
+        [
+            f"{sender_name} sent a document for signature via Canary Sign:",
+            "",
+            document_name,
+            "",
+            f"— {_firm_line(firm_name)}",
+        ]
+    )
+    html = _html_email_shell(
+        firm_name=firm_name,
+        inner_html=_html_info_block(
+            title=f"{sender_name} sent a document for signature via Canary Sign",
+            lines=[f"Document: {document_name}"],
+        ),
+    )
+    return subject, body, html
+
+
+def canary_sign_completed_staff(
+    *,
+    firm_name: str,
+    staff_name: str,
+    document_name: str,
+) -> tuple[str, str, str]:
+    subject = f"Canary Sign completed: {document_name}"
+    body = "\n".join(
+        [
+            "A Canary Sign request has been completed:",
+            "",
+            document_name,
+            "",
+            "The signed document has been filed on the matter in Canary.",
+            "",
+            f"— {_firm_line(firm_name)}",
+        ]
+    )
+    html = _html_email_shell(
+        firm_name=firm_name,
+        inner_html=_html_info_block(
+            title="A Canary Sign request has been completed",
+            lines=[
+                f"Document: {document_name}",
+                "The signed document has been filed on the matter in Canary.",
+            ],
+        ),
+    )
+    return subject, body, html
+
+
+def canary_sign_declined_staff(
+    *,
+    firm_name: str,
+    staff_name: str,
+    document_name: str,
+    recipient_name: str,
+    decline_reason: str,
+) -> tuple[str, str, str]:
+    subject = f"Canary Sign declined: {document_name}"
+    reason = (decline_reason or "").strip()
+    body_lines = [
+        f"{recipient_name} declined a Canary Sign request:",
+        "",
+        document_name,
+    ]
+    info_lines = [f"Document: {document_name}"]
+    if reason:
+        body_lines.extend(["", "Reason:", reason])
+        info_lines.append(f"Reason: {reason}")
+    body_lines.extend(["", f"— {_firm_line(firm_name)}"])
+    body = "\n".join(body_lines)
+    html = _html_email_shell(
+        firm_name=firm_name,
+        inner_html=_html_info_block(
+            title=f"{recipient_name} declined a Canary Sign request",
+            lines=info_lines,
+        ),
     )
     return subject, body, html
 

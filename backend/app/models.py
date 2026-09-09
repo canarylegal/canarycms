@@ -8,6 +8,7 @@ from sqlalchemy import (
     Boolean,
     Date,
     DateTime,
+    Float,
     LargeBinary,
     Time,
     Enum,
@@ -1704,3 +1705,172 @@ class PortalFormSubmission(Base):
     sent_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     voided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class CanarySignStatus(str, enum.Enum):
+    pending = "pending"
+    completed = "completed"
+    declined = "declined"
+    voided = "voided"
+    expired = "expired"
+
+
+class CanarySignRecipientStatus(str, enum.Enum):
+    pending = "pending"
+    viewed = "viewed"
+    signed = "signed"
+    declined = "declined"
+
+
+class CanarySignOrderMode(str, enum.Enum):
+    parallel = "parallel"
+    sequential = "sequential"
+
+
+class CanarySignFieldType(str, enum.Enum):
+    signature = "signature"
+    initials = "initials"
+    date = "date"
+    printed_name = "printed_name"
+    checkbox = "checkbox"
+
+
+class CanarySignAuditEventType(str, enum.Enum):
+    created = "created"
+    sent = "sent"
+    viewed = "viewed"
+    signed = "signed"
+    declined = "declined"
+    voided = "voided"
+    reminded = "reminded"
+    completed = "completed"
+    expired = "expired"
+    form_locked = "form_locked"
+    form_filled = "form_filled"
+
+
+class CanarySignRequest(Base):
+    __tablename__ = "canary_sign_request"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    case_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("case.id", ondelete="CASCADE"), nullable=False)
+    source_file_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("file.id", ondelete="RESTRICT"), nullable=False
+    )
+    snapshot_pdf_file_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("file.id", ondelete="SET NULL"), nullable=True
+    )
+    signed_file_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("file.id", ondelete="SET NULL"), nullable=True
+    )
+    certificate_file_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("file.id", ondelete="SET NULL"), nullable=True
+    )
+    sent_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("user.id", ondelete="SET NULL"), nullable=True
+    )
+    supersedes_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("canary_sign_request.id", ondelete="SET NULL"), nullable=True
+    )
+    subject: Mapped[str] = mapped_column(String(500), nullable=False, default="")
+    status: Mapped[CanarySignStatus] = mapped_column(
+        Enum(CanarySignStatus, name="canary_sign_status"),
+        nullable=False,
+        default=CanarySignStatus.pending,
+    )
+    status_detail: Mapped[str | None] = mapped_column(Text, nullable=True)
+    order_mode: Mapped[CanarySignOrderMode] = mapped_column(
+        Enum(CanarySignOrderMode, name="canary_sign_order_mode"),
+        nullable=False,
+        default=CanarySignOrderMode.parallel,
+    )
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    voided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    has_fillable_form: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    form_locked_by_recipient_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("canary_sign_recipient.id", ondelete="SET NULL"), nullable=True
+    )
+    form_locked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    form_completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    form_responses: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+
+
+class CanarySignRecipient(Base):
+    __tablename__ = "canary_sign_recipient"
+    __table_args__ = (UniqueConstraint("sign_token", name="uq_canary_sign_recipient_sign_token"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    signing_request_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("canary_sign_request.id", ondelete="CASCADE"), nullable=False
+    )
+    case_contact_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("case_contact.id", ondelete="SET NULL"), nullable=True
+    )
+    contact_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("contact.id", ondelete="SET NULL"), nullable=True
+    )
+    name: Mapped[str] = mapped_column(String(300), nullable=False)
+    email: Mapped[str] = mapped_column(String(320), nullable=False)
+    routing_order: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    sign_token: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[CanarySignRecipientStatus] = mapped_column(
+        Enum(CanarySignRecipientStatus, name="canary_sign_recipient_status"),
+        nullable=False,
+        default=CanarySignRecipientStatus.pending,
+    )
+    decline_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    signed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    viewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    signed_ip: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    signed_user_agent: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+
+
+class CanarySignField(Base):
+    __tablename__ = "canary_sign_field"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    signing_request_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("canary_sign_request.id", ondelete="CASCADE"), nullable=False
+    )
+    recipient_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("canary_sign_recipient.id", ondelete="CASCADE"), nullable=False
+    )
+    field_type: Mapped[CanarySignFieldType] = mapped_column(
+        Enum(CanarySignFieldType, name="canary_sign_field_type"),
+        nullable=False,
+    )
+    label: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    required: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    placement_mode: Mapped[str] = mapped_column(String(16), nullable=False, default="free")
+    page: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    x_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+    y_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+    w_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+    h_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+    value: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    filled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class CanarySignAuditEvent(Base):
+    __tablename__ = "canary_sign_audit_event"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    signing_request_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("canary_sign_request.id", ondelete="CASCADE"), nullable=False
+    )
+    recipient_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("canary_sign_recipient.id", ondelete="SET NULL"), nullable=True
+    )
+    event_type: Mapped[CanarySignAuditEventType] = mapped_column(
+        Enum(CanarySignAuditEventType, name="canary_sign_audit_event_type"),
+        nullable=False,
+    )
+    detail: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    ip: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    user_agent: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)

@@ -16,7 +16,6 @@ from app.models import (
     Case,
     CaseContact,
     Contact,
-    ContactPortalAccess,
     ContactPortalGrant,
     File,
     QuotePortalDelivery,
@@ -29,9 +28,9 @@ from app.portal_notifications import ALERTS_NOT_CONFIGURED_MSG, list_portal_staf
 from app.portal_service import (
     client_matter_description,
     contact_display_name,
+    ensure_contact_portal_access_for_delivery,
     file_folder_in_grant,
     grant_is_client_visible,
-    portal_access_is_active,
     resolve_matter_contact_email,
 )
 from app.quote_portal_pdf import create_portal_quote_pdf_snapshot
@@ -276,11 +275,11 @@ def send_quote_via_portal(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Contact not found")
     email = resolve_matter_contact_email(db, case_id=case_id, contact_id=contact_id)
 
-    access = db.execute(
-        select(ContactPortalAccess).where(ContactPortalAccess.contact_id == contact_id)
-    ).scalar_one_or_none()
-    if access is None or not portal_access_is_active(access):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Portal access is not active for this contact")
+    _access, newly_provisioned, access_code = ensure_contact_portal_access_for_delivery(
+        db,
+        contact_id=contact_id,
+        actor_user_id=actor_user_id,
+    )
 
     # Quotes are delivery-scoped — folder grants are optional (used for portal navigation when present).
     grant = _grant_covering_file(
@@ -343,6 +342,7 @@ def send_quote_via_portal(
                 "quote_filename": client_filename,
                 "matter_label": client_matter_description(case),
                 "portal_url": quote_url,
+                **({"access_code": access_code} if newly_provisioned and access_code else {}),
             },
             actor_user_id=actor_user_id,
         )

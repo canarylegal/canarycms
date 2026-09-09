@@ -458,6 +458,7 @@ export function CaseContactsAddDocForm({
 export function CaseContactsEditDocForm({
   token,
   caseId,
+  portalEnabled,
   busy,
   setBusy,
   editSnapshot,
@@ -474,6 +475,7 @@ export function CaseContactsEditDocForm({
 }: {
   token: string
   caseId: string
+  portalEnabled: boolean
   busy: boolean
   setBusy: (v: boolean) => void
   editSnapshot: CaseContactOut
@@ -649,6 +651,8 @@ export function CaseContactsEditDocForm({
       ) : null}
       <CaseContactPortalSection
         token={token}
+        caseId={caseId}
+        portalEnabled={portalEnabled}
         globalContactId={editSnapshot.contact_id}
         contactName={resolvedEditSnapshotName}
         contactEmail={editSnapshot.email}
