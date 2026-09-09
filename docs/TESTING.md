@@ -39,7 +39,16 @@ Environment overrides:
 
 CI: `.github/workflows/portal-smoke.yml` builds `db`+`backend`, ensures the fixture, and runs the same smoke script on portal-related path changes and via **workflow_dispatch**.
 
-Frontend CI runs `npm run build` (TypeScript + Vite). `npm run lint` exists but currently fails on substantial pre-existing React Compiler / eslint debt — wire it into CI only after a dedicated lint cleanup.
+Frontend CI runs `npm test` (Vitest) then `npm run build` (TypeScript + Vite). `npm run lint` exists but currently fails on substantial pre-existing React Compiler / eslint debt — wire it into CI only after a dedicated lint cleanup.
+
+### Frontend unit tests
+
+```bash
+cd frontend && npm test
+# or: npm run test:watch
+```
+
+Coverage is intentionally small and behaviour-focused: UI preference cache scoping, dialog FIFO queue, navigation push/replace, contact-search request sequencing, and HTML e-mail remote-content stripping.
 
 ## Live security checks
 

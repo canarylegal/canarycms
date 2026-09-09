@@ -83,6 +83,7 @@ import {
 } from './emailLauncher'
 import { useDialogs } from './DialogProvider'
 import { useNotifications, useNotificationsUserScope } from './NotificationsProvider'
+import { createRequestSeq } from './requestSeq'
 import { TextPromptModal } from './TextPromptModal'
 import { ContactSearchPicker } from './ContactSearchPicker'
 import { SingleSelectDropdown } from './SingleSelectDropdown'
@@ -4537,10 +4538,11 @@ function Contacts({ token, me }: { token: string; me?: UserPublic | null }) {
   const [contactCtx, setContactCtx] = useState<null | { x: number; y: number; c: ContactOut }>(null)
   const contactCtxRef = useRef<HTMLDivElement | null>(null)
 
-  const contactsSearchReqRef = useRef(0)
+  const contactsSearchSeqRef = useRef(createRequestSeq())
 
   async function load() {
-    const reqId = ++contactsSearchReqRef.current
+    const seq = contactsSearchSeqRef.current
+    const reqId = seq.next()
     setBusy(true)
     setErr(null)
     try {
@@ -4552,20 +4554,20 @@ function Contacts({ token, me }: { token: string; me?: UserPublic | null }) {
         hasPhone:
           contactsFilterPhone === 'has' ? true : contactsFilterPhone === 'missing' ? false : undefined,
       })
-      if (reqId !== contactsSearchReqRef.current) return
+      if (!seq.isCurrent(reqId)) return
       setContacts(data)
     } catch (e: unknown) {
-      if (reqId !== contactsSearchReqRef.current) return
+      if (!seq.isCurrent(reqId)) return
       setErr((e as { message?: string })?.message ?? 'Failed to load contacts')
     } finally {
-      if (reqId === contactsSearchReqRef.current) setBusy(false)
+      if (seq.isCurrent(reqId)) setBusy(false)
     }
   }
 
   useEffect(() => {
     void load()
     return () => {
-      contactsSearchReqRef.current += 1
+      contactsSearchSeqRef.current.invalidate()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- load closes over latest filter/search values
   }, [token, debouncedContactsSearch, contactsFilterType, contactsFilterEmail, contactsFilterPhone])
