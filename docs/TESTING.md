@@ -39,6 +39,8 @@ Environment overrides:
 
 CI: `.github/workflows/portal-smoke.yml` builds `db`+`backend`, ensures the fixture, and runs the same smoke script on portal-related path changes and via **workflow_dispatch**.
 
+Frontend CI runs `npm run build` (TypeScript + Vite). `npm run lint` exists but currently fails on substantial pre-existing React Compiler / eslint debt — wire it into CI only after a dedicated lint cleanup.
+
 ## Live security checks
 
 ```bash

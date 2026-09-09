@@ -75,7 +75,11 @@ export const DEFAULT_UI_PREFERENCES: UserUiPreferences = {
   contacts_column_widths: [],
 }
 
-const CACHE_KEY = 'canary.uiPreferences.v2'
+const LEGACY_CACHE_KEY = 'canary.uiPreferences.v2'
+
+export function uiPreferencesCacheKey(userId: string): string {
+  return `canary.uiPreferences.${userId}.v2`
+}
 
 /** Dispatched after menu column widths are reset so all tables revert immediately. */
 export const MENU_COLUMN_RESET_EVENT = 'canary-menu-columns-reset'
@@ -264,19 +268,46 @@ export function uiPreferencesEqual(a: UserUiPreferences, b: UserUiPreferences): 
   return JSON.stringify(a) === JSON.stringify(b)
 }
 
-export function readCachedUiPreferences(): UserUiPreferences {
+/** Do not keep free-text search in localStorage (shared workstation leakage). */
+function prefsForLocalCache(prefs: UserUiPreferences): UserUiPreferences {
+  return {
+    ...prefs,
+    main_menu_search: '',
+    tasks_menu_search: '',
+    contacts_search: '',
+  }
+}
+
+export function readCachedUiPreferences(userId: string | null | undefined): UserUiPreferences {
+  if (!userId) return { ...DEFAULT_UI_PREFERENCES }
   try {
-    const raw = localStorage.getItem(CACHE_KEY)
+    const raw = localStorage.getItem(uiPreferencesCacheKey(userId))
     if (raw) return normalizeUiPreferences(JSON.parse(raw))
+    // One-time migrate from the pre-user-scoped cache key.
+    const legacy = localStorage.getItem(LEGACY_CACHE_KEY)
+    if (legacy) {
+      const prefs = normalizeUiPreferences(JSON.parse(legacy))
+      writeCachedUiPreferences(prefs, userId)
+      try {
+        localStorage.removeItem(LEGACY_CACHE_KEY)
+      } catch {
+        /* ignore */
+      }
+      return prefsForLocalCache(prefs)
+    }
   } catch {
     /* ignore */
   }
   return { ...DEFAULT_UI_PREFERENCES }
 }
 
-export function writeCachedUiPreferences(prefs: UserUiPreferences): void {
+export function writeCachedUiPreferences(
+  prefs: UserUiPreferences,
+  userId: string | null | undefined,
+): void {
+  if (!userId) return
   try {
-    localStorage.setItem(CACHE_KEY, JSON.stringify(prefs))
+    localStorage.setItem(uiPreferencesCacheKey(userId), JSON.stringify(prefsForLocalCache(prefs)))
   } catch {
     /* ignore */
   }
@@ -296,6 +327,7 @@ export function legacyUiPreferenceOverrides(): Partial<UserUiPreferences> {
 export async function persistUserUiPreferences(
   token: string,
   patch: Partial<UserUiPreferences>,
+  userId?: string | null,
 ): Promise<UserUiPreferences> {
   const { apiFetch } = await import('./api')
   const user = await apiFetch<{ ui_preferences?: UserUiPreferences }>('/users/me/ui-preferences', {
@@ -304,17 +336,24 @@ export async function persistUserUiPreferences(
     json: patch,
   })
   const prefs = normalizeUiPreferences(user.ui_preferences)
-  writeCachedUiPreferences(prefs)
+  writeCachedUiPreferences(prefs, userId)
   return prefs
 }
 
 /** Clear saved column widths for all resizable menu tables (main menu, quotes, tasks, contacts). */
-export async function resetMenuColumnWidths(token: string): Promise<UserUiPreferences> {
-  const prefs = await persistUserUiPreferences(token, {
-    main_menu_column_widths: [],
-    tasks_menu_column_widths: [],
-    contacts_column_widths: [],
-  })
+export async function resetMenuColumnWidths(
+  token: string,
+  userId?: string | null,
+): Promise<UserUiPreferences> {
+  const prefs = await persistUserUiPreferences(
+    token,
+    {
+      main_menu_column_widths: [],
+      tasks_menu_column_widths: [],
+      contacts_column_widths: [],
+    },
+    userId,
+  )
   notifyMenuColumnReset()
   return prefs
 }

@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from 'react'
+import { createContext, useCallback, useContext, useMemo, useRef, useState, type ReactNode } from 'react'
 import { AlertModal } from './AlertModal'
 import { ConfirmModal } from './ConfirmModal'
 
@@ -14,6 +14,21 @@ type DialogContextValue = {
   askConfirm: (opts: ConfirmOptions) => Promise<boolean>
   alert: (message: string, title?: string) => Promise<void>
 }
+
+type ConfirmQueued = {
+  kind: 'confirm'
+  opts: ConfirmOptions
+  resolve: (v: boolean) => void
+}
+
+type AlertQueued = {
+  kind: 'alert'
+  title: string
+  message: string
+  resolve: () => void
+}
+
+type QueuedDialog = ConfirmQueued | AlertQueued
 
 const DialogContext = createContext<DialogContextValue | null>(null)
 
@@ -31,52 +46,69 @@ export function useDialogsOptional(): DialogContextValue | null {
 }
 
 export function DialogProvider({ children }: { children: ReactNode }) {
-  const [confirm, setConfirm] = useState<null | { opts: ConfirmOptions; resolve: (v: boolean) => void }>(null)
-  const [alertState, setAlertState] = useState<null | { title: string; message: string; resolve: () => void }>(null)
+  const queueRef = useRef<QueuedDialog[]>([])
+  const [active, setActive] = useState<QueuedDialog | null>(null)
 
-  const askConfirm = useCallback((opts: ConfirmOptions) => {
-    return new Promise<boolean>((resolve) => {
-      setConfirm({ opts, resolve })
-    })
+  const pump = useCallback(() => {
+    setActive(queueRef.current[0] ?? null)
   }, [])
 
-  const alertFn = useCallback((message: string, title = 'Notice') => {
-    return new Promise<void>((resolve) => {
-      setAlertState({ title, message, resolve })
-    })
-  }, [])
+  const askConfirm = useCallback(
+    (opts: ConfirmOptions) => {
+      return new Promise<boolean>((resolve) => {
+        queueRef.current.push({ kind: 'confirm', opts, resolve })
+        pump()
+      })
+    },
+    [pump],
+  )
+
+  const alertFn = useCallback(
+    (message: string, title = 'Notice') => {
+      return new Promise<void>((resolve) => {
+        queueRef.current.push({ kind: 'alert', title, message, resolve })
+        pump()
+      })
+    },
+    [pump],
+  )
+
+  const finishActive = useCallback(() => {
+    queueRef.current.shift()
+    pump()
+  }, [pump])
 
   const value = useMemo(() => ({ askConfirm, alert: alertFn }), [askConfirm, alertFn])
 
   return (
     <DialogContext.Provider value={value}>
       {children}
-      {confirm ? (
+      {active?.kind === 'confirm' ? (
         <ConfirmModal
           open
-          title={confirm.opts.title}
-          message={confirm.opts.message}
-          confirmLabel={confirm.opts.confirmLabel ?? 'Confirm'}
-          cancelLabel={confirm.opts.cancelLabel ?? 'Cancel'}
-          danger={confirm.opts.danger}
+          title={active.opts.title}
+          message={active.opts.message}
+          confirmLabel={active.opts.confirmLabel ?? 'Confirm'}
+          cancelLabel={active.opts.cancelLabel ?? 'Cancel'}
+          danger={active.opts.danger}
           onConfirm={() => {
-            confirm.resolve(true)
-            setConfirm(null)
+            active.resolve(true)
+            finishActive()
           }}
           onCancel={() => {
-            confirm.resolve(false)
-            setConfirm(null)
+            active.resolve(false)
+            finishActive()
           }}
         />
       ) : null}
-      {alertState ? (
+      {active?.kind === 'alert' ? (
         <AlertModal
           open
-          title={alertState.title}
-          message={alertState.message}
+          title={active.title}
+          message={active.message}
           onClose={() => {
-            alertState.resolve()
-            setAlertState(null)
+            active.resolve()
+            finishActive()
           }}
         />
       ) : null}

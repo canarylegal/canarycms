@@ -9,46 +9,67 @@ import { NotificationsProvider } from './NotificationsProvider'
 applyStoredTheme()
 import EditorPage from './EditorPage.tsx'
 
-class AppErrorBoundary extends Component<{ children: ReactNode }, { err: Error | null }> {
-  state = { err: null as Error | null }
+class AppErrorBoundary extends Component<{ children: ReactNode }, { err: Error | null; refId: string }> {
+  state = { err: null as Error | null, refId: '' }
 
   static getDerivedStateFromError(err: Error) {
-    return { err }
+    const refId =
+      typeof crypto !== 'undefined' && 'randomUUID' in crypto
+        ? crypto.randomUUID().slice(0, 8).toUpperCase()
+        : String(Date.now()).slice(-8)
+    return { err, refId }
+  }
+
+  componentDidCatch(err: Error, info: { componentStack?: string | null }) {
+    console.error('Canary runtime error', this.state.refId, err, info.componentStack)
   }
 
   render() {
     if (this.state.err) {
       const err = this.state.err
+      const isDev = import.meta.env.DEV
       return (
         <div
           style={{
             padding: 24,
             fontFamily: 'system-ui, sans-serif',
             background: 'var(--page-gradient)',
-            color: '#dc2626',
+            color: '#0f172a',
             minHeight: '100vh',
-            whiteSpace: 'pre-wrap',
           }}
         >
-          <h1 style={{ color: '#b91c1c' }}>Canary hit a runtime error</h1>
+          <h1 style={{ color: '#b91c1c' }}>Something went wrong</h1>
           <p style={{ color: '#64748b', marginBottom: 12 }}>
-            Check the browser console for details. Message:
+            Reload Canary to continue. Reference: <code>{this.state.refId || '—'}</code>
           </p>
-          <pre
-            style={{
-              margin: '0 0 16px',
-              padding: 12,
-              background: 'rgba(255,255,255,0.92)',
-              color: '#0f172a',
-              borderRadius: 8,
-              fontSize: 14,
-              lineHeight: 1.45,
-            }}
+          <button
+            type="button"
+            className="btn primary"
+            style={{ marginBottom: 16 }}
+            onClick={() => window.location.reload()}
           >
-            {err.message || String(err)}
-          </pre>
-          <p style={{ color: '#64748b', marginBottom: 8 }}>Stack:</p>
-          {err.stack ?? String(err)}
+            Reload Canary
+          </button>
+          {isDev ? (
+            <div style={{ whiteSpace: 'pre-wrap', color: '#dc2626' }}>
+              <p style={{ color: '#64748b', marginBottom: 8 }}>Development details:</p>
+              <pre
+                style={{
+                  margin: '0 0 16px',
+                  padding: 12,
+                  background: 'rgba(255,255,255,0.92)',
+                  color: '#0f172a',
+                  borderRadius: 8,
+                  fontSize: 14,
+                  lineHeight: 1.45,
+                }}
+              >
+                {err.message || String(err)}
+              </pre>
+              <p style={{ color: '#64748b', marginBottom: 8 }}>Stack:</p>
+              {err.stack ?? String(err)}
+            </div>
+          ) : null}
         </div>
       )
     }

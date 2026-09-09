@@ -33,16 +33,38 @@ function hadCustomColumnWidths(prefs: UserUiPreferences): boolean {
   )
 }
 
-function writePrefsSnapshot(next: UserUiPreferences, serverSnapshotRef: { current: string }) {
-  writeCachedUiPreferences(next)
-  serverSnapshotRef.current = JSON.stringify(next)
+function clearDebounceTimers(
+  debounceRef: { current: Partial<Record<keyof UserUiPreferences, ReturnType<typeof setTimeout>>> },
+) {
+  for (const t of Object.values(debounceRef.current)) {
+    if (t) clearTimeout(t)
+  }
+  debounceRef.current = {}
 }
 
 export function useUserUiPreferences(me: UserPublic | null | undefined, token: string | null) {
+  const userId = me?.id ?? null
+  const userIdRef = useRef<string | null>(userId)
   const migratedRef = useRef(false)
   const debounceRef = useRef<Partial<Record<keyof UserUiPreferences, ReturnType<typeof setTimeout>>>>({})
   const serverSnapshotRef = useRef('')
-  const [prefs, setPrefs] = useState<UserUiPreferences>(() => readCachedUiPreferences())
+  const [prefs, setPrefs] = useState<UserUiPreferences>(() => readCachedUiPreferences(userId))
+
+  const writePrefsSnapshot = useCallback((next: UserUiPreferences) => {
+    writeCachedUiPreferences(next, userIdRef.current)
+    serverSnapshotRef.current = JSON.stringify(next)
+  }, [])
+
+  useEffect(() => {
+    if (userIdRef.current === userId) return
+    userIdRef.current = userId
+    clearDebounceTimers(debounceRef)
+    serverSnapshotRef.current = ''
+    migratedRef.current = false
+    // Identity change: replace local prefs from the new user's cache (or defaults).
+    // Queue via microtask so we don't trip react-hooks/set-state-in-effect on the same tick.
+    queueMicrotask(() => setPrefs(readCachedUiPreferences(userId)))
+  }, [userId])
 
   useEffect(() => {
     if (!me?.ui_preferences) return
@@ -61,7 +83,7 @@ export function useUserUiPreferences(me: UserPublic | null | undefined, token: s
       if (pending.length > 0) {
         const overrides = Object.fromEntries(pending.map((k) => [k, prev[k]])) as Partial<UserUiPreferences>
         const next: UserUiPreferences = { ...server, ...overrides }
-        writePrefsSnapshot(next, serverSnapshotRef)
+        writePrefsSnapshot(next)
         return next
       }
 
@@ -74,10 +96,10 @@ export function useUserUiPreferences(me: UserPublic | null | undefined, token: s
       }
 
       if (uiPreferencesEqual(prev, server)) return prev
-      writePrefsSnapshot(server, serverSnapshotRef)
+      writePrefsSnapshot(server)
       return server
     })
-  }, [me?.ui_preferences])
+  }, [me?.ui_preferences, writePrefsSnapshot])
 
   useEffect(() => {
     if (!token || !me || migratedRef.current) return
@@ -86,7 +108,7 @@ export function useUserUiPreferences(me: UserPublic | null | undefined, token: s
     if (Object.keys(legacy).length === 0) return
     if (!uiPreferencesEqual(server, DEFAULT_UI_PREFERENCES)) return
     migratedRef.current = true
-    void persistUserUiPreferences(token, legacy)
+    void persistUserUiPreferences(token, legacy, me.id)
       .then((next) => {
         setPrefs(next)
         serverSnapshotRef.current = JSON.stringify(next)
@@ -114,18 +136,18 @@ export function useUserUiPreferences(me: UserPublic | null | undefined, token: s
           tasks_menu_column_widths: [],
           contacts_column_widths: [],
         }
-        writePrefsSnapshot(next, serverSnapshotRef)
+        writePrefsSnapshot(next)
         return next
       })
     }
     window.addEventListener(MENU_COLUMN_RESET_EVENT, onMenuColumnReset)
     return () => window.removeEventListener(MENU_COLUMN_RESET_EVENT, onMenuColumnReset)
-  }, [])
+  }, [writePrefsSnapshot])
 
   const persistPatch = useCallback(
     (patch: Partial<UserUiPreferences>) => {
       if (!token) return
-      void persistUserUiPreferences(token, patch)
+      void persistUserUiPreferences(token, patch, userIdRef.current)
         .then((next) => {
           serverSnapshotRef.current = JSON.stringify(next)
         })
@@ -141,12 +163,12 @@ export function useUserUiPreferences(me: UserPublic | null | undefined, token: s
       setPrefs((prev) => {
         if (prefValuesEqual(prev[key], value)) return prev
         const next = { ...prev, [key]: value }
-        writePrefsSnapshot(next, serverSnapshotRef)
+        writePrefsSnapshot(next)
         persistPatch({ [key]: value } as Partial<UserUiPreferences>)
         return next
       })
     },
-    [persistPatch],
+    [persistPatch, writePrefsSnapshot],
   )
 
   const setPreferenceDebounced = useCallback(
@@ -154,7 +176,7 @@ export function useUserUiPreferences(me: UserPublic | null | undefined, token: s
       setPrefs((prev) => {
         if (prefValuesEqual(prev[key], value)) return prev
         const next = { ...prev, [key]: value }
-        writePrefsSnapshot(next, serverSnapshotRef)
+        writePrefsSnapshot(next)
         const existing = debounceRef.current[key]
         if (existing) clearTimeout(existing)
         debounceRef.current[key] = setTimeout(() => {
@@ -164,7 +186,7 @@ export function useUserUiPreferences(me: UserPublic | null | undefined, token: s
         return next
       })
     },
-    [persistPatch],
+    [persistPatch, writePrefsSnapshot],
   )
 
   return { prefs, setPreference, setPreferenceDebounced }
