@@ -17,20 +17,19 @@ _poller_thread: threading.Thread | None = None
 
 
 def _run_once() -> None:
-    from app.db import SessionLocal
+    from app.db import SessionLocal, engine
     from app.event_tracked_tasks import refresh_tracked_event_tasks
 
     db = SessionLocal()
     locked = False
     try:
-        # Skip when another replica/worker already holds the lock (Postgres only).
-        try:
-            got = db.execute(text(f"SELECT pg_try_advisory_lock({_ADVISORY_LOCK_KEY})")).scalar()
-        except Exception:
-            got = True
+        if engine.dialect.name != "postgresql":
+            refresh_tracked_event_tasks(db)
+            return
+        got = db.execute(text(f"SELECT pg_try_advisory_lock({_ADVISORY_LOCK_KEY})")).scalar()
         if not got:
             return
-        locked = bool(got)
+        locked = True
         refresh_tracked_event_tasks(db)
     except Exception:
         log.exception("event_tracked_task_job: run failed")

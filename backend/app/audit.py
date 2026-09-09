@@ -55,7 +55,12 @@ def log_event(
     user_agent: str | None = None,
     meta: dict[str, Any] | None = None,
 ) -> None:
-    """Queue an audit row on the caller's session (caller must commit)."""
+    """Queue an audit row on the caller's session.
+
+    Does not commit. Request handlers using ``get_db`` get an automatic commit on
+    successful response. Prefer putting business mutations and ``log_event`` in the
+    same transaction, then a single ``db.commit()``, for sensitive operations.
+    """
     meta_json = None
     if meta is not None:
         # Never store secrets; keep it short and structured.

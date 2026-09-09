@@ -71,7 +71,54 @@ def test_content_disposition_allowlist() -> None:
     assert content_disposition_for_mime("application/pdf", download=False) == "inline"
     assert content_disposition_for_mime("application/zip", download=False) == "attachment"
     assert content_disposition_for_mime("image/png", download=False) == "inline"
+    assert content_disposition_for_mime("image/jpeg", download=False) == "inline"
+    assert content_disposition_for_mime("image/svg+xml", download=False) == "attachment"
+    assert content_disposition_for_mime("image/bmp", download=False) == "attachment"
     assert content_disposition_for_mime("application/pdf", download=True) == "attachment"
+
+
+def test_get_db_commits_pending_work_on_success() -> None:
+    from app.db import get_db
+
+    commits: list[str] = []
+    rollbacks: list[str] = []
+
+    class FakeSession:
+        def commit(self) -> None:
+            commits.append("commit")
+
+        def rollback(self) -> None:
+            rollbacks.append("rollback")
+
+        def close(self) -> None:
+            pass
+
+    gen = get_db.__wrapped__ if hasattr(get_db, "__wrapped__") else get_db
+    # get_db is a plain generator function
+    import app.db as dbmod
+
+    fake = FakeSession()
+    original = dbmod.SessionLocal
+    dbmod.SessionLocal = lambda: fake  # type: ignore[assignment]
+    try:
+        g = dbmod.get_db()
+        next(g)
+        try:
+            next(g)
+        except StopIteration:
+            pass
+        assert commits == ["commit"]
+        assert rollbacks == []
+
+        commits.clear()
+        g2 = dbmod.get_db()
+        next(g2)
+        with pytest.raises(RuntimeError):
+            g2.throw(RuntimeError("boom"))
+        assert rollbacks == ["rollback"]
+        assert commits == []
+    finally:
+        dbmod.SessionLocal = original
 
 
 def test_totp_roundtrip(monkeypatch: pytest.MonkeyPatch) -> None:

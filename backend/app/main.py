@@ -213,6 +213,14 @@ app.add_middleware(
 app.add_middleware(WebdavPublicCORSMiddleware)
 _install_proxy_headers_middleware(app)
 
+
+@app.middleware("http")
+async def _security_headers_middleware(request, call_next):
+    response = await call_next(request)
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    return response
+
+
 app.include_router(auth.router)
 app.include_router(plugin_auth.router)
 app.include_router(webauthn.router)

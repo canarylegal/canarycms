@@ -63,8 +63,23 @@ class Base(DeclarativeBase):
 
 
 def get_db():
+    """Request-scoped session.
+
+    On a successful request, any pending work (including ``log_event`` flushes) is
+    committed. On exception the session is rolled back. Callers may still commit
+    explicitly mid-request when needed; a final commit of a clean session is a no-op.
+    """
     db = SessionLocal()
     try:
         yield db
+    except Exception:
+        db.rollback()
+        raise
+    else:
+        try:
+            db.commit()
+        except Exception:
+            db.rollback()
+            raise
     finally:
         db.close()

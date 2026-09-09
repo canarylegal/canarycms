@@ -18,18 +18,21 @@ _poller_thread: threading.Thread | None = None
 
 def _run_once() -> None:
     from app.calendar_email_alert_service import process_due_calendar_notifications
-    from app.db import SessionLocal
+    from app.db import SessionLocal, engine
 
     db = SessionLocal()
     locked = False
     try:
-        try:
-            got = db.execute(text(f"SELECT pg_try_advisory_lock({_ADVISORY_LOCK_KEY})")).scalar()
-        except Exception:
-            got = True
+        if engine.dialect.name != "postgresql":
+            n = process_due_calendar_notifications(db)
+            db.commit()
+            if n:
+                log.info("calendar_notification_job: sent %s reminder e-mail(s)", n)
+            return
+        got = db.execute(text(f"SELECT pg_try_advisory_lock({_ADVISORY_LOCK_KEY})")).scalar()
         if not got:
             return
-        locked = bool(got)
+        locked = True
         n = process_due_calendar_notifications(db)
         db.commit()
         if n:
