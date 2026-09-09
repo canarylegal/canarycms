@@ -16,13 +16,14 @@ from app.audit import log_event
 from app.auth_principal import AuthPrincipal
 from app.db import get_db
 from app.deps import require_firm_admin, require_recovery_operator
-from app.file_storage import (, path_is_under_files_root
+from app.file_storage import (
     FILES_ROOT,
     ensure_files_root,
     firm_default_signature_file_paths,
     firm_letterhead_file_paths,
     firm_portal_logo_file_paths,
     firm_quote_letterhead_file_paths,
+    path_is_under_files_root,
 )
 from app.firm_letterhead_onlyoffice import (
     FirmLetterheadKind,
