@@ -137,7 +137,11 @@ export function AdminLoginUpdatePrompt({
       aria-modal="true"
       aria-labelledby="canary-update-prompt-title"
     >
-      <div className="modal card" style={{ maxWidth: 560, padding: 20 }} onClick={(e) => e.stopPropagation()}>
+      <div
+        className="modal card loginUpdateModal"
+        style={{ maxWidth: 560 }}
+        onClick={(e) => e.stopPropagation()}
+      >
         <h2 id="canary-update-prompt-title" style={{ margin: '0 0 8px', fontSize: 18 }}>
           {finishing ? 'Update complete' : busy ? 'Updating…' : 'Update available'}
         </h2>

@@ -3,6 +3,42 @@
  * Do not push to GitHub. Loaded after index.css.
  */
 
+@font-face {
+  font-family: 'Great Vibes';
+  src: url('/canary-fonts/GreatVibes-Regular.ttf') format('truetype');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Allura';
+  src: url('/canary-fonts/Allura-Regular.ttf') format('truetype');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Sacramento';
+  src: url('/canary-fonts/Sacramento-Regular.ttf') format('truetype');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Homemade Apple';
+  src: url('/canary-fonts/HomemadeApple-Regular.ttf') format('truetype');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Satisfy';
+  src: url('/canary-fonts/Satisfy-Regular.ttf') format('truetype');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
 :root {
   --app-font-stack: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
   /* Pale modern page wash */
@@ -260,6 +296,8 @@ body {
   border-radius: 22px !important;
   box-shadow: none !important;
   overflow: visible;
+  position: relative;
+  z-index: 20;
 }
 
 .caseDocsToolbar {
@@ -415,7 +453,7 @@ body {
   gap: 14px;
 }
 
-/* Dark chrome ribbon — match case documents toolbar height */
+/* Dark chrome ribbon — height matches collapsed side menu width (do not change sidebar). */
 .mainMenuShell--mainMenu > .mainMenuFilterBar,
 .mainMenuFilterBar {
   background: var(--local-chrome) !important;
@@ -424,12 +462,20 @@ body {
   box-shadow: none !important;
   width: 100%;
   margin: 0 !important;
-  padding: 14px 18px !important;
+  /* 60px collapsed sidebar → same outer height for Cases / Quotes / Tasks pills */
+  height: var(--app-sidebar-width-collapsed);
+  min-height: var(--app-sidebar-width-collapsed);
+  max-height: var(--app-sidebar-width-collapsed);
+  padding: 0 18px !important;
   box-sizing: border-box;
+  display: flex;
+  align-items: center;
 }
 
 .mainMenuFilterBar .mainMenuFilterRow--toolbar {
   min-height: 0;
+  width: 100%;
+  align-items: center;
 }
 
 /*
@@ -585,6 +631,29 @@ html.dark .modalOverlay > .card.modal {
   background: #ffffff !important;
   border: 1px solid rgba(15, 23, 42, 0.12) !important;
   box-shadow: 0 24px 64px rgba(0, 0, 0, 0.28) !important;
+}
+
+/* Login update prompt — simple padded body (no paneHead chrome). */
+.modalOverlay > .modal.loginUpdateModal,
+.modalOverlay > .card.modal.loginUpdateModal {
+  min-width: 0 !important;
+  min-height: 0 !important;
+  height: auto !important;
+  max-height: min(90vh, 720px) !important;
+  padding: 22px 22px 18px !important;
+  resize: none !important;
+  overflow: auto !important;
+  background: #ffffff !important;
+  border: 1px solid rgba(15, 23, 42, 0.12) !important;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.28) !important;
+}
+
+.modalOverlay > .modal.loginUpdateModal > .row:has(> .btn),
+.modalOverlay > .card.modal.loginUpdateModal > .row:has(> .btn) {
+  margin: 16px 0 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
 }
 
 /* Prompt / small form modals — same chrome as New matter; never resizable */
@@ -869,8 +938,8 @@ select:focus {
 }
 
 .loginScreen .appLogo--login {
-  max-width: min(560px, 92vw);
-  max-height: 280px;
+  max-width: min(340px, 78vw);
+  max-height: 340px;
   width: auto;
   height: auto;
   filter: drop-shadow(0 12px 28px rgba(0, 0, 0, 0.35));
@@ -989,8 +1058,8 @@ select:focus {
   }
 
   .loginScreen .appLogo--login {
-    max-height: 200px;
-    max-width: min(420px, 88vw);
+    max-height: 220px;
+    max-width: min(240px, 72vw);
   }
 
   .loginActionsRow {
@@ -1069,7 +1138,7 @@ select:focus {
 }
 
 .caseLeft.caseLeft--rail > .caseMatterHero {
-  padding: 18px 16px 16px !important;
+  padding: 14px 14px 12px !important;
   margin: 0;
   border-bottom: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 0;
@@ -1077,7 +1146,7 @@ select:focus {
 }
 
 .caseMatterHero {
-  padding: 18px 16px 16px;
+  padding: 14px 14px 12px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.1);
   background: var(--local-chrome);
 }
@@ -1180,8 +1249,8 @@ select:focus {
 
 /* Client / Source / Lock — same label–value rows as the old case details card */
 .caseMatterHeroDetails {
-  margin-top: 12px;
-  gap: 6px;
+  margin-top: 10px;
+  gap: 4px;
 }
 
 .caseMatterHeroDetails .caseDetailRow {
@@ -1222,19 +1291,28 @@ select:focus {
 
 .caseMatterHeroEdit {
   width: 100%;
-  margin-top: 14px;
+  margin-top: 10px;
   justify-content: center;
+  height: 32px;
+  min-height: 32px;
+  max-height: 32px;
+  padding: 0 12px !important;
+  font-size: 0.84rem;
+  font-weight: 650;
+  line-height: 1;
+  border-radius: 9px !important;
+  box-shadow: 0 4px 12px rgba(29, 78, 216, 0.22) !important;
 }
 
 /* Equal space above/below the hero separator (must beat `.caseLeft… > .card` padding). */
 .caseLeft.caseLeft--rail > .card.caseMatterSections {
-  padding: 16px 10px 0 !important;
+  padding: 10px 10px 0 !important;
 }
 
 .caseLeft.caseLeft--rail .accordion {
   margin-top: 0;
   display: grid;
-  gap: 2px;
+  gap: 1px;
   width: 100%;
 }
 
@@ -1242,16 +1320,17 @@ select:focus {
   box-sizing: border-box;
   width: 100%;
   border: 0;
-  border-radius: 12px;
+  border-radius: 10px;
   background: transparent;
   color: #d5deee;
-  padding: 12px 10px;
+  padding: 8px 10px;
+  min-height: 36px;
   font-weight: 650;
-  font-size: 0.92rem;
+  font-size: 0.88rem;
   display: flex;
   align-items: center;
   justify-content: flex-start;
-  gap: 10px;
+  gap: 8px;
 }
 
 .caseLeft.caseLeft--rail .caseLeftNavIcon {
@@ -1294,14 +1373,17 @@ select:focus {
 }
 
 .caseLeft.caseLeft--rail .accBody {
-  margin: 0 0 8px;
+  margin: 6px 0;
   padding: 10px;
-  border-radius: 12px;
+  border-radius: 10px;
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid rgba(255, 255, 255, 0.06);
   box-sizing: border-box;
   width: 100%;
   color: #c7d0e0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .caseLeft.caseLeft--rail .accBody strong {
@@ -1320,11 +1402,124 @@ select:focus {
 
 .caseLeft.caseLeft--rail .listTitle {
   color: #edf2fb;
+  font-size: 0.86rem;
+  line-height: 1.25;
 }
 
 .caseLeft.caseLeft--rail .listCard {
   background: rgba(255, 255, 255, 0.04);
   border-color: rgba(255, 255, 255, 0.08);
+  padding: 7px 8px;
+  border-radius: 9px;
+  gap: 8px;
+}
+
+.caseLeft.caseLeft--rail .caseLeftContactsList {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.caseLeft.caseLeft--rail .caseLeftContactCard {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.caseLeft.caseLeft--rail .caseLeftContactMeta {
+  min-width: 0;
+  flex: 1;
+}
+
+.caseLeft.caseLeft--rail .caseLeftContactMeta .muted {
+  font-size: 0.75rem !important;
+  margin-top: 1px !important;
+  line-height: 1.25;
+}
+
+.caseLeft.caseLeft--rail .caseLeftCompactBtn {
+  flex: 0 0 auto;
+  align-self: center;
+  height: 28px;
+  min-height: 28px;
+  max-height: 28px;
+  padding: 0 9px !important;
+  margin: 0;
+  font-size: 0.78rem;
+  font-weight: 600;
+  line-height: 1;
+  border-radius: 7px !important;
+  box-shadow: none !important;
+}
+
+.caseLeft.caseLeft--rail .caseLeftCompactBtn.primary {
+  height: 32px;
+  min-height: 32px;
+  max-height: 32px;
+  width: 100%;
+  margin-top: 0;
+  font-size: 0.84rem;
+  font-weight: 650;
+  border-radius: 9px !important;
+  box-shadow: 0 4px 12px rgba(29, 78, 216, 0.22) !important;
+}
+
+/* Accordion action buttons — same footprint as Matter details */
+.caseLeft.caseLeft--rail .accBody .btn {
+  box-sizing: border-box;
+  height: 32px;
+  min-height: 32px;
+  max-height: 32px;
+  padding: 0 12px !important;
+  font-size: 0.84rem;
+  font-weight: 650;
+  line-height: 1;
+  border-radius: 9px !important;
+}
+
+.caseLeft.caseLeft--rail .accBody > .btn,
+.caseLeft.caseLeft--rail .accBody > .stack + .btn,
+.caseLeft.caseLeft--rail .accBody > .muted + .btn {
+  width: 100%;
+  margin-top: 0;
+}
+
+.caseLeft.caseLeft--rail .accBody .btn.primary {
+  box-shadow: 0 4px 12px rgba(29, 78, 216, 0.22) !important;
+}
+
+.caseLeft.caseLeft--rail .accBody .btn:not(.primary) {
+  box-shadow: none !important;
+}
+
+.caseLeft.caseLeft--rail .accBody .row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 0;
+  flex-wrap: nowrap;
+}
+
+.caseLeft.caseLeft--rail .accBody .row .btn {
+  flex: 1 1 0;
+  width: auto;
+  min-width: 0;
+  margin-top: 0;
+}
+
+/* Contact-row Edit stays slightly tighter than full-width CTAs */
+.caseLeft.caseLeft--rail .caseLeftContactCard .caseLeftCompactBtn:not(.primary) {
+  height: 28px;
+  min-height: 28px;
+  max-height: 28px;
+  padding: 0 9px !important;
+  font-size: 0.78rem;
+  width: auto;
+  margin-top: 0;
+  border-radius: 7px !important;
+  box-shadow: none !important;
 }
 
 /* Docs / edit panels: own rounded panel on the page wash */
@@ -1595,7 +1790,7 @@ html:has(.portalShell) body {
   width: 100%;
   max-width: none;
   margin: 0;
-  padding: 24px !important;
+  padding: 22px 24px !important;
 }
 
 .portalLayout--wide .portalBrandHeader {
@@ -1655,6 +1850,58 @@ html:has(.portalShell) body {
   border: var(--local-surface-border);
   border-radius: var(--local-surface-radius);
   box-shadow: var(--local-surface-shadow);
+}
+
+/* Preview client view: keep contact dropdown flush with adjacent button */
+.portalPreviewRow {
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: flex-end;
+}
+
+.portalPreviewContactSelect {
+  flex: 1 1 220px;
+  min-width: 0;
+  max-width: none;
+}
+
+.portalPreviewContactSelect .singleSelectDropdownTrigger,
+.portalPreviewRow .portalPreviewBtn {
+  box-sizing: border-box;
+  height: 34px;
+  min-height: 34px;
+  max-height: 34px;
+  padding-top: 0;
+  padding-bottom: 0;
+  line-height: 1.2;
+}
+
+.portalPreviewContactSelect .singleSelectDropdownTrigger {
+  padding-left: 10px;
+  padding-right: 10px;
+}
+
+.portalPreviewRow .portalPreviewBtn {
+  flex: 0 0 auto;
+  padding-left: 12px;
+  padding-right: 12px;
+  white-space: nowrap;
+}
+
+.portalPreviewContactSelect .singleSelectDropdownTriggerMain {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.portalPreviewContactSelect .singleSelectDropdownTriggerLabel {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.portalPreviewContactSelect .singleSelectDropdownTriggerHint {
+  display: none;
 }
 
 
@@ -1859,4 +2106,501 @@ html.dark .reportsDdTriggerLabel {
 
 html.dark .reportsDdTriggerSummary {
   color: #f1f5f9 !important;
+}
+
+.portalActionBadge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  line-height: 1.4;
+}
+.portalActionBadge--outstanding { background: #dbeafe; color: #1d4ed8; }
+.portalActionBadge--complete { background: #dcfce7; color: #15803d; }
+.portalActionBadge--declined { background: #fee2e2; color: #b91c1c; }
+.portalActionBadge--expired { background: #ffedd5; color: #c2410c; }
+.portalActionBadge--cancelled { background: #e2e8f0; color: #475569; }
+.portalActionBadge--inactive { background: #e2e8f0; color: #475569; }
+.portalActionBadge--neutral { background: #e2e8f0; color: #475569; }
+.portalActionBadge--kindQuote { background: #e0e7ff; color: #3730a3; }
+.portalActionBadge--kindForm { background: #dcfce7; color: #15803d; }
+.portalActionBadge--kindSign { background: #ffedd5; color: #c2410c; }
+
+.portalPage {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+
+.portalPageHeader {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.portalPageHeaderTop {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.portalPageToolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-left: auto;
+}
+
+.portalBackBtn {
+  align-self: flex-start;
+  font-size: 13px;
+  padding: 6px 10px;
+}
+
+.portalPageTitle {
+  margin: 0;
+  font-size: clamp(1.15rem, 2.2vw, 1.45rem);
+  line-height: 1.35;
+  font-weight: 650;
+  color: #0f172a;
+  letter-spacing: -0.015em;
+  max-width: 52ch;
+}
+
+.portalPageContext {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.4;
+  color: #64748b;
+  max-width: 60ch;
+}
+
+.portalSection {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.portalSectionHeading {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #64748b;
+}
+
+.portalSectionBody {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.portalEmptyState {
+  padding: 8px 0 4px;
+  line-height: 1.5;
+}
+
+.portalRowChevron {
+  flex-shrink: 0;
+  color: #94a3b8;
+  font-size: 1.25rem;
+  line-height: 1;
+  font-weight: 400;
+  transition: color 0.15s ease, transform 0.15s ease;
+}
+
+.portalMatterList,
+.portalFolderList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.portalMatterCard,
+.portalFolderCard {
+  width: 100%;
+  text-align: left;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  border-radius: 12px;
+  border: 1px solid #e2e8f0;
+  background: #fff;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+}
+
+.portalMatterCard:hover,
+.portalFolderCard:hover,
+.portalActionRow:hover:not(:disabled) {
+  border-color: #cbd5e1;
+  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.06);
+}
+
+.portalMatterCard:hover .portalRowChevron,
+.portalFolderCard:hover .portalRowChevron,
+.portalActionRow:hover:not(:disabled) .portalRowChevron {
+  color: #475569;
+  transform: translateX(2px);
+}
+
+.portalMatterCardMain,
+.portalFolderCardMain {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.portalMatterTitle {
+  font-size: 15px;
+  line-height: 1.4;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.portalMatterTodoLabel {
+  font-size: 13px;
+  line-height: 1.3;
+}
+
+.portalFolderIcon {
+  flex-shrink: 0;
+  font-size: 1.25rem;
+  line-height: 1;
+}
+
+.portalFolderMeta {
+  font-size: 13px;
+}
+
+.portalActionKind {
+  font-size: 11px;
+  color: #64748b;
+  margin-left: 6px;
+}
+
+.portalActionList {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.portalActionSection {
+  border-top: 1px solid #eef2f7;
+}
+
+.portalActionSection:first-child {
+  border-top: none;
+}
+
+.portalActionSectionToggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  margin: 0;
+  padding: 10px 2px;
+  font-weight: 600;
+  font-size: 14px;
+  color: #0f172a;
+  text-decoration: none;
+}
+
+.portalActionSectionToggle:hover {
+  color: #1e293b;
+}
+
+.portalActionSectionChevron {
+  display: inline-block;
+  width: 0.9em;
+  color: #64748b;
+  font-weight: 400;
+}
+
+.portalActionSectionTitle {
+  flex: 1;
+  text-align: left;
+}
+
+.portalActionSectionCount {
+  min-width: 1.5rem;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: #f1f5f9;
+  color: #475569;
+  font-size: 12px;
+  font-weight: 650;
+  text-align: center;
+}
+
+.portalActionSectionBody {
+  padding: 0 0 10px;
+  animation: portalSectionIn 0.16s ease-out;
+}
+
+@keyframes portalSectionIn {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .portalActionSectionBody {
+    animation: none;
+  }
+  .portalMatterCard,
+  .portalFolderCard,
+  .portalActionRow,
+  .portalRowChevron {
+    transition: none;
+  }
+}
+
+.portalActionRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #fff;
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.portalActionRowMain {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+
+.portalActionRowTitle {
+  font-weight: 600;
+  color: #0f172a;
+  line-height: 1.35;
+}
+
+.portalBreadcrumb {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  margin: -6px 0 4px;
+  font-size: 13px;
+}
+
+.portalBreadcrumbPart {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.portalFilesTable {
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  overflow: hidden;
+  background: #fff;
+}
+
+.portalFilesTable .tr {
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  min-height: 0;
+  border-bottom: none;
+}
+
+.portalFilesTable .tr.th {
+  background: #f8fafc;
+  border-bottom: 1px solid #e2e8f0;
+  padding-top: 8px;
+  padding-bottom: 8px;
+  font-size: 12px;
+  color: #64748b;
+}
+
+.portalFilesTableRow {
+  border-top: 1px solid #f1f5f9;
+  transition: background 0.12s ease;
+}
+
+.portalFilesTableRow:hover {
+  background: #f8fafc;
+}
+
+.portalFilesTable .td,
+.portalFilesTable .thCell {
+  padding: 0;
+  align-self: center;
+  min-width: 0;
+}
+
+.portalFilesTable .td {
+  overflow: visible;
+  text-overflow: unset;
+  white-space: normal;
+}
+
+.portalFilesTableName {
+  font-weight: 550;
+  color: #0f172a;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.portalFilesTableSizeCol {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.portalFilesTableActionsCol,
+.portalFilesTableActions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: nowrap;
+  gap: 6px;
+  overflow: visible;
+  white-space: nowrap;
+}
+
+.portalFilesTableActionsCol .btn,
+.portalFilesTableActions .btn {
+  flex: 0 0 auto;
+  padding: 5px 10px;
+  font-size: 13px;
+  line-height: 1.2;
+}
+
+.portalFilesTableIconCol {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+}
+
+.portalFilesTableIconCol .docsTypeIcon {
+  width: 20px;
+  height: 20px;
+  font-size: 18px;
+  line-height: 1;
+}
+
+@media (max-width: 640px) {
+  .portalPageTitle {
+    max-width: none;
+  }
+}
+
+.canarySignFieldOverlay {
+  position: absolute;
+  box-sizing: border-box;
+  margin: 0;
+  padding: 2px 4px;
+  border: 2px solid;
+  border-radius: 4px;
+  color: #0f172a;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.15;
+  overflow: hidden;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  z-index: 2;
+}
+.canarySignFieldOverlay--selected {
+  border-style: solid;
+  z-index: 3;
+}
+.canarySignFieldOverlay--dragging {
+  cursor: grabbing !important;
+  opacity: 0.92;
+  z-index: 4;
+}
+.canarySignFieldOverlay__label {
+  opacity: 0.95;
+  pointer-events: none;
+  padding: 0 2px;
+  font-size: clamp(9px, 28%, 13px);
+  font-weight: 700;
+}
+.canarySignFieldOverlay__value {
+  pointer-events: none;
+  max-width: 100%;
+  max-height: 100%;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 0 2px;
+}
+.canarySignFieldOverlay__value--plain {
+  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+  font-weight: 500;
+  font-size: clamp(10px, 55%, 18px);
+  white-space: nowrap;
+  letter-spacing: 0.01em;
+}
+.canarySignFieldOverlay__value--script {
+  font-family: 'Great Vibes', 'Allura', cursive;
+  font-size: clamp(12px, 70%, 28px);
+  font-weight: 400;
+  white-space: nowrap;
+}
+.canarySignFieldOverlay__resize {
+  position: absolute;
+  right: -5px;
+  bottom: -5px;
+  width: 12px;
+  height: 12px;
+  border-radius: 2px;
+  background: #0f172a;
+  border: 2px solid #fff;
+  cursor: nwse-resize;
+  z-index: 5;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.35);
+}
+.canarySignStylePreview {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 88px;
+  margin-bottom: 8px;
+  padding: 12px 16px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #fff;
+  font-size: 42px;
+  line-height: 1.2;
+  color: #0f172a;
 }

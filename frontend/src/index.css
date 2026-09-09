@@ -308,6 +308,129 @@ a {
   min-width: 0;
 }
 
+.appSidebarBrandWrap {
+  position: relative;
+  flex-shrink: 0;
+  min-width: 0;
+}
+
+button.appSidebarBrand--button {
+  width: 100%;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+button.appSidebarBrand--button:hover .appSidebarBrandName,
+button.appSidebarBrand--button:focus-visible .appSidebarBrandName {
+  opacity: 1;
+}
+
+button.appSidebarBrand--button:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--primary) 55%, transparent);
+  outline-offset: 2px;
+  border-radius: 10px;
+}
+
+.appSidebarNotifyMark {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--app-main-menu-toolbar-height);
+  height: var(--app-main-menu-toolbar-height);
+}
+
+.appSidebarNotifyBadge {
+  position: absolute;
+  /* Midway between outer corner and tight-on-bird */
+  top: 5%;
+  left: 7%;
+  right: auto;
+  /* ~20% larger than the reduced badge */
+  min-width: 0.9rem;
+  height: 0.9rem;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: #c2410c;
+  color: #fff;
+  font-size: 0.66rem;
+  font-weight: 700;
+  line-height: 0.9rem;
+  text-align: center;
+  box-shadow: 0 0 0 2px var(--local-chrome, var(--panel, #0f2744));
+  pointer-events: none;
+  transform: translate(-12%, -12%);
+}
+
+.appSidebarNotifyPanel {
+  position: fixed;
+  z-index: 90;
+  width: min(320px, calc(100vw - 24px));
+  max-height: min(420px, calc(100vh - 16px));
+  display: flex;
+  flex-direction: column;
+  background: var(--surface, #fff);
+  color: var(--text, #1e293b);
+  border: 1px solid color-mix(in srgb, var(--text) 12%, transparent);
+  border-radius: 12px;
+  box-shadow: 0 12px 40px color-mix(in srgb, #0f172a 22%, transparent);
+  overflow: hidden;
+}
+
+.appSidebarNotifyPanelHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 12px 14px 8px;
+  border-bottom: 1px solid color-mix(in srgb, var(--text) 10%, transparent);
+}
+
+.appSidebarNotifyClear {
+  font-size: 12px;
+  padding: 0;
+  min-height: 0;
+}
+
+.appSidebarNotifyEmpty {
+  padding: 18px 14px;
+  font-size: 13px;
+}
+
+.appSidebarNotifyList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+}
+
+.appSidebarNotifyItem {
+  padding: 10px 14px;
+  border-bottom: 1px solid color-mix(in srgb, var(--text) 8%, transparent);
+}
+
+.appSidebarNotifyItem:last-child {
+  border-bottom: none;
+}
+
+.appSidebarNotifyItem--unread {
+  background: color-mix(in srgb, var(--primary, #1d4ed8) 8%, transparent);
+}
+
+.appSidebarNotifyMessage {
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.appSidebarNotifyTime {
+  margin-top: 4px;
+  font-size: 11px;
+}
+
 .appSidebarBrandName {
   font-size: 1.12rem;
   font-weight: 700;
@@ -321,6 +444,19 @@ a {
   gap: 4px;
   min-width: 0;
   flex: 1 1 auto;
+}
+
+.appSidebarNavDivider {
+  flex: 0 0 auto;
+  height: 1px;
+  margin: 6px 8px;
+  background: rgba(255, 255, 255, 0.12);
+  border: 0;
+}
+
+.appSidebar--collapsed .appSidebarNavDivider {
+  margin-left: 6px;
+  margin-right: 6px;
 }
 
 .appSidebar .appBrandMark {
@@ -3222,6 +3358,9 @@ select {
 /* New / Import / Refresh + search live in .caseDocsToolbarBar (sibling above the documents card). */
 .caseDocsToolbarBar {
   flex-shrink: 0;
+  /* Above sticky .caseDocsListHead (z-index 5) so New / Import menus paint over the Description row. */
+  position: relative;
+  z-index: 20;
 }
 
 .caseDocsToolbar {
@@ -3237,7 +3376,7 @@ select {
   flex-shrink: 0;
   background: transparent;
   position: relative;
-  z-index: 2;
+  z-index: 1;
 }
 
 .caseDocsToolbarMain {
@@ -3282,6 +3421,15 @@ select {
   border-radius: 10px;
   box-shadow: 0 12px 30px rgba(15, 23, 42, 0.12);
   padding: 4px 0;
+}
+
+/* Escapes case docs sticky header stacking — rendered via createPortal on document.body */
+.caseToolbarDropdown.caseToolbarDropdown--portal {
+  position: fixed;
+  top: auto;
+  left: auto;
+  margin-top: 0;
+  z-index: 5000;
 }
 
 .caseToolbarDropdownItem {
@@ -5824,6 +5972,7 @@ html.dark .emlPreviewBodyWrap {
 
 .portalFilesTable .tr {
   align-items: center;
+  min-height: 0;
 }
 
 .portalPendingApprovalRow {
@@ -5853,15 +6002,14 @@ html.dark .emlPreviewBodyWrap {
 
   .portalFilesTable .tr:not(.th) {
     display: grid;
-    grid-template-columns: 32px 1fr !important;
+    grid-template-columns: 32px minmax(0, 1fr) !important;
     grid-template-areas:
       'icon name'
-      'icon folder'
       'icon size'
       'actions actions';
     gap: 6px 10px;
-    padding: 12px;
-    align-items: start;
+    padding: 10px;
+    align-items: center;
   }
 
   .portalFilesTable .portalFilesTableIconCol {
@@ -5872,33 +6020,25 @@ html.dark .emlPreviewBodyWrap {
     grid-area: name;
     font-weight: 600;
     word-break: break-word;
+    white-space: normal;
   }
 
   .portalFilesTable .tr:not(.th) > .td:nth-child(3) {
-    grid-area: folder;
+    grid-area: size;
     font-size: 13px;
+    text-align: left;
   }
 
   .portalFilesTable .tr:not(.th) > .td:nth-child(3)::before {
-    content: 'Folder: ';
-    font-weight: 600;
-  }
-
-  .portalFilesTable .tr:not(.th) > .td:nth-child(4) {
-    grid-area: size;
-    font-size: 13px;
-  }
-
-  .portalFilesTable .tr:not(.th) > .td:nth-child(4)::before {
     content: 'Size: ';
     font-weight: 600;
   }
 
-  .portalFilesTable .tr:not(.th) > .td:nth-child(5) {
+  .portalFilesTable .tr:not(.th) > .td:nth-child(4) {
     grid-area: actions;
     justify-content: flex-start;
     flex-wrap: wrap;
-    padding-top: 4px;
+    padding-top: 2px;
   }
 
   .portalPendingApprovalDecline {

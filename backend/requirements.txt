@@ -18,3 +18,4 @@ icalendar>=5.0.0
 extract-msg>=0.48.0,<0.60
 webauthn>=2.2.0,<3
 pikepdf>=9.0.0,<10
+Pillow>=10.0.0,<12

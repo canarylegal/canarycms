@@ -15,7 +15,7 @@ from app.alert_dispatch import AlertKind, dispatch_alert, firm_alerts_configured
 from app.portal_notifications import ALERTS_NOT_CONFIGURED_MSG, contact_wants_notification
 from app.portal_case import require_case_portal_enabled
 from app.file_storage import sanitize_folder_path
-from app.models import Case, Contact, ContactPortalAccess, ContactPortalGrant, User
+from app.models import Case, CaseContact, Contact, ContactPortalAccess, ContactPortalGrant, User
 from app.portal_service import (
     contact_display_name,
     default_grant_label,
@@ -172,6 +172,28 @@ def update_contact_portal_notification_prefs(
     )
 
 
+def _require_matter_portal_for_access_action(
+    db: Session,
+    *,
+    user: User,
+    contact_id: uuid.UUID,
+    case_id: uuid.UUID | None,
+) -> None:
+    """Matter contact UI passes case_id — refuse if that matter's portal is off."""
+    if case_id is None:
+        return
+    require_case_access(case_id, user, db)
+    require_case_portal_enabled(db, case_id)
+    on_case = db.execute(
+        select(CaseContact.id).where(CaseContact.case_id == case_id, CaseContact.contact_id == contact_id)
+    ).scalar_one_or_none()
+    if on_case is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Contact is not on this matter",
+        )
+
+
 @router.post("/access", response_model=ContactPortalAccessCreateOut, status_code=status.HTTP_201_CREATED)
 def create_contact_portal_access(
     contact_id: uuid.UUID,
@@ -180,6 +202,7 @@ def create_contact_portal_access(
     db: Session = Depends(get_db),
 ) -> ContactPortalAccessCreateOut:
     _get_contact_or_404(db, contact_id)
+    _require_matter_portal_for_access_action(db, user=user, contact_id=contact_id, case_id=payload.case_id)
     contact = db.get(Contact, contact_id)
     assert contact is not None
     existing = db.execute(select(ContactPortalAccess).where(ContactPortalAccess.contact_id == contact_id)).scalar_one_or_none()
@@ -209,6 +232,7 @@ def create_contact_portal_access(
         action=action,
         entity_type="contact",
         entity_id=str(contact_id),
+        meta={"case_id": str(payload.case_id)} if payload.case_id else None,
     )
     email_sent = False
     email_skip_reason: str | None = None
@@ -248,6 +272,7 @@ def rotate_contact_portal_access(
     db: Session = Depends(get_db),
 ) -> ContactPortalAccessCreateOut:
     _get_contact_or_404(db, contact_id)
+    _require_matter_portal_for_access_action(db, user=user, contact_id=contact_id, case_id=payload.case_id)
     contact = db.get(Contact, contact_id)
     assert contact is not None
     row = db.execute(select(ContactPortalAccess).where(ContactPortalAccess.contact_id == contact_id)).scalar_one_or_none()
@@ -272,6 +297,7 @@ def rotate_contact_portal_access(
         action="contact.portal.access.rotate",
         entity_type="contact",
         entity_id=str(contact_id),
+        meta={"case_id": str(payload.case_id)} if payload.case_id else None,
     )
     email_sent = False
     email_skip_reason: str | None = None

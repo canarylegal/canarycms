@@ -4,6 +4,7 @@ import './index.css'
 import './local-modern.css'
 import { applyStoredTheme } from './theme'
 import { DialogProvider } from './DialogProvider'
+import { NotificationsProvider } from './NotificationsProvider'
 
 applyStoredTheme()
 import EditorPage from './EditorPage.tsx'
@@ -64,7 +65,12 @@ if (!el) {
   const searchParams = new URLSearchParams(window.location.search)
   const ledgerCaseId = searchParams.get('ledger')
 
-  if (window.location.pathname === '/portal' || /^\/portal\/q\/[^/]+$/i.test(window.location.pathname) || /^\/portal\/f\/[^/]+$/i.test(window.location.pathname)) {
+  if (
+    window.location.pathname === '/portal' ||
+    /^\/portal\/q\/[^/]+$/i.test(window.location.pathname) ||
+    /^\/portal\/f\/[^/]+$/i.test(window.location.pathname) ||
+    /^\/portal\/s\/[^/]+$/i.test(window.location.pathname)
+  ) {
     document.documentElement.style.zoom = '1'
     // Client portal must not inherit staff Appearance page-bg / dark mode.
     document.documentElement.classList.remove('dark')
@@ -153,7 +159,9 @@ if (!el) {
         <StrictMode>
           <AppErrorBoundary>
             <DialogProvider>
-              <App />
+              <NotificationsProvider>
+                <App />
+              </NotificationsProvider>
             </DialogProvider>
           </AppErrorBoundary>
         </StrictMode>,

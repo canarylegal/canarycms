@@ -9,7 +9,7 @@ type MarkProps = {
   size?: 'toolbar' | 'sidebar' | 'login'
 }
 
-/** Circular Canary app icon from ``public/icons/``. */
+/** App icon mark (rounded square) from ``public/icons/`` — no wordmark. */
 export function CanaryMark({ className, size = 'toolbar' }: MarkProps) {
   const px = size === 'login' ? 48 : size === 'sidebar' ? 44 : 28
   const src =

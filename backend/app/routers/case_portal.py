@@ -192,6 +192,10 @@ def list_case_portal_folder_share_contacts(
     case_id: uuid.UUID,
     folder_path: str = Query(default=""),
     grant_scope: str = Query(default="folder"),
+    require_portal_access: bool = Query(
+        default=True,
+        description="When false, include matter contacts without portal access (for quote/form/sign send).",
+    ),
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> list[CasePortalFolderShareContactOut]:
@@ -213,7 +217,8 @@ def list_case_portal_folder_share_contacts(
         if not cc.contact_id or cc.contact_id in seen:
             continue
         access = access_by_contact.get(cc.contact_id)
-        if access is None or not portal_access_is_active(access):
+        access_active = access is not None and portal_access_is_active(access)
+        if require_portal_access and not access_active:
             continue
         seen.add(cc.contact_id)
         if matter_scope:
@@ -227,6 +232,7 @@ def list_case_portal_folder_share_contacts(
                 contact_name=(cc.name or "").strip() or "Contact",
                 has_grant=grant is not None,
                 grant_id=grant.id if grant else None,
+                portal_access_active=access_active,
             )
         )
     return out

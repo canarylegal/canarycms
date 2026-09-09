@@ -330,8 +330,8 @@ export function CasePortalPanel({ token, caseId, onFilesChanged }: Props) {
           </div>
         ) : null}
         {previewContacts.length > 0 ? (
-          <div className="row" style={{ gap: 8, flexWrap: 'wrap', alignItems: 'flex-end' }}>
-            <div style={{ flex: '1 1 220px', minWidth: 0 }}>
+          <div className="row portalPreviewRow">
+            <div className="portalPreviewContactSelect">
               <SingleSelectDropdown
                 label="Contact to preview"
                 options={previewContactOptions}
@@ -345,7 +345,7 @@ export function CasePortalPanel({ token, caseId, onFilesChanged }: Props) {
             </div>
             <button
               type="button"
-              className="btn primary"
+              className="btn primary portalPreviewBtn"
               disabled={previewBusy || busy || !previewContactId}
               onClick={() => void openClientPreview()}
             >

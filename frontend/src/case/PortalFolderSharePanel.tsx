@@ -67,7 +67,7 @@ export function PortalFolderSharePanel({ token, caseId, folderPath, onChanged }:
         const payload: ContactPortalGrantCreateIn = {
           case_id: caseId,
           folder_path: folderPath,
-          label: folderLabel === 'Home' ? null : folderLabel,
+          label: null,
           can_download: true,
           can_upload: true,
           send_email: sendEmail,

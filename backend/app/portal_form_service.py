@@ -22,7 +22,6 @@ from app.models import (
     Case,
     CaseContact,
     Contact,
-    ContactPortalAccess,
     File,
     FileCategory,
     PortalFormFieldType,
@@ -34,7 +33,12 @@ from app.models import (
 )
 from app.portal_activity import log_portal_activity
 from app.portal_notifications import notify_portal_staff_form_completed
-from app.portal_service import client_matter_description, contact_display_name, portal_access_is_active, resolve_matter_contact_email
+from app.portal_service import (
+    client_matter_description,
+    contact_display_name,
+    ensure_contact_portal_access_for_delivery,
+    resolve_matter_contact_email,
+)
 from app.portal_case import require_case_portal_enabled
 from app.portal_notifications import ALERTS_NOT_CONFIGURED_MSG
 from app.quote_portal_service import pick_portal_grant_for_case
@@ -253,9 +257,11 @@ def send_form_to_contact(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Contact not found")
     email = resolve_matter_contact_email(db, case_id=case_id, contact_id=contact_id)
 
-    access = db.execute(select(ContactPortalAccess).where(ContactPortalAccess.contact_id == contact_id)).scalar_one_or_none()
-    if access is None or not portal_access_is_active(access):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Contact does not have active portal access")
+    _access, newly_provisioned, access_code = ensure_contact_portal_access_for_delivery(
+        db,
+        contact_id=contact_id,
+        actor_user_id=actor.id,
+    )
 
     # Forms are delivery-scoped — folder grants are optional (used for portal navigation when present).
     grant = pick_portal_grant_for_case(db, case_id=case_id, contact_id=contact_id)
@@ -306,6 +312,7 @@ def send_form_to_contact(
             "form_name": template.name,
             "matter_label": client_matter_description(case),
             "portal_url": form_url,
+            **({"access_code": access_code} if newly_provisioned and access_code else {}),
         },
         actor_user_id=actor.id,
     )
