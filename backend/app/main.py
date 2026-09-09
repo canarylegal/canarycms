@@ -5,6 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app import models  # noqa: F401
+from app import portal_grant_views  # noqa: F401 — register ContactPortalGrantView on metadata
 from app.build_metadata import effective_build_commit
 from app.canary_public_url import get_canary_public_base
 from app.calendar_notification_job import start_calendar_notification_job

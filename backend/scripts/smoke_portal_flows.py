@@ -3,10 +3,17 @@
 
 Runs against the live backend (default http://127.0.0.1:8000 inside compose).
 
-  docker compose --profile prod exec backend \\
-    python scripts/smoke_portal_flows.py
+Preferred (repo root):
+
+  make smoke-portal
+  make smoke-portal-ci          # also ensure matter 000002 fixture
+
+Or:
+
+  docker compose exec backend python scripts/smoke_portal_flows.py
 
 Optional:
+
   PORTAL_SMOKE_BASE=http://127.0.0.1:8000
   CASE_NUMBER=000002
 """

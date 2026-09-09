@@ -8,6 +8,7 @@ Guides for deploying, operating, and troubleshooting a Canary installation.
 | [TROUBLESHOOTING.md](TROUBLESHOOTING.md) | Developers | Docker dev: 502 on Vite proxy, LAN access, firewall |
 | [ONLYOFFICE_BROWSER_EDIT.md](ONLYOFFICE_BROWSER_EDIT.md) | Firm IT / developers | In-browser editing with ONLYOFFICE Document Server |
 | [WEBDAV_DESKTOP_EDIT.md](WEBDAV_DESKTOP_EDIT.md) | Firm IT / developers | Desktop editing via WebDAV checkout |
+| [TESTING.md](TESTING.md) | Developers | Pytest, portal smoke (`make smoke-portal`), CI workflows |
 
 **Component guides** (live next to the code they describe):
 

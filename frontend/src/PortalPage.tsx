@@ -499,6 +499,12 @@ export default function PortalPage() {
     const data = await portalFetch<PortalBrowseOut>(`/portal/grants/${grantId}/browse${q}`, { portalToken: token })
     setBrowse(data)
     setBrowseSubfolder(data.subfolder)
+    // Mark this visit so the next session clears folder "new" badges.
+    try {
+      await portalFetch(`/portal/grants/${grantId}/viewed`, { method: 'POST', portalToken: token })
+    } catch {
+      /* non-fatal */
+    }
   }, [])
 
   const loadPendingForms = useCallback(async (token: string) => {
@@ -1267,6 +1273,7 @@ export default function PortalPage() {
       <div className="list portalMatterList">
         {matters.map((m) => {
           const todo = outstandingCountForCase(clientActions, m.caseId)
+          const newFiles = m.grants.reduce((n, g) => n + (g.new_file_count ?? 0), 0)
           return (
             <button
               key={m.caseId}
@@ -1281,7 +1288,17 @@ export default function PortalPage() {
                     {todo === 1 ? '1 action needed' : `${todo} actions needed`}
                   </div>
                 ) : null}
+                {newFiles > 0 ? (
+                  <div className="muted portalMatterNewLabel">
+                    {newFiles === 1 ? '1 new shared file' : `${newFiles} new shared files`}
+                  </div>
+                ) : null}
               </div>
+              {newFiles > 0 ? (
+                <span className="portalNewBadge" title="New since last visit">
+                  New
+                </span>
+              ) : null}
               <span className="portalRowChevron" aria-hidden>
                 ›
               </span>
@@ -1581,8 +1598,16 @@ export default function PortalPage() {
                         <div className="muted portalFolderMeta">
                           {g.can_download ? 'View & download' : 'View'}
                           {g.can_upload ? ' · Upload allowed' : ''}
+                          {(g.new_file_count ?? 0) > 0
+                            ? ` · ${g.new_file_count === 1 ? '1 new file' : `${g.new_file_count} new files`}`
+                            : ''}
                         </div>
                       </div>
+                      {(g.new_file_count ?? 0) > 0 ? (
+                        <span className="portalNewBadge" title="New since last visit">
+                          New
+                        </span>
+                      ) : null}
                       <span className="portalRowChevron" aria-hidden>
                         ›
                       </span>
@@ -1681,7 +1706,14 @@ export default function PortalPage() {
                       <DocMimeIcon mime={f.mime_type} filename={f.original_filename} />
                     </span>
                   </div>
-                  <div className="td portalFilesTableName">{f.original_filename}</div>
+                  <div className="td portalFilesTableName">
+                    {f.original_filename}
+                    {f.is_new ? (
+                      <span className="portalNewBadge portalNewBadge--inline" title="New since last visit">
+                        New
+                      </span>
+                    ) : null}
+                  </div>
                   <div className="td muted portalFilesTableSizeCol">{formatBytes(f.size_bytes)}</div>
                   <div className="td portalFilesTableActions">
                     {activeGrant?.can_download ? (

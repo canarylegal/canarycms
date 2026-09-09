@@ -2378,6 +2378,8 @@ class PortalGrantSummaryOut(BaseModel):
     label: str
     can_download: bool
     can_upload: bool
+    new_file_count: int = 0
+    last_viewed_at: datetime | None = None
 
 
 class PortalAuthOut(BaseModel):
@@ -2403,6 +2405,7 @@ class PortalFileOut(BaseModel):
     folder_display: str = ""
     created_at: datetime
     updated_at: datetime
+    is_new: bool = False
 
 
 class PortalBrowseOut(BaseModel):
@@ -2414,7 +2417,8 @@ class PortalBrowseOut(BaseModel):
     pending_docusign_signings: list[PortalDocusignSigningOut] = []
     pending_canary_signings: list["PortalCanarySignOut"] = []
     pending_portal_forms: list["PortalFormPendingOut"] = []
-
+    new_file_count: int = 0
+    last_viewed_at: datetime | None = None
 
 class PortalFormTemplateFieldIn(BaseModel):
     field_key: str = Field(min_length=1, max_length=80)
@@ -2572,6 +2576,7 @@ class CasePortalPreviewContactOut(BaseModel):
     shared_folder_count: int
     pending_quote_count: int = 0
     pending_form_count: int = 0
+    pending_canary_sign_count: int = 0
 
 
 class CasePortalPreviewIn(BaseModel):

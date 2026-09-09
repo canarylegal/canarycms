@@ -1467,6 +1467,17 @@ select:focus {
 }
 
 /* Accordion action buttons — same footprint as Matter details */
+.caseLeft.caseLeft--rail .accBody .caseLeftRailPreview {
+  gap: 4px;
+  font-size: 0.78rem;
+  line-height: 1.35;
+  color: #c7d0e0;
+}
+
+.caseLeft.caseLeft--rail .accBody .caseLeftRailPreview .muted {
+  font-size: 0.75rem;
+}
+
 .caseLeft.caseLeft--rail .accBody .btn {
   box-sizing: border-box;
   height: 32px;
@@ -2266,6 +2277,34 @@ html.dark .reportsDdTriggerSummary {
   line-height: 1.4;
   font-weight: 600;
   color: #0f172a;
+}
+
+.portalMatterNewLabel {
+  margin-top: 2px;
+  font-size: 0.8rem;
+  color: #2563eb;
+}
+
+.portalNewBadge {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: #1d4ed8;
+  background: rgba(37, 99, 235, 0.12);
+  border: 1px solid rgba(37, 99, 235, 0.22);
+  line-height: 1.2;
+}
+
+.portalNewBadge--inline {
+  margin-left: 8px;
+  vertical-align: middle;
 }
 
 .portalMatterTodoLabel {

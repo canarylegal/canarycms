@@ -66,6 +66,24 @@ function clampPlace(x: number, y: number, w: number, h: number) {
   }
 }
 
+function looksTechnicalApiDetail(msg: string): boolean {
+  return /onlyoffice|pikepdf|httpx|traceback|ConvertService|\.ashx|RuntimeError|PdfError|FileNotFoundError|ConnectionError|stack trace/i.test(
+    msg,
+  )
+}
+
+function friendlySendError(e: unknown): string {
+  const err = e as { message?: string; status?: number }
+  const raw = (err.message || '').trim() || 'Could not send for signature'
+  if (err.status === 503 && looksTechnicalApiDetail(raw)) {
+    return 'Could not convert this document for signing. Try a PDF, or check ONLYOFFICE is available.'
+  }
+  if (looksTechnicalApiDetail(raw)) {
+    return 'Could not convert this document for signing. Try a PDF, or check ONLYOFFICE is available.'
+  }
+  return raw
+}
+
 export function SendCanarySignModal({
   token,
   caseId,
@@ -89,6 +107,7 @@ export function SendCanarySignModal({
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
+  const [formFieldsWarning, setFormFieldsWarning] = useState<string | null>(null)
   const [fillableFields, setFillableFields] = useState<CanarySignAcroFormFieldOut[]>([])
   /** null = not chosen yet; required before send when fillableFields.length > 0 */
   const [retainFillableForm, setRetainFillableForm] = useState<boolean | null>(null)
@@ -119,6 +138,7 @@ export function SendCanarySignModal({
     if (!open) return
     setErr(null)
     setNotice(null)
+    setFormFieldsWarning(null)
     setSubject(existing?.subject || fileName)
     setOrderMode((existing?.order_mode as 'parallel' | 'sequential') || 'parallel')
     setExpiresInDays(14)
@@ -231,6 +251,7 @@ export function SendCanarySignModal({
     let cancelled = false
     setFillableFields([])
     setRetainFillableForm(null)
+    setFormFieldsWarning(null)
     void (async () => {
       try {
         const rows = await apiFetch<CanarySignAcroFormFieldOut[]>(
@@ -239,7 +260,12 @@ export function SendCanarySignModal({
         )
         if (!cancelled) setFillableFields(rows || [])
       } catch {
-        if (!cancelled) setFillableFields([])
+        if (!cancelled) {
+          setFillableFields([])
+          setFormFieldsWarning(
+            'Could not check this file for fillable form fields. Document conversion or preview may have failed — try a PDF, or check ONLYOFFICE is available.',
+          )
+        }
       }
     })()
     return () => {
@@ -433,7 +459,7 @@ export function SendCanarySignModal({
       setNotice(amendFromId ? 'Amended signing request sent.' : 'Document sent for signature.')
       onSent?.()
     } catch (e: unknown) {
-      setErr((e as { message?: string }).message ?? 'Could not send for signature')
+      setErr(friendlySendError(e))
     } finally {
       setBusy(false)
     }
@@ -489,6 +515,7 @@ export function SendCanarySignModal({
         <div className="stack modalBodyScroll" style={{ marginTop: 12, gap: 12 }}>
           {err ? <div className="error">{err}</div> : null}
           {notice ? <div className="notice">{notice}</div> : null}
+          {formFieldsWarning ? <div className="notice">{formFieldsWarning}</div> : null}
           {recipientsNeedingPortal.length > 0 ? (
             <div className="notice">
               Portal access will be enabled for{' '}

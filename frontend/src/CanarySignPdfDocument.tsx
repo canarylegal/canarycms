@@ -71,6 +71,8 @@ type Props = {
     id: string,
     info: { page: number; x_pct: number; y_pct: number; w_pct: number; h_pct: number },
   ) => void
+  /** Fired when the document fails to load or render (friendly message). */
+  onError?: (message: string) => void
   className?: string
 }
 
@@ -117,20 +119,31 @@ export function CanarySignPdfDocument({
   onOverlayClick,
   onOverlayMove,
   onOverlayResize,
+  onError,
   className,
 }: Props) {
   const hostRef = useRef<HTMLDivElement>(null)
   const dragRef = useRef<DragState | null>(null)
+  const onErrorRef = useRef(onError)
+  onErrorRef.current = onError
   const [pages, setPages] = useState<PageView[]>([])
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState<string | null>(null)
   const [draggingId, setDraggingId] = useState<string | null>(null)
+  const [retryKey, setRetryKey] = useState(0)
+  const [visiblePage, setVisiblePage] = useState(1)
+
+  function reportError(message: string) {
+    setErr(message)
+    onErrorRef.current?.(message)
+  }
 
   useEffect(() => {
     let cancelled = false
     setPages([])
     setErr(null)
     setLoading(true)
+    setVisiblePage(1)
 
     void (async () => {
       try {
@@ -138,7 +151,13 @@ export function CanarySignPdfDocument({
         applyAuthHeaders(headers, authToken)
         const res = await fetch(pdfUrl, { headers })
         if (!res.ok) {
-          if (!cancelled) setErr('Could not load document.')
+          if (!cancelled) {
+            reportError(
+              res.status === 503
+                ? 'Could not convert this document for signing. Try a PDF, or check ONLYOFFICE is available.'
+                : 'Could not load the document for preview. Check the file and try again.',
+            )
+          }
           return
         }
         const buf = await res.arrayBuffer()
@@ -160,7 +179,7 @@ export function CanarySignPdfDocument({
           canvas.height = viewport.height
           const ctx = canvas.getContext('2d')
           if (!ctx) {
-            if (!cancelled) setErr('Canvas is unavailable in this browser.')
+            if (!cancelled) reportError('This browser cannot display the PDF preview.')
             return
           }
           await page.render({ canvasContext: ctx, viewport }).promise
@@ -172,9 +191,15 @@ export function CanarySignPdfDocument({
             dataUrl: canvas.toDataURL('image/png'),
           })
         }
-        if (!cancelled) setPages(next)
+        if (!cancelled) {
+          if (!next.length) {
+            reportError('This document has no pages to display.')
+          } else {
+            setPages(next)
+          }
+        }
       } catch {
-        if (!cancelled) setErr('Could not render document.')
+        if (!cancelled) reportError('Could not display this document. Try again, or use a PDF.')
       } finally {
         if (!cancelled) setLoading(false)
       }
@@ -183,7 +208,38 @@ export function CanarySignPdfDocument({
     return () => {
       cancelled = true
     }
-  }, [pdfUrl, authToken])
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- retryKey forces reload
+  }, [pdfUrl, authToken, retryKey])
+
+  useEffect(() => {
+    if (pages.length <= 1) return
+    const root = hostRef.current
+    if (!root) return
+    const ratios = new Map<number, number>()
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          const page = Number((entry.target as HTMLElement).dataset.page || 0)
+          if (!page) continue
+          ratios.set(page, entry.isIntersecting ? entry.intersectionRatio : 0)
+        }
+        let best = 1
+        let bestRatio = -1
+        for (const [page, ratio] of ratios) {
+          if (ratio > bestRatio) {
+            bestRatio = ratio
+            best = page
+          }
+        }
+        if (bestRatio >= 0) setVisiblePage(best)
+      },
+      { root: null, threshold: [0.15, 0.35, 0.55, 0.75] },
+    )
+    for (const el of root.querySelectorAll('.canarySignPdfPage')) {
+      observer.observe(el)
+    }
+    return () => observer.disconnect()
+  }, [pages])
 
   useEffect(() => {
     if (!onOverlayMove && !onOverlayResize) return
@@ -288,14 +344,50 @@ export function CanarySignPdfDocument({
     onOverlayClick?.(o.id)
   }
 
+  const numPages = pages.length
+
   return (
     <div
       ref={hostRef}
       className={className}
-      style={{ cursor: placing ? 'crosshair' : undefined, minHeight: 120 }}
+      style={{ cursor: placing ? 'crosshair' : undefined, minHeight: 120, position: 'relative' }}
     >
-      {loading ? <div className="muted">Loading document…</div> : null}
-      {err ? <div className="error">{err}</div> : null}
+      {numPages > 1 ? (
+        <div
+          className="muted"
+          style={{
+            position: 'sticky',
+            top: 0,
+            zIndex: 2,
+            alignSelf: 'flex-start',
+            display: 'inline-block',
+            marginBottom: 8,
+            padding: '4px 10px',
+            fontSize: 12,
+            background: 'rgba(255, 255, 255, 0.92)',
+            border: '1px solid #e2e8f0',
+            borderRadius: 6,
+            boxShadow: '0 1px 2px rgba(15, 23, 42, 0.06)',
+          }}
+          aria-live="polite"
+        >
+          Page {visiblePage} of {numPages}
+        </div>
+      ) : null}
+      {loading ? <div className="muted">Loading document preview…</div> : null}
+      {err ? (
+        <div className="stack" style={{ gap: 8 }}>
+          <div className="error">{err}</div>
+          <div>
+            <button type="button" className="btn" onClick={() => setRetryKey((k) => k + 1)}>
+              Retry
+            </button>
+          </div>
+        </div>
+      ) : null}
+      {!loading && !err && numPages === 0 ? (
+        <div className="muted">No pages to show for this document.</div>
+      ) : null}
       {pages.map((p) => (
         <div
           key={p.page}

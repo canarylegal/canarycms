@@ -20,6 +20,8 @@ from app.canary_sign_pdf import (
     ensure_snapshot_pdf_bytes,
     extract_acroform_fields,
     fill_and_flatten_acroform,
+    http_exception_for_pdf_prepare_failure,
+    http_exception_for_pdf_snapshot_failure,
     strip_acroform_fields,
     stamp_from_field_value,
     stamp_signed_pdf,
@@ -448,10 +450,7 @@ def send_signing_request(
         )
     except Exception as e:
         log.exception("Canary Sign PDF snapshot failed")
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=str(e).strip() or "Could not prepare PDF for signing",
-        ) from e
+        raise http_exception_for_pdf_snapshot_failure(e) from e
 
     detected_fields = extract_acroform_fields(pdf_bytes)
     if detected_fields:
@@ -470,10 +469,7 @@ def send_signing_request(
                 pdf_bytes = strip_acroform_fields(pdf_bytes)
             except Exception as e:
                 log.exception("Failed to strip AcroForm before Canary Sign send")
-                raise HTTPException(
-                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail=str(e).strip() or "Could not remove fillable form fields from the PDF",
-                ) from e
+                raise http_exception_for_pdf_prepare_failure(e) from e
             req.has_fillable_form = bool(extract_acroform_fields(pdf_bytes))
             if req.has_fillable_form:
                 raise HTTPException(
@@ -1256,10 +1252,7 @@ def complete_signing_request(db: Session, req: CanarySignRequest, *, detail: str
             pdf_bytes = fill_and_flatten_acroform(pdf_bytes, req.form_responses)
         except Exception as e:
             log.exception("Canary Sign form fill/flatten failed for %s", req.id)
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=str(e).strip() or "Failed to fill form fields in PDF",
-            ) from e
+            raise http_exception_for_pdf_prepare_failure(e) from e
 
     fields = _fields_for_request(db, req.id)
     stamps = []
@@ -1282,10 +1275,7 @@ def complete_signing_request(db: Session, req: CanarySignRequest, *, detail: str
         signed_bytes = stamp_signed_pdf(pdf_bytes, stamps)
     except Exception as e:
         log.exception("Canary Sign stamp failed for %s", req.id)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e).strip() or "Failed to stamp signed PDF",
-        ) from e
+        raise http_exception_for_pdf_prepare_failure(e) from e
 
     folder_path = (source.folder_path if source else "") or ""
     owner_id = req.sent_by_user_id or (source.owner_id if source else None)

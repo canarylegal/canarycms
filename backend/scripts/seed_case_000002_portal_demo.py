@@ -17,6 +17,7 @@ import os
 import sys
 import uuid
 from datetime import datetime, timezone
+from io import BytesIO
 from pathlib import Path
 
 _ROOT = Path(__file__).resolve().parents[1]
@@ -25,11 +26,12 @@ if str(_ROOT) not in sys.path:
 
 os.environ.setdefault("FILES_ROOT", "/data/files")
 
+import pikepdf
 from sqlalchemy import select
 
 from app.canary_sign_service import list_pending_for_contact, send_signing_request
 from app.db import SessionLocal
-from app.file_storage import case_file_paths, ensure_files_root, sanitize_folder_path
+from app.file_storage import FILES_ROOT, case_file_paths, ensure_files_root, sanitize_folder_path
 from app.models import (
     CanarySignOrderMode,
     Case,
@@ -54,10 +56,56 @@ CASE_NUMBER = os.getenv("CASE_NUMBER", "000002").strip().zfill(6)
 SHARED_FOLDER = "Shared with client"
 CONTACT_EMAIL_HINTS = ("sam.thomas@example.com",)
 CONTACT_NAME_HINTS = ("sam thomas",)
+_STUB_PDF = b"%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF\n"
 
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def valid_blank_pdf_bytes() -> bytes:
+    """Valid single-page PDF (pikepdf), same pattern as smoke/ensure fixture helpers."""
+    pdf = pikepdf.Pdf.new()
+    pdf.add_blank_page(page_size=(612, 792))
+    buf = BytesIO()
+    pdf.save(buf)
+    return buf.getvalue()
+
+
+def repair_stub_pdfs(db, case: Case) -> int:
+    """Replace tiny / unreadable demo stub PDFs so portal viewers and Canary Sign work."""
+    ensure_files_root()
+    good = valid_blank_pdf_bytes()
+    fixed = 0
+    rows = db.execute(select(DbFile).where(DbFile.case_id == case.id)).scalars().all()
+    for row in rows:
+        name = (row.original_filename or "").lower()
+        if not name.endswith(".pdf"):
+            continue
+        path = FILES_ROOT / row.storage_path
+        if not path.exists():
+            continue
+        raw = path.read_bytes()
+        broken = False
+        if len(raw) < 200 or raw == _STUB_PDF:
+            broken = True
+        else:
+            try:
+                with pikepdf.open(BytesIO(raw)) as _:
+                    pass
+            except Exception:
+                broken = True
+        if not broken:
+            continue
+        path.write_bytes(good)
+        row.size_bytes = len(good)
+        row.mime_type = "application/pdf"
+        row.updated_at = _utcnow()
+        db.add(row)
+        fixed += 1
+    if fixed:
+        print(f"  ~ repaired {fixed} stub PDF(s)")
+    return fixed
 
 
 def _find_contact(db, case_id: uuid.UUID) -> Contact:
@@ -117,14 +165,8 @@ def _ensure_shared_docs(db, *, case: Case, actor: User, contact: Contact) -> Con
             folder_path=folder,
         )
         paths.abs_path.parent.mkdir(parents=True, exist_ok=True)
-        import pikepdf
-        from io import BytesIO
-
-        pdf = pikepdf.Pdf.new()
-        pdf.add_blank_page(page_size=(612, 792))
-        buf = BytesIO()
-        pdf.save(buf)
-        paths.abs_path.write_bytes(buf.getvalue())
+        pdf_bytes = valid_blank_pdf_bytes()
+        paths.abs_path.write_bytes(pdf_bytes)
         db.add(
             DbFile(
                 id=file_id,
@@ -136,7 +178,7 @@ def _ensure_shared_docs(db, *, case: Case, actor: User, contact: Contact) -> Con
                 is_pinned=False,
                 original_filename="Welcome pack.pdf",
                 mime_type="application/pdf",
-                size_bytes=paths.abs_path.stat().st_size,
+                size_bytes=len(pdf_bytes),
                 version=1,
                 checksum=None,
                 created_at=_utcnow(),
@@ -387,6 +429,7 @@ def main() -> None:
         ).scalar_one()
 
         print(f"Seeding portal demo on {CASE_NUMBER} for {contact.name}…")
+        repair_stub_pdfs(db, case)
         _ensure_shared_docs(db, case=case, actor=actor, contact=contact)
         _ensure_quote(db, case=case, actor=actor, contact=contact)
         _ensure_form(db, case=case, actor=actor, contact=contact)
