@@ -2495,11 +2495,11 @@ export function CaseDetail({
               {leftOpen.accounts ? (
                 <div className="accBody">
                   {accountsPreviewErr ? (
-                    <div className="muted" style={{ fontSize: 13 }}>
+                    <div className="muted">
                       {accountsPreviewErr}
                     </div>
                   ) : accountsPreview ? (
-                    <div className="stack" style={{ gap: 6, fontSize: 14 }}>
+                    <div className="stack caseLeftRailPreview">
                       <div>
                         Client balance:{' '}
                         <strong>{ledgerSignedGb(accountsPreview.client.balance_pence)}</strong>
@@ -2510,14 +2510,13 @@ export function CaseDetail({
                       </div>
                     </div>
                   ) : (
-                    <div className="muted" style={{ fontSize: 13 }}>
+                    <div className="muted">
                       Loading…
                     </div>
                   )}
                   <button
                     type="button"
                     className="btn primary"
-                    style={{ marginTop: 8, width: '100%', boxSizing: 'border-box' }}
                     disabled={busy}
                     onClick={() => setCaseDocPanel('accounts')}
                   >
@@ -2763,7 +2762,7 @@ export function CaseDetail({
                         const net = cr - dr
                         const creditBal = net >= 0
                         return (
-                          <div className="stack" style={{ gap: 6, fontSize: 14 }}>
+                          <div className="stack caseLeftRailPreview">
                             <div>
                               Credits: <strong>{penceGb(cr)}</strong>
                             </div>
@@ -2789,7 +2788,6 @@ export function CaseDetail({
                     <button
                       type="button"
                       className="btn primary"
-                      style={{ marginTop: 8 }}
                       disabled={busy}
                       onClick={() => setCaseDocPanel('finance')}
                     >

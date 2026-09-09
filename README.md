@@ -30,6 +30,7 @@ Operational guides live under **[docs/](docs/)**:
 | [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | Docker dev: 502 errors, LAN access, firewall |
 | [docs/ONLYOFFICE_BROWSER_EDIT.md](docs/ONLYOFFICE_BROWSER_EDIT.md) | In-browser editing (ONLYOFFICE) |
 | [docs/WEBDAV_DESKTOP_EDIT.md](docs/WEBDAV_DESKTOP_EDIT.md) | Desktop editing via WebDAV |
+| [docs/TESTING.md](docs/TESTING.md) | Unit tests, portal smoke (`make smoke-portal`), CI |
 
 Mail add-on detail: [thunderbird-addin/README.md](thunderbird-addin/README.md), [frontend/public/outlook-addin/README.md](frontend/public/outlook-addin/README.md).
 

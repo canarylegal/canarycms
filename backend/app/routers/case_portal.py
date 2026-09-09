@@ -105,6 +105,7 @@ def _portal_access_by_contact_ids(
 
 
 def _preview_contacts_for_case(db: Session, case_id: uuid.UUID) -> list[CasePortalPreviewContactOut]:
+    from app.canary_sign_service import list_pending_for_contact as list_pending_canary_sign
     from app.portal_form_service import list_pending_for_contact as list_pending_portal_forms
     from app.quote_portal_service import list_pending_quote_deliveries_for_contact
 
@@ -139,7 +140,10 @@ def _preview_contacts_for_case(db: Session, case_id: uuid.UUID) -> list[CasePort
         pending_forms = sum(
             1 for s in list_pending_portal_forms(db, cc.contact_id) if s.case_id == case_id
         )
-        if shared <= 0 and pending_quotes <= 0 and pending_forms <= 0:
+        pending_signs = sum(
+            1 for req, _recip in list_pending_canary_sign(db, cc.contact_id) if req.case_id == case_id
+        )
+        if shared <= 0 and pending_quotes <= 0 and pending_forms <= 0 and pending_signs <= 0:
             continue
         seen.add(cc.contact_id)
         out.append(
@@ -149,6 +153,7 @@ def _preview_contacts_for_case(db: Session, case_id: uuid.UUID) -> list[CasePort
                 shared_folder_count=shared,
                 pending_quote_count=pending_quotes,
                 pending_form_count=pending_forms,
+                pending_canary_sign_count=pending_signs,
             )
         )
     return out

@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 import pikepdf
+from fastapi import HTTPException, status
 from PIL import Image, ImageDraw, ImageFont
 from sqlalchemy.orm import Session
 
@@ -24,6 +25,47 @@ log = logging.getLogger(__name__)
 _PDF_MIME = "application/pdf"
 _OFFICE_EXTS = {".doc", ".docx", ".odt", ".rtf", ".xls", ".xlsx", ".ods", ".ppt", ".pptx", ".odp"}
 _FONTS_DIR = Path(__file__).resolve().parent / "fonts"
+
+MSG_CONVERT_FOR_SIGNING = (
+    "Could not convert this document for signing. Try a PDF, or check ONLYOFFICE is available."
+)
+MSG_PDF_PREPARE_FAILED = "This PDF could not be prepared for signing."
+
+
+def http_exception_for_pdf_snapshot_failure(exc: BaseException) -> HTTPException:
+    """Map OnlyOffice/httpx/pikepdf failures to client-safe details (caller should log.exception)."""
+    text = str(exc).strip().lower()
+    module = type(exc).__module__ or ""
+
+    bad_pdf = (
+        module.startswith("pikepdf")
+        or "not a valid pdf" in text
+        or "invalid pdf" in text
+        or "pdf syntax" in text
+    )
+    unsupported = "unsupported format" in text
+    if bad_pdf:
+        return HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=MSG_PDF_PREPARE_FAILED)
+    if unsupported:
+        return HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=MSG_CONVERT_FOR_SIGNING)
+
+    oo_or_unavailable = (
+        module.startswith("httpx")
+        or isinstance(exc, (ConnectionError, TimeoutError, FileNotFoundError))
+        or "onlyoffice" in text
+        or "timed out" in text
+        or "timeout" in text
+        or "connection" in text
+    )
+    if oo_or_unavailable:
+        return HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=MSG_CONVERT_FOR_SIGNING)
+
+    return HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=MSG_CONVERT_FOR_SIGNING)
+
+
+def http_exception_for_pdf_prepare_failure(_exc: BaseException | None = None) -> HTTPException:
+    """Fill/stamp/flatten failures — never leak library messages to clients."""
+    return HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=MSG_PDF_PREPARE_FAILED)
 
 
 @dataclass

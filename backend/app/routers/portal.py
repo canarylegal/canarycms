@@ -181,6 +181,8 @@ def _safe_zip_name(name: str) -> str:
 
 
 def _grant_summaries(db: Session, contact_id: uuid.UUID) -> list[PortalGrantSummaryOut]:
+    from app.portal_grant_views import count_new_files_for_grant, get_grant_last_viewed_at
+
     grants = filter_grants_for_portal_enabled_cases(db, list_active_grants_for_contact(db, contact_id))
     out: list[PortalGrantSummaryOut] = []
     for g in grants:
@@ -189,6 +191,7 @@ def _grant_summaries(db: Session, contact_id: uuid.UUID) -> list[PortalGrantSumm
         if not case_title:
             case_title = "Matter"
         folder_label = grant_folder_display_name(g)
+        last_viewed = get_grant_last_viewed_at(db, contact_id=contact_id, grant_id=g.id)
         out.append(
             PortalGrantSummaryOut(
                 id=g.id,
@@ -199,6 +202,8 @@ def _grant_summaries(db: Session, contact_id: uuid.UUID) -> list[PortalGrantSumm
                 label=default_grant_label(db, g),
                 can_download=g.can_download,
                 can_upload=g.can_upload,
+                new_file_count=count_new_files_for_grant(db, g, contact_id=contact_id),
+                last_viewed_at=last_viewed,
             )
         )
     return out
@@ -580,7 +585,12 @@ def portal_download_quote_delivery_file(
     )
 
 
-def _file_out(grant: ContactPortalGrant, row: File) -> PortalFileOut:
+def _file_out(
+    grant: ContactPortalGrant,
+    row: File,
+    *,
+    is_new: bool = False,
+) -> PortalFileOut:
     from ..file_storage import decode_folder_path_for_display
 
     rel = relative_folder_under_grant(grant_folder=grant.folder_path or "", absolute_folder=row.folder_path or "")
@@ -602,6 +612,7 @@ def _file_out(grant: ContactPortalGrant, row: File) -> PortalFileOut:
         folder_display=display,
         created_at=row.created_at,
         updated_at=row.updated_at,
+        is_new=is_new,
     )
 
 
@@ -625,12 +636,17 @@ def portal_browse_grant(
     contact: Contact = Depends(get_portal_contact),
     db: Session = Depends(get_db),
 ) -> PortalBrowseOut:
+    from app.portal_grant_views import file_is_new_since, get_grant_last_viewed_at
+
     grant = get_grant_for_contact(db, contact_id=contact.id, grant_id=grant_id)
     if not grant.can_download:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Download is not allowed for this area")
     rel, child_names, files_here = browse_grant_folder(db, grant, subfolder=subfolder)
     pending = list_pending_approvals_for_grant(db, contact_id=contact.id, grant=grant)
     pending_ids = {d.file_id for d in pending}
+    last_viewed = get_grant_last_viewed_at(db, contact_id=contact.id, grant_id=grant.id)
+    visible = [f for f in files_here if f.id not in pending_ids]
+    file_outs = [_file_out(grant, f, is_new=file_is_new_since(f, last_viewed)) for f in visible]
     crumbs: list[str] = []
     if rel:
         crumbs = rel.split("/")
@@ -638,7 +654,7 @@ def portal_browse_grant(
         subfolder=rel,
         breadcrumb=crumbs,
         subfolders=child_names,
-        files=[_file_out(grant, f) for f in files_here if f.id not in pending_ids],
+        files=file_outs,
         pending_approvals=[PortalQuoteDeliveryViewOut(**portal_quote_delivery_view(db, d, grant=grant)) for d in pending],
         pending_docusign_signings=[
             PortalDocusignSigningOut(**docusign_portal_signing_view(db, req, contact_id=contact.id))
@@ -649,7 +665,23 @@ def portal_browse_grant(
             for req, _recip in list_pending_canary_sign_for_contact(db, contact.id)
         ],
         pending_portal_forms=_pending_forms_for_grant(db, contact=contact, grant=grant),
+        new_file_count=sum(1 for f in file_outs if f.is_new),
+        last_viewed_at=last_viewed,
     )
+
+
+@router.post("/grants/{grant_id}/viewed", status_code=status.HTTP_204_NO_CONTENT)
+def portal_mark_grant_viewed(
+    grant_id: uuid.UUID,
+    contact: Contact = Depends(get_portal_contact),
+    db: Session = Depends(get_db),
+) -> None:
+    from app.portal_grant_views import mark_grant_viewed
+
+    get_grant_for_contact(db, contact_id=contact.id, grant_id=grant_id)
+    mark_grant_viewed(db, contact_id=contact.id, grant_id=grant_id)
+    db.commit()
+    return None
 
 
 def _pending_forms_for_grant(db: Session, *, contact: Contact, grant: ContactPortalGrant) -> list[PortalFormPendingOut]:

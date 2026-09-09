@@ -1501,6 +1501,8 @@ export type PortalGrantSummaryOut = {
   label: string
   can_download: boolean
   can_upload: boolean
+  new_file_count?: number
+  last_viewed_at?: string | null
 }
 
 export type PortalAuthOut = {
@@ -1526,6 +1528,7 @@ export type PortalFileOut = {
   folder_display?: string
   created_at: string
   updated_at: string
+  is_new?: boolean
 }
 
 export type PortalBrowseOut = {
@@ -1537,6 +1540,8 @@ export type PortalBrowseOut = {
   pending_docusign_signings?: PortalDocusignSigningOut[]
   pending_canary_signings?: PortalCanarySignOut[]
   pending_portal_forms?: PortalFormPendingOut[]
+  new_file_count?: number
+  last_viewed_at?: string | null
 }
 
 export type PortalFormFieldType = 'section' | 'text' | 'textarea' | 'date' | 'select' | 'file'
@@ -1647,6 +1652,7 @@ export type CasePortalPreviewContactOut = {
   shared_folder_count: number
   pending_quote_count?: number
   pending_form_count?: number
+  pending_canary_sign_count?: number
 }
 
 export type CasePortalPreviewOut = {

@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
+import logging
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.orm import Session
 
-from app.canary_sign_pdf import ensure_snapshot_pdf_bytes, extract_acroform_fields
+from app.canary_sign_pdf import (
+    ensure_snapshot_pdf_bytes,
+    extract_acroform_fields,
+    http_exception_for_pdf_snapshot_failure,
+)
 from app.canary_sign_service import (
     active_signing_for_file,
     list_case_requests,
@@ -29,6 +34,8 @@ from app.schemas import (
     CanarySignStaffOptionsOut,
     CanarySignVoidIn,
 )
+
+log = logging.getLogger(__name__)
 
 router = APIRouter(tags=["canary-sign"])
 case_router = APIRouter(prefix="/cases/{case_id}/canary-sign", tags=["case-canary-sign"])
@@ -103,10 +110,8 @@ def get_canary_sign_preview_pdf(
             conversion_key=f"canary-sign-preview-{file_id}",
         )
     except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=str(e).strip() or "Could not prepare PDF preview",
-        ) from e
+        log.exception("Canary Sign preview PDF failed for file %s", file_id)
+        raise http_exception_for_pdf_snapshot_failure(e) from e
     filename = f"{(source.original_filename or 'document')[:80]}.pdf"
     return Response(
         content=raw,
@@ -135,10 +140,8 @@ def get_canary_sign_form_fields(
             conversion_key=f"canary-sign-form-fields-{file_id}",
         )
     except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=str(e).strip() or "Could not prepare PDF",
-        ) from e
+        log.exception("Canary Sign form-fields PDF failed for file %s", file_id)
+        raise http_exception_for_pdf_snapshot_failure(e) from e
     return [CanarySignAcroFormFieldOut(**f) for f in extract_acroform_fields(raw)]
 
 

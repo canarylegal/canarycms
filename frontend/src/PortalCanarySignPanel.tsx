@@ -59,6 +59,14 @@ function isLockedField(fieldType: string) {
   return fieldType === 'printed_name' || fieldType === 'date'
 }
 
+function friendlyPortalError(e: unknown, fallback: string): string {
+  const raw = ((e as { message?: string }).message || '').trim() || fallback
+  if (/onlyoffice|pikepdf|httpx|traceback|ConvertService|RuntimeError|PdfError/i.test(raw)) {
+    return 'This PDF could not be prepared for signing. Please contact the sender.'
+  }
+  return raw
+}
+
 export function PortalCanarySignPanel({
   signing: signingProp,
   portalToken,
@@ -260,7 +268,7 @@ export function PortalCanarySignPanel({
       })
       applySigning(next)
     } catch (e: unknown) {
-      setErr((e as { message?: string }).message ?? 'Could not lock the form')
+      setErr(friendlyPortalError(e, 'Could not lock the form'))
     } finally {
       setBusy(false)
     }
@@ -278,7 +286,7 @@ export function PortalCanarySignPanel({
       })
       applySigning(next)
     } catch (e: unknown) {
-      setErr((e as { message?: string }).message ?? 'Could not save form answers')
+      setErr(friendlyPortalError(e, 'Could not save form answers'))
     } finally {
       setBusy(false)
     }
@@ -332,7 +340,7 @@ export function PortalCanarySignPanel({
       })
       onCompleted()
     } catch (e: unknown) {
-      setErr((e as { message?: string }).message ?? 'Could not submit signature')
+      setErr(friendlyPortalError(e, 'Could not submit signature'))
     } finally {
       setBusy(false)
     }
@@ -353,7 +361,7 @@ export function PortalCanarySignPanel({
       })
       onDeclined()
     } catch (e: unknown) {
-      setErr((e as { message?: string }).message ?? 'Could not decline')
+      setErr(friendlyPortalError(e, 'Could not decline'))
     } finally {
       setBusy(false)
     }

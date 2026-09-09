@@ -53,6 +53,10 @@ function previewContactSummary(row: CasePortalPreviewContactOut): string {
   if (forms > 0) {
     parts.push(forms === 1 ? '1 form' : `${forms} forms`)
   }
+  const signs = row.pending_canary_sign_count ?? 0
+  if (signs > 0) {
+    parts.push(signs === 1 ? '1 signature' : `${signs} signatures`)
+  }
   return parts.length > 0 ? ` · ${parts.join(' · ')}` : ''
 }
 

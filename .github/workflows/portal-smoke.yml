@@ -1,0 +1,90 @@
+name: Portal smoke
+
+# Live HTTP smoke for client portal quote / form / Canary Sign flows.
+# Spins up db+backend, ensures the 000002 fixture, then runs smoke_portal_flows.py.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "backend/app/routers/portal.py"
+      - "backend/app/portal_*.py"
+      - "backend/app/canary_sign*.py"
+      - "backend/app/quote_portal*.py"
+      - "backend/scripts/smoke_portal_flows.py"
+      - "backend/scripts/ensure_portal_smoke_fixture.py"
+      - "scripts/smoke-portal.sh"
+      - ".github/workflows/portal-smoke.yml"
+  pull_request:
+    paths:
+      - "backend/app/routers/portal.py"
+      - "backend/app/portal_*.py"
+      - "backend/app/canary_sign*.py"
+      - "backend/app/quote_portal*.py"
+      - "backend/scripts/smoke_portal_flows.py"
+      - "backend/scripts/ensure_portal_smoke_fixture.py"
+      - "scripts/smoke-portal.sh"
+      - ".github/workflows/portal-smoke.yml"
+
+jobs:
+  portal-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Write CI .env
+        run: |
+          set -euo pipefail
+          python3 -m pip install --quiet 'cryptography>=42'
+          FERNET="$(python3 -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())')"
+          {
+            echo "COMPOSE_PROJECT_NAME=canaryci"
+            echo "COMPOSE_PROFILES="
+            echo "JWT_SECRET=$(openssl rand -hex 32)"
+            echo "DATA_ENCRYPTION_KEY=${FERNET}"
+            echo "ONLYOFFICE_JWT_SECRET=$(openssl rand -hex 32)"
+            echo "ONLYOFFICE_SECURE_LINK_SECRET=$(openssl rand -hex 32)"
+            echo "MASTER_ADMIN_LOGIN=ci-master-$(openssl rand -hex 8)"
+            echo "MASTER_ADMIN_PASSWORD=$(openssl rand -hex 24)"
+            echo "MASTER_ADMIN_REQUIRE_2FA=false"
+            echo "MASTER_ADMIN_TOTP_SECRET="
+            echo "POSTGRES_USER=canary"
+            echo "POSTGRES_PASSWORD=$(openssl rand -hex 16)"
+            echo "POSTGRES_DB=canary"
+            echo "CANARY_PUBLIC_URL=http://127.0.0.1:8080"
+            echo "CANARY_CORS_ORIGINS=http://127.0.0.1:8080"
+            echo "ONLYOFFICE_DS_PUBLIC_URL=http://127.0.0.1:8080/office-ds"
+            echo "CANARY_CALDAV_PUBLIC_URL=http://127.0.0.1:8080"
+            echo "BACKEND_PORT_PUBLISH=127.0.0.1:18000:8000"
+            echo "POSTGRES_PORT_PUBLISH=127.0.0.1:15432:5432"
+            echo "FRONTEND_PORT_PUBLISH=127.0.0.1:18080:80"
+            echo "ONLYOFFICE_PORT_PUBLISH=127.0.0.1:18084:80"
+            echo "RADICALE_PORT_PUBLISH=127.0.0.1:15232:5232"
+          } > .env
+
+      - name: Build and start db + backend
+        run: |
+          docker compose up -d --build db backend
+
+      - name: Wait for backend health
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 90); do
+            if docker compose exec -T backend python -c \
+              "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"; then
+              echo "healthy"
+              exit 0
+            fi
+            sleep 3
+          done
+          docker compose logs backend | tail -100
+          exit 1
+
+      - name: Portal smoke (ensure fixture)
+        run: ./scripts/smoke-portal.sh --ensure-fixture
+
+      - name: Dump logs on failure
+        if: failure()
+        run: docker compose logs --tail=200 backend db || true
