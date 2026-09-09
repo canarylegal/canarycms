@@ -376,7 +376,7 @@ function ensureDomPurifyEmlHooks(): void {
   domPurifyEmlHooksAdded = true
 }
 
-function sanitizeEmlHtml(html: string, allowRemote: boolean): string {
+export function sanitizeEmlHtml(html: string, allowRemote: boolean): string {
   if (typeof window === 'undefined' || !html.trim()) return ''
   if (html.length > MAX_HTML_SANITIZE_CHARS) {
     return '<p class="muted">HTML body is too large to preview safely. Use <strong>Download</strong> or <strong>Open</strong>.</p>'
@@ -391,7 +391,7 @@ function sanitizeEmlHtml(html: string, allowRemote: boolean): string {
   }
 }
 
-function wrapEmailHtmlDocument(safeBodyHtml: string, allowRemote: boolean): string {
+export function wrapEmailHtmlDocument(safeBodyHtml: string, allowRemote: boolean): string {
   const csp = allowRemote
     ? "default-src 'none'; img-src https: http: data: blob: cid:; style-src 'unsafe-inline'; font-src data: https: http:; base-uri 'none'; form-action 'none'; frame-ancestors 'none';"
     : "default-src 'none'; img-src data: blob: cid:; style-src 'unsafe-inline'; font-src data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none';"

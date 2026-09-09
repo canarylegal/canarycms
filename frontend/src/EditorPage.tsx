@@ -333,14 +333,14 @@ export default function EditorPage() {
   const [saveAsPdfNotice, setSaveAsPdfNotice] = useState<string | null>(null)
   const [saveAsPdfBusy, setSaveAsPdfBusy] = useState(false)
   const apiRef = useRef<DocsApiEditor | null>(null)
-  const pdfExportTimeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
-  const saveAsPdfNoticeTimeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const pdfExportTimeoutRef = useRef<ReturnType<typeof window.setTimeout> | undefined>(undefined)
+  const saveAsPdfNoticeTimeoutRef = useRef<ReturnType<typeof window.setTimeout> | undefined>(undefined)
   /** After downloadAs: print staging, Save as PDF (new file), or persist edits to Canary storage. */
   const pendingDownloadAsRef = useRef<'print' | 'saveAsPdf' | 'persist' | null>(null)
   const persistSaveWaitRef = useRef<{
     resolve: () => void
     reject: (err: Error) => void
-    timeout: ReturnType<typeof setTimeout>
+    timeout: ReturnType<typeof window.setTimeout>
   } | null>(null)
   /** ONLYOFFICE ``onDocumentStateChange``: true while the user is actively typing. */
   const ooEditorBusyRef = useRef(false)
