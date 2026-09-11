@@ -57,11 +57,13 @@ def test_portal_quote_delivery_view_prefers_pdf_metadata() -> None:
         size_bytes=1000,
         folder_path="Quotes",
         version=1,
+        case_id=delivery.case_id,
     )
     pdf = SimpleNamespace(
         original_filename="Quote.pdf",
         mime_type="application/pdf",
         size_bytes=500,
+        case_id=delivery.case_id,
     )
     case = SimpleNamespace(title="Test matter")
 

@@ -7,7 +7,6 @@ import pytest
 from sqlalchemy import select
 
 from app.compose_quote import _computed_from_compose_lines, resolve_compose_quote_lines
-from app.db import SessionLocal
 from app.models import (
     Case,
     FeeScale,
@@ -19,14 +18,6 @@ from app.models import (
 )
 from app.schemas import ComposeQuoteIn, ComposeQuoteLineIn, QuoteDraftCategoryIn, QuoteDraftLineIn
 
-
-@pytest.fixture
-def db():
-    session = SessionLocal()
-    try:
-        yield session
-    finally:
-        session.close()
 
 
 def test_computed_from_compose_lines_preserves_vat_pence() -> None:

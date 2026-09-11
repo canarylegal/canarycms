@@ -6,20 +6,10 @@ import pytest
 from sqlalchemy import select
 
 from app.compose_merge import merge_compose_docx_bytes, resolve_blank_email_compose_body
-from app.db import SessionLocal
 from app.docx_util import extract_plain_text_from_docx_bytes
 from app.models import Case, Precedent
 from app.precedent_constants import BLANK_EMAIL_PRECEDENT_REFERENCE, BLANK_LETTER_PRECEDENT_REFERENCE
 from app.schemas import ComposeOfficeDocumentIn
-
-
-@pytest.fixture
-def db():
-    session = SessionLocal()
-    try:
-        yield session
-    finally:
-        session.close()
 
 
 def test_blank_email_compose_resolves_to_blank_email_precedent(db) -> None:

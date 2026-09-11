@@ -7,7 +7,6 @@ from datetime import datetime, timezone
 import pytest
 from sqlalchemy import select
 
-from app.db import SessionLocal
 from app.finance_service import (
     FUNDS_RECEIVED_CATEGORY_NAME,
     PURCHASE_COSTS_CATEGORY_NAME,
@@ -17,15 +16,6 @@ from app.finance_service import (
 )
 from app.models import FinanceCategoryTemplate, FinanceItemTemplate, MatterHeadType, MatterSubType
 
-
-@pytest.fixture
-def db():
-    session = SessionLocal()
-    try:
-        yield session
-        session.rollback()
-    finally:
-        session.close()
 
 
 def test_residential_purchase_default_finance_template(db) -> None:

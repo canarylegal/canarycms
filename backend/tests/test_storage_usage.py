@@ -14,7 +14,7 @@ def test_category_labels_cover_all_enums() -> None:
 
 def test_parse_docker_human_size() -> None:
     assert parse_docker_human_size("696MB (virtual 4.66GB)") == 696 * 1024**2
-    assert parse_docker_human_size("4.1kB") == 4100
+    assert parse_docker_human_size("4.1kB") == int(4.1 * 1024)
 
 
 def test_walk_directory_bytes_sums_files(tmp_path: Path) -> None:
@@ -32,13 +32,14 @@ def test_measure_deployment_storage_splits_compose_and_files(tmp_path: Path, mon
 
     monkeypatch.setenv("CANARY_COMPOSE_PROJECT_DIR", str(compose))
     monkeypatch.setenv("FILES_ROOT", str(files))
+    monkeypatch.setattr("app.storage_usage.FILES_ROOT", files)
 
     class _Db:
         pass
 
     with patch("app.storage_usage.measure_postgres_logical_bytes", return_value=500), patch(
         "app.storage_usage.measure_docker_stack_usage"
-    ) as mock_stack, patch("app.storage_usage.list_compose_volume_names", return_value=[]):
+    ) as mock_stack, patch("app.docker_stack_usage.list_compose_volume_names", return_value=[]):
         from app.docker_stack_usage import DockerStackUsage
 
         mock_stack.return_value = DockerStackUsage(

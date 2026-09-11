@@ -9,7 +9,6 @@ from sqlalchemy import select
 
 from app.compose_merge import apply_quote_digital_letterhead_from_settings
 from app.compose_quote import merge_compose_quote_docx_bytes
-from app.db import SessionLocal
 from app.models import Case, FirmSettings, LetterheadStyle
 from app.schemas import ComposeQuoteIn, ComposeQuoteLineIn
 
@@ -18,14 +17,6 @@ def _has_header_media(docx_bytes: bytes) -> bool:
     with zipfile.ZipFile(io.BytesIO(docx_bytes)) as z:
         return any(n.startswith("word/media/") for n in z.namelist())
 
-
-@pytest.fixture
-def db():
-    session = SessionLocal()
-    try:
-        yield session
-    finally:
-        session.close()
 
 
 def test_apply_quote_digital_letterhead_skips_when_preprinted() -> None:

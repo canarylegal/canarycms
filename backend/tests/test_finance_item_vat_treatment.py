@@ -8,7 +8,6 @@ import pytest
 from sqlalchemy import select
 
 from app.billing_service import update_default_vat_percent
-from app.db import SessionLocal
 from app.finance_service import (
     _billing_vat_rate_bps,
     _sync_item_vat_from_treatment,
@@ -17,14 +16,6 @@ from app.finance_service import (
 from app.models import Case, FinanceCategory, FinanceItem, FeeScaleVatTreatment
 from app.schemas import FinanceItemUpdate
 
-
-@pytest.fixture
-def db():
-    session = SessionLocal()
-    try:
-        yield session
-    finally:
-        session.close()
 
 
 def test_sync_item_vat_from_treatment_computes_plus_vat() -> None:
