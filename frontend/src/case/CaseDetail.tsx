@@ -2,12 +2,10 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { createPortal } from 'react-dom'
 import { lockBodyWaitCursor, unlockBodyWaitCursor } from '../bodyCursorLock'
 import { CaseEventCreateModal } from '../CaseEventCreateModal'
-import { EventsPage } from '../EventsPage'
-import { FinancePage } from '../FinancePage'
 import { resolveContactNameWithFallback } from '../GlobalContactCreateForm'
 import { ManageCaseAccessModal } from '../ManageCaseAccessModal'
 import { MATTER_CONTACT_TYPE_OPTIONS_FALLBACK } from '../matterContactTypeOptions'
-import { apiFetch, apiUrl, applyAuthHeaders, browserAbsoluteApiUrl } from '../api'
+import { apiFetch, apiUrl, browserAbsoluteApiUrl } from '../api'
 import {
   appendOutlookWebAuthHintsForNav,
   OWA_MESSAGE_WINDOW_FEATURES,
@@ -48,8 +46,6 @@ import { isQuotePortalSendCandidate } from '../quotePortalFile'
 import { QUOTE_EMAIL_PRECEDENT_REFERENCE, type PendingCaseCompose, type PrecedentPickerState } from '../quoteEmailPrecedent'
 import { CANARY_FOLLOW_UP_STANDARD_TASK_ID } from '../standardTasks'
 import { TextPromptModal } from '../TextPromptModal'
-import { LedgerPage } from '../LedgerPage'
-import { CaseTimePanel } from '../CaseTimePanel'
 import { openOnlyOfficeCaseEditor } from '../onlyofficeEditorWindow'
 import { caseHasRevokedUserAccess, formatCaseStatusLabel, type CaseWorkflowStatus } from '../types'
 import type {
@@ -79,19 +75,15 @@ import type {
   CasePortalShareStatusOut,
   OutlookPluginPendingComposeHandoffOut,
 } from '../types'
-import { TasksTable } from '../TasksTable'
 import { useUserUiPreferences } from '../useUserUiPreferences'
 import { useColumnWidths } from '../useColumnWidths'
 import { LEGACY_AUTO_TASKS_MENU_COLUMN_WIDTHS, effectiveColumnWidths } from '../columnGridDefaults'
 import { TASKS_MENU_COLUMN_COUNT, TASKS_MENU_COLUMN_WIDTHS_DEFAULT } from '../userUiPreferences'
-import { CaseContactsAddDocForm, CaseContactsEditDocForm, LAWYER_CLIENTS_REQUIRED_MSG } from './CaseContactsDocForms'
+import { LAWYER_CLIENTS_REQUIRED_MSG } from './CaseContactsDocForms'
 import { computeDocContextMenuStyle } from './docContextMenu'
 import { dndEventHasFiles, docListPrimaryDate, formatDocFileSize, formatDocModified, matterTypeDisplayLine } from './docFormat'
 import { DocsFileDescCell, DocsFolderDescCell, folderContentsSummary } from './DocCells'
-import { financeCaseTotals, penceGb } from './financeTotals'
 import { matterContactTypeLabel } from './matterLabels'
-import { PropertyDetailsForm } from './PropertyDetailsForm'
-import { propertyTenureLabel } from './propertyLabels'
 import { EmlPreviewModal, parseEmlForPreview, type EmlPreviewData } from './emlPreview'
 import { isEmlLikeFileSummary, isEmlLikeUploadFile, isOfficeLikeFile } from './officeFiles'
 import {
@@ -107,214 +99,32 @@ import {
   portalSharedFolderMoveConfirmMessage,
   portalSharedFolderUploadNotifyMessage,
 } from './portalFolderAccess'
-import { CasePortalPanel } from './CasePortalPanel'
-import { PortalFolderSharePanel } from './PortalFolderSharePanel'
-import { NavIcon, type NavIconName } from '../NavIcon'
-
-function fileDocOwnerLabel(f: FileSummary): string {
-  return f.owner_initials ?? f.owner_display_name ?? f.owner_email ?? '—'
-}
-
-/** Abort same-origin file GETs so a stuck server/proxy cannot leave the UI on “Loading” indefinitely. */
-const CASE_FILE_FETCH_MS = 90_000
-
-function caseAuthHeaders(token: string): Headers {
-  const h = new Headers()
-  applyAuthHeaders(h, String(token ?? '').trim())
-  return h
-}
-
-async function fetchCaseFileResponse(caseId: string, fileId: string, token: string): Promise<Response> {
-  const ctrl = new AbortController()
-  const tid = window.setTimeout(() => ctrl.abort(), CASE_FILE_FETCH_MS)
-  try {
-    return await fetch(apiUrl(`/cases/${caseId}/files/${fileId}`), {
-      headers: caseAuthHeaders(token),
-      signal: ctrl.signal,
-    })
-  } finally {
-    clearTimeout(tid)
-  }
-}
-
-function fetchTimedOutMessage(e: unknown): string | null {
-  const err = e as { name?: string }
-  return err?.name === 'AbortError' ? 'Request timed out — try again or use Download.' : null
-}
-
-/** Preview only: read up to this cap (octets preserved via ISO-8859-1) so we never wait on multi‑GB .eml bodies. */
-const EML_PREVIEW_STREAM_CAP = 768 * 1024
-
-async function fetchEmlTextForPreview(caseId: string, fileId: string, token: string): Promise<string> {
-  const ctrl = new AbortController()
-  const tid = window.setTimeout(() => ctrl.abort(), CASE_FILE_FETCH_MS)
-  try {
-    const res = await fetch(apiUrl(`/cases/${caseId}/files/${fileId}`), {
-      headers: caseAuthHeaders(token),
-      signal: ctrl.signal,
-    })
-    if (res.status === 401) {
-      localStorage.removeItem('token')
-      window.location.reload()
-      return ''
-    }
-    if (!res.ok) throw new Error((await res.text()) || res.statusText)
-    if (!res.body) return await res.text()
-    const reader = res.body.getReader()
-    const decoder = new TextDecoder('iso-8859-1', { fatal: false })
-    let out = ''
-    while (out.length < EML_PREVIEW_STREAM_CAP) {
-      const { done, value } = await reader.read()
-      if (done) break
-      if (value) out += decoder.decode(value, { stream: true })
-      if (out.length >= EML_PREVIEW_STREAM_CAP) {
-        try {
-          ctrl.abort()
-        } catch {
-          /* ignore */
-        }
-        break
-      }
-    }
-    return out
-  } finally {
-    clearTimeout(tid)
-  }
-}
-
-function ledgerSignedGb(p: number): string {
-  if (p === 0) return penceGb(0)
-  return p < 0 ? `-${penceGb(-p)}` : penceGb(p)
-}
-
-const CLIENT_TYPE_SLUG = 'client'
-const LAWYERS_TYPE_SLUG = 'lawyers'
-
-function isClientMatterContact(c: CaseContactOut) {
-  return (c.matter_contact_type || '').trim().toLowerCase() === CLIENT_TYPE_SLUG
-}
-
-/** Matter sub-menu panel body: fit width, scroll vertically (no zoom shrinking). */
-function CaseDocPanelScroll({
-  children,
-  /** Stretch direct child to host height when content is short (e.g. embedded calendar). */
-  fillHost = false,
-}: {
-  children: React.ReactNode
-  fillHost?: boolean
-}) {
-  return (
-    <div className={`caseDocPanelScrollHost${fillHost ? ' caseDocPanelScrollHost--fillHost' : ''}`}>{children}</div>
-  )
-}
-
-/** Dark header chrome for case sub-menus — matches New matter modal paneHead. */
-function CaseDocPanelChrome({
-  title,
-  subtitle,
-  onClose,
-  closeLabel = 'Close',
-  closeDisabled,
-  actions,
-}: {
-  title: string
-  subtitle?: string
-  onClose: () => void
-  closeLabel?: string
-  closeDisabled?: boolean
-  actions?: React.ReactNode
-}) {
-  return (
-    <div className="caseDocPanelBar">
-      <div className="caseDocPanelBarTitle">
-        <h2>{title}</h2>
-        {subtitle ? <div className="muted">{subtitle}</div> : null}
-      </div>
-      <div className="caseDocPanelBarActions">
-        {actions}
-        <button type="button" className="btn" onClick={onClose} disabled={closeDisabled}>
-          {closeLabel}
-        </button>
-      </div>
-    </div>
-  )
-}
-
-function CaseDocsToolbarBtnIcon({ d }: { d: string }) {
-  return (
-    <svg className="caseDocsToolbarBtnIcon" width={16} height={16} viewBox="0 0 24 24" aria-hidden>
-      <path fill="currentColor" d={d} />
-    </svg>
-  )
-}
-
-const CASE_DOCS_TOOLBAR_ICONS = {
-  import: 'M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z',
-  export: 'M9 16h6v-6h4l-7-7-7 7h4zm-4 2v2h14v-2H5z',
-  portal:
-    'M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z',
-  refresh:
-    'M17.65 6.35A7.958 7.958 0 0 0 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0 1 12 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z',
-} as const
-
-type CaseLeftMenuIconName =
-  | 'overview'
-  | 'contacts'
-  | 'accounts'
-  | 'tasks'
-  | 'property'
-  | 'events'
-  | 'finance'
-
-/** Case left sub-menu icons — reuse main-nav glyphs where the same section exists. */
-function CaseLeftMenuIcon({ name }: { name: CaseLeftMenuIconName }) {
-  const navName: NavIconName | null =
-    name === 'contacts'
-      ? 'contacts'
-      : name === 'accounts'
-        ? 'accounts'
-        : name === 'tasks'
-          ? 'tasks'
-          : name === 'events'
-            ? 'calendar'
-            : name === 'finance'
-              ? 'reports'
-              : null
-  if (navName) {
-    return <NavIcon name={navName} className="caseLeftNavIcon" />
-  }
-
-  const common = {
-    className: 'caseLeftNavIcon',
-    width: 16,
-    height: 16,
-    viewBox: '0 0 24 24',
-    fill: 'none' as const,
-    xmlns: 'http://www.w3.org/2000/svg',
-    'aria-hidden': true as const,
-  }
-  if (name === 'overview') {
-    return (
-      <svg {...common}>
-        <rect x="4" y="4" width="7" height="7" rx="1.5" stroke="currentColor" strokeWidth="2" />
-        <rect x="13" y="4" width="7" height="7" rx="1.5" stroke="currentColor" strokeWidth="2" />
-        <rect x="4" y="13" width="7" height="7" rx="1.5" stroke="currentColor" strokeWidth="2" />
-        <rect x="13" y="13" width="7" height="7" rx="1.5" stroke="currentColor" strokeWidth="2" />
-      </svg>
-    )
-  }
-  // Property — no main-nav counterpart
-  return (
-    <svg {...common}>
-      <path
-        d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5.5v-6h-5v6H4a1 1 0 0 1-1-1v-9.5Z"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinejoin="round"
-      />
-    </svg>
-  )
-}
+import {
+  CASE_DOCS_TOOLBAR_ICONS,
+  CaseDocsToolbarBtnIcon,
+} from './caseDetailChrome'
+import {
+  CASE_FILE_FETCH_MS,
+  caseAuthHeaders,
+  fetchCaseFileResponse,
+  fetchEmlTextForPreview,
+  fetchTimedOutMessage,
+  fileDocOwnerLabel,
+  isClientMatterContact,
+  LAWYERS_TYPE_SLUG,
+} from './caseDetailHelpers'
+import {
+  CaseDetailAccountsPanel,
+  CaseDetailContactsPanel,
+  CaseDetailEditDetailsPanel,
+  CaseDetailEventsPanel,
+  CaseDetailFinancePanel,
+  CaseDetailPortalHubPanel,
+  CaseDetailPortalSharePanel,
+  CaseDetailPropertyPanel,
+  CaseDetailTasksPanel,
+} from './CaseDetailDocPanels'
+import { CaseDetailLeftNav } from './CaseDetailLeftNav'
 
 export type CaseOpenDocPanel = 'accounts'
 
@@ -2364,440 +2174,42 @@ export function CaseDetail({
             </button>
           </div>
 
-          <div className="card caseMatterSections">
-            <button
-              type="button"
-              className={`accHead caseLeftNavItem${caseDocPanel === 'documents' ? ' is-active' : ''}`}
-              aria-current={caseDocPanel === 'documents' ? 'page' : undefined}
-              onClick={goToOverview}
-            >
-              <CaseLeftMenuIcon name="overview" />
-              <span>Overview</span>
-            </button>
-            <div className="accordion">
-              <button
-                className={`accHead${caseDocPanel === 'contacts' ? ' is-active' : ''}`}
-                aria-expanded={leftOpen.contacts}
-                aria-current={caseDocPanel === 'contacts' ? 'page' : undefined}
-                onClick={() => toggleLeftAccordion('contacts')}
-              >
-                <CaseLeftMenuIcon name="contacts" />
-                <span>Contacts</span>
-                <span className="muted">{leftOpen.contacts ? '▾' : '▸'}</span>
-              </button>
-              {leftOpen.contacts ? (
-                <div className="accBody">
-                  <>
-                    <div className="list caseLeftContactsList">
-                        {caseContactsMenuOrder.map((cc) => (
-                          <div
-                            key={cc.id}
-                            className="listCard caseLeftContactCard"
-                            onDoubleClick={() => {
-                              if (busy) return
-                              setContactAddOpen(false)
-                              setEditSnapshot(cc)
-                              setPushToGlobal(false)
-                              setCaseDocPanel('contacts')
-                            }}
-                            onContextMenu={(e) => {
-                              e.preventDefault()
-                              setContactRowMenu({ cc, x: e.clientX, y: e.clientY })
-                            }}
-                          >
-                            <div className="caseLeftContactMeta">
-                              <div className="listTitle">{cc.name}</div>
-                              <div className="muted">
-                                {matterContactTypeLabel(cc.matter_contact_type, matterTypeOptions)}
-                              </div>
-                            </div>
-                            <button
-                              type="button"
-                              className="btn caseLeftCompactBtn"
-                              disabled={busy}
-                              onClick={() => {
-                                setContactAddOpen(false)
-                                setEditSnapshot(cc)
-                                setPushToGlobal(false)
-                                setCaseDocPanel('contacts')
-                              }}
-                            >
-                              Edit
-                            </button>
-                          </div>
-                        ))}
-                        {caseContacts.length === 0 ? <div className="muted">No contacts yet.</div> : null}
-                      </div>
-                      {contactRowMenu ? (
-                        <div
-                          ref={contactRowMenuRef}
-                          className="docContextMenu"
-                          style={{
-                            position: 'fixed',
-                            left: contactRowMenu.x,
-                            top: contactRowMenu.y,
-                            zIndex: 40,
-                          }}
-                          onMouseDown={(e) => e.stopPropagation()}
-                        >
-                          <div
-                            className="docContextItem"
-                            role="menuitem"
-                            tabIndex={0}
-                            onClick={() => {
-                              const cc = contactRowMenu.cc
-                              setContactRowMenu(null)
-                              setContactAddOpen(false)
-                              setEditSnapshot(cc)
-                              setPushToGlobal(false)
-                              setCaseDocPanel('contacts')
-                            }}
-                          >
-                            Open
-                          </div>
-                        </div>
-                      ) : null}
-                      <button
-                        type="button"
-                        className="btn primary caseLeftCompactBtn"
-                        disabled={busy}
-                        onClick={() => {
-                          setEditSnapshot(null)
-                          setMatterContactType('')
-                          setMatterContactReference('')
-                          setLawyerLinkClientIds([])
-                          setContactAddErr(null)
-                          setSelectedGlobalContactId(null)
-                          setContactAddOpen(true)
-                          setCaseDocPanel('contacts')
-                        }}
-                      >
-                        Add contact…
-                      </button>
-                  </>
-                </div>
-              ) : null}
-            </div>
-          </div>
-
-          <div className="card">
-            <div className="accordion">
-              <button
-                className={`accHead${caseDocPanel === 'accounts' ? ' is-active' : ''}`}
-                aria-expanded={leftOpen.accounts}
-                aria-current={caseDocPanel === 'accounts' ? 'page' : undefined}
-                onClick={() => toggleLeftAccordion('accounts')}
-              >
-                <CaseLeftMenuIcon name="accounts" />
-                <span>Accounts</span>
-                <span className="muted">{leftOpen.accounts ? '▾' : '▸'}</span>
-              </button>
-              {leftOpen.accounts ? (
-                <div className="accBody">
-                  {accountsPreviewErr ? (
-                    <div className="muted">
-                      {accountsPreviewErr}
-                    </div>
-                  ) : accountsPreview ? (
-                    <div className="stack caseLeftRailPreview">
-                      <div>
-                        Client balance:{' '}
-                        <strong>{ledgerSignedGb(accountsPreview.client.balance_pence)}</strong>
-                      </div>
-                      <div>
-                        Office balance:{' '}
-                        <strong>{ledgerSignedGb(accountsPreview.office.balance_pence)}</strong>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="muted">
-                      Loading…
-                    </div>
-                  )}
-                  <button
-                    type="button"
-                    className="btn primary"
-                    disabled={busy}
-                    onClick={() => setCaseDocPanel('accounts')}
-                  >
-                    View accounts
-                  </button>
-                </div>
-              ) : null}
-            </div>
-          </div>
-
-          {hasTasksMenu ? (
-            <div className="card">
-              <div className="accordion">
-                <button
-                  className={`accHead${caseDocPanel === 'tasks' ? ' is-active' : ''}`}
-                  aria-expanded={leftOpen.tasks}
-                  aria-current={caseDocPanel === 'tasks' ? 'page' : undefined}
-                  onClick={() => toggleLeftAccordion('tasks')}
-                >
-                  <CaseLeftMenuIcon name="tasks" />
-                  <span>Tasks</span>
-                  <span className="muted">{leftOpen.tasks ? '▾' : '▸'}</span>
-                </button>
-                {leftOpen.tasks ? (
-                  <div className="accBody">
-                    <div className="muted" style={{ fontSize: 13 }}>
-                      {sidebarTaskRows.length === 0 ? 'No tasks yet.' : `${sidebarTaskRows.length} task(s).`}
-                    </div>
-                    <button
-                      type="button"
-                      className="btn primary"
-                      style={{ marginTop: 8, width: '100%', boxSizing: 'border-box' }}
-                      disabled={busy}
-                      onClick={() => setCaseDocPanel('tasks')}
-                    >
-                      View tasks
-                    </button>
-                  </div>
-                ) : null}
-              </div>
-            </div>
-          ) : null}
-
-          {hasPropertyMenu ? (
-            <div className="card">
-              <div className="accordion">
-                <button
-                  className={`accHead${caseDocPanel === 'property' ? ' is-active' : ''}`}
-                  aria-expanded={leftOpen.property}
-                  aria-current={caseDocPanel === 'property' ? 'page' : undefined}
-                  onClick={() => toggleLeftAccordion('property')}
-                >
-                  <CaseLeftMenuIcon name="property" />
-                  <span>Property</span>
-                  <span className="muted">{leftOpen.property ? '▾' : '▸'}</span>
-                </button>
-                {leftOpen.property ? (
-                  <div className="accBody">
-                    {propertyLoading ? (
-                      <div className="muted">Loading…</div>
-                    ) : !propertyDetails?.has_details ? (
-                      <>
-                        <div className="muted">No details added</div>
-                        <button
-                          type="button"
-                          className="btn primary"
-                          style={{ marginTop: 8 }}
-                          disabled={busy}
-                          onClick={() => {
-                            const blank: CasePropertyPayload = {
-                              is_non_postal: false,
-                              uk: {},
-                              free_lines: ['', '', '', '', '', ''],
-                              title_numbers: [],
-                              tenure: null,
-                            }
-                            setPropertyDraft(blank)
-                            setPropertyBaseline(JSON.parse(JSON.stringify(blank)) as CasePropertyPayload)
-                            setCaseDocPanel('property')
-                          }}
-                        >
-                          Add
-                        </button>
-                      </>
-                    ) : (
-                      <>
-                        <div className="stack" style={{ gap: 4 }}>
-                          {propertyDetails.payload.title_numbers
-                            .map((t) => t.trim())
-                            .filter(Boolean)
-                            .map((t, i) => (
-                              <div key={`title-${i}`}>Title number: {t}</div>
-                            ))}
-                          {propertyTenureLabel(propertyDetails.payload.tenure ?? undefined) ? (
-                            <div>{propertyTenureLabel(propertyDetails.payload.tenure ?? undefined)}</div>
-                          ) : null}
-                          {propertyDetails.payload.existing_lender_case_contact_id ? (
-                            <div>
-                              Existing lender:{' '}
-                              {caseContacts.find((c) => c.id === propertyDetails.payload.existing_lender_case_contact_id)
-                                ?.name ?? '—'}
-                            </div>
-                          ) : null}
-                          {propertyDetails.payload.charge_date ? (
-                            <div>
-                              Charge date:{' '}
-                              {(() => {
-                                const raw = propertyDetails.payload.charge_date ?? ''
-                                const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(raw)
-                                return m ? `${m[3]}/${m[2]}/${m[1]}` : raw
-                              })()}
-                            </div>
-                          ) : null}
-                          {(propertyDetails.payload.is_non_postal
-                            ? propertyDetails.payload.free_lines
-                            : [
-                                propertyDetails.payload.uk.line1,
-                                propertyDetails.payload.uk.line2,
-                                propertyDetails.payload.uk.town,
-                                propertyDetails.payload.uk.county,
-                                propertyDetails.payload.uk.postcode,
-                                propertyDetails.payload.uk.country,
-                              ]
-                          )
-                            .map((ln) => (ln || '').trim())
-                            .filter(Boolean)
-                            .map((ln, i) => (
-                              <div key={`prop-line-${i}`}>{ln}</div>
-                            ))}
-                        </div>
-                        <button
-                          type="button"
-                          className="btn primary"
-                          style={{ marginTop: 8 }}
-                          disabled={busy}
-                          onClick={() => {
-                            const d: CasePropertyPayload = {
-                              ...propertyDetails.payload,
-                              free_lines: [...propertyDetails.payload.free_lines],
-                              title_numbers: [...propertyDetails.payload.title_numbers],
-                              tenure: propertyDetails.payload.tenure ?? null,
-                            }
-                            setPropertyDraft(d)
-                            setPropertyBaseline(JSON.parse(JSON.stringify(d)) as CasePropertyPayload)
-                            setCaseDocPanel('property')
-                          }}
-                        >
-                          Edit
-                        </button>
-                      </>
-                    )}
-                  </div>
-                ) : null}
-              </div>
-            </div>
-          ) : null}
-
-          {hasEventsMenu ? (
-            <div className="card">
-              <div className="accordion">
-                <button
-                  className={`accHead${caseDocPanel === 'events' ? ' is-active' : ''}`}
-                  aria-expanded={leftOpen.events}
-                  aria-current={caseDocPanel === 'events' ? 'page' : undefined}
-                  onClick={() => toggleLeftAccordion('events')}
-                >
-                  <CaseLeftMenuIcon name="events" />
-                  <span>Calendar</span>
-                  <span className="muted">{leftOpen.events ? '▾' : '▸'}</span>
-                </button>
-                {leftOpen.events ? (
-                  <div className="accBody">
-                    {eventsPreview ? (
-                      <div className="stack" style={{ gap: 6 }}>
-                        {eventsPreview.events.length === 0 ? (
-                          <div className="muted">No event lines yet.</div>
-                        ) : (
-                          eventsPreview.events.slice(0, 6).map((ev) => (
-                            <div key={ev.id} className="muted" style={{ fontSize: 13 }}>
-                              {ev.track_in_calendar ? (
-                                <span title="Tracked in calendar" aria-hidden style={{ marginRight: 4 }}>
-                                  🔔
-                                </span>
-                              ) : null}
-                              <strong style={{ color: 'var(--text)' }}>{ev.name}</strong>
-                              {ev.event_date
-                                ? ` · ${new Date(ev.event_date).toLocaleDateString('en-GB')}`
-                                : ' · No date'}
-                            </div>
-                          ))
-                        )}
-                        {eventsPreview.events.length > 6 ? (
-                          <div className="muted" style={{ fontSize: 12 }}>
-                            +{eventsPreview.events.length - 6} more…
-                          </div>
-                        ) : null}
-                      </div>
-                    ) : (
-                      <div className="muted">Loading…</div>
-                    )}
-                    <div className="row" style={{ marginTop: 8, gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-                      <button
-                        type="button"
-                        className="btn"
-                        disabled={busy}
-                        onClick={() => openCaseEventModal()}
-                      >
-                        New event
-                      </button>
-                      <button
-                        type="button"
-                        className="btn primary"
-                        disabled={busy}
-                        onClick={() => setCaseDocPanel('events')}
-                      >
-                        View
-                      </button>
-                    </div>
-                  </div>
-                ) : null}
-              </div>
-            </div>
-          ) : null}
-
-          {hasFinanceMenu ? (
-            <div className="card">
-              <div className="accordion">
-                <button
-                  className={`accHead${caseDocPanel === 'finance' ? ' is-active' : ''}`}
-                  aria-expanded={leftOpen.finance}
-                  aria-current={caseDocPanel === 'finance' ? 'page' : undefined}
-                  onClick={() => toggleLeftAccordion('finance')}
-                >
-                  <CaseLeftMenuIcon name="finance" />
-                  <span>Finance</span>
-                  <span className="muted">{leftOpen.finance ? '▾' : '▸'}</span>
-                </button>
-                {leftOpen.finance ? (
-                  <div className="accBody">
-                    {financePreview ? (
-                      (() => {
-                        const { dr, cr } = financeCaseTotals(financePreview)
-                        const net = cr - dr
-                        const creditBal = net >= 0
-                        return (
-                          <div className="stack caseLeftRailPreview">
-                            <div>
-                              Credits: <strong>{penceGb(cr)}</strong>
-                            </div>
-                            <div>
-                              Debits: <strong>{penceGb(dr)}</strong>
-                            </div>
-                            <div
-                              className={
-                                creditBal ? 'caseFinanceBalance caseFinanceBalance--ok' : 'caseFinanceBalance caseFinanceBalance--dr'
-                              }
-                            >
-                              Balance:{' '}
-                              <strong>
-                                {creditBal ? penceGb(net) : `-${penceGb(-net)}`}
-                              </strong>
-                            </div>
-                          </div>
-                        )
-                      })()
-                    ) : (
-                      <div className="muted">Loading…</div>
-                    )}
-                    <button
-                      type="button"
-                      className="btn primary"
-                      disabled={busy}
-                      onClick={() => setCaseDocPanel('finance')}
-                    >
-                      Edit
-                    </button>
-                  </div>
-                ) : null}
-              </div>
-            </div>
-          ) : null}
+          <CaseDetailLeftNav
+            busy={busy}
+            caseDocPanel={caseDocPanel}
+            leftOpen={leftOpen}
+            toggleLeftAccordion={toggleLeftAccordion}
+            goToOverview={goToOverview}
+            setCaseDocPanel={setCaseDocPanel}
+            caseContacts={caseContacts}
+            caseContactsMenuOrder={caseContactsMenuOrder}
+            matterTypeOptions={matterTypeOptions}
+            contactRowMenu={contactRowMenu}
+            setContactRowMenu={setContactRowMenu}
+            contactRowMenuRef={contactRowMenuRef}
+            setContactAddOpen={setContactAddOpen}
+            setEditSnapshot={setEditSnapshot}
+            setPushToGlobal={setPushToGlobal}
+            setMatterContactType={setMatterContactType}
+            setMatterContactReference={setMatterContactReference}
+            setLawyerLinkClientIds={setLawyerLinkClientIds}
+            setContactAddErr={setContactAddErr}
+            setSelectedGlobalContactId={setSelectedGlobalContactId}
+            accountsPreview={accountsPreview}
+            accountsPreviewErr={accountsPreviewErr}
+            hasTasksMenu={hasTasksMenu}
+            sidebarTaskRows={sidebarTaskRows}
+            hasPropertyMenu={hasPropertyMenu}
+            propertyLoading={propertyLoading}
+            propertyDetails={propertyDetails}
+            setPropertyDraft={setPropertyDraft}
+            setPropertyBaseline={setPropertyBaseline}
+            hasEventsMenu={hasEventsMenu}
+            eventsPreview={eventsPreview}
+            openCaseEventModal={openCaseEventModal}
+            hasFinanceMenu={hasFinanceMenu}
+            financePreview={financePreview}
+          />
 
         </div>
 
@@ -3214,511 +2626,154 @@ export function CaseDetail({
               ) : null}
               </>
               ) : caseDocPanel === 'events' && caseId ? (
-                <div className="caseDocPanelInset caseDocPanelHost stack">
-                  <CaseDocPanelChrome title="Calendar" onClose={backToDocuments} />
-                  <CaseDocPanelScroll fillHost>
-                    <EventsPage
-                      caseId={caseId}
-                      token={token}
-                      me={currentUser}
-                      embedded
-                      onRequestNewEvent={openCaseEventModal}
-                      caseLabel={
-                        caseDetail
-                          ? `${caseDetail.case_number}${caseDetail.matter_description ? ` — ${caseDetail.matter_description}` : ''}`.trim()
-                          : ''
-                      }
-                      onClose={() => {
-                        setCaseDocPanel('documents')
-                        void apiFetch<CaseEventsOut>(`/cases/${caseId}/events`, { token }).then(setEventsPreview).catch(() => {})
-                      }}
-                    />
-                  </CaseDocPanelScroll>
-                </div>
+                <CaseDetailEventsPanel
+                  caseId={caseId}
+                  token={token}
+                  currentUser={currentUser}
+                  caseDetail={caseDetail}
+                  backToDocuments={backToDocuments}
+                  openCaseEventModal={openCaseEventModal}
+                  setCaseDocPanel={setCaseDocPanel}
+                  setEventsPreview={setEventsPreview}
+                />
               ) : caseDocPanel === 'finance' && caseId ? (
-                <div className="caseDocPanelInset caseDocPanelHost stack">
-                  <CaseDocPanelChrome title="Finance" onClose={backToDocuments} />
-                  <CaseDocPanelScroll>
-                    <FinancePage
-                      caseId={caseId}
-                      token={token}
-                      embedded
-                      onSaved={() => {
-                        void apiFetch<FinanceOut>(`/cases/${caseId}/finance`, { token })
-                          .then(setFinancePreview)
-                          .catch(() => {})
-                      }}
-                    />
-                  </CaseDocPanelScroll>
-                </div>
+                <CaseDetailFinancePanel
+                  caseId={caseId}
+                  token={token}
+                  backToDocuments={backToDocuments}
+                  setFinancePreview={setFinancePreview}
+                />
               ) : caseDocPanel === 'edit-details' && caseId ? (
-                <div className="caseDocPanelInset caseDocPanelHost stack">
-                  <CaseDocPanelChrome
-                    title="Case details"
-                    onClose={backToDocuments}
-                    closeDisabled={busy}
-                  />
-                  <CaseDocPanelScroll>
-                    <div className="card caseDocEditEmbed">
-                      <div className="muted" style={{ marginBottom: 12 }}>
-                        Reference is immutable and generated automatically. Client name comes from matter contacts with type
-                        &quot;Client&quot;. Use Contacts in the left menu → Edit to change names.
-                      </div>
-                      <SingleSelectDropdown
-                        label="Matter type"
-                        options={editMatterHeadOptions}
-                        value={editMatterHeadTypeId}
-                        onChange={(v) => {
-                          setEditMatterHeadTypeId(v)
-                          setEditPracticeArea('')
-                        }}
-                        open={editCaseDropdown.isOpen('head')}
-                        onOpenChange={(next) => editCaseDropdown.setOpen('head', next)}
-                        disabled={busy}
-                        placeholder="— select —"
-                        emptyMessage={
-                          editMatterHeadOptions.length === 0
-                            ? 'No matter types available — add them under Admin → Matters.'
-                            : undefined
-                        }
-                      />
-                      {editMatterHeadTypeId ? (
-                        <SingleSelectDropdown
-                          label="Sub-type"
-                          options={editMatterSubOptions}
-                          value={editPracticeArea}
-                          onChange={setEditPracticeArea}
-                          open={editCaseDropdown.isOpen('sub')}
-                          onOpenChange={(next) => editCaseDropdown.setOpen('sub', next)}
-                          disabled={busy}
-                          placeholder="— select —"
-                          emptyMessage={
-                            editMatterSubOptions.length === 0
-                              ? 'No sub-types for this matter type — add them under Admin → Matters.'
-                              : undefined
-                          }
-                        />
-                      ) : (
-                        <p className="muted" style={{ margin: 0, fontSize: 13 }}>
-                          Choose a matter type, then pick a sub-type.
-                        </p>
-                      )}
-                      <label className="field">
-                        <span>Description</span>
-                        <input
-                          value={editMatterDescription}
-                          onChange={(e) => setEditMatterDescription(e.target.value)}
-                        />
-                      </label>
-                      <SingleSelectDropdown
-                        label="Fee earner"
-                        options={editFeeEarnerOptions}
-                        value={editFeeEarner}
-                        onChange={setEditFeeEarner}
-                        open={editCaseDropdown.isOpen('feeEarner')}
-                        onOpenChange={(next) => editCaseDropdown.setOpen('feeEarner', next)}
-                        disabled={busy}
-                        placeholder="Select fee earner"
-                        emptyMessage={editFeeEarnerOptions.length === 0 ? 'No fee earners available.' : undefined}
-                      />
-                      <SingleSelectDropdown
-                        label="Status"
-                        options={editStatusOptions}
-                        value={editCaseStatus}
-                        onChange={(v) => setEditCaseStatus(v as CaseWorkflowStatus)}
-                        open={editCaseDropdown.isOpen('status')}
-                        onOpenChange={(next) => editCaseDropdown.setOpen('status', next)}
-                        disabled={busy}
-                        placeholder="— select —"
-                      />
-                      <SingleSelectDropdown
-                        label="Source"
-                        options={editSourceOptions}
-                        value={editSourceId}
-                        onChange={setEditSourceId}
-                        open={editCaseDropdown.isOpen('source')}
-                        onOpenChange={(next) => editCaseDropdown.setOpen('source', next)}
-                        disabled={busy}
-                        placeholder="— none —"
-                      />
-                      <label className="row field" style={{ gap: 10, alignItems: 'center', cursor: busy ? 'default' : 'pointer' }}>
-                        <input
-                          type="checkbox"
-                          checked={editPortalEnabled}
-                          disabled={busy}
-                          onChange={(e) => void onEditPortalEnabledChange(e.target.checked)}
-                        />
-                        <span>
-                          Enable portal
-                          <span className="muted" style={{ display: 'block', fontSize: 13, marginTop: 2 }}>
-                            Allow folder sharing, client preview, and portal notifications for this matter.
-                          </span>
-                        </span>
-                      </label>
-                      <div className="row" style={{ justifyContent: 'flex-start', marginTop: 8 }}>
-                        <button
-                          type="button"
-                          className="btn"
-                          disabled={busy || !caseId}
-                          onClick={() => setManageAccessOpen(true)}
-                        >
-                          Manage access…
-                        </button>
-                      </div>
-                      {editCaseErr ? <div className="error">{editCaseErr}</div> : null}
-                      <div className="row" style={{ justifyContent: 'flex-end', marginTop: 12, gap: 8 }}>
-                        <button className="btn" onClick={backToDocuments} disabled={busy}>
-                          Cancel
-                        </button>
-                        <button
-                          className="btn primary"
-                          disabled={busy || !editMatterDescription.trim() || !editFeeEarner}
-                          onClick={async () => {
-                            if (!editFeeEarner) {
-                              setEditCaseErr('Select a fee earner.')
-                              return
-                            }
-                            setBusy(true)
-                            setEditCaseErr(null)
-                            try {
-                              await apiFetch(`/cases/${caseId}`, {
-                                token,
-                                method: 'PATCH',
-                                json: {
-                                  matter_description: editMatterDescription.trim(),
-                                  fee_earner_user_id: editFeeEarner,
-                                  status: editCaseStatus,
-                                  source_id: editSourceId.trim() ? editSourceId.trim() : null,
-                                  ...(editPracticeArea.trim()
-                                    ? { matter_sub_type_id: editPracticeArea.trim() }
-                                    : { matter_sub_type_id: null, matter_head_type_id: null }),
-                                  portal_enabled: editPortalEnabled,
-                                },
-                              })
-                              backToDocuments()
-                              onRefresh()
-                              onCaseListInvalidate?.()
-                            } catch (e: unknown) {
-                              const err = e as { message?: string }
-                              setEditCaseErr(err?.message ?? 'Failed to update case')
-                            } finally {
-                              setBusy(false)
-                            }
-                          }}
-                        >
-                          Save
-                        </button>
-                      </div>
-                    </div>
-                  </CaseDocPanelScroll>
-                </div>
+                <CaseDetailEditDetailsPanel
+                  caseId={caseId}
+                  busy={busy}
+                  setBusy={setBusy}
+                  backToDocuments={backToDocuments}
+                  editMatterHeadOptions={editMatterHeadOptions}
+                  editMatterHeadTypeId={editMatterHeadTypeId}
+                  setEditMatterHeadTypeId={setEditMatterHeadTypeId}
+                  setEditPracticeArea={setEditPracticeArea}
+                  editMatterSubOptions={editMatterSubOptions}
+                  editPracticeArea={editPracticeArea}
+                  editMatterDescription={editMatterDescription}
+                  setEditMatterDescription={setEditMatterDescription}
+                  editFeeEarnerOptions={editFeeEarnerOptions}
+                  editFeeEarner={editFeeEarner}
+                  setEditFeeEarner={setEditFeeEarner}
+                  editStatusOptions={editStatusOptions}
+                  editCaseStatus={editCaseStatus}
+                  setEditCaseStatus={setEditCaseStatus}
+                  editSourceOptions={editSourceOptions}
+                  editSourceId={editSourceId}
+                  setEditSourceId={setEditSourceId}
+                  editPortalEnabled={editPortalEnabled}
+                  onEditPortalEnabledChange={onEditPortalEnabledChange}
+                  editCaseDropdown={editCaseDropdown}
+                  editCaseErr={editCaseErr}
+                  setEditCaseErr={setEditCaseErr}
+                  setManageAccessOpen={setManageAccessOpen}
+                  token={token}
+                  onRefresh={onRefresh}
+                  onCaseListInvalidate={onCaseListInvalidate}
+                />
               ) : caseDocPanel === 'portal-hub' && caseId && portalEnabled ? (
-                <div className="caseDocPanelInset caseDocPanelHost stack">
-                  <CaseDocPanelChrome title="Portal" onClose={backToDocuments} closeDisabled={busy} />
-                  <CaseDocPanelScroll>
-                    <CasePortalPanel token={token} caseId={caseId} onFilesChanged={onRefresh} />
-                  </CaseDocPanelScroll>
-                </div>
+                <CaseDetailPortalHubPanel
+                  caseId={caseId}
+                  token={token}
+                  busy={busy}
+                  backToDocuments={backToDocuments}
+                  onRefresh={onRefresh}
+                />
               ) : caseDocPanel === 'portal-share' && caseId && portalEnabled && portalShareFolderPath !== null ? (
-                <div className="caseDocPanelInset caseDocPanelHost stack">
-                  <CaseDocPanelChrome title="Share folder" subtitle="Portal folder access" onClose={backToDocuments} closeDisabled={busy} />
-                  <CaseDocPanelScroll>
-                    <PortalFolderSharePanel
-                      token={token}
-                      caseId={caseId}
-                      folderPath={portalShareFolderPath}
-                      onChanged={() => {
-                        refreshPortalFolderGrants()
-                        onRefresh()
-                      }}
-                    />
-                  </CaseDocPanelScroll>
-                </div>
+                <CaseDetailPortalSharePanel
+                  caseId={caseId}
+                  token={token}
+                  busy={busy}
+                  portalShareFolderPath={portalShareFolderPath}
+                  backToDocuments={backToDocuments}
+                  refreshPortalFolderGrants={refreshPortalFolderGrants}
+                  onRefresh={onRefresh}
+                />
               ) : caseDocPanel === 'accounts' && caseId ? (
-                <div className="caseDocPanelInset caseDocPanelHost stack">
-                  <CaseDocPanelChrome
-                    title="Accounts"
-                    onClose={backToDocuments}
-                    actions={
-                      <>
-                        <button
-                          type="button"
-                          className={`btn${accountsSubTab === 'ledger' ? ' primary' : ''}`}
-                          onClick={() => setAccountsSubTab('ledger')}
-                        >
-                          Ledger
-                        </button>
-                        <button
-                          type="button"
-                          className={`btn${accountsSubTab === 'time' ? ' primary' : ''}`}
-                          onClick={() => setAccountsSubTab('time')}
-                        >
-                          Time
-                        </button>
-                      </>
-                    }
-                  />
-                  <div className="caseDocLedgerEmbed">
-                    <CaseDocPanelScroll>
-                      {accountsSubTab === 'ledger' ? (
-                        <LedgerPage
-                          caseId={caseId}
-                          token={token}
-                          currentUserId={currentUser?.id}
-                          onCaseChanged={onRefresh}
-                        />
-                      ) : (
-                        <CaseTimePanel
-                          caseId={caseId}
-                          token={token}
-                          isAdmin={Boolean(currentUser?.admin_console_access)}
-                          currentUserId={currentUser?.id ?? ''}
-                        />
-                      )}
-                    </CaseDocPanelScroll>
-                  </div>
-                </div>
+                <CaseDetailAccountsPanel
+                  caseId={caseId}
+                  token={token}
+                  currentUser={currentUser}
+                  accountsSubTab={accountsSubTab}
+                  setAccountsSubTab={setAccountsSubTab}
+                  backToDocuments={backToDocuments}
+                  onRefresh={onRefresh}
+                />
               ) : caseDocPanel === 'tasks' && caseId ? (
-                <div className="caseDocPanelInset caseDocPanelHost stack">
-                  <CaseDocPanelChrome
-                    title="Tasks"
-                    onClose={backToDocuments}
-                    actions={
-                      <>
-                        <button type="button" className="btn primary" disabled={busy} onClick={() => openTaskCreateModal()}>
-                          New task
-                        </button>
-                        <div className="tasksToolbarLayoutGroup">
-                          <span className="tasksToolbarLayoutLabel">View</span>
-                          <SingleSelectDropdown
-                            hideLabel
-                            label="Task layout"
-                            options={[
-                              { value: 'list', label: 'List' },
-                              { value: 'kanban', label: 'Kanban' },
-                            ]}
-                            value={uiPrefs.case_tasks_layout}
-                            onChange={(v) => setUiPreference('case_tasks_layout', v as 'list' | 'kanban')}
-                            open={caseTasksLayoutOpen}
-                            onOpenChange={setCaseTasksLayoutOpen}
-                          />
-                        </div>
-                        <SearchInput
-                          placeholder="Search tasks…"
-                          value={caseTasksSearch}
-                          onChange={(e) => setCaseTasksSearch(e.target.value)}
-                          onClear={() => setCaseTasksSearch('')}
-                          style={{ flex: 1, minWidth: 160 }}
-                          aria-label="Search tasks for this matter"
-                        />
-                        <button
-                          type="button"
-                          className="btn"
-                          onClick={() => {
-                            void apiFetch<TaskMenuRow[]>(`/tasks?case_id=${encodeURIComponent(caseId)}`, { token })
-                              .then((data) => setCaseTaskMenuRows(Array.isArray(data) ? data : []))
-                              .catch(() => setCaseTaskMenuRows([]))
-                          }}
-                        >
-                          Refresh
-                        </button>
-                        <button
-                          type="button"
-                          className="btn"
-                          onClick={() => void (async () => {
-                            const ok = await askConfirm({
-                              title: 'Clear completed tasks',
-                              message:
-                                'Remove all completed tasks for this matter from the list? Only tasks on this matter are affected.',
-                            })
-                            if (!ok) return
-                            try {
-                              await apiFetch(`/tasks/completed?case_id=${encodeURIComponent(caseId)}`, {
-                                token,
-                                method: 'DELETE',
-                              })
-                              void apiFetch<TaskMenuRow[]>(`/tasks?case_id=${encodeURIComponent(caseId)}`, { token })
-                                .then((data) => setCaseTaskMenuRows(Array.isArray(data) ? data : []))
-                                .catch(() => setCaseTaskMenuRows([]))
-                              onRefresh()
-                              onTaskMenuInvalidate?.()
-                            } catch {
-                              // ignore
-                            }
-                          })()}
-                        >
-                          Clear completed
-                        </button>
-                      </>
-                    }
-                  />
-                  <CaseDocPanelScroll>
-                    <TasksTable
-                      token={token}
-                      currentUserId={currentUser?.id ?? ''}
-                      users={users}
-                      rows={caseTaskMenuRows}
-                      layoutMode={uiPrefs.case_tasks_layout}
-                      search={caseTasksSearch}
-                      filterMatterType=""
-                      onSelectCase={() => {}}
-                      sortKey={uiPrefs.case_tasks_sort_key}
-                      sortDir={uiPrefs.case_tasks_sort_dir}
-                      onSort={(k) => {
-                        if (k === uiPrefs.case_tasks_sort_key) {
-                          setUiPreference('case_tasks_sort_dir', uiPrefs.case_tasks_sort_dir === 'asc' ? 'desc' : 'asc')
-                        } else {
-                          setUiPreference('case_tasks_sort_key', k)
-                          setUiPreference('case_tasks_sort_dir', k === 'priority' ? 'desc' : 'asc')
-                        }
-                      }}
-                      gridTemplateColumns={tasksGridColumns}
-                      startColumnResize={tasksStartResize}
-                      onInvalidate={() => {
-                        void apiFetch<TaskMenuRow[]>(`/tasks?case_id=${encodeURIComponent(caseId)}`, { token })
-                          .then((data) => setCaseTaskMenuRows(Array.isArray(data) ? data : []))
-                          .catch(() => setCaseTaskMenuRows([]))
-                        onRefresh()
-                        onTaskMenuInvalidate?.()
-                      }}
-                      embedded
-                      suppressCaseOpen
-                    />
-                  </CaseDocPanelScroll>
-                </div>
+                <CaseDetailTasksPanel
+                  caseId={caseId}
+                  token={token}
+                  busy={busy}
+                  backToDocuments={backToDocuments}
+                  openTaskCreateModal={openTaskCreateModal}
+                  uiPrefs={uiPrefs}
+                  setUiPreference={setUiPreference}
+                  caseTasksLayoutOpen={caseTasksLayoutOpen}
+                  setCaseTasksLayoutOpen={setCaseTasksLayoutOpen}
+                  caseTasksSearch={caseTasksSearch}
+                  setCaseTasksSearch={setCaseTasksSearch}
+                  caseTaskMenuRows={caseTaskMenuRows}
+                  setCaseTaskMenuRows={setCaseTaskMenuRows}
+                  askConfirm={askConfirm}
+                  onRefresh={onRefresh}
+                  onTaskMenuInvalidate={onTaskMenuInvalidate}
+                  currentUser={currentUser}
+                  users={users}
+                  tasksGridColumns={tasksGridColumns}
+                  tasksStartResize={tasksStartResize}
+                />
               ) : caseDocPanel === 'property' && propertyDraft ? (
-                <div className="caseDocPanelInset caseDocPanelHost stack">
-                  <CaseDocPanelChrome
-                    title="Property details"
-                    onClose={backToDocuments}
-                    closeDisabled={busy}
-                    actions={
-                      <>
-                        <button
-                          type="button"
-                          className="btn"
-                          disabled={busy}
-                          onClick={() => {
-                            if (propertyBaseline) {
-                              setPropertyDraft(JSON.parse(JSON.stringify(propertyBaseline)) as CasePropertyPayload)
-                            }
-                            setCaseDocPanel('documents')
-                          }}
-                        >
-                          Discard
-                        </button>
-                        <button
-                          type="button"
-                          className="btn primary"
-                          disabled={busy}
-                          onClick={async () => {
-                            if (!caseId) return
-                            setBusy(true)
-                            setActionErr(null)
-                            try {
-                              const lines = [...propertyDraft.free_lines]
-                              while (lines.length < 6) lines.push('')
-                              const out = await apiFetch<CasePropertyDetailsOut>(
-                                `/cases/${caseId}/property-details`,
-                                {
-                                  method: 'PUT',
-                                  token,
-                                  json: { ...propertyDraft, free_lines: lines.slice(0, 6) },
-                                },
-                              )
-                              setPropertyDetails(out)
-                              setCaseDocPanel('documents')
-                            } catch (e: any) {
-                              setActionErr(e?.message ?? 'Save failed')
-                            } finally {
-                              setBusy(false)
-                            }
-                          }}
-                        >
-                          Save and close
-                        </button>
-                      </>
-                    }
-                  />
-                  <CaseDocPanelScroll>
-                    <div className="card caseDocPropertyEmbed">
-                    <PropertyDetailsForm
-                      draft={propertyDraft}
-                      onChange={setPropertyDraft}
-                      disabled={busy}
-                      token={token}
-                      caseId={caseId}
-                      caseContacts={caseContacts}
-                      onCaseContactsChange={onRefresh}
-                    />
-                  </div>
-                  </CaseDocPanelScroll>
-                </div>
+                <CaseDetailPropertyPanel
+                  caseId={caseId}
+                  token={token}
+                  busy={busy}
+                  setBusy={setBusy}
+                  propertyDraft={propertyDraft}
+                  setPropertyDraft={setPropertyDraft}
+                  propertyBaseline={propertyBaseline}
+                  setPropertyDetails={setPropertyDetails}
+                  setCaseDocPanel={setCaseDocPanel}
+                  setActionErr={setActionErr}
+                  backToDocuments={backToDocuments}
+                  caseContacts={caseContacts}
+                  onRefresh={onRefresh}
+                />
               ) : caseDocPanel === 'contacts' && caseId && (contactAddOpen || editSnapshot) ? (
-                <div className="caseDocPanelInset caseDocPanelHost stack">
-                  <CaseDocPanelChrome
-                    title={contactAddOpen ? 'Add contact' : 'Edit contact'}
-                    subtitle={
-                      contactAddOpen
-                        ? 'Link an existing global contact or create a new one.'
-                        : 'Update the snapshot on this matter.'
-                    }
-                    onClose={() => {
-                      if (contactAddOpen) {
-                        setContactAddErr(null)
-                      }
-                      backToDocuments()
-                    }}
-                    closeDisabled={busy}
-                  />
-                  <CaseDocPanelScroll>
-                  <div className="card caseDocPropertyEmbed" style={{ maxWidth: '100%' }}>
-                    {contactAddOpen ? (
-                      <CaseContactsAddDocForm
-                          token={token}
-                          caseId={caseId}
-                          busy={busy}
-                          setBusy={setBusy}
-                          onDone={finishContactsDoc}
-                          matterContactType={matterContactType}
-                          setMatterContactType={setMatterContactType}
-                          matterContactReference={matterContactReference}
-                          setMatterContactReference={setMatterContactReference}
-                          lawyerLinkClientIds={lawyerLinkClientIds}
-                          setLawyerLinkClientIds={setLawyerLinkClientIds}
-                          selectedGlobalContactId={selectedGlobalContactId}
-                          setSelectedGlobalContactId={setSelectedGlobalContactId}
-                          matterTypeOptions={matterTypeOptions}
-                          lawyerLinkableContacts={lawyerLinkableMatterContacts}
-                          contactAddErr={contactAddErr}
-                          setContactAddErr={setContactAddErr}
-                          setActionErr={setActionErr}
-                          onGlobalContactsUpdated={() => {}}
-                        />
-                    ) : editSnapshot ? (
-                        <CaseContactsEditDocForm
-                          token={token}
-                          caseId={caseId}
-                          portalEnabled={portalEnabled}
-                          busy={busy}
-                          setBusy={setBusy}
-                          editSnapshot={editSnapshot}
-                          setEditSnapshot={setEditSnapshot}
-                          editLawyerLinkClientIds={editLawyerLinkClientIds}
-                          setEditLawyerLinkClientIds={setEditLawyerLinkClientIds}
-                          pushToGlobal={pushToGlobal}
-                          setPushToGlobal={setPushToGlobal}
-                          resolvedEditSnapshotName={resolvedEditSnapshotName}
-                          matterTypeOptions={matterTypeOptions}
-                          lawyerLinkableContacts={lawyerLinkableMatterContacts}
-                          onDone={finishContactsDoc}
-                          setActionErr={setActionErr}
-                        />
-                    ) : null}
-                  </div>
-                  </CaseDocPanelScroll>
-                </div>
-              ) : null}
+                <CaseDetailContactsPanel
+                  caseId={caseId}
+                  token={token}
+                  portalEnabled={portalEnabled}
+                  busy={busy}
+                  setBusy={setBusy}
+                  contactAddOpen={contactAddOpen}
+                  setContactAddErr={setContactAddErr}
+                  backToDocuments={backToDocuments}
+                  finishContactsDoc={finishContactsDoc}
+                  matterContactType={matterContactType}
+                  setMatterContactType={setMatterContactType}
+                  matterContactReference={matterContactReference}
+                  setMatterContactReference={setMatterContactReference}
+                  lawyerLinkClientIds={lawyerLinkClientIds}
+                  setLawyerLinkClientIds={setLawyerLinkClientIds}
+                  selectedGlobalContactId={selectedGlobalContactId}
+                  setSelectedGlobalContactId={setSelectedGlobalContactId}
+                  matterTypeOptions={matterTypeOptions}
+                  lawyerLinkableContacts={lawyerLinkableMatterContacts}
+                  contactAddErr={contactAddErr}
+                  setActionErr={setActionErr}
+                  editSnapshot={editSnapshot}
+                  setEditSnapshot={setEditSnapshot}
+                  editLawyerLinkClientIds={editLawyerLinkClientIds}
+                  setEditLawyerLinkClientIds={setEditLawyerLinkClientIds}
+                  pushToGlobal={pushToGlobal}
+                  setPushToGlobal={setPushToGlobal}
+                  resolvedEditSnapshotName={resolvedEditSnapshotName}
+                />              ) : null}
             </div>
           </div>
 
