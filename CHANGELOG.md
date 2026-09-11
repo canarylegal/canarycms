@@ -9,6 +9,7 @@ All notable releases of Canary CMS are documented here. Prefer a tagged release 
 - Backend rejects `.env.example` `CHANGE_ME_*` / all-`#` secret placeholders at startup.
 - Go-live checklist and README quick start require generated secrets and tag-pinned checkouts.
 - Portal smoke workflow runs on `v*` tags and on compose/backend image path changes; healthier wait/logging.
+- Fix duplicate Alembic revision id that blocked cold `alembic upgrade head` (portal smoke / fresh installs).
 
 ## [1.0.0] — 2026-09-11
 
