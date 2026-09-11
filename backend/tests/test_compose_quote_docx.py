@@ -10,7 +10,6 @@ import pytest
 from sqlalchemy import select
 
 from app.compose_quote import merge_compose_quote_docx_bytes
-from app.db import SessionLocal
 from app.models import (
     Case,
     FeeScale,
@@ -22,14 +21,6 @@ from app.models import (
 )
 from app.schemas import ComposeQuoteIn, ComposeQuoteLineIn
 
-
-@pytest.fixture
-def db():
-    session = SessionLocal()
-    try:
-        yield session
-    finally:
-        session.close()
 
 
 def test_compose_quote_produces_docx_with_table(db) -> None:

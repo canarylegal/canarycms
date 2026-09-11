@@ -220,23 +220,9 @@ def compute_quote_lines(
                 continue
 
             if line.line_kind == FeeScaleLineKind.vat:
-                base = sum(section_vatable)
-                if base:
-                    vat = vat_pence_for_net(base, scale.vat_rate_bps)
-                    out.append(
-                        ComputedQuoteLine(
-                            line_id=line.id,
-                            name=line.name,
-                            line_kind=line.line_kind,
-                            amount_pence=None,
-                            vat_pence=vat,
-                            editable=False,
-                            is_bold=False,
-                            align_right=True,
-                        )
-                    )
-                    section_vat.append(vat)
-                elif section_vat:
+                # Prefer VAT already tracked on plus_vat items; otherwise compute from the
+                # vatable base. Never append a second time when items already contributed.
+                if section_vat:
                     vat = sum(section_vat)
                     out.append(
                         ComputedQuoteLine(
@@ -250,6 +236,23 @@ def compute_quote_lines(
                             align_right=True,
                         )
                     )
+                else:
+                    base = sum(section_vatable)
+                    if base:
+                        vat = vat_pence_for_net(base, scale.vat_rate_bps)
+                        out.append(
+                            ComputedQuoteLine(
+                                line_id=line.id,
+                                name=line.name,
+                                line_kind=line.line_kind,
+                                amount_pence=None,
+                                vat_pence=vat,
+                                editable=False,
+                                is_bold=False,
+                                align_right=True,
+                            )
+                        )
+                        section_vat.append(vat)
                 continue
 
             if line.line_kind == FeeScaleLineKind.subtotal:
@@ -380,23 +383,7 @@ def compute_quote_from_draft(
                 continue
 
             if kind == FeeScaleLineKind.vat:
-                base = sum(section_vatable)
-                if base:
-                    vat = vat_pence_for_net(base, scale.vat_rate_bps)
-                    out.append(
-                        ComputedQuoteLine(
-                            line_id=line.line_id,
-                            name=line.name,
-                            line_kind=kind,
-                            amount_pence=None,
-                            vat_pence=vat,
-                            editable=False,
-                            is_bold=False,
-                            align_right=True,
-                        )
-                    )
-                    section_vat.append(vat)
-                elif section_vat:
+                if section_vat:
                     vat = sum(section_vat)
                     out.append(
                         ComputedQuoteLine(
@@ -410,6 +397,23 @@ def compute_quote_from_draft(
                             align_right=True,
                         )
                     )
+                else:
+                    base = sum(section_vatable)
+                    if base:
+                        vat = vat_pence_for_net(base, scale.vat_rate_bps)
+                        out.append(
+                            ComputedQuoteLine(
+                                line_id=line.line_id,
+                                name=line.name,
+                                line_kind=kind,
+                                amount_pence=None,
+                                vat_pence=vat,
+                                editable=False,
+                                is_bold=False,
+                                align_right=True,
+                            )
+                        )
+                        section_vat.append(vat)
                 continue
 
             if kind == FeeScaleLineKind.subtotal:

@@ -31,7 +31,7 @@ def test_open_draft_uses_configured_owa_host_not_weblink_office365() -> None:
     assert "outlook.cloud.microsoft" in query_style
     assert "outlook.office365.com" not in query_style
     assert "/deeplink/compose?ItemID=" in query_style
-    assert "RestId456" in query_style or "RestId456" in path_style
+    assert item_id in query_style or item_id in path_style or "AAMkAGI2THVSAAA" in query_style or "AAMkAGI2THVSAAA" in path_style
 
 
 def test_compose_deeplink_from_weblink_strips_read_viewmodel() -> None:

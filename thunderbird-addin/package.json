@@ -3,7 +3,7 @@
   "private": true,
   "description": "Build and sign scripts for the Canary Thunderbird MailExtension",
   "scripts": {
-    "lint": "web-ext lint --source-dir .",
+    "lint": "web-ext lint --source-dir . --self-hosted",
     "package": "node scripts/package.mjs",
     "sign": "node scripts/sign.mjs",
     "publish-hosting": "node scripts/publish-hosting.mjs",
