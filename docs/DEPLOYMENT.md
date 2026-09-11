@@ -104,6 +104,8 @@ docker compose exec backend python scripts/reencrypt_data_secrets.py
 
 Admin → Deploy (and the optional post-login prompt) only **notify** when GitHub is ahead of this build. There is no in-app “Update now”, and the backend does **not** mount `docker.sock`.
 
+The former GUI Compose updater code is **intentionally retained** in the repo (fail-closed stubs + implementation under `backend/app/local_compose_update.py` and `backend/app/compose_deploy_job.py`) so audits do not treat it as unmarked dead code and so any future re-enablement requires an explicit security review. It is not a supported production path.
+
 **Prefer a known release**, not an unreviewed `main` tip:
 
 ```bash

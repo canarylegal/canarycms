@@ -1,11 +1,19 @@
-"""Legacy helpers for host Compose updates.
+"""Host Compose update helpers (notify-only product path; full updater implementation retained).
 
-GUI-driven Compose updates (``docker.sock`` + in-app “Update now”) were removed for security.
-Admin → Deploy is notify-only: compare the running build to GitHub. Apply updates on the host
-via SSH / CI (see ``docs/DEPLOYMENT.md``).
+**Product posture (Approach A):** Admin → Deploy is notify-only. The backend must not mount
+``docker.sock``, and in-app “Update now” / ``POST /admin/deploy/trigger`` always fail closed
+(HTTP 410 / ``RuntimeError``). Operators apply updates on the host via SSH or CI — see
+``docs/DEPLOYMENT.md``.
 
-Functions below remain for optional git HEAD readout when ``CANARY_COMPOSE_PROJECT_DIR`` is set,
-and for tests of the retired update path.
+**Intentionally retained — do not delete as “dead code” without an explicit product decision:**
+
+- Live call sites still use git HEAD helpers here for build metadata / GitHub update checks
+  (``compose_project_git_head``, ``compose_update_configured`` always false).
+- ``run_compose_update`` and the surrounding git/compose orchestration stay in-tree so the
+  retired GUI path remains reviewable, regression-tested, and fail-closed if anything still
+  imports it. Re-enabling would need a deliberate security review (Docker socket exposure).
+- Startup may still reconcile leftover compose-job disk state from older installs that ran
+  the former GUI updater (``app.compose_deploy_job``).
 """
 
 from __future__ import annotations
@@ -451,7 +459,11 @@ def run_compose_update(
     on_after_build_before_compose_up: Callable[[], None] | None = None,
     git_strategy: GitSyncStrategy = "ff-only",
 ) -> None:
-    """Retired: GUI Compose updates are permanently disabled (notify-only Admin → Deploy)."""
+    """Fail closed: in-app Compose updates are disabled (notify-only Admin → Deploy).
+
+    The surrounding git/compose helpers in this module are intentionally kept for tests and
+    for reviewability — see the module docstring. Do not re-enable without security review.
+    """
     raise RuntimeError(
         "In-app Compose updates are disabled. Apply updates on the host (see docs/DEPLOYMENT.md)."
     )
