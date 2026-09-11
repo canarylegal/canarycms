@@ -70,7 +70,9 @@ from app.routers import (
 
 
 from app.master_admin import validate_master_admin_config_at_startup
+from app.env_placeholders import reject_insecure_placeholder, validate_core_secrets_at_startup
 
+validate_core_secrets_at_startup()
 validate_master_admin_config_at_startup()
 
 

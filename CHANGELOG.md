@@ -2,6 +2,14 @@
 
 All notable releases of Canary CMS are documented here. Prefer a tagged release over floating `main` when deploying (see `docs/DEPLOYMENT.md`).
 
+## [Unreleased]
+
+### Ops / release readiness
+- Admin → Deploy defaults to **`latest-release`** (compare to newest GitHub Release tip, not floating `main`).
+- Backend rejects `.env.example` `CHANGE_ME_*` / all-`#` secret placeholders at startup.
+- Go-live checklist and README quick start require generated secrets and tag-pinned checkouts.
+- Portal smoke workflow runs on `v*` tags and on compose/backend image path changes; healthier wait/logging.
+
 ## [1.0.0] — 2026-09-11
 
 First named production baseline. Active development continues; `1.x` will move with minor/patch releases.

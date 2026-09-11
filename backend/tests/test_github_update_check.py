@@ -101,6 +101,52 @@ def test_update_available_when_remote_ahead(
     assert payload["compare_html_url"] == "https://github.com/o/r/compare/old..new"
 
 
+@patch("app.github_update_check.load_github_repo_for_api", return_value=("owner", "repo", "latest-release"))
+@patch("app.github_update_check.effective_build_commit_for_update_check", return_value="aaa1111")
+@patch("app.github_update_check.httpx.Client")
+def test_latest_release_ref_compares_to_release_tag(
+    client_cls: MagicMock,
+    _current: object,
+    _repo: object,
+) -> None:
+    sha = "aaa1111" + ("0" * 33)
+    mock_client = MagicMock()
+    client_cls.return_value.__enter__.return_value = mock_client
+
+    rel_resp = MagicMock()
+    rel_resp.status_code = 200
+    rel_resp.json.return_value = {
+        "tag_name": "v1.0.0",
+        "name": "Canary CMS v1.0.0",
+        "body": "baseline",
+    }
+
+    tip_resp = MagicMock()
+    tip_resp.status_code = 200
+    tip_resp.json.return_value = {"sha": sha}
+
+    cmp_resp = MagicMock()
+    cmp_resp.status_code = 200
+    cmp_resp.json.return_value = {"ahead_by": 0, "behind_by": 0, "commits": []}
+
+    def fake_get(url: str, **kwargs: object) -> MagicMock:
+        if url.endswith("/releases/latest"):
+            return rel_resp
+        if "/commits/v1.0.0" in url:
+            return tip_resp
+        if "/compare/" in url:
+            return cmp_resp
+        return MagicMock(status_code=404)
+
+    mock_client.get.side_effect = fake_get
+
+    payload = build_update_check_payload()
+    assert payload["update_available"] is False
+    assert payload["remote_ref"] == "v1.0.0"
+    assert payload["latest_release_tag"] == "v1.0.0"
+    assert payload["compose_git_ref"] == "v1.0.0"
+
+
 @patch("app.github_update_check.load_github_repo_for_api", return_value=("owner", "repo", "main"))
 @patch("app.github_update_check.effective_build_commit_for_update_check", return_value="localonly")
 @patch("app.github_update_check.httpx.Client")

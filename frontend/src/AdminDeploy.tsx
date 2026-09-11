@@ -57,7 +57,9 @@ export function AdminDeploy({ token }: { token: string }) {
       <div className="card">
         <h3 style={{ marginTop: 0 }}>Check for updates</h3>
         <p className="muted" style={{ lineHeight: 1.55 }}>
-          Compares the backend image build commit against the tip of the configured public GitHub branch. The post-login
+          Compares the backend image build commit against the configured GitHub ref tip (default:{' '}
+          <code>latest-release</code>, so tag-pinned installs track GitHub Releases rather than floating{' '}
+          <code>main</code>). The post-login
           prompt only runs once per session (and is silenced for any version dismissed with “Skip this version”); use
           this button to re-check at any time without logging out.
         </p>
