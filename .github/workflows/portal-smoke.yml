@@ -19,6 +19,7 @@ on:
       - "scripts/smoke-portal.sh"
       - ".github/workflows/portal-smoke.yml"
       - "docker-compose.yml"
+      - "docker-compose.ci.yml"
       - "backend/requirements.txt"
       - "backend/Dockerfile"
   pull_request:
@@ -32,6 +33,7 @@ on:
       - "scripts/smoke-portal.sh"
       - ".github/workflows/portal-smoke.yml"
       - "docker-compose.yml"
+      - "docker-compose.ci.yml"
       - "backend/requirements.txt"
       - "backend/Dockerfile"
 
@@ -79,16 +81,29 @@ jobs:
       - name: Build and start db + backend
         run: |
           set -euo pipefail
-          docker compose up -d --build --wait --wait-timeout 360 db backend
-          docker compose ps
+          docker compose up -d --build db backend
+          docker compose ps -a
 
-      - name: Verify backend /health on published port
+      - name: Wait for backend health
         run: |
           set -euo pipefail
-          curl -fsS --retry 12 --retry-all-errors --retry-delay 5 \
-            http://127.0.0.1:18000/health
-          docker compose exec -T backend python -c \
-            "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5)"
+          # Prefer host-published /health (works even while exec is flaky during restarts).
+          for i in $(seq 1 120); do
+            if curl -fsS --max-time 5 http://127.0.0.1:18000/health >/dev/null 2>&1; then
+              echo "host /health ok after ${i} attempts"
+              docker compose ps
+              exit 0
+            fi
+            if (( i % 10 == 0 )); then
+              echo "attempt ${i}: still waiting"
+              docker compose ps -a || true
+              docker compose logs --tail=50 backend || true
+            fi
+            sleep 3
+          done
+          docker compose ps -a || true
+          docker compose logs --tail=300 backend db || true
+          exit 1
 
       - name: Portal smoke (ensure fixture)
         run: ./scripts/smoke-portal.sh --ensure-fixture
