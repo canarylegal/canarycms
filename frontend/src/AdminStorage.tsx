@@ -228,8 +228,7 @@ export function AdminStorage({ token }: { token: string }) {
               ) : null}
               {!data.docker_detected ? (
                 <p className="muted adminStorageDiskNote">
-                  Docker could not be queried — mount <code>/var/run/docker.sock</code> into the backend for complete
-                  totals.
+                  Docker image/layer totals are omitted (the backend does not mount the Docker socket by default).
                 </p>
               ) : null}
             </div>

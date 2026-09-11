@@ -5,12 +5,12 @@ cd "$(dirname "$0")/.."
 
 : "${ATN_API_KEY:?Export ATN_API_KEY (from addons.thunderbird.net → API key)}"
 : "${ATN_API_SECRET:?Export ATN_API_SECRET}"
-: "${SMB_PASSWORD:?Export SMB_PASSWORD (TrueNAS password for ${SMB_USER:-cmcwilli})}"
+: "${SMB_USER:?Export SMB_USER (SMB account for the TrueNAS share)}"
+: "${SMB_PASSWORD:?Export SMB_PASSWORD (password for SMB_USER)}"
 
 export CANARY_TB_ARTIFACTS_DIR=".build-out"
 export SMB_HOST="${SMB_HOST:-truenas.local}"
 export SMB_SHARE="${SMB_SHARE:-thunderbird}"
-export SMB_USER="${SMB_USER:-cmcwilli}"
 
 echo "==> Package $(node -p "require('./manifest.json').version")"
 npm run package

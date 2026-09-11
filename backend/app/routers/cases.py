@@ -487,6 +487,10 @@ def update_case(
     case.updated_at = datetime.utcnow()
 
     db.add(case)
+    if "status" in data and data["status"] in (CaseStatus.closed, CaseStatus.archived, CaseStatus.quote_closed):
+        from app.portal_service import revoke_matter_portal_access_for_case
+
+        revoke_matter_portal_access_for_case(db, case.id)
     log_event(
         db,
         actor_user_id=user.id,

@@ -3,7 +3,7 @@ import {
   startAuthentication,
   type PublicKeyCredentialRequestOptionsJSON,
 } from '@simplewebauthn/browser'
-import { apiFetch, type ApiError } from './api'
+import { apiFetch, COOKIE_SESSION_TOKEN, type ApiError } from './api'
 import { AppLogo } from './AppLogo'
 import type { TokenResponse, UserPublic } from './types'
 
@@ -66,12 +66,11 @@ function ConnectLoginForm({
     setBusy(true)
     setError(null)
     try {
-      const res = await apiFetch<TokenResponse>('/auth/login', {
+      await apiFetch<TokenResponse>('/auth/login', {
         json: { email: email.trim(), password, totp_code: totp ?? null },
         timeoutMs: 45_000,
       })
-      localStorage.setItem('token', res.access_token)
-      onSignedIn(res.access_token)
+      onSignedIn(COOKIE_SESSION_TOKEN)
       return 'success' as const
     } catch (e: unknown) {
       const msg = ((e as ApiError).message ?? '').trim() || 'Sign-in failed'
@@ -100,12 +99,11 @@ function ConnectLoginForm({
         json: { email: emailNorm },
       })
       const assertion = await startAuthentication({ optionsJSON: options })
-      const res = await apiFetch<TokenResponse>('/auth/webauthn/login/finish', {
+      await apiFetch<TokenResponse>('/auth/webauthn/login/finish', {
         method: 'POST',
         json: { email: emailNorm, credential: assertion },
       })
-      localStorage.setItem('token', res.access_token)
-      onSignedIn(res.access_token)
+      onSignedIn(COOKIE_SESSION_TOKEN)
     } catch (e: unknown) {
       setError((e as ApiError).message ?? 'Passkey sign-in failed')
     } finally {
@@ -219,23 +217,27 @@ function ConnectLoginForm({
 
 export default function MailPluginConnectPage() {
   const params = useMemo(() => parseConnectParams(), [])
-  const [token, setToken] = useState(() => localStorage.getItem('token') ?? '')
+  const [token, setToken] = useState(COOKIE_SESSION_TOKEN)
   const [me, setMe] = useState<UserPublic | null>(null)
   const [loadingMe, setLoadingMe] = useState(true)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [signedIn, setSignedIn] = useState(false)
 
-  const loadMe = useCallback(async (accessToken: string) => {
+  const loadMe = useCallback(async (accessToken: string, opts?: { quiet?: boolean }) => {
     setLoadingMe(true)
     try {
       const user = await apiFetch<UserPublic>('/auth/me', { token: accessToken })
       setMe(user)
+      setSignedIn(true)
       setError(null)
     } catch (e: unknown) {
       setMe(null)
-      localStorage.removeItem('token')
-      setToken('')
-      setError((e as ApiError).message ?? 'Could not load your account.')
+      setSignedIn(false)
+      setToken(COOKIE_SESSION_TOKEN)
+      if (!opts?.quiet) {
+        setError((e as ApiError).message ?? 'Could not load your account.')
+      }
     } finally {
       setLoadingMe(false)
     }
@@ -246,15 +248,11 @@ export default function MailPluginConnectPage() {
       setLoadingMe(false)
       return
     }
-    if (!token) {
-      setLoadingMe(false)
-      return
-    }
-    void loadMe(token)
-  }, [loadMe, params, token])
+    void loadMe(COOKIE_SESSION_TOKEN, { quiet: true })
+  }, [loadMe, params])
 
   async function authorize() {
-    if ('error' in params || !token || !me) return
+    if ('error' in params || !signedIn || !me) return
     const block = sessionReadyForAuthorize(me)
     if (block) {
       setError(block)
@@ -308,10 +306,11 @@ export default function MailPluginConnectPage() {
         <p className="muted" style={{ textAlign: 'center' }}>
           Loading…
         </p>
-      ) : !token || !me ? (
+      ) : !signedIn || !me ? (
         <ConnectLoginForm
           onSignedIn={(nextToken) => {
             setToken(nextToken)
+            setSignedIn(true)
             void loadMe(nextToken)
           }}
         />

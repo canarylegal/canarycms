@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { apiFetch } from './api'
+import { apiFetch, COOKIE_SESSION_TOKEN } from './api'
 import { useDialogsOptional, type ConfirmOptions } from './DialogProvider'
 import { isPortalSharedFolder, portalSharedFolderUploadNotifyMessage, portalContactsForFolder } from './case/portalFolderAccess'
 import type { CasePortalFolderAccessGrantOut } from './types'
@@ -345,7 +345,7 @@ export default function EditorPage() {
   /** ONLYOFFICE ``onDocumentStateChange``: true while the user is actively typing. */
   const ooEditorBusyRef = useRef(false)
   const printTabRef = useRef<Window | null>(null)
-  const token = localStorage.getItem('token') ?? undefined
+  const token = COOKIE_SESSION_TOKEN
 
   // Fetch editor config on mount. AbortController avoids overlapping onlyoffice-config calls
   // (React Strict Mode remount, fast tab switches) minting extra WebDAV sessions server-side.

@@ -19,10 +19,12 @@ import { coerceLetterSalutation, type LetterSalutation } from '../letterSalutati
 import type { CaseContactOut, ContactOut } from '../types'
 import { applyCaseContactFieldPatch } from './caseContactPatch'
 import { CaseContactPortalSection } from './CaseContactPortalSection'
+import { CaseContactMatterPortalSection } from './CaseContactMatterPortalSection'
 import { matterContactTypeLabel } from './matterLabels'
 
 const CONTACT_TYPE_REQUIRED_MSG = 'Please select a contact type for this matter.'
 const LAWYERS_TYPE_SLUG = 'lawyers'
+const CLIENT_TYPE_SLUG = 'client'
 
 /** Shown when Lawyers contact type is chosen but no client matter contacts are linked. */
 export const LAWYER_CLIENTS_REQUIRED_MSG =
@@ -649,14 +651,26 @@ export function CaseContactsEditDocForm({
           <span className="muted">Also update global contact</span>
         </label>
       ) : null}
-      <CaseContactPortalSection
-        token={token}
-        caseId={caseId}
-        portalEnabled={portalEnabled}
-        globalContactId={editSnapshot.contact_id}
-        contactName={resolvedEditSnapshotName}
-        contactEmail={editSnapshot.email}
-      />
+      {(editSnapshot.matter_contact_type || '').trim().toLowerCase() === CLIENT_TYPE_SLUG ||
+      !(editSnapshot.matter_contact_type || '').trim() ? (
+        <CaseContactPortalSection
+          token={token}
+          caseId={caseId}
+          portalEnabled={portalEnabled}
+          globalContactId={editSnapshot.contact_id}
+          contactName={resolvedEditSnapshotName}
+          contactEmail={editSnapshot.email}
+        />
+      ) : (
+        <CaseContactMatterPortalSection
+          token={token}
+          caseId={caseId}
+          portalEnabled={portalEnabled}
+          globalContactId={editSnapshot.contact_id}
+          contactName={resolvedEditSnapshotName}
+          contactEmail={editSnapshot.email}
+        />
+      )}
       {saveErr ? <div className="error">{saveErr}</div> : null}
       <div className="row" style={{ justifyContent: 'space-between', marginTop: 8 }}>
         <button

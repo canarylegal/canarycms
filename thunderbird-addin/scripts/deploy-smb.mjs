@@ -8,7 +8,7 @@ const hostingDir = path.join(addinRoot, 'hosting')
 
 const smbHost = process.env.SMB_HOST || 'truenas.local'
 const smbShare = process.env.SMB_SHARE || 'thunderbird'
-const smbUser = process.env.SMB_USER || 'cmcwilli'
+const smbUser = process.env.SMB_USER || ''
 const smbPassword = process.env.SMB_PASSWORD || ''
 
 const files = ['updates.json', '.htaccess']
@@ -29,9 +29,15 @@ for (const name of [...files, ...xpis]) {
   }
 }
 
+if (!smbUser) {
+  console.error('[thunderbird-addin] Set SMB_USER (SMB account for //' + smbHost + '/' + smbShare + ')')
+  console.error('Example: SMB_USER=deploy SMB_PASSWORD=\'…\' npm run deploy-smb')
+  process.exit(1)
+}
+
 if (!smbPassword) {
   console.error('[thunderbird-addin] Set SMB_PASSWORD for //' + smbHost + '/' + smbShare)
-  console.error('Example: SMB_PASSWORD=\'…\' npm run deploy-smb')
+  console.error('Example: SMB_USER=deploy SMB_PASSWORD=\'…\' npm run deploy-smb')
   process.exit(1)
 }
 

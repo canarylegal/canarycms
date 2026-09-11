@@ -1,11 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import { apiFetch } from './api'
-import { postDeployTriggerAndWaitForCompose } from './composeDeployPoll'
-import { ComposeUpdateProgress } from './ComposeUpdateProgress'
 import { AdminStorage } from './AdminStorage'
-import { useDialogs } from './DialogProvider'
 import type { ApiError } from './api'
-import type { AdminDeployComposeJobOut, AdminDeployUpdateCheckOut } from './types'
+import type { AdminDeployUpdateCheckOut } from './types'
 
 export type AdminDeployStatusOut = {
   configured: boolean
@@ -15,21 +12,15 @@ export type AdminDeployStatusOut = {
 }
 
 export function AdminDeploy({ token }: { token: string }) {
-  const { askConfirm } = useDialogs()
   const [status, setStatus] = useState<AdminDeployStatusOut | null>(null)
-  const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
-  const [ok, setOk] = useState<string | null>(null)
   const [updateCheck, setUpdateCheck] = useState<AdminDeployUpdateCheckOut | null>(null)
   const [updateCheckBusy, setUpdateCheckBusy] = useState(false)
   const [updateCheckErr, setUpdateCheckErr] = useState<string | null>(null)
   const [updateCheckAt, setUpdateCheckAt] = useState<Date | null>(null)
-  const [composeProgress, setComposeProgress] = useState<AdminDeployComposeJobOut | null>(null)
-  const [finishing, setFinishing] = useState(false)
 
   const load = useCallback(async () => {
     setErr(null)
-    setOk(null)
     try {
       const s = await apiFetch<AdminDeployStatusOut>('/admin/deploy/status', { token })
       setStatus(s)
@@ -59,62 +50,16 @@ export function AdminDeploy({ token }: { token: string }) {
     void checkForUpdates()
   }, [load, checkForUpdates])
 
-  async function triggerCompose(gitStrategy: 'ff-only' | 'reset' = 'ff-only') {
-    const isReset = gitStrategy === 'reset'
-    if (isReset) {
-      const gitRef = status?.compose_git_ref || updateCheck?.compose_git_ref || 'main'
-      const confirmed = await askConfirm({
-        title: 'Reset to GitHub and update',
-        message: `This discards any local changes on the server and updates from GitHub (${gitRef}). Continue?`,
-        danger: true,
-        confirmLabel: 'Reset and update',
-      })
-      if (!confirmed) return
-    }
-    setBusy(true)
-    setErr(null)
-    setOk(null)
-    setComposeProgress(null)
-    setFinishing(false)
-    try {
-      const { reloadApp } = await postDeployTriggerAndWaitForCompose(
-        token,
-        {
-          method: 'compose',
-          git_strategy: gitStrategy,
-        },
-        { onProgress: setComposeProgress, onFinishing: () => setFinishing(true) },
-      )
-      if (reloadApp) {
-        window.location.reload()
-        return
-      }
-      setOk('Update complete.')
-      await load()
-      await checkForUpdates()
-    } catch (e) {
-      setErr((e as ApiError).message ?? 'Compose update failed')
-    } finally {
-      setBusy(false)
-      setComposeProgress(null)
-      setFinishing(false)
-    }
-  }
-
-  const composeOn = Boolean(status?.compose_update_enabled)
-  const resetOn = Boolean(status?.compose_git_reset_enabled)
-
   return (
     <div className="stack" style={{ maxWidth: 720 }}>
       {err ? <div className="error">{err}</div> : null}
-      {ok ? <div className="muted">{ok}</div> : null}
 
       <div className="card">
         <h3 style={{ marginTop: 0 }}>Check for updates</h3>
         <p className="muted" style={{ lineHeight: 1.55 }}>
-          Compares the backend image build commit against the tip of the configured public GitHub branch. The post-login prompt
-          only runs once per session (and is silenced for any version dismissed with “Skip this version”); use this
-          button to re-check at any time without logging out.
+          Compares the backend image build commit against the tip of the configured public GitHub branch. The post-login
+          prompt only runs once per session (and is silenced for any version dismissed with “Skip this version”); use
+          this button to re-check at any time without logging out.
         </p>
 
         {updateCheckErr ? <div className="error" style={{ marginBottom: 10 }}>{updateCheckErr}</div> : null}
@@ -127,7 +72,10 @@ export function AdminDeploy({ token }: { token: string }) {
                 {updateCheck.build_commit_unknown ? 'unknown' : updateCheck.current_commit_short}
               </strong>
               {updateCheck.build_commit_unknown ? (
-                <span> — image was built without the <code>GIT_COMMIT</code> build-arg, so updates cannot be detected.</span>
+                <span>
+                  {' '}
+                  — image was built without the <code>GIT_COMMIT</code> build-arg, so updates cannot be detected.
+                </span>
               ) : null}
             </li>
             {updateCheck.github_repo_configured ? (
@@ -136,8 +84,7 @@ export function AdminDeploy({ token }: { token: string }) {
                   Remote ref: <strong>{updateCheck.remote_ref || '(default)'}</strong>
                 </li>
                 <li>
-                  Remote tip:{' '}
-                  <strong>{updateCheck.remote_commit_short || '—'}</strong>
+                  Remote tip: <strong>{updateCheck.remote_commit_short || '—'}</strong>
                 </li>
                 <li>
                   Update available:{' '}
@@ -147,10 +94,6 @@ export function AdminDeploy({ token }: { token: string }) {
                 </li>
                 <li>
                   Login prompt: <strong>{updateCheck.prompt_enabled ? 'enabled' : 'disabled'}</strong>
-                </li>
-                <li>
-                  Compose update from UI:{' '}
-                  <strong>{updateCheck.compose_update_enabled ? 'enabled' : 'not configured'}</strong>
                 </li>
               </>
             ) : (
@@ -168,7 +111,9 @@ export function AdminDeploy({ token }: { token: string }) {
         )}
 
         {updateCheck?.note ? (
-          <p className="muted" style={{ marginTop: 8, fontSize: 13, lineHeight: 1.55 }}>{updateCheck.note}</p>
+          <p className="muted" style={{ marginTop: 8, fontSize: 13, lineHeight: 1.55 }}>
+            {updateCheck.note}
+          </p>
         ) : null}
 
         {updateCheck && updateCheck.update_available && updateCheck.commit_messages.length > 0 ? (
@@ -208,79 +153,38 @@ export function AdminDeploy({ token }: { token: string }) {
       </div>
 
       <div className="card">
-        <h3 style={{ marginTop: 0 }}>Update this server (Docker Compose)</h3>
+        <h3 style={{ marginTop: 0 }}>How to update this server</h3>
         <p className="muted" style={{ lineHeight: 1.55 }}>
-          Administrators run Compose on the host from here (no GitHub token). Requires{' '}
-          <code>CANARY_COMPOSE_UPDATE_ENABLED</code>, a mounted Docker socket, and the compose project directory (see{' '}
-          <code>.env.example</code>). The initial request returns immediately; the page polls until{' '}
-          <code>docker compose build</code>/<code>up</code> finish (works behind short proxy timeouts). Granting Docker
-          socket access is powerful — restrict who has Admin.
+          Canary does not run Compose from the browser. Apply updates on the host over SSH (or your usual CI), then
+          rebuild and restart. See <code>docs/DEPLOYMENT.md</code>.
         </p>
-        {composeOn ? (
-          <p className="muted" style={{ marginTop: 12 }}>
-            Compose-based updates are <strong>enabled</strong> on this server.
-            {resetOn ? (
-              <>
-                {' '}
-                <strong>Reset to GitHub</strong> is enabled (<code>CANARY_COMPOSE_GIT_RESET_ENABLED</code>) — use when{' '}
-                <code>git pull --ff-only</code> fails because the checkout has local commits or diverged.
-              </>
-            ) : null}
-          </p>
-        ) : (
-          <p className="muted" style={{ marginTop: 12 }}>
-            Compose-based updates are <strong>not configured</strong>.
-          </p>
-        )}
-        {composeOn ? (
-          <p className="muted" style={{ marginTop: 12, fontSize: 13, lineHeight: 1.45 }}>
-            To avoid data loss, only run the updater when there is no work currently in progress.
-          </p>
-        ) : null}
-        <div className="row" style={{ gap: 8, marginTop: 16, flexWrap: 'wrap' }}>
-          <button
-            type="button"
-            className="btn primary"
-            disabled={busy || !composeOn}
-            onClick={() => void triggerCompose('ff-only')}
-          >
-            {busy ? 'Working…' : 'Run Compose update'}
-          </button>
-          {resetOn ? (
-            <button
-              type="button"
-              className="btn"
-              disabled={busy || !composeOn}
-              title={`git fetch + reset --hard origin/${status?.compose_git_ref || 'main'}, then compose build/up`}
-              style={{ borderColor: 'var(--danger, #dc2626)', color: 'var(--danger, #dc2626)' }}
-              onClick={() => void triggerCompose('reset')}
-            >
-              {busy ? 'Working…' : 'Reset to GitHub & update'}
-            </button>
+        <pre
+          style={{
+            marginTop: 12,
+            padding: 12,
+            overflow: 'auto',
+            fontSize: 13,
+            lineHeight: 1.45,
+            background: 'var(--surface-2, #f4f4f5)',
+            borderRadius: 6,
+          }}
+        >{`cd /path/to/canarycms
+git pull --ff-only
+GIT_COMMIT=$(git rev-parse HEAD) docker compose --profile prod build
+docker compose --profile prod up -d`}</pre>
+        <p className="muted" style={{ marginTop: 12, fontSize: 13, lineHeight: 1.45 }}>
+          In-app “Update now” was removed so the backend never needs the Docker socket. Status above stays notify-only
+          {status?.compose_git_ref ? (
+            <>
+              {' '}
+              (tracking <code>{status.compose_git_ref}</code>)
+            </>
           ) : null}
-          <button type="button" className="btn" disabled={busy} onClick={() => void load()}>
-            Reload
-          </button>
-        </div>
-        {busy ? (
-          finishing ? (
-            <p className="muted" style={{ marginTop: 16, fontSize: 13 }}>
-              Update complete — waiting for services to restart, then this page will reload…
-            </p>
-          ) : (
-            <ComposeUpdateProgress progress={composeProgress} />
-          )
-        ) : null}
+          .
+        </p>
       </div>
 
       <AdminStorage token={token} />
-
-      {!status?.configured ? (
-        <p className="muted" style={{ marginTop: 12 }}>
-          Compose updates are not configured — set <code>CANARY_COMPOSE_*</code> env vars and mounts (see{' '}
-          <code>.env.example</code>).
-        </p>
-      ) : null}
     </div>
   )
 }

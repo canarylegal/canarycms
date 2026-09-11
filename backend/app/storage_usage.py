@@ -262,7 +262,7 @@ def measure_deployment_storage(db: Session) -> DeploymentStorageSnapshot:
         notes.append(docker_stack.note)
     if not docker_sock_available():
         notes.append(
-            "Mount /var/run/docker.sock into the backend to include Docker images, container layers, and build cache."
+            "Docker image/layer totals omitted — backend does not mount docker.sock by default."
         )
     if application_checkout_bytes > 50 * 1024**2:
         notes.append(

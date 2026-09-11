@@ -9,7 +9,7 @@ import httpx
 
 from app.build_metadata import effective_build_commit_for_update_check
 from app.github_deploy import load_github_repo_for_api
-from app.local_compose_update import compose_git_reset_enabled, compose_update_configured, load_compose_update_config
+from app.local_compose_update import compose_update_configured
 
 GITHUB_API = "https://api.github.com"
 
@@ -41,14 +41,15 @@ def build_update_check_payload() -> dict[str, Any]:
     prompt = (os.getenv("CANARY_UPDATE_PROMPT_ON_LOGIN") or "1").strip().lower() not in ("0", "false", "no", "off")
     current = effective_build_commit_for_update_check() or "unknown"
 
+    # Always false: in-app Compose updates were removed (notify-only Admin → Deploy).
     compose_deploy = compose_update_configured()
-    compose_cfg = load_compose_update_config()
+    git_ref = (os.getenv("CANARY_GITHUB_DEPLOY_REF") or "main").strip() or "main"
     base: dict[str, Any] = {
         "github_repo_configured": False,
         "deploy_trigger_configured": compose_deploy,
         "compose_update_enabled": compose_deploy,
-        "compose_git_reset_enabled": compose_git_reset_enabled(),
-        "compose_git_ref": compose_cfg.git_ref if compose_cfg else "main",
+        "compose_git_reset_enabled": False,
+        "compose_git_ref": git_ref,
         "prompt_enabled": prompt,
         "current_commit": current,
         "current_commit_short": _short_sha(current) if current != "unknown" else "unknown",
@@ -127,8 +128,8 @@ def build_update_check_payload() -> dict[str, Any]:
                     prev = (base.get("note") or "").strip()
                     tail = (
                         f"This deployment ({_short_sha(current)}) is ahead of GitHub {_short_sha(remote_sha)} "
-                        "with unpublished local commits. Push from your dev machine, or use Reset to GitHub if you "
-                        "intend to discard local changes."
+                        "with unpublished local commits. Push from your server checkout, or reset the host git "
+                        "tree to the remote ref before rebuilding (see docs/DEPLOYMENT.md)."
                     )
                     base["note"] = f"{prev} {tail}".strip() if prev else tail
             else:

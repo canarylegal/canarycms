@@ -1,8 +1,11 @@
 # Canary — production-oriented stack. Use docker-compose.dev.yml for bind mounts + Vite hot reload.
 #
+# Host port defaults bind to 127.0.0.1 (not 0.0.0.0). Override *_PORT_PUBLISH in `.env` only if you
+# intentionally expose a service beyond loopback / your reverse proxy.
+#
 # Profiles (set COMPOSE_PROFILES in `.env` or pass --profile):
-#   prod — nginx static UI on FRONTEND_PORT_PUBLISH (default :8080)
-#   dev  — Vite dev UI on FRONTEND_DEV_PORT_PUBLISH (default :5173)
+#   prod — nginx static UI on FRONTEND_PORT_PUBLISH (default 127.0.0.1:8080)
+#   dev  — Vite dev UI on FRONTEND_DEV_PORT_PUBLISH (default 127.0.0.1:5173)
 #
 # Examples:
 #   cp .env.example .env   # edit secrets
@@ -25,7 +28,8 @@ services:
     volumes:
       - db-data:/var/lib/postgresql/data
     ports:
-      - "${POSTGRES_PORT_PUBLISH:-5432:5432}"
+      # Loopback by default — override in .env only if you intentionally expose Postgres on the LAN.
+      - "${POSTGRES_PORT_PUBLISH:-127.0.0.1:5432:5432}"
     healthcheck:
       test:
         [
@@ -107,16 +111,9 @@ services:
       CANARY_GITHUB_DEPLOY_OWNER: ${CANARY_GITHUB_DEPLOY_OWNER:-}
       CANARY_GITHUB_DEPLOY_REPO: ${CANARY_GITHUB_DEPLOY_REPO:-}
       CANARY_GITHUB_DEPLOY_REF: ${CANARY_GITHUB_DEPLOY_REF:-main}
-      # GUI “Update now” via Docker Compose on the host (mount docker.sock + project dir — see .env.example).
-      CANARY_COMPOSE_UPDATE_ENABLED: ${CANARY_COMPOSE_UPDATE_ENABLED:-}
-      CANARY_COMPOSE_PROJECT_DIR: ${CANARY_COMPOSE_PROJECT_DIR:-/canary-compose}
-      CANARY_COMPOSE_PROFILES: ${CANARY_COMPOSE_PROFILES:-prod}
-      CANARY_COMPOSE_FILES: ${CANARY_COMPOSE_FILES:-docker-compose.yml}
-      CANARY_COMPOSE_GIT_PULL: ${CANARY_COMPOSE_GIT_PULL:-}
-      CANARY_COMPOSE_GIT_RESET_ENABLED: ${CANARY_COMPOSE_GIT_RESET_ENABLED:-}
-      # Host path for the compose project (required on btrfs when mountinfo shows /@home/... — see .env.example).
-      CANARY_COMPOSE_HOST_PROJECT_DIR: ${CANARY_COMPOSE_HOST_PROJECT_DIR:-}
-      # Prefer git HEAD on the mounted compose project for /health + Deploy (auto when unset — see .env.example).
+      # Prefer git HEAD from a host checkout for /health + Deploy (optional RO bind — see .env.example).
+      # Do not mount docker.sock: GUI Compose updates are not supported (notify-only).
+      CANARY_COMPOSE_PROJECT_DIR: ${CANARY_COMPOSE_PROJECT_DIR:-}
       CANARY_RUNTIME_COMMIT_FROM_COMPOSE_REPO: ${CANARY_RUNTIME_COMMIT_FROM_COMPOSE_REPO:-}
       # When not "0"/"false": admins may see an update prompt after login if GitHub is ahead of this build.
       CANARY_UPDATE_PROMPT_ON_LOGIN: ${CANARY_UPDATE_PROMPT_ON_LOGIN:-1}
@@ -133,11 +130,9 @@ services:
     volumes:
       - ./data/files:/data/files
       - radicale-data:/radicale-data
-      # CANARY_COMPOSE_* in `.env` — exposes host Docker to the backend (powerful; restrict Admin access).
-      - /var/run/docker.sock:/var/run/docker.sock
-      - ./:/canary-compose:rw
     ports:
-      - "${BACKEND_PORT_PUBLISH:-8000:8000}"
+      # Loopback by default — public traffic should hit frontend/nginx (or a reverse proxy), not the API directly.
+      - "${BACKEND_PORT_PUBLISH:-127.0.0.1:8000:8000}"
 
   radicale:
     image: tomsquest/docker-radicale:3.1.3.0
@@ -154,7 +149,7 @@ services:
       - ./radicale/config:/config:ro
       - radicale-data:/data
     ports:
-      - "${RADICALE_PORT_PUBLISH:-0.0.0.0:5232:5232}"
+      - "${RADICALE_PORT_PUBLISH:-127.0.0.1:5232:5232}"
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:5232/ -o /dev/null"]
       interval: 10s
@@ -177,12 +172,14 @@ services:
       JWT_SECRET: ${ONLYOFFICE_JWT_SECRET:?Set ONLYOFFICE_JWT_SECRET in .env — see .env.example}
       SECURE_LINK_SECRET: ${ONLYOFFICE_SECURE_LINK_SECRET:?Set ONLYOFFICE_SECURE_LINK_SECRET in .env — see .env.example}
       JWT_IN_BODY: "true"
-      ALLOW_PRIVATE_IP_ADDRESS: "true"
-      ALLOW_META_IP_ADDRESS: "true"
+      # Private Docker DNS (backend <-> Document Server) needs private IPs — keep true on Compose.
+      ALLOW_PRIVATE_IP_ADDRESS: ${ONLYOFFICE_ALLOW_PRIVATE_IP_ADDRESS:-true}
+      # Metadata / link-local (e.g. 169.254.169.254): off by default.
+      ALLOW_META_IP_ADDRESS: ${ONLYOFFICE_ALLOW_META_IP_ADDRESS:-false}
     #volumes:
     #  - ./onlyoffice-local-cachefix.json:/etc/onlyoffice/documentserver/local.json
     ports:
-      - "${ONLYOFFICE_PORT_PUBLISH:-0.0.0.0:18080:80}"
+      - "${ONLYOFFICE_PORT_PUBLISH:-127.0.0.1:18080:80}"
     healthcheck:
       test:
         [

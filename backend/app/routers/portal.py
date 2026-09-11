@@ -20,7 +20,14 @@ from starlette.background import BackgroundTask
 
 from app.audit import log_event
 from app.db import get_db
-from app.deps import get_portal_contact, get_portal_session, get_portal_write_contact, require_portal_client_write
+from app.deps import (
+    get_portal_contact,
+    get_portal_session,
+    get_portal_write_contact,
+    require_portal_client_audience,
+    require_portal_client_write,
+    require_portal_not_preview,
+)
 from app.security import (
     PortalSessionPayload,
     create_portal_file_open_token,
@@ -67,15 +74,21 @@ from app.portal_service import (
     find_portal_contact_by_email,
     get_portal_grant_file,
     get_grant_for_contact,
+    get_matter_portal_access_by_code,
     get_portal_access_by_code,
     grant_folder_display_name,
     grant_is_active,
     issue_portal_login_otp,
     contact_has_portal_content_on_case,
     list_active_grants_for_contact,
+    list_active_grants_for_matter_session,
     list_grant_files,
+    matter_portal_access_is_active,
+    matter_portal_session_version,
     normalize_access_code,
     portal_access_is_active,
+    record_matter_portal_auth_failure,
+    record_matter_portal_auth_success,
     record_portal_auth_failure,
     record_portal_auth_success,
     relative_folder_under_grant,
@@ -180,10 +193,20 @@ def _safe_zip_name(name: str) -> str:
     return cleaned[:120] or "folder"
 
 
-def _grant_summaries(db: Session, contact_id: uuid.UUID) -> list[PortalGrantSummaryOut]:
+def _grant_summaries(
+    db: Session,
+    contact_id: uuid.UUID,
+    *,
+    case_id: uuid.UUID | None = None,
+) -> list[PortalGrantSummaryOut]:
     from app.portal_grant_views import count_new_files_for_grant, get_grant_last_viewed_at
 
-    grants = filter_grants_for_portal_enabled_cases(db, list_active_grants_for_contact(db, contact_id))
+    if case_id is not None:
+        grants = filter_grants_for_portal_enabled_cases(
+            db, list_active_grants_for_matter_session(db, contact_id=contact_id, case_id=case_id)
+        )
+    else:
+        grants = filter_grants_for_portal_enabled_cases(db, list_active_grants_for_contact(db, contact_id))
     out: list[PortalGrantSummaryOut] = []
     for g in grants:
         case = db.get(Case, g.case_id)
@@ -246,6 +269,44 @@ def portal_auth(payload: PortalAuthIn, request: Request, db: Session = Depends(g
     if len(code) < 8:
         record_portal_auth_ip_failure(db, ip=ip)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid access code")
+
+    matter_row = get_matter_portal_access_by_code(db, code)
+    if matter_row is not None:
+        if not matter_portal_access_is_active(matter_row):
+            record_matter_portal_auth_failure(db, matter_row)
+            record_portal_auth_ip_failure(db, ip=ip)
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid access code")
+        contact = db.get(Contact, matter_row.contact_id)
+        if contact is None:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid access code")
+        from app.portal_case import require_case_portal_enabled
+
+        require_case_portal_enabled(db, matter_row.case_id)
+        record_matter_portal_auth_success(db, matter_row)
+        token = create_portal_session_token(
+            contact_id=str(contact.id),
+            session_version=matter_portal_session_version(matter_row),
+            audience="exchange",
+            case_id=str(matter_row.case_id),
+        )
+        log_event(
+            db,
+            actor_user_id=None,
+            action="portal.auth.success",
+            entity_type="matter_portal_access",
+            entity_id=str(matter_row.id),
+            meta={"contact_id": str(contact.id), "case_id": str(matter_row.case_id), "audience": "exchange"},
+        )
+        db.commit()
+        return PortalAuthOut(
+            session_token=token,
+            contact_name=contact_display_name(contact),
+            grants=_grant_summaries(db, contact.id, case_id=matter_row.case_id),
+            focus_case_id=matter_row.case_id,
+            staff_preview=False,
+            audience="exchange",
+        )
+
     row = get_portal_access_by_code(db, code)
     if row is None or not portal_access_is_active(row):
         if row is not None:
@@ -260,6 +321,7 @@ def portal_auth(payload: PortalAuthIn, request: Request, db: Session = Depends(g
     token = create_portal_session_token(
         contact_id=str(contact.id),
         session_version=portal_session_version(row),
+        audience="client",
     )
     log_event(
         db,
@@ -267,13 +329,15 @@ def portal_auth(payload: PortalAuthIn, request: Request, db: Session = Depends(g
         action="portal.auth.success",
         entity_type="contact",
         entity_id=str(contact.id),
-        meta={"contact_id": str(contact.id)},
+        meta={"contact_id": str(contact.id), "audience": "client"},
     )
     db.commit()
     return PortalAuthOut(
         session_token=token,
         contact_name=contact_display_name(contact),
         grants=_grant_summaries(db, contact.id),
+        staff_preview=False,
+        audience="client",
     )
 
 
@@ -334,6 +398,7 @@ def portal_verify_otp(payload: PortalOtpVerifyIn, request: Request, db: Session 
         session_token=token,
         contact_name=contact_display_name(contact),
         grants=_grant_summaries(db, contact.id),
+        audience="client",
     )
 
 
@@ -388,6 +453,7 @@ def portal_preview_exchange(payload: PortalPreviewExchangeIn, db: Session = Depe
         grants=_grant_summaries(db, contact.id),
         focus_case_id=case_id,
         staff_preview=True,
+        audience="client",
     )
 
 
@@ -504,9 +570,11 @@ def portal_form_exchange(payload: PortalFormExchangeIn, db: Session = Depends(ge
 @router.get("/quote-deliveries", response_model=list[PortalQuoteDeliveryViewOut])
 def portal_list_quote_deliveries(
     contact: Contact = Depends(get_portal_contact),
+    session: PortalSessionPayload = Depends(get_portal_session),
     db: Session = Depends(get_db),
 ) -> list[PortalQuoteDeliveryViewOut]:
     """Pending quotes for this contact (folder grants not required)."""
+    require_portal_client_audience(session)
     rows = list_pending_quote_deliveries_for_contact(db, contact_id=contact.id)
     return [_quote_delivery_view(db, d) for d in rows]
 
@@ -622,10 +690,20 @@ def portal_session(
     session: PortalSessionPayload = Depends(get_portal_session),
     db: Session = Depends(get_db),
 ) -> PortalSessionOut:
+    focus_case_id = None
+    case_filter = None
+    if getattr(session, "audience", "client") == "exchange" and session.case_id:
+        try:
+            focus_case_id = uuid.UUID(session.case_id)
+            case_filter = focus_case_id
+        except ValueError:
+            focus_case_id = None
     return PortalSessionOut(
         contact_name=contact_display_name(contact),
-        grants=_grant_summaries(db, contact.id),
+        grants=_grant_summaries(db, contact.id, case_id=case_filter),
         staff_preview=session.staff_preview,
+        audience="exchange" if getattr(session, "audience", "client") == "exchange" else "client",
+        focus_case_id=focus_case_id,
     )
 
 
@@ -634,15 +712,20 @@ def portal_browse_grant(
     grant_id: uuid.UUID,
     subfolder: str = Query(default=""),
     contact: Contact = Depends(get_portal_contact),
+    session: PortalSessionPayload = Depends(get_portal_session),
     db: Session = Depends(get_db),
 ) -> PortalBrowseOut:
     from app.portal_grant_views import file_is_new_since, get_grant_last_viewed_at
 
     grant = get_grant_for_contact(db, contact_id=contact.id, grant_id=grant_id)
+    if getattr(session, "audience", "client") == "exchange" and session.case_id:
+        if str(grant.case_id) != session.case_id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Area not found")
     if not grant.can_download:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Download is not allowed for this area")
     rel, child_names, files_here = browse_grant_folder(db, grant, subfolder=subfolder)
-    pending = list_pending_approvals_for_grant(db, contact_id=contact.id, grant=grant)
+    exchange = getattr(session, "audience", "client") == "exchange"
+    pending = [] if exchange else list_pending_approvals_for_grant(db, contact_id=contact.id, grant=grant)
     pending_ids = {d.file_id for d in pending}
     last_viewed = get_grant_last_viewed_at(db, contact_id=contact.id, grant_id=grant.id)
     visible = [f for f in files_here if f.id not in pending_ids]
@@ -656,15 +739,23 @@ def portal_browse_grant(
         subfolders=child_names,
         files=file_outs,
         pending_approvals=[PortalQuoteDeliveryViewOut(**portal_quote_delivery_view(db, d, grant=grant)) for d in pending],
-        pending_docusign_signings=[
-            PortalDocusignSigningOut(**docusign_portal_signing_view(db, req, contact_id=contact.id))
-            for req, _recip in list_pending_docusign_for_contact(db, contact.id)
-        ],
-        pending_canary_signings=[
-            PortalCanarySignOut(**canary_portal_signing_view(db, req, contact_id=contact.id))
-            for req, _recip in list_pending_canary_sign_for_contact(db, contact.id)
-        ],
-        pending_portal_forms=_pending_forms_for_grant(db, contact=contact, grant=grant),
+        pending_docusign_signings=(
+            []
+            if exchange
+            else [
+                PortalDocusignSigningOut(**docusign_portal_signing_view(db, req, contact_id=contact.id))
+                for req, _recip in list_pending_docusign_for_contact(db, contact.id)
+            ]
+        ),
+        pending_canary_signings=(
+            []
+            if exchange
+            else [
+                PortalCanarySignOut(**canary_portal_signing_view(db, req, contact_id=contact.id))
+                for req, _recip in list_pending_canary_sign_for_contact(db, contact.id)
+            ]
+        ),
+        pending_portal_forms=[] if exchange else _pending_forms_for_grant(db, contact=contact, grant=grant),
         new_file_count=sum(1 for f in file_outs if f.is_new),
         last_viewed_at=last_viewed,
     )
@@ -709,8 +800,10 @@ def _pending_forms_for_grant(db: Session, *, contact: Contact, grant: ContactPor
 @router.get("/forms", response_model=list[PortalFormPendingOut])
 def portal_list_forms(
     contact: Contact = Depends(get_portal_contact),
+    session: PortalSessionPayload = Depends(get_portal_session),
     db: Session = Depends(get_db),
 ) -> list[PortalFormPendingOut]:
+    require_portal_client_audience(session)
     out: list[PortalFormPendingOut] = []
     for sub in list_pending_forms_for_contact(db, contact.id):
         detail = portal_form_detail(db, sub)
@@ -983,10 +1076,15 @@ def portal_upload_file(
     grant_id: uuid.UUID,
     upload: UploadFile = FastAPIFile(...),
     folder: str = Form(default=""),
-    contact: Contact = Depends(get_portal_write_contact),
+    contact: Contact = Depends(get_portal_contact),
+    session: PortalSessionPayload = Depends(get_portal_session),
     db: Session = Depends(get_db),
 ) -> PortalFileOut:
+    require_portal_not_preview(session)
     grant = get_grant_for_contact(db, contact_id=contact.id, grant_id=grant_id)
+    if getattr(session, "audience", "client") == "exchange" and session.case_id:
+        if str(grant.case_id) != session.case_id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Area not found")
     target_folder = ensure_upload_folder_allowed(grant=grant, folder=folder or grant.folder_path or "")
     case = db.get(Case, grant.case_id)
     if case is None:
@@ -1316,9 +1414,11 @@ def portal_canary_sign_decline(
 @router.get("/client-actions", response_model=PortalClientActionsOut)
 def portal_client_actions(
     contact: Contact = Depends(get_portal_contact),
+    session: PortalSessionPayload = Depends(get_portal_session),
     db: Session = Depends(get_db),
 ) -> PortalClientActionsOut:
     """Unified outstanding / complete / inactive action items for the portal home."""
+    require_portal_client_audience(session)
     outstanding: list[PortalClientActionItemOut] = []
     complete: list[PortalClientActionItemOut] = []
     inactive: list[PortalClientActionItemOut] = []

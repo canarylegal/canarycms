@@ -17,15 +17,20 @@ from app.portal_case import require_case_portal_enabled
 from app.file_storage import sanitize_folder_path
 from app.models import Case, CaseContact, Contact, ContactPortalAccess, ContactPortalGrant, User
 from app.portal_service import (
+    allocate_unique_access_code,
+    client_matter_description,
     contact_display_name,
     default_grant_label,
+    ensure_matter_portal_access,
     generate_access_code,
     hash_access_code,
     portal_access_is_active,
+    staff_matter_portal_access_code,
     staff_portal_access_code,
     store_portal_access_code,
     utcnow,
 )
+from app.matter_contact_constants import is_exchange_matter_contact_type
 from app.schemas import (
     ContactPortalAccessActionIn,
     ContactPortalAccessCreateOut,
@@ -129,6 +134,40 @@ def _notify_portal_folder_granted(db: Session, contact: Contact, grant: ContactP
             "contact_name": contact_display_name(contact),
             "area_label": default_grant_label(db, grant),
             "portal_url": _portal_public_url(),
+        },
+        actor_user_id=actor_user_id,
+    )
+    return sent, None if sent else ALERTS_NOT_CONFIGURED_MSG
+
+
+def _notify_exchange_folder_granted(
+    db: Session,
+    *,
+    contact: Contact,
+    grant: ContactPortalGrant,
+    access_code: str,
+    actor_user_id: uuid.UUID,
+) -> tuple[bool, str | None]:
+    if not firm_alerts_configured(db):
+        return False, ALERTS_NOT_CONFIGURED_MSG
+    from app.portal_service import resolve_matter_contact_email
+
+    email = resolve_matter_contact_email(db, case_id=grant.case_id, contact_id=contact.id)
+    if not email:
+        return False, "Contact has no e-mail address."
+    if not (access_code or "").strip():
+        return False, "Matter portal access code is not available."
+    case = db.get(Case, grant.case_id)
+    sent = dispatch_alert(
+        db,
+        AlertKind.portal_matter_exchange_shared,
+        to_email=email,
+        context={
+            "contact_name": contact_display_name(contact),
+            "matter_label": client_matter_description(case),
+            "area_label": default_grant_label(db, grant),
+            "portal_url": _portal_public_url(),
+            "access_code": access_code,
         },
         actor_user_id=actor_user_id,
     )
@@ -393,13 +432,40 @@ def create_contact_portal_grant(
     require_case_access(payload.case_id, user, db)
     require_case_portal_enabled(db, payload.case_id)
     folder = sanitize_folder_path(payload.folder_path)
+
+    cc = db.execute(
+        select(CaseContact).where(
+            CaseContact.case_id == payload.case_id,
+            CaseContact.contact_id == contact_id,
+        )
+    ).scalar_one_or_none()
+    if cc is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Contact is not on this matter")
+
+    exchange = is_exchange_matter_contact_type(cc.matter_contact_type)
+    exchange_code: str | None = None
+    if exchange:
+        _row, _newly, code = ensure_matter_portal_access(
+            db,
+            case_id=payload.case_id,
+            contact_id=contact_id,
+            actor_user_id=user.id,
+        )
+        exchange_code = code or staff_matter_portal_access_code(_row)
+        # Download-only by default for exchange contacts (staff can enable upload later).
+        can_download = True
+        can_upload = False
+    else:
+        can_download = payload.can_download
+        can_upload = payload.can_upload
+
     grant = ContactPortalGrant(
         contact_id=contact_id,
         case_id=payload.case_id,
         folder_path=folder,
         label=(payload.label or "").strip() or None,
-        can_download=payload.can_download,
-        can_upload=payload.can_upload,
+        can_download=can_download,
+        can_upload=can_upload,
         expires_at=payload.expires_at,
         created_by_user_id=user.id,
     )
@@ -410,14 +476,30 @@ def create_contact_portal_grant(
         action="contact.portal.grant.create",
         entity_type="contact_portal_grant",
         entity_id=str(grant.id),
-        meta={"contact_id": str(contact_id), "case_id": str(payload.case_id), "folder_path": folder},
+        meta={
+            "contact_id": str(contact_id),
+            "case_id": str(payload.case_id),
+            "folder_path": folder,
+            "exchange": exchange,
+        },
     )
     db.commit()
     db.refresh(grant)
     email_sent = False
     email_skip_reason: str | None = None
     if payload.send_email:
-        email_sent, email_skip_reason = _notify_portal_folder_granted(db, contact, grant, actor_user_id=user.id)
+        if exchange:
+            email_sent, email_skip_reason = _notify_exchange_folder_granted(
+                db,
+                contact=contact,
+                grant=grant,
+                access_code=exchange_code or "",
+                actor_user_id=user.id,
+            )
+        else:
+            email_sent, email_skip_reason = _notify_portal_folder_granted(
+                db, contact, grant, actor_user_id=user.id
+            )
     out = _grant_out(db, grant)
     return out.model_copy(update={"email_sent": email_sent, "email_skip_reason": email_skip_reason})
 

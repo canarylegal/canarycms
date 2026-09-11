@@ -1,9 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { apiFetch } from './api'
-import { postDeployTriggerAndWaitForCompose } from './composeDeployPoll'
-import { ComposeUpdateProgress } from './ComposeUpdateProgress'
-import type { ApiError } from './api'
-import type { AdminDeployComposeJobOut, AdminDeployUpdateCheckOut, UserPublic } from './types'
+import type { AdminDeployUpdateCheckOut, UserPublic } from './types'
 
 const DISMISS_KEY = 'canary_update_prompt_dismissed_remote_sha'
 const LATER_SESSION_KEY = 'canary_update_prompt_later_remote_sha'
@@ -19,10 +16,6 @@ export function AdminLoginUpdatePrompt({
 }) {
   const [data, setData] = useState<AdminDeployUpdateCheckOut | null>(null)
   const [open, setOpen] = useState(false)
-  const [busy, setBusy] = useState(false)
-  const [err, setErr] = useState<string | null>(null)
-  const [composeProgress, setComposeProgress] = useState<AdminDeployComposeJobOut | null>(null)
-  const [finishing, setFinishing] = useState(false)
   const fetchedRef = useRef<string | null>(null)
 
   useEffect(() => {
@@ -97,36 +90,6 @@ export function AdminLoginUpdatePrompt({
     setOpen(false)
   }
 
-  async function executeDeploy() {
-    if (!data || !me) return
-    if (!data.deploy_trigger_configured) {
-      setErr('Updates from the UI are not configured on this server.')
-      return
-    }
-    setBusy(true)
-    setErr(null)
-    setComposeProgress(null)
-    setFinishing(false)
-    try {
-      const { reloadApp } = await postDeployTriggerAndWaitForCompose(
-        token,
-        { method: 'auto' },
-        { onProgress: setComposeProgress, onFinishing: () => setFinishing(true) },
-      )
-      if (reloadApp) {
-        window.location.reload()
-        return
-      }
-      setOpen(false)
-    } catch (e) {
-      setErr((e as ApiError).message ?? 'Deploy request failed')
-    } finally {
-      setBusy(false)
-      setComposeProgress(null)
-      setFinishing(false)
-    }
-  }
-
   if (!open || !data) return null
 
   return (
@@ -143,38 +106,19 @@ export function AdminLoginUpdatePrompt({
         onClick={(e) => e.stopPropagation()}
       >
         <h2 id="canary-update-prompt-title" style={{ margin: '0 0 8px', fontSize: 18 }}>
-          {finishing ? 'Update complete' : busy ? 'Updating…' : 'Update available'}
+          Update available
         </h2>
-        {!busy ? (
-          <p className="muted" style={{ margin: '0 0 12px', lineHeight: 1.45 }}>
-            A newer version is available on GitHub ({data.remote_ref}, tip{' '}
-            <code>{data.remote_commit_short}</code>).
-          </p>
-        ) : finishing ? (
-          <p className="muted" style={{ margin: '0 0 12px', lineHeight: 1.45, fontSize: 13 }}>
-            Waiting for services to restart, then this page will reload automatically…
-          </p>
-        ) : (
-          <p className="muted" style={{ margin: '0 0 12px', lineHeight: 1.45, fontSize: 13 }}>
-            This may take several minutes. Do not close this tab.
-          </p>
-        )}
-        {data.note && !busy ? (
+        <p className="muted" style={{ margin: '0 0 12px', lineHeight: 1.45 }}>
+          A newer version is available on GitHub ({data.remote_ref}, tip <code>{data.remote_commit_short}</code>).
+          Apply it on the server over SSH or CI — Canary does not update itself from the browser.
+        </p>
+        {data.note ? (
           <p className="muted" style={{ margin: '0 0 12px', fontSize: 13 }}>
             {data.note}
           </p>
         ) : null}
-        {err ? <div className="error" style={{ marginBottom: 10 }}>{err}</div> : null}
 
-        {!busy ? (
-          <p className="muted" style={{ margin: '0 0 12px', fontSize: 13, lineHeight: 1.45 }}>
-            To avoid data loss, only run the updater when there is no work currently in progress.
-          </p>
-        ) : null}
-
-        {busy && !finishing ? <ComposeUpdateProgress progress={composeProgress} /> : null}
-
-        {!busy && (data.latest_release_name || data.latest_release_tag) ? (
+        {(data.latest_release_name || data.latest_release_tag) ? (
           <div style={{ marginBottom: 12 }}>
             <div style={{ fontWeight: 600, marginBottom: 6 }}>Latest GitHub release</div>
             <div className="muted" style={{ fontSize: 14 }}>
@@ -201,7 +145,7 @@ export function AdminLoginUpdatePrompt({
           </div>
         ) : null}
 
-        {!busy && data.commit_messages.length > 0 ? (
+        {data.commit_messages.length > 0 ? (
           <div style={{ marginBottom: 12 }}>
             <div style={{ fontWeight: 600, marginBottom: 6 }}>Recent changes</div>
             <ul style={{ margin: 0, paddingLeft: 18, maxHeight: 200, overflow: 'auto', fontSize: 13 }}>
@@ -219,30 +163,17 @@ export function AdminLoginUpdatePrompt({
           </div>
         ) : null}
 
+        <p className="muted" style={{ margin: '0 0 12px', fontSize: 13, lineHeight: 1.45 }}>
+          Details and host commands: Admin → Deploy, or <code>docs/DEPLOYMENT.md</code>.
+        </p>
+
         <div className="row" style={{ gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end', marginTop: 16 }}>
-          {!busy ? (
-            <>
-              <button type="button" className="btn" onClick={remindLater}>
-                Later
-              </button>
-              <button type="button" className="btn" onClick={dismissForVersion}>
-                Skip this version
-              </button>
-              <button
-                type="button"
-                className="btn primary"
-                style={!data.deploy_trigger_configured ? { opacity: 0.55, cursor: 'not-allowed' } : undefined}
-                title={data.deploy_trigger_configured ? undefined : 'Compose updates are not configured on this server.'}
-                onClick={() => void executeDeploy()}
-              >
-                Update now
-              </button>
-            </>
-          ) : (
-            <button type="button" className="btn" disabled>
-              Updating…
-            </button>
-          )}
+          <button type="button" className="btn" onClick={remindLater}>
+            Later
+          </button>
+          <button type="button" className="btn" onClick={dismissForVersion}>
+            Skip this version
+          </button>
         </div>
       </div>
     </div>

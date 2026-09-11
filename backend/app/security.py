@@ -241,6 +241,8 @@ class PortalSessionPayload:
     contact_id: str
     staff_preview: bool = False
     session_version: int = 1
+    audience: str = "client"  # "client" | "exchange"
+    case_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -263,16 +265,24 @@ def create_portal_session_token(
     contact_id: str,
     staff_preview: bool = False,
     session_version: int = 1,
+    audience: str = "client",
+    case_id: str | None = None,
 ) -> str:
     now = int(time.time())
-    payload = {
+    aud = (audience or "client").strip().lower() or "client"
+    if aud not in ("client", "exchange"):
+        aud = "client"
+    payload: dict = {
         "sub": contact_id,
         "purpose": "portal",
         "staff_preview": bool(staff_preview),
         "sv": int(session_version),
+        "portal_audience": aud,
         "iat": now,
         "exp": now + PORTAL_SESSION_TTL_SECONDS,
     }
+    if aud == "exchange" and case_id:
+        payload["case_id"] = case_id
     return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALG)
 
 
@@ -293,10 +303,20 @@ def decode_portal_session_token(token: str) -> PortalSessionPayload:
         session_version = int(sv_raw)
     else:
         session_version = 1
+    aud_raw = payload.get("portal_audience", payload.get("aud", "client"))
+    audience = aud_raw.strip().lower() if isinstance(aud_raw, str) else "client"
+    if audience not in ("client", "exchange"):
+        audience = "client"
+    case_id_raw = payload.get("case_id")
+    case_id = case_id_raw.strip() if isinstance(case_id_raw, str) and case_id_raw.strip() else None
+    if audience == "exchange" and not case_id:
+        raise ValueError("Invalid session")
     return PortalSessionPayload(
         contact_id=sub,
         staff_preview=bool(payload.get("staff_preview")),
         session_version=session_version,
+        audience=audience,
+        case_id=case_id,
     )
 
 

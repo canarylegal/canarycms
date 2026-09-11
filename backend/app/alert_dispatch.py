@@ -30,6 +30,7 @@ from app.alert_templates import (
     portal_form_completed_staff,
     portal_form_sent,
     portal_login_otp,
+    portal_matter_exchange_shared,
     portal_quote_accepted,
     portal_quote_declined,
     portal_quote_sent,
@@ -48,6 +49,7 @@ class AlertKind(str, enum.Enum):
     portal_staff_upload = "portal_staff_upload"
     portal_contact_access = "portal_contact_access"
     portal_contact_folder = "portal_contact_folder"
+    portal_matter_exchange_shared = "portal_matter_exchange_shared"
     portal_contact_files_added = "portal_contact_files_added"
     portal_login_otp = "portal_login_otp"
     portal_quote_sent = "portal_quote_sent"
@@ -126,6 +128,15 @@ def dispatch_alert(
             contact_name=str(context.get("contact_name") or "Client"),
             area_label=str(context.get("area_label") or "Documents"),
             portal_url=str(context.get("portal_url") or portal_public_url()),
+        )
+    elif kind == AlertKind.portal_matter_exchange_shared:
+        subject, body, body_html = portal_matter_exchange_shared(
+            firm_name=firm,
+            contact_name=str(context.get("contact_name") or "Contact"),
+            matter_label=str(context.get("matter_label") or "your matter"),
+            area_label=str(context.get("area_label") or "Documents"),
+            portal_url=str(context.get("portal_url") or portal_public_url()),
+            access_code=str(context.get("access_code") or ""),
         )
     elif kind == AlertKind.portal_contact_files_added:
         filenames = context.get("filenames") or []
