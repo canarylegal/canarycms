@@ -1,3 +1,12 @@
+/**
+ * Client helpers for the retired in-app Compose “Update now” flow.
+ *
+ * **Intentionally retained — not accidental dead code.** Admin → Deploy is notify-only;
+ * trigger endpoints return HTTP 410 and the UI no longer offers Update now. This module stays
+ * so the former client contract remains reviewable if product later reconsiders host-side
+ * updates (which would need an explicit security review — backend must not regain docker.sock).
+ * Do not wire it back into AdminDeploy without that decision.
+ */
 import { apiFetch, apiUrl } from './api'
 import type { AdminDeployComposeJobOut, AdminDeployTriggerOut } from './types'
 

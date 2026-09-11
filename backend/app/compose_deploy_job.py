@@ -1,9 +1,15 @@
-"""Background Docker Compose updates for admin GUI (avoids long HTTP requests / proxy timeouts).
+"""Compose deploy job state (retired GUI updater; reconciliation retained for old installs).
 
-Job status is persisted to JSON under ``<compose project>/.canary/runtime`` so it survives
-**backend container recreation** during ``docker compose up -d`` (never under ``FILES_ROOT``).
+**Notify-only:** starting a job from the admin API is gone (``POST /admin/deploy/trigger`` → 410).
+``try_start_compose_job`` / background runners are not a production entry point.
 
-Use a **single** API worker process (default ``uvicorn`` without ``--workers``).
+**Intentionally retained — not accidental dead code:**
+
+- ``reconcile_compose_job_state`` / ``compose_job_disk_says_running`` still run at backend
+  startup so a host that once used the GUI updater does not strand “running” job markers
+  after upgrades.
+- Implementation + tests stay so any proposal to restore in-app Compose updates is forced
+  through an explicit review rather than a silent reintroduction of Docker socket access.
 """
 
 from __future__ import annotations

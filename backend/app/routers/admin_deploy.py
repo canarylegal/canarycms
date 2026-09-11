@@ -1,4 +1,10 @@
-"""Admin-only: deployment status and GitHub update checks (notify-only; no in-app Compose update)."""
+"""Admin-only: deployment status and GitHub update checks (notify-only; no in-app Compose update).
+
+Trigger / compose-job routes remain as deliberate HTTP 410 stubs so old clients fail closed
+with a clear message. The former updater implementation is retained under
+``app.local_compose_update`` / ``app.compose_deploy_job`` — see those modules — and must not
+be treated as unmarked dead code or silently re-enabled.
+"""
 
 from __future__ import annotations
 
