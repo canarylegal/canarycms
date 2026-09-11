@@ -39,6 +39,9 @@ jobs:
   portal-smoke:
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    env:
+      COMPOSE_FILE: docker-compose.yml:docker-compose.ci.yml
+      BACKEND_CONTAINER: canaryci-backend
     steps:
       - uses: actions/checkout@v6
 
@@ -76,34 +79,22 @@ jobs:
       - name: Build and start db + backend
         run: |
           set -euo pipefail
-          docker compose up -d --build db backend
+          docker compose up -d --build --wait --wait-timeout 360 db backend
           docker compose ps
 
-      - name: Wait for backend health
+      - name: Verify backend /health on published port
         run: |
           set -euo pipefail
-          for i in $(seq 1 120); do
-            if docker compose exec -T backend python -c \
-              "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5)"; then
-              echo "healthy after ${i} attempts"
-              exit 0
-            fi
-            echo "attempt ${i}: not healthy yet"
-            if (( i % 10 == 0 )); then
-              docker compose ps || true
-              docker compose logs --tail=40 backend || true
-            fi
-            sleep 3
-          done
-          echo "=== backend logs (tail) ==="
-          docker compose logs --tail=200 backend || true
-          echo "=== db logs (tail) ==="
-          docker compose logs --tail=80 db || true
-          exit 1
+          curl -fsS --retry 12 --retry-all-errors --retry-delay 5 \
+            http://127.0.0.1:18000/health
+          docker compose exec -T backend python -c \
+            "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5)"
 
       - name: Portal smoke (ensure fixture)
         run: ./scripts/smoke-portal.sh --ensure-fixture
 
       - name: Dump logs on failure
         if: failure()
-        run: docker compose logs --tail=200 backend db || true
+        run: |
+          docker compose ps -a || true
+          docker compose logs --tail=300 backend db || true
