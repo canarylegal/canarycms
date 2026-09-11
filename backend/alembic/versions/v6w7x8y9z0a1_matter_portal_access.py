@@ -1,4 +1,8 @@
-"""Matter-scoped portal access for non-client exchange contacts."""
+"""Matter-scoped portal access for non-client exchange contacts.
+
+Revision ID: v6w7x8y9z0a1
+Revises: u5v6w7x8y9z0
+"""
 
 from __future__ import annotations
 
@@ -6,8 +10,8 @@ import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects import postgresql
 
-revision = "u5v6w7x8y9z0"
-down_revision = "t4u5v6w7x8y9"
+revision = "v6w7x8y9z0a1"
+down_revision = "u5v6w7x8y9z0"
 branch_labels = None
 depends_on = None
 
