@@ -1,0 +1,14 @@
+# CI-only overrides: unique container names + rely on Compose healthchecks.
+# Usage: docker compose -f docker-compose.yml -f docker-compose.ci.yml ...
+
+services:
+  db:
+    container_name: canaryci-db
+  backend:
+    container_name: canaryci-backend
+    # Give migrations + uvicorn more room on cold GitHub runners.
+    healthcheck:
+      interval: 5s
+      timeout: 5s
+      retries: 36
+      start_period: 120s
