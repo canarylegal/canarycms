@@ -1,13 +1,14 @@
-# CI-only overrides: unique container names + rely on Compose healthchecks.
-# Usage: docker compose -f docker-compose.yml -f docker-compose.ci.yml ...
+# CI-only overrides: unique container names + longer health grace on cold runners.
+# Usage: COMPOSE_FILE=docker-compose.yml:docker-compose.ci.yml docker compose ...
 
 services:
   db:
     container_name: canaryci-db
   backend:
     container_name: canaryci-backend
-    # Give migrations + uvicorn more room on cold GitHub runners.
+    # Full healthcheck block (Compose replaces the mapping; keep the test command).
     healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')\""]
       interval: 5s
       timeout: 5s
       retries: 36
