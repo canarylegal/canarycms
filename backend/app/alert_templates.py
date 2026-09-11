@@ -170,6 +170,49 @@ def portal_contact_access_granted(
     return subject, body, html
 
 
+def portal_matter_exchange_shared(
+    *,
+    firm_name: str,
+    contact_name: str,
+    matter_label: str,
+    area_label: str,
+    portal_url: str,
+    access_code: str,
+) -> tuple[str, str, str]:
+    subject = f"Documents shared — {matter_label} — {_firm_line(firm_name)}"
+    cta_label = "Open portal"
+    body = "\n".join(
+        [
+            f"Dear {contact_name},",
+            "",
+            f"Documents have been shared with you for: {matter_label}",
+            f"Shared folder: {area_label}",
+            "",
+            f"{cta_label}: {portal_url}",
+            f"Access code: {access_code}",
+            "",
+            "Sign in with this access code on the portal. Keep the code confidential.",
+            "",
+            f"— {_firm_line(firm_name)}",
+        ]
+    )
+    html = _html_email_shell(
+        firm_name=firm_name,
+        inner_html=(
+            f"<p>Dear {_escape_html(contact_name)},</p>"
+            f"<p>Documents have been shared with you for: <strong>{_escape_html(matter_label)}</strong></p>"
+            f"<p>Shared folder: <strong>{_escape_html(area_label)}</strong></p>"
+            f"{_html_cta_button(portal_url, cta_label)}"
+            f"{_html_fallback_link(portal_url)}"
+            f"{_html_highlight_code('Your access code', access_code)}"
+            '<p style="font-size:13px;color:#64748b;margin:0;">'
+            "Sign in with this access code on the portal. Keep the code confidential."
+            "</p>"
+        ),
+    )
+    return subject, body, html
+
+
 def password_reset_email(
     *,
     firm_name: str,

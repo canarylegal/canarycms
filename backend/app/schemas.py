@@ -1108,19 +1108,15 @@ class AdminDeployStatusOut(BaseModel):
 
 
 class AdminDeployTriggerIn(BaseModel):
-    """Trigger a Docker Compose pull/build/up on the host (self-host)."""
+    """Legacy body for ``POST /admin/deploy/trigger`` (always returns HTTP 410 — GUI updates removed)."""
 
     method: Literal["auto", "compose"] = Field(
         default="auto",
-        description="Both values run the Compose update path; ``auto`` is kept for older clients.",
+        description="Ignored; endpoint is gone.",
     )
     git_strategy: Literal["ff-only", "reset"] = Field(
         default="ff-only",
-        description=(
-            "``ff-only``: ``git pull --ff-only`` when ``CANARY_COMPOSE_GIT_PULL`` is set. "
-            "``reset``: ``git fetch`` + ``reset --hard`` to ``CANARY_GITHUB_DEPLOY_REF`` "
-            "(requires ``CANARY_COMPOSE_GIT_RESET_ENABLED``)."
-        ),
+        description="Ignored; endpoint is gone.",
     )
 
     model_config = {"extra": "forbid"}
@@ -1683,6 +1679,10 @@ class CasePortalFolderShareContactOut(BaseModel):
     has_grant: bool
     grant_id: uuid.UUID | None
     portal_access_active: bool = True
+    # Matter snapshot e-mail, then global contact card (empty when missing).
+    email: str = ""
+    matter_contact_type: str = ""
+    is_exchange_contact: bool = False
 
 
 class FileDesktopCheckoutOut(BaseModel):
@@ -2388,12 +2388,15 @@ class PortalAuthOut(BaseModel):
     grants: list[PortalGrantSummaryOut]
     focus_case_id: uuid.UUID | None = None
     staff_preview: bool = False
+    audience: Literal["client", "exchange"] = "client"
 
 
 class PortalSessionOut(BaseModel):
     contact_name: str
     grants: list[PortalGrantSummaryOut]
     staff_preview: bool = False
+    audience: Literal["client", "exchange"] = "client"
+    focus_case_id: uuid.UUID | None = None
 
 
 class PortalFileOut(BaseModel):
@@ -2702,6 +2705,33 @@ class ContactPortalAccessActionIn(BaseModel):
     send_email: bool = False
     """When set (matter contact UI), portal must be enabled on that matter before granting access."""
     case_id: uuid.UUID | None = None
+
+
+class MatterPortalAccessOut(BaseModel):
+    enabled: bool
+    expires_at: datetime | None
+    last_login_at: datetime | None
+    locked_until: datetime | None
+    has_access: bool
+    access_code: str | None = None
+    access_record_exists: bool = False
+    notify_folder_shared: bool = True
+    case_id: uuid.UUID
+    contact_id: uuid.UUID
+
+
+class MatterPortalAccessCreateOut(BaseModel):
+    access_code: str
+    enabled: bool
+    expires_at: datetime | None = None
+    email_sent: bool = False
+    email_skip_reason: str | None = None
+    case_id: uuid.UUID
+    contact_id: uuid.UUID
+
+
+class MatterPortalAccessActionIn(BaseModel):
+    send_email: bool = False
 
 
 class ContactPortalAccessEmailIn(BaseModel):

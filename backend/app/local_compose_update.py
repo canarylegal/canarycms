@@ -1,4 +1,12 @@
-"""Run Docker Compose on the host (via mounted docker.sock) for GUI-driven self-hosted updates."""
+"""Legacy helpers for host Compose updates.
+
+GUI-driven Compose updates (``docker.sock`` + in-app “Update now”) were removed for security.
+Admin → Deploy is notify-only: compare the running build to GitHub. Apply updates on the host
+via SSH / CI (see ``docs/DEPLOYMENT.md``).
+
+Functions below remain for optional git HEAD readout when ``CANARY_COMPOSE_PROJECT_DIR`` is set,
+and for tests of the retired update path.
+"""
 
 from __future__ import annotations
 
@@ -31,46 +39,17 @@ def _truthy(v: str | None) -> bool:
 
 
 def load_compose_update_config() -> ComposeUpdateConfig | None:
-    if not _truthy(os.getenv("CANARY_COMPOSE_UPDATE_ENABLED")):
-        return None
-    raw = (os.getenv("CANARY_COMPOSE_PROJECT_DIR") or "").strip()
-    if not raw:
-        return None
-    project = Path(raw).resolve()
-    if not project.is_dir():
-        return None
-    files_raw = (os.getenv("CANARY_COMPOSE_FILES") or "docker-compose.yml").strip()
-    compose_files = tuple(f.strip() for f in files_raw.split(",") if f.strip())
-    if not compose_files:
-        compose_files = ("docker-compose.yml",)
-    for cf in compose_files:
-        if not (project / cf).is_file():
-            return None
-
-    prof_raw = (os.getenv("CANARY_COMPOSE_PROFILES") or "prod").strip()
-    profiles = tuple(p.strip() for p in prof_raw.replace(",", " ").split() if p.strip())
-    if not profiles:
-        profiles = ("prod",)
-
-    return ComposeUpdateConfig(
-        project_dir=project,
-        compose_files=compose_files,
-        profiles=profiles,
-        git_pull=_truthy(os.getenv("CANARY_COMPOSE_GIT_PULL")),
-        git_reset_enabled=_truthy(os.getenv("CANARY_COMPOSE_GIT_RESET_ENABLED")),
-        git_ref=(os.getenv("CANARY_GITHUB_DEPLOY_REF") or "main").strip() or "main",
-    )
+    """Always ``None`` — in-app Compose updates are no longer supported."""
+    return None
 
 
 def compose_git_reset_enabled() -> bool:
-    """True when admins may request ``git fetch`` + ``reset --hard`` before compose (see ``CANARY_COMPOSE_GIT_RESET_ENABLED``)."""
-    cfg = load_compose_update_config()
-    return cfg is not None and cfg.git_reset_enabled
+    return False
 
 
 def compose_update_configured() -> bool:
-    return load_compose_update_config() is not None
-
+    """GUI Compose updates are permanently disabled (notify-only Admin → Deploy)."""
+    return False
 
 def _git_trust_repo_args(repo: Path) -> list[str]:
     """Skip Git 2.35+ "dubious ownership" when the repo is bind-mounted (host uid ≠ container user).
@@ -472,50 +451,7 @@ def run_compose_update(
     on_after_build_before_compose_up: Callable[[], None] | None = None,
     git_strategy: GitSyncStrategy = "ff-only",
 ) -> None:
-    cfg = load_compose_update_config()
-    if cfg is None:
-        raise RuntimeError("Docker Compose update is not enabled or project dir is invalid.")
-
-    if git_strategy == "reset":
-        if not cfg.git_reset_enabled:
-            raise RuntimeError(
-                "Git reset is not enabled. Set CANARY_COMPOSE_GIT_RESET_ENABLED=1 (see .env.example)."
-            )
-        _run_git_sync(cfg, journal, "reset")
-    elif cfg.git_pull:
-        _run_git_sync(cfg, journal, "ff-only")
-
-    project_dir = str(cfg.project_dir)
-    base = _compose_base_cmd(cfg)
-    env = os.environ.copy()
-    _inject_git_commit_for_compose_build(env, cfg.project_dir)
-
-    def _run(step: list[str], timeout: int) -> None:
-        _journal(journal, f"docker-compose: {' '.join(step)} (starting)")
-        try:
-            subprocess.run(
-                base + step,
-                cwd=project_dir,
-                check=True,
-                timeout=timeout,
-                env=env,
-                capture_output=True,
-                text=True,
-            )
-        except subprocess.CalledProcessError as e:
-            msg = _subprocess_failure_message(f"docker-compose {' '.join(step)}", e)
-            _journal(journal, msg.splitlines()[0])
-            for line in msg.splitlines()[1:]:
-                if line.strip():
-                    _journal(journal, line.strip())
-            raise RuntimeError(msg) from e
-        _journal(journal, f"docker-compose: {' '.join(step)} (finished)")
-
-    _run(["build", "--pull"], 3600)
-    if _isolated_compose_up_enabled():
-        jid = (compose_job_id or "").strip() or uuid.uuid4().hex[:12]
-        if on_after_build_before_compose_up is not None:
-            on_after_build_before_compose_up()
-        _run_compose_up_isolated(cfg, journal=journal, env=env, timeout=900, compose_job_id=jid)
-    else:
-        _run(["up", "-d"], 900)
+    """Retired: GUI Compose updates are permanently disabled (notify-only Admin → Deploy)."""
+    raise RuntimeError(
+        "In-app Compose updates are disabled. Apply updates on the host (see docs/DEPLOYMENT.md)."
+    )

@@ -267,6 +267,7 @@ export default function PortalPage() {
   const [activeCanarySign, setActiveCanarySign] = useState<PortalCanarySignOut | null>(null)
   const [previewFocusCaseId, setPreviewFocusCaseId] = useState<string | null>(null)
   const [staffPreviewSession, setStaffPreviewSession] = useState(false)
+  const [portalAudience, setPortalAudience] = useState<'client' | 'exchange'>('client')
 
   const matterGroups = useMemo(
     () => buildMatterGroups(grants, allPendingForms, pendingQuoteDeliveries, clientActions),
@@ -460,6 +461,8 @@ export default function PortalPage() {
     setContactName(sess.contact_name)
     setGrants(sess.grants)
     setStaffPreviewSession(Boolean(sess.staff_preview))
+    setPortalAudience(sess.audience === 'exchange' ? 'exchange' : 'client')
+    if (sess.focus_case_id) setActiveCaseId(sess.focus_case_id)
     return sess
   }, [])
 
@@ -537,11 +540,18 @@ export default function PortalPage() {
   useEffect(() => {
     const token = sessionToken.trim()
     if (!token || previewExchangeBusy || quoteExchangeBusy || formExchangeBusy || canaryExchangeBusy) return
+    if (portalAudience === 'exchange') {
+      setAllPendingForms([])
+      setPendingQuoteDeliveries([])
+      setClientActions(null)
+      return
+    }
     void loadPendingForms(token)
     void loadPendingQuotes(token)
     void loadClientActions(token)
   }, [
     sessionToken,
+    portalAudience,
     loadPendingForms,
     loadPendingQuotes,
     loadClientActions,
@@ -656,7 +666,8 @@ export default function PortalPage() {
       setContactName(out.contact_name)
       setGrants(out.grants)
       setStaffPreviewSession(Boolean(out.staff_preview))
-      setActiveCaseId(null)
+      setPortalAudience(out.audience === 'exchange' ? 'exchange' : 'client')
+      setActiveCaseId(out.focus_case_id || null)
       setActiveGrantId(null)
       setBrowse(null)
       setBrowseSubfolder('')
@@ -699,6 +710,7 @@ export default function PortalPage() {
       setContactName(out.contact_name)
       setGrants(out.grants)
       setStaffPreviewSession(Boolean(out.staff_preview))
+      setPortalAudience(out.audience === 'exchange' ? 'exchange' : 'client')
       setActiveCaseId(null)
       setActiveGrantId(null)
       setBrowse(null)

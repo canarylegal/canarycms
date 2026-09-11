@@ -66,19 +66,11 @@ def test_subprocess_failure_message_prefers_build_errors() -> None:
     assert "Downloading websockets" not in msg
 
 
-def test_run_compose_update_reset_requires_flag(compose_cfg: ComposeUpdateConfig, monkeypatch: pytest.MonkeyPatch) -> None:
-    cfg_no_reset = ComposeUpdateConfig(
-        project_dir=compose_cfg.project_dir,
-        compose_files=compose_cfg.compose_files,
-        profiles=compose_cfg.profiles,
-        git_pull=True,
-        git_reset_enabled=False,
-        git_ref="main",
-    )
+def test_run_compose_update_is_disabled(compose_cfg: ComposeUpdateConfig, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("CANARY_COMPOSE_UPDATE_ENABLED", "1")
     monkeypatch.setenv("CANARY_COMPOSE_PROJECT_DIR", str(compose_cfg.project_dir))
     (compose_cfg.project_dir / "docker-compose.yml").write_text("services: {}\n", encoding="utf-8")
 
-    with patch("app.local_compose_update.load_compose_update_config", return_value=cfg_no_reset):
-        with pytest.raises(RuntimeError, match="Git reset is not enabled"):
+    with patch("app.local_compose_update.load_compose_update_config", return_value=compose_cfg):
+        with pytest.raises(RuntimeError, match="In-app Compose updates are disabled"):
             run_compose_update(git_strategy="reset")

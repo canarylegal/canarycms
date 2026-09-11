@@ -23,9 +23,13 @@ from app.portal_case import active_portal_share_counts, require_case_portal_enab
 from app.portal_service import (
     contact_display_name,
     contact_has_portal_content_on_case,
+    get_matter_portal_access,
     grant_is_client_visible,
+    matter_portal_access_is_active,
     portal_access_is_active,
+    resolve_matter_contact_email,
 )
+from app.matter_contact_constants import is_client_matter_contact_type, is_exchange_matter_contact_type
 from app.schemas import (
     CasePortalActivityOut,
     CasePortalFolderShareContactOut,
@@ -223,13 +227,25 @@ def list_case_portal_folder_share_contacts(
             continue
         access = access_by_contact.get(cc.contact_id)
         access_active = access is not None and portal_access_is_active(access)
-        if require_portal_access and not access_active:
-            continue
+        exchange = is_exchange_matter_contact_type(cc.matter_contact_type)
+        client = is_client_matter_contact_type(cc.matter_contact_type)
+        matter_access = get_matter_portal_access(db, case_id=case_id, contact_id=cc.contact_id) if exchange else None
+        matter_access_active = matter_access is not None and matter_portal_access_is_active(matter_access)
+
+        if require_portal_access:
+            # Folder share: clients need contact-wide login; exchange contacts listed for first-share provision.
+            if client and not access_active:
+                continue
+            if not client and not exchange:
+                continue
+        # When require_portal_access=false (quote/form send), include all matter contacts as before.
+
         seen.add(cc.contact_id)
         if matter_scope:
             grant = _any_active_grant_on_case(db, grants, contact_id=cc.contact_id)
         else:
             grant = _grant_for_exact_folder(db, grants, contact_id=cc.contact_id, folder_path=folder)
+        portal_ready = matter_access_active if exchange else access_active
         out.append(
             CasePortalFolderShareContactOut(
                 case_contact_id=cc.id,
@@ -237,7 +253,10 @@ def list_case_portal_folder_share_contacts(
                 contact_name=(cc.name or "").strip() or "Contact",
                 has_grant=grant is not None,
                 grant_id=grant.id if grant else None,
-                portal_access_active=access_active,
+                portal_access_active=portal_ready,
+                email=resolve_matter_contact_email(db, case_id=case_id, contact_id=cc.contact_id),
+                matter_contact_type=(cc.matter_contact_type or "").strip(),
+                is_exchange_contact=exchange,
             )
         )
     return out

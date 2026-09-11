@@ -77,8 +77,10 @@ FRONTEND_PORT_PUBLISH=127.0.0.1:8080:80
 FRONTEND_TAILSCALE_PORT_PUBLISH=100.x.x.x:8080:80
 BACKEND_PORT_PUBLISH=127.0.0.1:8004:8000
 
-# Optional: disable GUI “Update now” on first install
-CANARY_COMPOSE_UPDATE_ENABLED=0
+# Optional: public GitHub for Admin → Deploy “behind?” checks (no token; no in-app update)
+CANARY_GITHUB_DEPLOY_OWNER=canarylegal
+CANARY_GITHUB_DEPLOY_REPO=canarycms
+CANARY_GITHUB_DEPLOY_REF=main
 ```
 
 Build and start:
@@ -97,6 +99,30 @@ After first deploy on an existing database with encrypted secrets, run once insi
 ```bash
 docker compose exec backend python scripts/reencrypt_data_secrets.py
 ```
+
+### Updating an existing install
+
+Admin → Deploy (and the optional post-login prompt) only **notify** when GitHub is ahead of this build. There is no in-app “Update now”, and the backend does **not** mount `docker.sock`.
+
+**Prefer a known release**, not an unreviewed `main` tip:
+
+```bash
+cd /path/to/canarycms
+git fetch --tags origin
+git checkout vX.Y.Z   # or: git checkout <full-commit-sha>
+GIT_COMMIT=$(git rev-parse HEAD) docker compose --profile prod build
+docker compose --profile prod up -d
+```
+
+Fast-forward without a tag (still pin the SHA you verified):
+
+```bash
+git pull --ff-only
+GIT_COMMIT=$(git rev-parse HEAD) docker compose --profile prod build
+docker compose --profile prod up -d
+```
+
+Bake `GIT_COMMIT` so Admin → Deploy can compare correctly.
 
 ---
 
@@ -307,7 +333,11 @@ Production installs require a **Mozilla-signed `.xpi`** (unlisted on the Thunder
 3. Confirm **Canary — file to matter** appears and **survives a Thunderbird restart**.
 4. Each user: toolbar **Canary** → **Server & sign-in** → enter **`https://canary.yourfirm.co.uk`** (the **firm** Canary host, not canarylegalsoftware.co.uk).
 
-**Updates:** Thunderbird checks **`https://canarylegalsoftware.co.uk/thunderbird/updates.json`** about daily and installs newer signed builds automatically (after users have a build that includes `update_url` in the manifest).
+**Updates (choose a firm policy):**
+
+- **Vendor channel (default XPI):** Thunderbird checks **`https://canarylegalsoftware.co.uk/thunderbird/updates.json`** about daily and may auto-install newer signed builds.
+- **IT-controlled (recommended for production):** pin a reviewed `.xpi` version and **disable** Thunderbird auto-updates for this add-on. Use Betterbird/Thunderbird `policies.json` `ExtensionSettings` with `installation_mode: force_installed` and a firm-hosted `install_url` (see [deploy/betterbird/policies.json](../deploy/betterbird/policies.json)). Optionally host your own `updates.json` + XPI on an internal HTTPS URL and rebuild the add-on with that `update_url` in `manifest.json`.
+- **Disable auto-update only:** after installing a known-good XPI, remove or override `update_url` via enterprise policy where your mail client supports it, or redistribute a firm-signed build that points `update_url` at your own static hosting.
 
 #### Enterprise pre-install (Betterbird / Thunderbird)
 

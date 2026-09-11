@@ -43,6 +43,7 @@ from app.routers import (
     case_time,
     cases,
     contact_portal,
+    matter_portal,
     fee_scales,
     task_menu,
     contacts,
@@ -241,6 +242,7 @@ app.include_router(precedents.router)
 app.include_router(fee_scales.router)
 app.include_router(contacts.router)
 app.include_router(contact_portal.router)
+app.include_router(matter_portal.router)
 app.include_router(case_access.router)
 app.include_router(case_contacts.router)
 app.include_router(case_portal.router)

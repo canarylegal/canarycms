@@ -12,7 +12,17 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.file_storage import sanitize_folder_path
-from app.models import Case, CaseContact, Contact, ContactPortalAccess, ContactPortalGrant, File, FileCategory, PortalLoginOtp
+from app.models import (
+    Case,
+    CaseContact,
+    Contact,
+    ContactPortalAccess,
+    ContactPortalGrant,
+    File,
+    FileCategory,
+    MatterPortalAccess,
+    PortalLoginOtp,
+)
 
 PORTAL_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 PORTAL_CODE_GROUPS = (4, 4, 4)
@@ -42,6 +52,22 @@ def generate_access_code() -> str:
     total = sum(PORTAL_CODE_GROUPS)
     chars = [secrets.choice(PORTAL_CODE_ALPHABET) for _ in range(total)]
     return format_access_code("".join(chars))
+
+
+def allocate_unique_access_code(db: Session) -> str:
+    """Generate an access code whose hash is free in both client and matter access tables."""
+    for _ in range(32):
+        code = generate_access_code()
+        digest = hash_access_code(code)
+        if db.execute(select(ContactPortalAccess.id).where(ContactPortalAccess.code_sha256 == digest).limit(1)).first():
+            continue
+        if db.execute(select(MatterPortalAccess.id).where(MatterPortalAccess.code_sha256 == digest).limit(1)).first():
+            continue
+        return code
+    raise HTTPException(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        detail="Could not allocate a unique portal access code",
+    )
 
 
 def hash_access_code(code: str) -> str:
@@ -583,7 +609,7 @@ def ensure_contact_portal_access_for_delivery(
     if row is not None and portal_access_is_active(row):
         return row, False, None
 
-    code = generate_access_code()
+    code = allocate_unique_access_code(db)
     created = row is None
     if row is None:
         row = ContactPortalAccess(
@@ -612,3 +638,218 @@ def ensure_contact_portal_access_for_delivery(
         meta={"reason": "auto_provision_for_portal_delivery"},
     )
     return row, True, code
+
+
+def store_matter_portal_access_code(row: MatterPortalAccess, code: str) -> None:
+    from app.email_crypt import encrypt_password
+
+    formatted = format_access_code(code)
+    row.code_sha256 = hash_access_code(formatted)
+    row.code_enc = encrypt_password(formatted)
+    bump_matter_portal_session_version(row)
+
+
+def bump_matter_portal_session_version(row: MatterPortalAccess) -> None:
+    row.session_version = int(getattr(row, "session_version", 1) or 1) + 1
+    row.updated_at = utcnow()
+
+
+def matter_portal_session_version(row: MatterPortalAccess | None) -> int:
+    if row is None:
+        return 1
+    return int(getattr(row, "session_version", 1) or 1)
+
+
+def staff_matter_portal_access_code(row: MatterPortalAccess) -> str | None:
+    from app.email_crypt import decrypt_password
+
+    enc = (row.code_enc or "").strip()
+    if not enc:
+        return None
+    try:
+        return decrypt_password(enc).strip() or None
+    except Exception:
+        return None
+
+
+def matter_portal_access_is_active(row: MatterPortalAccess, *, now: datetime | None = None) -> bool:
+    now = now or utcnow()
+    if not row.enabled:
+        return False
+    if row.expires_at is not None:
+        exp = row.expires_at
+        if exp.tzinfo is None:
+            exp = exp.replace(tzinfo=timezone.utc)
+        if now >= exp:
+            return False
+    if row.locked_until is not None:
+        locked = row.locked_until
+        if locked.tzinfo is None:
+            locked = locked.replace(tzinfo=timezone.utc)
+        if now < locked:
+            return False
+    return True
+
+
+def get_matter_portal_access_by_code(db: Session, access_code: str) -> MatterPortalAccess | None:
+    digest = hash_access_code(access_code)
+    return db.execute(select(MatterPortalAccess).where(MatterPortalAccess.code_sha256 == digest)).scalar_one_or_none()
+
+
+def get_matter_portal_access(
+    db: Session,
+    *,
+    case_id: uuid.UUID,
+    contact_id: uuid.UUID,
+) -> MatterPortalAccess | None:
+    return db.execute(
+        select(MatterPortalAccess).where(
+            MatterPortalAccess.case_id == case_id,
+            MatterPortalAccess.contact_id == contact_id,
+        )
+    ).scalar_one_or_none()
+
+
+def case_contact_for_portal(
+    db: Session,
+    *,
+    case_id: uuid.UUID,
+    contact_id: uuid.UUID,
+) -> CaseContact:
+    cc = db.execute(
+        select(CaseContact).where(
+            CaseContact.case_id == case_id,
+            CaseContact.contact_id == contact_id,
+        )
+    ).scalar_one_or_none()
+    if cc is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Contact is not on this matter")
+    return cc
+
+
+def require_exchange_matter_contact(db: Session, *, case_id: uuid.UUID, contact_id: uuid.UUID) -> CaseContact:
+    from app.matter_contact_constants import is_exchange_matter_contact_type
+
+    cc = case_contact_for_portal(db, case_id=case_id, contact_id=contact_id)
+    if not is_exchange_matter_contact_type(cc.matter_contact_type):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Matter portal exchange access is only for non-client matter contacts.",
+        )
+    return cc
+
+
+def list_active_grants_for_matter_session(
+    db: Session,
+    *,
+    contact_id: uuid.UUID,
+    case_id: uuid.UUID,
+) -> list[ContactPortalGrant]:
+    now = utcnow()
+    rows = (
+        db.execute(
+            select(ContactPortalGrant).where(
+                ContactPortalGrant.contact_id == contact_id,
+                ContactPortalGrant.case_id == case_id,
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return [g for g in rows if grant_is_client_visible(db, g, now=now)]
+
+
+def record_matter_portal_auth_failure(db: Session, row: MatterPortalAccess) -> None:
+    row.failed_attempts = int(row.failed_attempts or 0) + 1
+    if row.failed_attempts >= PORTAL_MAX_FAILED_ATTEMPTS:
+        row.locked_until = utcnow() + timedelta(minutes=PORTAL_LOCKOUT_MINUTES)
+        row.failed_attempts = 0
+    row.updated_at = utcnow()
+    db.add(row)
+    db.commit()
+
+
+def record_matter_portal_auth_success(db: Session, row: MatterPortalAccess) -> None:
+    row.failed_attempts = 0
+    row.locked_until = None
+    row.last_login_at = utcnow()
+    row.updated_at = utcnow()
+    db.add(row)
+    db.commit()
+
+
+def ensure_matter_portal_access(
+    db: Session,
+    *,
+    case_id: uuid.UUID,
+    contact_id: uuid.UUID,
+    actor_user_id: uuid.UUID,
+) -> tuple[MatterPortalAccess, bool, str | None]:
+    """Ensure non-client matter portal login exists. Returns (row, newly_provisioned, code|None)."""
+    require_exchange_matter_contact(db, case_id=case_id, contact_id=contact_id)
+    contact = db.get(Contact, contact_id)
+    if contact is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Contact not found")
+
+    row = get_matter_portal_access(db, case_id=case_id, contact_id=contact_id)
+    if row is not None and matter_portal_access_is_active(row):
+        return row, False, None
+
+    code = allocate_unique_access_code(db)
+    created = row is None
+    if row is None:
+        row = MatterPortalAccess(
+            case_id=case_id,
+            contact_id=contact_id,
+            enabled=True,
+            created_by_user_id=actor_user_id,
+        )
+        db.add(row)
+    else:
+        row.enabled = True
+        row.failed_attempts = 0
+        row.locked_until = None
+        row.updated_at = utcnow()
+    store_matter_portal_access_code(row, code)
+    db.add(row)
+    db.flush()
+
+    from app.audit import log_event
+
+    log_event(
+        db,
+        actor_user_id=actor_user_id,
+        action="matter.portal.access.create" if created else "matter.portal.access.reactivate",
+        entity_type="matter_portal_access",
+        entity_id=str(row.id),
+        meta={"case_id": str(case_id), "contact_id": str(contact_id)},
+    )
+    return row, True, code
+
+
+def revoke_matter_portal_access_for_case(db: Session, case_id: uuid.UUID) -> int:
+    """Disable all matter exchange portal access for a closed/archived matter."""
+    rows = (
+        db.execute(select(MatterPortalAccess).where(MatterPortalAccess.case_id == case_id)).scalars().all()
+    )
+    if not rows:
+        return 0
+    contact_ids = {r.contact_id for r in rows}
+    for row in rows:
+        row.enabled = False
+        bump_matter_portal_session_version(row)
+        db.add(row)
+    grants = (
+        db.execute(
+            select(ContactPortalGrant).where(
+                ContactPortalGrant.case_id == case_id,
+                ContactPortalGrant.contact_id.in_(contact_ids),
+            )
+        )
+        .scalars()
+        .all()
+    )
+    for grant in grants:
+        db.delete(grant)
+    db.flush()
+    return len(rows)

@@ -2,7 +2,7 @@ import logging
 import os
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Request, Response, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -52,6 +52,7 @@ from app.schemas import (
     Verify2FARequest,
     Verify2FASessionResponse,
 )
+from app.session_cookie import attach_session_cookie, clear_session_cookie
 from app.totp_secrets import decrypt_totp_secret, encrypt_totp_secret
 from app.security import (
     build_totp_uri,
@@ -72,7 +73,12 @@ _me_bearer = HTTPBearer(auto_error=False)
 
 
 @router.post("/login", response_model=TokenResponse)
-def login(payload: LoginRequest, request: Request, db: Session = Depends(get_db)) -> TokenResponse:
+def login(
+    payload: LoginRequest,
+    request: Request,
+    response: Response,
+    db: Session = Depends(get_db),
+) -> TokenResponse:
     login_id = normalize_master_login(str(payload.email))
     ip = client_ip_from_request(request)
     check_staff_login_rate_limits(db, email=login_id, ip=ip)
@@ -93,7 +99,9 @@ def login(payload: LoginRequest, request: Request, db: Session = Depends(get_db)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid 2FA code")
     if master_ok:
         clear_staff_login_rate_limits(db, email=login_id)
-        return TokenResponse(access_token=create_master_recovery_token())
+        token = create_master_recovery_token()
+        attach_session_cookie(response, token, request=request)
+        return TokenResponse(access_token=token)
 
     user = db.execute(select(User).where(User.email == login_id)).scalar_one_or_none()
     if not user or not user.is_active:
@@ -140,7 +148,15 @@ def login(payload: LoginRequest, request: Request, db: Session = Depends(get_db)
         meta={"email": user.email, "password_login_restricted": not mfa_verified},
     )
     db.commit()
+    attach_session_cookie(response, token, request=request)
     return TokenResponse(access_token=token)
+
+
+@router.post("/logout")
+def logout(request: Request, response: Response) -> dict[str, bool]:
+    """Clear the HttpOnly session cookie (Bearer tokens are discarded by the client)."""
+    clear_session_cookie(response, request=request)
+    return {"ok": True}
 
 
 @router.get("/me", response_model=UserPublic)
@@ -277,6 +293,8 @@ def setup_2fa(
 @router.post("/2fa/verify", response_model=Verify2FASessionResponse)
 def verify_2fa(
     payload: Verify2FARequest,
+    request: Request,
+    response: Response,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> Verify2FASessionResponse:
@@ -299,6 +317,7 @@ def verify_2fa(
     db.commit()
     db.refresh(user)
     access_token = login_access_token(db, user, mfa_verified=True)
+    attach_session_cookie(response, access_token, request=request)
     return Verify2FASessionResponse(access_token=access_token, user=build_user_public(user, db))
 
 
@@ -383,6 +402,8 @@ def cancel_my_2fa_setup(
 @router.post("/change-password", response_model=ChangePasswordResponse)
 def change_password(
     payload: ChangePasswordRequest,
+    request: Request,
+    response: Response,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> ChangePasswordResponse:
@@ -406,4 +427,5 @@ def change_password(
     db.commit()
     db.refresh(user)
     access_token = login_access_token(db, user, mfa_verified=True)
+    attach_session_cookie(response, access_token, request=request)
     return ChangePasswordResponse(access_token=access_token, user=build_user_public(user, db))

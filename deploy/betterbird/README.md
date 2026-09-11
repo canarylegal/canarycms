@@ -25,7 +25,7 @@ Typical install paths:
 
 Use the official Betterbird installer (not Flatpak). Restart Betterbird after deploying policy.
 
-When releasing a new signed mail add-on `.xpi`, update the firm's `install_url` to match the version on your hosting server. Existing installs still auto-update via `updates.json` once installed.
+When releasing a new signed mail add-on `.xpi`, update the firm's `install_url` to the **exact reviewed file** on your hosting (or a vendor URL you trust). For production, prefer **IT-controlled** updates: force-install a pinned XPI and do not rely on the vendor `updates.json` channel indefinitely — see `docs/DEPLOYMENT.md` § Thunderbird.
 
 ## Calendar category colours
 

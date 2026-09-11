@@ -1511,12 +1511,15 @@ export type PortalAuthOut = {
   grants: PortalGrantSummaryOut[]
   focus_case_id?: string | null
   staff_preview?: boolean
+  audience?: 'client' | 'exchange'
 }
 
 export type PortalSessionOut = {
   contact_name: string
   grants: PortalGrantSummaryOut[]
   staff_preview?: boolean
+  audience?: 'client' | 'exchange'
+  focus_case_id?: string | null
 }
 
 export type PortalFileOut = {
@@ -1727,6 +1730,33 @@ export type CasePortalFolderShareContactOut = {
   grant_id: string | null
   /** False when the contact will be auto-granted portal access on send. */
   portal_access_active?: boolean
+  /** Matter snapshot or global contact e-mail (empty when missing). */
+  email?: string
+  matter_contact_type?: string
+  is_exchange_contact?: boolean
+}
+
+export type MatterPortalAccessOut = {
+  enabled: boolean
+  expires_at: string | null
+  last_login_at: string | null
+  locked_until: string | null
+  has_access: boolean
+  access_code: string | null
+  access_record_exists: boolean
+  notify_folder_shared: boolean
+  case_id: string
+  contact_id: string
+}
+
+export type MatterPortalAccessCreateOut = {
+  access_code: string
+  enabled: boolean
+  expires_at?: string | null
+  email_sent: boolean
+  email_skip_reason?: string | null
+  case_id: string
+  contact_id: string
 }
 
 export type CasePortalFolderAccessGrantOut = {

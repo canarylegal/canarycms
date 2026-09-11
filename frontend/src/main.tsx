@@ -142,38 +142,44 @@ if (!el) {
     )
   } else if (ledgerCaseId || searchParams.get('finance')) {
     const financeCaseId = searchParams.get('finance')
-    const storedToken = localStorage.getItem('token') ?? ''
-    if (!storedToken) {
-      root.render(
-        <div style={{ padding: 32, fontFamily: 'system-ui, sans-serif', color: '#64748b' }}>
-          Please log in to Canary first, then reopen this tab.
-        </div>,
-      )
-    } else if (financeCaseId) {
-      void import('./FinancePage.tsx').then(({ FinanceStandalone }) => {
+    void import('./api').then(async ({ apiFetch, COOKIE_SESSION_TOKEN }) => {
+      try {
+        await apiFetch('/auth/me', { token: COOKIE_SESSION_TOKEN })
+      } catch {
         root.render(
-          <StrictMode>
-            <AppErrorBoundary>
-              <DialogProvider>
-                <FinanceStandalone caseId={financeCaseId} token={storedToken} />
-              </DialogProvider>
-            </AppErrorBoundary>
-          </StrictMode>,
+          <div style={{ padding: 32, fontFamily: 'system-ui, sans-serif', color: '#64748b' }}>
+            Please log in to Canary first, then reopen this tab.
+          </div>,
         )
-      })
-    } else {
-      void import('./LedgerPage.tsx').then(({ LedgerStandalone }) => {
-        root.render(
-          <StrictMode>
-            <AppErrorBoundary>
-              <DialogProvider>
-                <LedgerStandalone caseId={ledgerCaseId!} token={storedToken} />
-              </DialogProvider>
-            </AppErrorBoundary>
-          </StrictMode>,
-        )
-      })
-    }
+        return
+      }
+      const sessionToken = COOKIE_SESSION_TOKEN
+      if (financeCaseId) {
+        void import('./FinancePage.tsx').then(({ FinanceStandalone }) => {
+          root.render(
+            <StrictMode>
+              <AppErrorBoundary>
+                <DialogProvider>
+                  <FinanceStandalone caseId={financeCaseId} token={sessionToken} />
+                </DialogProvider>
+              </AppErrorBoundary>
+            </StrictMode>,
+          )
+        })
+      } else {
+        void import('./LedgerPage.tsx').then(({ LedgerStandalone }) => {
+          root.render(
+            <StrictMode>
+              <AppErrorBoundary>
+                <DialogProvider>
+                  <LedgerStandalone caseId={ledgerCaseId!} token={sessionToken} />
+                </DialogProvider>
+              </AppErrorBoundary>
+            </StrictMode>,
+          )
+        })
+      }
+    })
   } else {
     void import('./App.tsx').then(({ default: App }) => {
       root.render(

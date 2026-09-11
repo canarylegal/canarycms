@@ -10,7 +10,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, Field
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
@@ -37,8 +37,9 @@ from app.deps import get_current_user
 from app.models import User, WebAuthnChallenge, WebAuthnCredential
 from app.org_security import firm_mandates_second_factor
 from app.password_reset_service import login_access_token
-from app.security import create_access_token
 from app.schemas import TokenResponse
+from app.security import create_access_token
+from app.session_cookie import attach_session_cookie
 
 router = APIRouter(prefix="/auth/webauthn", tags=["webauthn"])
 log = logging.getLogger(__name__)
@@ -175,6 +176,7 @@ def webauthn_login_begin(
 def webauthn_login_finish(
     payload: WebAuthnLoginFinishIn,
     request: Request,
+    response: Response,
     db: Session = Depends(get_db),
 ) -> TokenResponse:
     email = str(payload.email).lower().strip()
@@ -224,6 +226,7 @@ def webauthn_login_finish(
     )
     db.commit()
     token = login_access_token(db, user, mfa_verified=True)
+    attach_session_cookie(response, token, request=request)
     return TokenResponse(access_token=token)
 
 
@@ -260,6 +263,7 @@ def webauthn_register_begin(
 def webauthn_register_finish(
     payload: WebAuthnRegisterFinishIn,
     request: Request,
+    response: Response,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> TokenResponse:
@@ -313,6 +317,7 @@ def webauthn_register_finish(
         mfa_verified=True,
         auth_token_version=int(user.auth_token_version),
     )
+    attach_session_cookie(response, access_token, request=request)
     return TokenResponse(access_token=access_token)
 
 

@@ -54,7 +54,9 @@ export function PortalFolderSharePanel({ token, caseId, folderPath, onChanged }:
       let sendEmail = false
       if (await askConfirm({
         title: 'Notify contact?',
-        message: `E-mail ${row.contact_name} that documents were shared (${folderLabel})?`,
+        message: row.is_exchange_contact
+          ? `E-mail ${row.contact_name} with the portal link and matter access code for ${folderLabel}?`
+          : `E-mail ${row.contact_name} that documents were shared (${folderLabel})?`,
         confirmLabel: 'Send e-mail',
         cancelLabel: 'Skip',
       })) {
@@ -69,7 +71,7 @@ export function PortalFolderSharePanel({ token, caseId, folderPath, onChanged }:
           folder_path: folderPath,
           label: null,
           can_download: true,
-          can_upload: true,
+          can_upload: row.is_exchange_contact ? false : true,
           send_email: sendEmail,
         }
         const out = await apiFetch<ContactPortalGrantOut>(`/contacts/${row.contact_id}/portal/grants`, {
@@ -83,6 +85,8 @@ export function PortalFolderSharePanel({ token, caseId, folderPath, onChanged }:
               ? `Notification e-mail sent to ${row.contact_name}.`
               : out.email_skip_reason ?? PORTAL_ALERTS_NOT_CONFIGURED_MSG,
           )
+        } else if (row.is_exchange_contact && row.portal_access_active === false) {
+          setNotice(`Matter portal access enabled for ${row.contact_name}. Share the access code from their contact card if needed.`)
         }
         await reloadRows()
         onChanged()
@@ -120,15 +124,17 @@ export function PortalFolderSharePanel({ token, caseId, folderPath, onChanged }:
       <div>
         <h3 style={{ margin: '0 0 6px' }}>Share folder via portal</h3>
         <p className="muted" style={{ margin: 0 }}>
-          Grant or revoke portal access to <strong>{folderLabel}</strong> for contacts on this matter who already have
-          portal login.
+          Grant or revoke portal access to <strong>{folderLabel}</strong>. Clients need portal login first. Other matter
+          contacts (e.g. lawyers) receive a matter-specific access code when you share.
         </p>
       </div>
       {err ? <div className="error">{err}</div> : null}
       {notice ? <div className="notice">{notice}</div> : null}
       {busy && rows.length === 0 ? <div className="muted">Loading contacts…</div> : null}
       {!busy && rows.length === 0 ? (
-        <div className="muted">No matter contacts with portal access. Grant portal access from the contact card first.</div>
+        <div className="muted">
+          No shareable contacts. Grant client portal access from the contact card, or add a non-client matter contact.
+        </div>
       ) : (
         <div className="stack" style={{ gap: 8 }}>
           {rows.map((row) => (
@@ -139,7 +145,12 @@ export function PortalFolderSharePanel({ token, caseId, folderPath, onChanged }:
                 disabled={busy}
                 onChange={(e) => void toggleContact(row, e.target.checked)}
               />
-              <span>{row.contact_name}</span>
+              <span>
+                {row.contact_name}
+                {row.is_exchange_contact ? (
+                  <span className="muted"> — exchange{row.portal_access_active ? '' : ' (code will be issued)'}</span>
+                ) : null}
+              </span>
             </label>
           ))}
         </div>

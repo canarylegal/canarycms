@@ -53,7 +53,7 @@ def _path_allows_password_change_only(path: str) -> bool:
 
 
 def _jwt_raw_from_request(request: Request, creds: HTTPAuthorizationCredentials | None) -> str | None:
-    """Prefer ``Authorization: Bearer``, then ``X-Canary-Token`` (some proxies strip Bearer on multipart POST)."""
+    """Prefer ``Authorization: Bearer``, then ``X-Canary-Token``, then HttpOnly session cookie."""
 
     if creds is not None and creds.scheme.lower() == "bearer":
         c = (creds.credentials or "").strip()
@@ -64,7 +64,9 @@ def _jwt_raw_from_request(request: Request, creds: HTTPAuthorizationCredentials 
         t = alt.strip()
         if t:
             return t
-    return None
+    from app.session_cookie import session_token_from_request
+
+    return session_token_from_request(request)
 
 
 def get_auth_principal(
@@ -301,14 +303,36 @@ def require_portal_client_write(session: PortalSessionPayload) -> None:
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Form submission is disabled in preview mode",
         )
+    if getattr(session, "audience", "client") == "exchange":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This action is not available for matter exchange access",
+        )
+
+
+def require_portal_not_preview(session: PortalSessionPayload) -> None:
+    """Block staff preview writes; allows client and exchange sessions."""
+    if session.staff_preview:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Uploads are disabled in preview mode",
+        )
+
+
+def require_portal_client_audience(session: PortalSessionPayload) -> None:
+    if getattr(session, "audience", "client") == "exchange":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This action is not available for matter exchange access",
+        )
 
 
 def get_portal_contact(
     session: PortalSessionPayload = Depends(get_portal_session),
     db: Session = Depends(get_db),
 ) -> Contact:
-    from app.models import ContactPortalAccess
-    from app.portal_service import portal_access_is_active
+    from app.models import ContactPortalAccess, MatterPortalAccess
+    from app.portal_service import matter_portal_access_is_active, portal_access_is_active
 
     try:
         contact_id = uuid.UUID(session.contact_id)
@@ -317,6 +341,29 @@ def get_portal_contact(
     contact = db.get(Contact, contact_id)
     if contact is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid portal session")
+
+    if getattr(session, "audience", "client") == "exchange":
+        if not session.case_id:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid portal session")
+        try:
+            case_id = uuid.UUID(session.case_id)
+        except ValueError:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid portal session")
+        access = db.execute(
+            select(MatterPortalAccess).where(
+                MatterPortalAccess.contact_id == contact_id,
+                MatterPortalAccess.case_id == case_id,
+            )
+        ).scalar_one_or_none()
+        if access is None or not matter_portal_access_is_active(access):
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Portal access is disabled")
+        if int(getattr(access, "session_version", 1) or 1) != int(session.session_version or 1):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Session expired — sign in again.",
+            )
+        return contact
+
     access = db.execute(
         select(ContactPortalAccess).where(ContactPortalAccess.contact_id == contact_id)
     ).scalar_one_or_none()
@@ -334,6 +381,6 @@ def get_portal_write_contact(
     session: PortalSessionPayload = Depends(get_portal_session),
     contact: Contact = Depends(get_portal_contact),
 ) -> Contact:
-    """Portal contact allowed to mutate (blocks staff preview sessions)."""
+    """Portal contact allowed to mutate client workflows (blocks preview and exchange)."""
     require_portal_client_write(session)
     return contact

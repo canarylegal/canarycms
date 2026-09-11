@@ -160,8 +160,14 @@ export function formatApiErrorDetail(body: unknown, fallback: string, requestUrl
 /** Some reverse proxies drop ``Authorization`` on multipart/form-data; backend also accepts this header. */
 export const CANARY_TOKEN_HEADER = 'X-Canary-Token'
 
+/**
+ * Sentinel for browser sessions authenticated only via the HttpOnly ``canary_session`` cookie.
+ * Not a real JWT — never send as Bearer.
+ */
+export const COOKIE_SESSION_TOKEN = 'cookie'
+
 export function applyAuthHeaders(headers: Headers, authTrimmed: string): void {
-  if (!authTrimmed) return
+  if (!authTrimmed || authTrimmed === COOKIE_SESSION_TOKEN) return
   headers.set('Authorization', `Bearer ${authTrimmed}`)
   headers.set(CANARY_TOKEN_HEADER, authTrimmed)
 }
@@ -202,6 +208,7 @@ export async function apiFetch<T>(
       method,
       headers,
       body,
+      credentials: 'include',
       signal: controller.signal,
     })
   } catch (e: unknown) {
@@ -231,9 +238,14 @@ export async function apiFetch<T>(
     if (res.status === 401) {
       // Wrong password / 2FA on POST /auth/login also returns 401 — do not reload or we wipe the inline error.
       const isLoginAttempt = path === '/auth/login' || path.endsWith('/auth/login')
-      if (!isLoginAttempt) {
-        // Token likely expired/was invalidated; force re-login.
-        localStorage.removeItem('token')
+      const isSessionProbe = path === '/auth/me' || path.endsWith('/auth/me')
+      if (!isLoginAttempt && !isSessionProbe) {
+        // Token/cookie likely expired/was invalidated; force re-login.
+        try {
+          localStorage.removeItem('token')
+        } catch {
+          /* */
+        }
         // Editor runs in its own tab — reloading here produces a blank loop and hides the error. User can close and re-open from the main app.
         if (
           typeof window !== 'undefined' &&

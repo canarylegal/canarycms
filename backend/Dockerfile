@@ -8,17 +8,10 @@ WORKDIR /app
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
-# docker-compose CLI + git (optional CANARY_COMPOSE_GIT_PULL) for CANARY_COMPOSE_UPDATE_ENABLED GUI updates via mounted docker.sock.
-# Binaries below are linux-amd64; use buildx with a different Dockerfile stage for arm64 hosts if needed.
-ARG DOCKER_STATIC_VERSION=27.3.1
-ARG COMPOSE_PLUGIN_VERSION=2.29.7
+# git: optional live commit readout when CANARY_COMPOSE_PROJECT_DIR is mounted (Admin → Deploy notify-only).
+# Docker CLI was removed — in-app Compose updates are not supported (no docker.sock).
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends git ca-certificates curl \
-  && curl -fsSL "https://download.docker.com/linux/static/stable/x86_64/docker-${DOCKER_STATIC_VERSION}.tgz" \
-    | tar -xz --strip-components=1 -C /usr/local/bin docker/docker \
-  && curl -fsSL "https://github.com/docker/compose/releases/download/v${COMPOSE_PLUGIN_VERSION}/docker-compose-linux-x86_64" \
-    -o /usr/local/bin/docker-compose \
-  && chmod +x /usr/local/bin/docker-compose \
+  && apt-get install -y --no-install-recommends git ca-certificates \
   && rm -rf /var/lib/apt/lists/*
 
 RUN pip install --no-cache-dir --upgrade pip

@@ -180,17 +180,22 @@ def test_reconcile_failure_marker_finalizes_job(
 def test_running_payload_includes_live_journal_from_disk(
     compose_state_layout: tuple[Path, Path],
 ) -> None:
+    from datetime import datetime, timezone
+
+    started = datetime.now(timezone.utc).isoformat()
     _write_json(
         compose_job_state_path(),
         {
             "status": "running",
             "job_id": "live1",
-            "started_at": "2026-01-01T00:00:00+00:00",
+            "started_at": started,
             "journal_lines": ["git: pull --ff-only (starting)"],
             "progress_phase": "git",
         },
     )
-    pub = get_compose_job_public()
+    with patch("app.compose_deploy_job.reconcile_compose_job_state"):
+        with patch("app.compose_deploy_job.docker_inspect_container_state", return_value=None):
+            pub = get_compose_job_public()
     assert pub["status"] == "running"
     assert pub["journal_lines"] == ["git: pull --ff-only (starting)"]
     assert pub["progress_phase"] == "git"
