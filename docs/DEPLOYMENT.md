@@ -32,8 +32,12 @@ If using **Cloudflare** (orange cloud / “Proxied”): TLS and WAF live at Clou
 ```bash
 git clone https://github.com/canarylegal/canarycms.git /opt/canarycms
 cd /opt/canarycms
+# Prefer a release tag for production (see CHANGELOG.md / GitHub Releases)
+git checkout v1.0.0   # or latest vX.Y.Z
 cp .env.example .env
 ```
+
+**Do not** start Compose until you replace every `CHANGE_ME_*` secret in `.env`. Backend startup rejects those placeholders.
 
 Generate secrets (run each command once; paste results into `.env`):
 
@@ -77,10 +81,12 @@ FRONTEND_PORT_PUBLISH=127.0.0.1:8080:80
 FRONTEND_TAILSCALE_PORT_PUBLISH=100.x.x.x:8080:80
 BACKEND_PORT_PUBLISH=127.0.0.1:8004:8000
 
-# Optional: public GitHub for Admin → Deploy “behind?” checks (no token; no in-app update)
+# Optional: public GitHub for Admin → Deploy “behind?” checks (no token; no in-app update).
+# Default latest-release compares to the newest GitHub Release tip (fits tag-pinned installs).
+# Use CANARY_GITHUB_DEPLOY_REF=main only if you intentionally track floating main.
 CANARY_GITHUB_DEPLOY_OWNER=canarylegal
 CANARY_GITHUB_DEPLOY_REPO=canarycms
-CANARY_GITHUB_DEPLOY_REF=main
+CANARY_GITHUB_DEPLOY_REF=latest-release
 ```
 
 Build and start:
@@ -124,7 +130,9 @@ GIT_COMMIT=$(git rev-parse HEAD) docker compose --profile prod build
 docker compose --profile prod up -d
 ```
 
-Bake `GIT_COMMIT` so Admin → Deploy can compare correctly.
+Bake `GIT_COMMIT` so Admin → Deploy can compare correctly. With the default
+`CANARY_GITHUB_DEPLOY_REF=latest-release`, a host on `v1.0.0` stays quiet until a newer
+GitHub Release is published (it will **not** nag for every commit on `main`).
 
 ---
 
@@ -217,14 +225,30 @@ WAF and in-app rate limits **complement** each other.
 
 ## 7. Go-live checklist
 
-- [ ] `DATA_ENCRYPTION_KEY` set; re-encrypt script run if migrating existing data
-- [ ] `MASTER_ADMIN_LOGIN`, `MASTER_ADMIN_PASSWORD`, and `MASTER_ADMIN_TOTP_SECRET` stored securely (not in git)
-- [ ] All staff users have permission categories
-- [ ] Mandatory 2FA enabled when ready
-- [ ] WAF / rate rules on login endpoints
+### Secrets & identity (Compose will not start without these)
+- [ ] `JWT_SECRET` generated (`openssl rand -hex 32`) — not a `CHANGE_ME_*` placeholder
+- [ ] `DATA_ENCRYPTION_KEY` generated (Fernet) — not a placeholder; re-encrypt script run if migrating existing data
+- [ ] `POSTGRES_PASSWORD` generated and recorded offline
+- [ ] `ONLYOFFICE_JWT_SECRET` and `ONLYOFFICE_SECURE_LINK_SECRET` generated
+- [ ] `MASTER_ADMIN_LOGIN`, `MASTER_ADMIN_PASSWORD`, and `MASTER_ADMIN_TOTP_SECRET` generated and stored securely (not in git)
+- [ ] `MASTER_ADMIN_REQUIRE_2FA=true` with a valid authenticator enrolment (or temporary `false` only for break-glass)
+
+### Public URLs & auth
+- [ ] `CANARY_PUBLIC_URL`, `CANARY_CORS_ORIGINS`, `ONLYOFFICE_DS_PUBLIC_URL`, `CANARY_CALDAV_PUBLIC_URL` are the live HTTPS origins
+- [ ] `WEBAUTHN_RP_ID` matches the hostname staff open (no port)
 - [ ] `ONLYOFFICE_CALLBACK_REQUIRE_JWT=1` for production (ONLYOFFICE 9.x sends signed callbacks)
-- [ ] Backups for Postgres volume (`db-data`) and `./data/files`
-- [ ] Do **not** expose Postgres or backend ports to the public internet
+- [ ] Behind TLS terminator: `CANARY_BEHIND_REVERSE_PROXY=1` and tight `CANARY_PROXY_TRUSTED_HOSTS`
+
+### Access control & ops
+- [ ] Checkout pinned to a release tag (`vX.Y.Z`), not floating `main`
+- [ ] `CANARY_GITHUB_DEPLOY_REF=latest-release` (default) so Admin → Deploy tracks Releases, not `main`
+- [ ] `GIT_COMMIT=$(git rev-parse HEAD)` baked into the backend image at build time
+- [ ] All staff users have permission categories
+- [ ] Mandatory 2FA enabled for staff when ready
+- [ ] WAF / rate rules on login endpoints
+- [ ] Postgres and backend publish ports stay on `127.0.0.1` (not the public internet)
+- [ ] **Backups:** Postgres volume (`db-data`) and `./data/files` on a schedule
+- [ ] **Restore drill:** document how to restore Postgres (`docker compose … exec` / volume restore) and files from the latest backup; run once before go-live
 - [ ] **Outlook add-in** deployed (if the firm uses Microsoft 365) — see §8.1
 - [ ] **Thunderbird add-on** signed `.xpi` distributed (if the firm uses Thunderbird) — see §8.2
 

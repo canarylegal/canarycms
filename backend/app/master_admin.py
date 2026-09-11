@@ -48,15 +48,22 @@ def normalize_master_login(raw: str) -> str:
     return (raw or "").strip().lower()
 
 
+from app.env_placeholders import reject_insecure_placeholder
+
+
 def load_master_admin_config() -> MasterAdminConfig:
     login = normalize_master_login(_require_env("MASTER_ADMIN_LOGIN"))
     password = _require_env("MASTER_ADMIN_PASSWORD")
+    reject_insecure_placeholder("MASTER_ADMIN_LOGIN", login)
+    reject_insecure_placeholder("MASTER_ADMIN_PASSWORD", password)
     if len(login) < 8:
         raise RuntimeError("MASTER_ADMIN_LOGIN must be at least 8 characters")
     if len(password) < 12:
         raise RuntimeError("MASTER_ADMIN_PASSWORD must be at least 12 characters")
     require_2fa = _env_bool("MASTER_ADMIN_REQUIRE_2FA", default=True)
     totp_secret = (os.getenv("MASTER_ADMIN_TOTP_SECRET") or "").strip() or None
+    if totp_secret:
+        reject_insecure_placeholder("MASTER_ADMIN_TOTP_SECRET", totp_secret)
     if require_2fa and not totp_secret:
         raise RuntimeError(
             "MASTER_ADMIN_TOTP_SECRET is required when MASTER_ADMIN_REQUIRE_2FA is enabled "

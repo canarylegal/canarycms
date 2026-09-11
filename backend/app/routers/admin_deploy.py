@@ -8,11 +8,10 @@ be treated as unmarked dead code or silently re-enabled.
 
 from __future__ import annotations
 
-import os
-
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.deps import require_admin
+from app.github_deploy import configured_github_deploy_ref
 from app.github_update_check import build_update_check_payload
 from app.models import User
 from app.schemas import (
@@ -36,7 +35,7 @@ def deploy_status_public() -> dict:
         "configured": False,
         "compose_update_enabled": False,
         "compose_git_reset_enabled": False,
-        "compose_git_ref": (os.getenv("CANARY_GITHUB_DEPLOY_REF") or "main").strip() or "main",
+        "compose_git_ref": configured_github_deploy_ref(),
     }
 
 

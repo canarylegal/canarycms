@@ -6,6 +6,8 @@ name: Portal smoke
 on:
   workflow_dispatch:
   push:
+    tags:
+      - 'v[0-9]*'
     branches: [main]
     paths:
       - "backend/app/routers/portal.py"
@@ -16,6 +18,9 @@ on:
       - "backend/scripts/ensure_portal_smoke_fixture.py"
       - "scripts/smoke-portal.sh"
       - ".github/workflows/portal-smoke.yml"
+      - "docker-compose.yml"
+      - "backend/requirements.txt"
+      - "backend/Dockerfile"
   pull_request:
     paths:
       - "backend/app/routers/portal.py"
@@ -26,6 +31,9 @@ on:
       - "backend/scripts/ensure_portal_smoke_fixture.py"
       - "scripts/smoke-portal.sh"
       - ".github/workflows/portal-smoke.yml"
+      - "docker-compose.yml"
+      - "backend/requirements.txt"
+      - "backend/Dockerfile"
 
 jobs:
   portal-smoke:
@@ -57,6 +65,7 @@ jobs:
             echo "CANARY_CORS_ORIGINS=http://127.0.0.1:8080"
             echo "ONLYOFFICE_DS_PUBLIC_URL=http://127.0.0.1:8080/office-ds"
             echo "CANARY_CALDAV_PUBLIC_URL=http://127.0.0.1:8080"
+            echo "CANARY_GITHUB_DEPLOY_REF=latest-release"
             echo "BACKEND_PORT_PUBLISH=127.0.0.1:18000:8000"
             echo "POSTGRES_PORT_PUBLISH=127.0.0.1:15432:5432"
             echo "FRONTEND_PORT_PUBLISH=127.0.0.1:18080:80"
@@ -66,20 +75,30 @@ jobs:
 
       - name: Build and start db + backend
         run: |
+          set -euo pipefail
           docker compose up -d --build db backend
+          docker compose ps
 
       - name: Wait for backend health
         run: |
           set -euo pipefail
-          for i in $(seq 1 90); do
+          for i in $(seq 1 120); do
             if docker compose exec -T backend python -c \
-              "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"; then
-              echo "healthy"
+              "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5)"; then
+              echo "healthy after ${i} attempts"
               exit 0
+            fi
+            echo "attempt ${i}: not healthy yet"
+            if (( i % 10 == 0 )); then
+              docker compose ps || true
+              docker compose logs --tail=40 backend || true
             fi
             sleep 3
           done
-          docker compose logs backend | tail -100
+          echo "=== backend logs (tail) ==="
+          docker compose logs --tail=200 backend || true
+          echo "=== db logs (tail) ==="
+          docker compose logs --tail=80 db || true
           exit 1
 
       - name: Portal smoke (ensure fixture)

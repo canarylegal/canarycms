@@ -11,8 +11,17 @@ Requires Docker and Docker Compose on a Linux host.
 ```bash
 git clone https://github.com/canarylegal/canarycms.git
 cd canarycms
+git checkout v1.0.0   # prefer a release tag — see GitHub Releases / CHANGELOG.md
 cp .env.example .env
-# Edit .env — set secrets and public URLs (see comments in .env.example)
+```
+
+**Before** `docker compose up`, replace every `CHANGE_ME_*` value in `.env` with generated secrets
+(`openssl rand -hex …`, Fernet key, master admin TOTP — full commands in [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) §3).
+Backend startup rejects leftover placeholders from `.env.example`.
+
+```bash
+# Edit .env — secrets + public HTTPS URLs (CANARY_PUBLIC_URL, CORS, ONLYOFFICE, CalDAV)
+GIT_COMMIT=$(git rev-parse HEAD) docker compose --profile prod build
 docker compose --profile prod up -d
 ```
 
@@ -34,13 +43,16 @@ Operational guides live under **[docs/](docs/)**:
 
 Mail add-on detail: [thunderbird-addin/README.md](thunderbird-addin/README.md), [frontend/public/outlook-addin/README.md](frontend/public/outlook-addin/README.md).
 
-## Deploy checklist (after `git pull`)
+## Deploy checklist (after updating)
+
+Prefer a **release tag** over floating `main` (see [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)).
 
 When you update an existing installation, rebuild **both** the backend and frontend so API and UI stay in sync (stale frontend bundles can show old filters, missing buttons, or broken admin pages).
 
 ```bash
-git pull
-docker compose --profile prod build backend frontend
+git fetch --tags origin
+git checkout vX.Y.Z   # or: git pull --ff-only on a reviewed commit
+GIT_COMMIT=$(git rev-parse HEAD) docker compose --profile prod build backend frontend
 docker compose --profile prod up -d
 docker compose --profile prod exec backend alembic upgrade head
 ```
