@@ -22,6 +22,9 @@ on:
       - "docker-compose.ci.yml"
       - "backend/requirements.txt"
       - "backend/Dockerfile"
+      - "backend/app/main.py"
+      - "backend/app/master_admin.py"
+      - "backend/app/env_placeholders.py"
   pull_request:
     paths:
       - "backend/app/routers/portal.py"
@@ -42,6 +45,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
+      # Unique container names on CI (see docker-compose.ci.yml).
       COMPOSE_FILE: docker-compose.yml:docker-compose.ci.yml
       BACKEND_CONTAINER: canaryci-backend
     steps:
@@ -76,33 +80,44 @@ jobs:
             echo "FRONTEND_PORT_PUBLISH=127.0.0.1:18080:80"
             echo "ONLYOFFICE_PORT_PUBLISH=127.0.0.1:18084:80"
             echo "RADICALE_PORT_PUBLISH=127.0.0.1:15232:5232"
+            echo "GIT_COMMIT=${GITHUB_SHA}"
           } > .env
 
       - name: Build and start db + backend
         run: |
           set -euo pipefail
+          docker compose config >/dev/null
           docker compose up -d --build db backend
           docker compose ps -a
 
       - name: Wait for backend health
         run: |
           set -euo pipefail
-          # Prefer host-published /health (works even while exec is flaky during restarts).
           for i in $(seq 1 120); do
             if curl -fsS --max-time 5 http://127.0.0.1:18000/health >/dev/null 2>&1; then
-              echo "host /health ok after ${i} attempts"
-              docker compose ps
+              echo "healthy via host port after ${i} attempts"
               exit 0
             fi
-            if (( i % 10 == 0 )); then
+            if docker compose exec -T backend python -c \
+              "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5)" \
+              >/dev/null 2>&1; then
+              echo "healthy via exec after ${i} attempts"
+              exit 0
+            fi
+            if (( i % 15 == 0 )); then
               echo "attempt ${i}: still waiting"
               docker compose ps -a || true
-              docker compose logs --tail=50 backend || true
+              docker compose logs --tail=80 backend || true
             fi
             sleep 3
           done
-          docker compose ps -a || true
-          docker compose logs --tail=300 backend db || true
+          {
+            echo "## Portal smoke: backend never became healthy"
+            echo '```'
+            docker compose ps -a || true
+            docker compose logs --tail=400 backend db || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
           exit 1
 
       - name: Portal smoke (ensure fixture)
@@ -111,5 +126,11 @@ jobs:
       - name: Dump logs on failure
         if: failure()
         run: |
-          docker compose ps -a || true
-          docker compose logs --tail=300 backend db || true
+          {
+            echo "## Portal smoke failure logs"
+            echo '```'
+            docker compose ps -a || true
+            docker compose logs --tail=400 backend db || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          docker compose logs --tail=200 backend db || true
