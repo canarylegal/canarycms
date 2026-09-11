@@ -1,0 +1,55 @@
+# Create a GitHub Release when an app version tag is pushed (v1.0.0, v1.1.0, …).
+# Thunderbird add-in releases use tags thunderbird-v* and a separate workflow.
+
+name: App release
+
+on:
+  push:
+    tags:
+      - 'v[0-9]*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Extract release notes from CHANGELOG
+        id: notes
+        run: |
+          set -euo pipefail
+          VER="${GITHUB_REF_NAME#v}"
+          NOTES_FILE="${RUNNER_TEMP}/release-notes.md"
+          python3 -c "
+          import re
+          from pathlib import Path
+          ver = '''${VER}'''
+          text = Path('CHANGELOG.md').read_text(encoding='utf-8') if Path('CHANGELOG.md').is_file() else ''
+          pat = re.compile(r'^##\s*\[?' + re.escape(ver) + r'\]?[^\n]*\n(.*?)(?=^##\s|\Z)', re.M | re.S)
+          m = pat.search(text)
+          body = (m.group(1).strip() if m else '').strip()
+          if not body:
+              body = (
+                  f'Canary CMS {ver} — see CHANGELOG.md and docs/DEPLOYMENT.md.\n\n'
+                  'Prefer this tag over floating \`main\` when deploying.'
+              )
+          Path('''${NOTES_FILE}''').write_text(body + '\n', encoding='utf-8')
+          "
+          echo "file=${NOTES_FILE}" >> "$GITHUB_OUTPUT"
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          TITLE="Canary CMS ${TAG}"
+          NOTES_FILE="${{ steps.notes.outputs.file }}"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" --title "$TITLE" --notes-file "$NOTES_FILE"
+          else
+            gh release create "$TAG" --title "$TITLE" --notes-file "$NOTES_FILE"
+          fi
