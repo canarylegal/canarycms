@@ -849,6 +849,17 @@ async def onlyoffice_callback(
             )
         else:
             log.warning("onlyoffice_callback: active session found, proceeding to save file %s", file_id)
+            from app.desktop_edit_session import session_owner_still_authorized
+
+            if session_owner_still_authorized(db, active_sess) is None:
+                log.warning(
+                    "onlyoffice_callback: session owner no longer authorised for file %s — skipping save",
+                    file_id,
+                )
+                active_sess.released_at = datetime.now(timezone.utc)
+                db.add(active_sess)
+                db.commit()
+                return {"error": 1}
 
         ensure_files_root()
         abs_path = (FILES_ROOT / row.storage_path).resolve()

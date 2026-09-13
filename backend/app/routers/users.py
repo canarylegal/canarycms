@@ -20,6 +20,13 @@ from app.email_integration_settings import build_user_public
 from app.file_storage import FILES_ROOT, ensure_files_root, user_signature_file_paths
 from app.models import File as DbFile
 from app.models import FileCategory, User
+from app.signature_image import (
+    MAX_SIGNATURE_BYTES,
+    SignatureImageError,
+    assert_signature_filename_and_mime,
+    signature_storage_filename,
+    validate_and_reencode_signature_image,
+)
 from app.permission_checks import (
     user_may_access_accounts_workspace,
     user_may_approve_invoice,
@@ -355,9 +362,7 @@ def put_my_signature_settings(
     return build_user_public(user, db)
 
 
-_ALLOWED_SIGNATURE_SUFFIX = frozenset({".png", ".jpg", ".jpeg", ".gif", ".webp"})
-_ALLOWED_SIGNATURE_MIME = frozenset({"image/png", "image/jpeg", "image/gif", "image/webp"})
-_MAX_SIGNATURE_BYTES = 2 * 1024 * 1024
+_MAX_SIGNATURE_BYTES = MAX_SIGNATURE_BYTES
 
 
 def _delete_user_signature_file(db: Session, user: User) -> None:
@@ -377,20 +382,10 @@ def _delete_user_signature_file(db: Session, user: User) -> None:
 
 
 def _validate_signature_upload(filename: str, content_type: str | None) -> None:
-    suf = Path(filename or "").suffix.lower()
-    if suf not in _ALLOWED_SIGNATURE_SUFFIX:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Signature must be a PNG, JPEG, GIF, or WebP image.",
-        )
-    mime = (content_type or "").split(";", 1)[0].strip().lower()
-    if mime and mime not in _ALLOWED_SIGNATURE_MIME:
-        guess = mimetypes.guess_type(filename)[0]
-        if guess not in _ALLOWED_SIGNATURE_MIME:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Signature must be a PNG, JPEG, GIF, or WebP image.",
-            )
+    try:
+        assert_signature_filename_and_mime(filename, content_type)
+    except SignatureImageError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
 
 @router.post("/me/signature", response_model=UserPublic)
@@ -402,27 +397,31 @@ async def upload_my_signature(
     original = upload.filename or "signature.png"
     _validate_signature_upload(original, upload.content_type)
     ensure_files_root()
+
+    raw = bytearray()
+    while True:
+        chunk = await upload.read(1024 * 64)
+        if not chunk:
+            break
+        raw.extend(chunk)
+        if len(raw) > _MAX_SIGNATURE_BYTES:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Signature image must be 2 MB or smaller.",
+            )
+    try:
+        png_bytes, mime = validate_and_reencode_signature_image(bytes(raw))
+    except SignatureImageError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
     _delete_user_signature_file(db, user)
 
+    stored_name = signature_storage_filename(original)
     file_id = uuid.uuid4()
-    paths = user_signature_file_paths(user_id=user.id, file_id=file_id, original_filename=original)
-    size = 0
-    with paths.abs_path.open("wb") as fh:
-        while True:
-            chunk = await upload.read(1024 * 64)
-            if not chunk:
-                break
-            size += len(chunk)
-            if size > _MAX_SIGNATURE_BYTES:
-                fh.close()
-                paths.abs_path.unlink(missing_ok=True)
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Signature image must be 2 MB or smaller.",
-                )
-            fh.write(chunk)
+    paths = user_signature_file_paths(user_id=user.id, file_id=file_id, original_filename=stored_name)
+    paths.abs_path.write_bytes(png_bytes)
+    size = len(png_bytes)
 
-    mime = upload.content_type or mimetypes.guess_type(original)[0] or "image/png"
     row = DbFile(
         id=file_id,
         case_id=None,
@@ -431,7 +430,7 @@ async def upload_my_signature(
         storage_path=paths.rel_path,
         folder_path="",
         is_pinned=False,
-        original_filename=Path(original).name,
+        original_filename=stored_name,
         mime_type=mime,
         size_bytes=size,
         version=1,

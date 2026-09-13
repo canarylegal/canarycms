@@ -56,7 +56,7 @@ def create_access_token(
 
 
 def bump_auth_token_version(user) -> None:
-    """Invalidate existing staff JWTs for this user (password reset, admin set-password, etc.)."""
+    """Invalidate existing staff JWTs for this user (logout, password reset, admin set-password, etc.)."""
     user.auth_token_version = int(getattr(user, "auth_token_version", 0) or 0) + 1
 
 

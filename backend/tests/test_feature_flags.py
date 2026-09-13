@@ -42,6 +42,8 @@ def test_onlyoffice_editor_customization_pdf_autosave() -> None:
     pdf = onlyoffice_editor_customization(file_type="pdf")
     assert pdf["forcesave"] is True
     assert pdf["autosave"] is True
+    assert pdf["features"] == {"featuresTips": False}
     docx = onlyoffice_editor_customization(file_type="docx")
     assert docx["forcesave"] is True
     assert "autosave" not in docx
+    assert docx["features"] == {"featuresTips": False}

@@ -120,6 +120,10 @@ def upsert_rule(
     if existing:
         existing.mode = payload.mode
         db.add(existing)
+        if payload.mode == CaseAccessMode.deny:
+            from app.desktop_edit_session import release_edit_sessions_for_user
+
+            release_edit_sessions_for_user(db, payload.user_id, case_id=case_id)
         _sync_case_access_flags(case_id, db)
         log_event(
             db,
@@ -135,6 +139,10 @@ def upsert_rule(
 
     rule = CaseAccessRule(case_id=case_id, user_id=payload.user_id, mode=payload.mode)
     db.add(rule)
+    if payload.mode == CaseAccessMode.deny:
+        from app.desktop_edit_session import release_edit_sessions_for_user
+
+        release_edit_sessions_for_user(db, payload.user_id, case_id=case_id)
     _sync_case_access_flags(case_id, db)
     log_event(
         db,
@@ -165,6 +173,10 @@ def delete_rule(
     )
     if res.rowcount == 0:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Rule not found")
+    # Removing an allow (or any) rule can revoke access under allow-list mode — drop open edits.
+    from app.desktop_edit_session import release_edit_sessions_for_user
+
+    release_edit_sessions_for_user(db, user_id, case_id=case_id)
     _sync_case_access_flags(case_id, db)
     log_event(
         db,

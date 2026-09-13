@@ -157,3 +157,89 @@ def test_void_approved_invoice_blocked_when_reversal_would_over_credit_office() 
 
     db.rollback()
     assert list_case_invoices(case.id, db).invoices[0].status == INV_APPROVED
+
+
+def test_approve_invoice_is_idempotent() -> None:
+    db = ledger_test_session()
+    admin = add_user(db)
+    case = add_case(db, fee_earner_user_id=admin.id)
+
+    inv = create_case_invoice(case.id, _invoice_payload(credit_user_id=admin.id), admin, db)
+    approve_case_invoice(case.id, inv.id, admin, db)
+    db.commit()
+    approve_case_invoice(case.id, inv.id, admin, db)
+    db.commit()
+
+    assert list_case_invoices(case.id, db).invoices[0].status == INV_APPROVED
+    assert get_ledger(case.id, db).office.balance_pence == -12_000
+
+
+def test_ledger_cannot_approve_pending_invoice_pair() -> None:
+    """CL-08: payment approvers must not approve invoice-origin pairs via ledger."""
+    from app.ledger_service import approve_ledger_pair
+    from app.models import UserRole
+    from tests.ledger_test_helpers import add_payment_approver_category
+
+    db = ledger_test_session()
+    admin = add_user(db)
+    case = add_case(db, fee_earner_user_id=admin.id)
+    cat = add_payment_approver_category(db)
+    payer = add_user(db, role=UserRole.user, permission_category_id=cat.id, email="pay@example.com")
+
+    inv = create_case_invoice(case.id, _invoice_payload(credit_user_id=admin.id), admin, db)
+    db.commit()
+
+    with pytest.raises(HTTPException) as exc:
+        approve_ledger_pair(case.id, inv.ledger_pair_id, payer, db)
+    assert exc.value.status_code == 400
+    assert "pending invoice" in str(exc.value.detail).lower()
+
+    assert list_case_invoices(case.id, db).invoices[0].status == INV_PENDING
+    assert get_ledger(case.id, db).office.balance_pence == 0
+
+
+def test_invoice_approver_without_payment_perm_can_approve_invoice() -> None:
+    """CL-08: invoice workflow does not require perm_approve_payments."""
+    from app.models import UserRole
+    from tests.ledger_test_helpers import add_invoice_approver_category
+
+    db = ledger_test_session()
+    admin = add_user(db)
+    case = add_case(db, fee_earner_user_id=admin.id)
+    cat = add_invoice_approver_category(db)
+    inv_user = add_user(db, role=UserRole.user, permission_category_id=cat.id, email="inv@example.com")
+
+    inv = create_case_invoice(case.id, _invoice_payload(credit_user_id=admin.id), admin, db)
+    db.commit()
+
+    approve_case_invoice(case.id, inv.id, inv_user, db)
+    db.commit()
+
+    assert list_case_invoices(case.id, db).invoices[0].status == INV_APPROVED
+    assert get_ledger(case.id, db).office.balance_pence == -12_000
+
+
+def test_approve_finishes_when_ledger_pair_already_approved() -> None:
+    """Repair path: if legs were approved first, invoice approve still completes."""
+    from app.models import LedgerEntry
+    from sqlalchemy import select
+
+    db = ledger_test_session()
+    admin = add_user(db)
+    case = add_case(db, fee_earner_user_id=admin.id)
+
+    inv = create_case_invoice(case.id, _invoice_payload(credit_user_id=admin.id), admin, db)
+    db.commit()
+
+    # Simulate a legacy split: force-approve legs without going through the blocked path.
+    legs = db.execute(select(LedgerEntry).where(LedgerEntry.pair_id == inv.ledger_pair_id)).scalars().all()
+    for e in legs:
+        e.is_approved = True
+        db.add(e)
+    db.commit()
+
+    approve_case_invoice(case.id, inv.id, admin, db)
+    db.commit()
+
+    assert list_case_invoices(case.id, db).invoices[0].status == INV_APPROVED
+    assert get_ledger(case.id, db).office.balance_pence == -12_000

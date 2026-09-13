@@ -41,6 +41,13 @@ from app.onlyoffice_force_save import (
 )
 from app.routers.onlyoffice import persist_onlyoffice_browser_url_to_file
 from app.schemas import FirmSettingsOut, FirmSettingsUpdate, OnlyofficeEditorConfigOut, OoPersistDownloadIn
+from app.signature_image import (
+    MAX_SIGNATURE_BYTES as _MAX_SIGNATURE_BYTES,
+    SignatureImageError,
+    assert_signature_filename_and_mime,
+    signature_storage_filename,
+    validate_and_reencode_signature_image,
+)
 
 router = APIRouter(prefix="/admin/firm-settings", tags=["admin-firm-settings"])
 
@@ -63,9 +70,6 @@ _ALLOWED_LETTERHEAD_MIME = frozenset(
 _ALLOWED_PORTAL_LOGO_SUFFIX = frozenset({".png", ".jpg", ".jpeg", ".webp"})
 _ALLOWED_PORTAL_LOGO_MIME = frozenset({"image/png", "image/jpeg", "image/webp"})
 _PORTAL_LOGO_MAX_BYTES = 2 * 1024 * 1024
-_ALLOWED_SIGNATURE_SUFFIX = frozenset({".png", ".jpg", ".jpeg", ".gif", ".webp"})
-_ALLOWED_SIGNATURE_MIME = frozenset({"image/png", "image/jpeg", "image/gif", "image/webp"})
-_MAX_SIGNATURE_BYTES = 2 * 1024 * 1024
 
 
 def _settings_row(db: Session) -> FirmSettings:
@@ -196,20 +200,10 @@ def _validate_portal_logo_upload(filename: str, content_type: str | None) -> Non
 
 
 def _validate_signature_upload(filename: str, content_type: str | None) -> None:
-    suf = Path(filename or "").suffix.lower()
-    if suf not in _ALLOWED_SIGNATURE_SUFFIX:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Signature image must be PNG, JPEG, GIF, or WebP.",
-        )
-    mime = (content_type or "").split(";", 1)[0].strip().lower()
-    if mime and mime not in _ALLOWED_SIGNATURE_MIME:
-        guess = mimetypes.guess_type(filename)[0]
-        if guess not in _ALLOWED_SIGNATURE_MIME:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Signature image must be PNG, JPEG, GIF, or WebP.",
-            )
+    try:
+        assert_signature_filename_and_mime(filename, content_type)
+    except SignatureImageError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
 
 def _delete_portal_logo_file(db: Session, settings: FirmSettings) -> None:
@@ -578,32 +572,30 @@ async def upload_default_signature(
 
     row = _settings_row(db)
     ensure_files_root()
+
+    raw = bytearray()
+    while True:
+        chunk = await upload.read(1024 * 64)
+        if not chunk:
+            break
+        raw.extend(chunk)
+        if len(raw) > _MAX_SIGNATURE_BYTES:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Signature image must be 2 MB or smaller.",
+            )
+    try:
+        png_bytes, mime = validate_and_reencode_signature_image(bytes(raw))
+    except SignatureImageError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
     _delete_default_signature_file(db, row)
 
+    stored_name = signature_storage_filename(original)
     file_id = uuid.uuid4()
-    paths = firm_default_signature_file_paths(file_id=file_id, original_filename=original)
-
-    size = 0
-    with paths.abs_path.open("wb") as fh:
-        while True:
-            chunk = await upload.read(1024 * 64)
-            if not chunk:
-                break
-            size += len(chunk)
-            if size > _MAX_SIGNATURE_BYTES:
-                fh.close()
-                if paths.abs_path.is_file():
-                    paths.abs_path.unlink()
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Signature image must be 2 MB or smaller.",
-                )
-            fh.write(chunk)
-
-    mime = upload.content_type or (mimetypes.guess_type(original)[0] or "image/png")
-    mime = mime.split(";", 1)[0].strip().lower()
-    if mime not in _ALLOWED_SIGNATURE_MIME:
-        mime = "image/png"
+    paths = firm_default_signature_file_paths(file_id=file_id, original_filename=stored_name)
+    paths.abs_path.write_bytes(png_bytes)
+    size = len(png_bytes)
 
     now = datetime.utcnow()
     frow = DbFile(
@@ -615,7 +607,7 @@ async def upload_default_signature(
         folder_path="",
         parent_file_id=None,
         is_pinned=False,
-        original_filename=Path(original).name,
+        original_filename=stored_name,
         mime_type=mime,
         size_bytes=size,
         version=1,

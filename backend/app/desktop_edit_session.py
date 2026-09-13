@@ -26,6 +26,80 @@ def webdav_session_hours() -> int:
         return 8
 
 
+def _locked_by_name(db: Session, sess: FileEditSession) -> str:
+    other = db.get(User, sess.user_id)
+    return (other.display_name if other else None) or "Another user"
+
+
+def active_edit_sessions_for_files(db: Session, file_ids: list[uuid.UUID]) -> list[FileEditSession]:
+    if not file_ids:
+        return []
+    now = _utcnow()
+    return list(
+        db.execute(
+            select(FileEditSession).where(
+                FileEditSession.file_id.in_(file_ids),
+                FileEditSession.released_at.is_(None),
+                FileEditSession.expires_at > now,
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+
+def raise_if_files_checked_out(db: Session, file_ids: list[uuid.UUID], *, action: str = "change") -> None:
+    """Reject rename/move/delete when any of the files has an active desktop/OO edit session (CL-06)."""
+    active = active_edit_sessions_for_files(db, file_ids)
+    if not active:
+        return
+    locked_name = _locked_by_name(db, active[0])
+    raise HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail={
+            "message": (
+                f"This file is checked out for editing by {locked_name}. "
+                f"Stop desktop or browser editing before you {action} it."
+            ),
+            "locked_by": locked_name,
+        },
+    )
+
+
+def release_edit_sessions_for_user(
+    db: Session,
+    user_id: uuid.UUID,
+    *,
+    case_id: uuid.UUID | None = None,
+) -> int:
+    """Mark open edit sessions released (account disable / matter deny). Returns count released."""
+    now = _utcnow()
+    q = select(FileEditSession).where(
+        FileEditSession.user_id == user_id,
+        FileEditSession.released_at.is_(None),
+        FileEditSession.expires_at > now,
+    )
+    if case_id is not None:
+        q = q.where(FileEditSession.case_id == case_id)
+    rows = list(db.execute(q).scalars().all())
+    for sess in rows:
+        sess.released_at = now
+        db.add(sess)
+    return len(rows)
+
+
+def session_owner_still_authorized(db: Session, sess: FileEditSession) -> User | None:
+    """Return the session owner if they may still edit; otherwise None (CL-07)."""
+    from app.deps import get_case_if_accessible
+
+    user = db.get(User, sess.user_id)
+    if user is None or not user.is_active:
+        return None
+    if sess.case_id is not None and get_case_if_accessible(sess.case_id, user, db) is None:
+        return None
+    return user
+
+
 def acquire_file_edit_session(
     db: Session,
     *,
@@ -74,8 +148,7 @@ def acquire_file_edit_session(
     )
     others = [s for s in active if s.user_id != user.id]
     if others:
-        other = db.get(User, others[0].user_id)
-        locked_name = (other.display_name if other else None) or "Another user"
+        locked_name = _locked_by_name(db, others[0])
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail={

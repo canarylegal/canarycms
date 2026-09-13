@@ -1,5 +1,6 @@
 import logging
 import os
+import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Request, Response, status
@@ -19,7 +20,12 @@ from app.client_ip import client_ip_from_request
 from app.db import get_db
 from app.deps import _jwt_raw_from_request, get_auth_principal, get_current_user
 from app.email_integration_settings import build_master_recovery_public, build_user_public
-from app.master_admin import is_reserved_master_login, normalize_master_login, try_authenticate_master
+from app.master_admin import (
+    MASTER_RECOVERY_ROLE,
+    is_reserved_master_login,
+    normalize_master_login,
+    try_authenticate_master,
+)
 from app.models import User
 from app.org_security import (
     firm_mandates_second_factor,
@@ -56,6 +62,7 @@ from app.session_cookie import attach_session_cookie, clear_session_cookie
 from app.totp_secrets import decrypt_totp_secret, encrypt_totp_secret
 from app.security import (
     build_totp_uri,
+    bump_auth_token_version,
     create_master_recovery_token,
     decode_access_token,
     generate_totp_secret,
@@ -70,6 +77,45 @@ log = logging.getLogger(__name__)
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 _me_bearer = HTTPBearer(auto_error=False)
+
+
+def _invalidate_staff_jwt_on_logout(db: Session, raw_token: str | None) -> None:
+    """Bump auth_token_version when logout presents a still-current staff JWT.
+
+    Idempotent for already-stale tokens (does not bump again, so other fresh sessions stay valid).
+    Master-recovery tokens have no user version and are ignored here (cookie clear is enough).
+    """
+    if not raw_token:
+        return
+    try:
+        payload = decode_access_token(raw_token)
+    except ValueError:
+        return
+    if payload.role == MASTER_RECOVERY_ROLE:
+        return
+    if payload.auth_token_version is None:
+        return
+    try:
+        user_uuid = uuid.UUID(payload.user_id)
+    except ValueError:
+        return
+    user = db.get(User, user_uuid)
+    if not user or not user.is_active:
+        return
+    if int(payload.auth_token_version) != int(user.auth_token_version or 0):
+        return
+    bump_auth_token_version(user)
+    db.add(user)
+    log_event(
+        db,
+        actor_user_id=user.id,
+        action="auth.logout",
+        entity_type="user",
+        entity_id=str(user.id),
+        meta={"email": user.email},
+    )
+    db.commit()
+
 
 
 @router.post("/login", response_model=TokenResponse)
@@ -153,8 +199,15 @@ def login(
 
 
 @router.post("/logout")
-def logout(request: Request, response: Response) -> dict[str, bool]:
-    """Clear the HttpOnly session cookie (Bearer tokens are discarded by the client)."""
+def logout(
+    request: Request,
+    response: Response,
+    creds: HTTPAuthorizationCredentials | None = Depends(_me_bearer),
+    db: Session = Depends(get_db),
+) -> dict[str, bool]:
+    """Clear the HttpOnly session cookie and invalidate current staff JWTs for this account."""
+    raw = _jwt_raw_from_request(request, creds)
+    _invalidate_staff_jwt_on_logout(db, raw)
     clear_session_cookie(response, request=request)
     return {"ok": True}
 

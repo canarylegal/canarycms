@@ -135,7 +135,15 @@ class PendingStoredFile:
 def _sanitize_folder_path(folder_path: str) -> str:
     # Accept user-provided folder path as a slash-separated relative string.
     # We do not allow absolute paths, backtracking (..), or traversal components.
-    p = PurePosixPath(folder_path or "")
+    raw = (folder_path or "").replace("\\", "/")
+    if "\x00" in raw:
+        raise ValueError("Invalid folder path")
+    # Reject absolute inputs instead of silently stripping the leading slash (portal CL-01).
+    if raw.startswith("/"):
+        raise ValueError("Invalid folder path")
+    p = PurePosixPath(raw)
+    if p.is_absolute():
+        raise ValueError("Invalid folder path")
     parts: list[str] = []
     for part in p.parts:
         if part in ("", ".", "/"):

@@ -412,11 +412,22 @@ def record_portal_auth_success(db: Session, row: ContactPortalAccess) -> None:
     db.commit()
 
 
+def _portal_folder_path(folder: str) -> str:
+    """Sanitize a portal folder/subfolder input; map traversal to HTTP 400 (not 500)."""
+    try:
+        return sanitize_folder_path(folder)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc) or "Invalid folder path",
+        ) from exc
+
+
 def ensure_upload_folder_allowed(*, grant: ContactPortalGrant, folder: str) -> str:
     if not grant.can_upload:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Upload is not allowed for this area")
-    target = sanitize_folder_path(folder)
-    grant_root = sanitize_folder_path(grant.folder_path)
+    target = _portal_folder_path(folder)
+    grant_root = _portal_folder_path(grant.folder_path)
     if grant_root and target != grant_root and not target.startswith(grant_root + "/"):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Upload folder is outside this area")
     if not grant_root and target:
@@ -476,10 +487,10 @@ def browse_grant_folder(
     subfolder: str = "",
 ) -> tuple[str, list[str], list[File]]:
     """Return (relative_subfolder, immediate_child_folder_names, files_in_current_folder)."""
-    grant_root = sanitize_folder_path(grant.folder_path)
-    rel = sanitize_folder_path(subfolder)
+    grant_root = _portal_folder_path(grant.folder_path)
+    rel = _portal_folder_path(subfolder)
     if grant_root:
-        current = sanitize_folder_path(f"{grant_root}/{rel}" if rel else grant_root)
+        current = _portal_folder_path(f"{grant_root}/{rel}" if rel else grant_root)
     else:
         current = rel
 
@@ -487,12 +498,12 @@ def browse_grant_folder(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Folder is outside this area")
 
     all_files = list_grant_files(db, grant)
-    current_norm = sanitize_folder_path(current)
-    files_here = [f for f in all_files if sanitize_folder_path(f.folder_path or "") == current_norm]
+    current_norm = _portal_folder_path(current)
+    files_here = [f for f in all_files if _portal_folder_path(f.folder_path or "") == current_norm]
     child_names: set[str] = set()
     prefix = f"{current_norm}/" if current_norm else ""
     for f in all_files:
-        fp = sanitize_folder_path(f.folder_path or "")
+        fp = _portal_folder_path(f.folder_path or "")
         if current_norm:
             if fp != current_norm and not fp.startswith(prefix):
                 continue
