@@ -206,9 +206,12 @@ def save_invoice_document_to_case(
         updated_at=now,
     )
     db.add(row)
-    inv.document_file_id = file_id
-    db.add(inv)
+    # Flush the File row before linking: CaseInvoice has a bare FK (no relationship),
+    # so SQLAlchemy may otherwise UPDATE document_file_id before INSERT into file.
     try:
+        db.flush()
+        inv.document_file_id = file_id
+        db.add(inv)
         db.flush()
     except Exception:
         unlink_stored_file(paths.abs_path)

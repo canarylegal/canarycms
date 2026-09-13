@@ -24,6 +24,7 @@ from starlette.background import BackgroundTask
 
 from app.db import get_db
 from app.deps import get_current_user, require_case_access
+from app.desktop_edit_session import raise_if_files_checked_out
 from app.compose_merge import merge_compose_docx_bytes, resolve_blank_email_compose_body
 from app.compose_quote import merge_compose_quote_docx_bytes, quote_lines_snapshot_payload, resolve_compose_quote_lines
 from app.finance_service import sync_finance_from_quote
@@ -416,11 +417,28 @@ def upload_case_file(
     require_case_access(case_id, user, db)
     ensure_files_root()
 
+    try:
+        folder = sanitize_folder_path(folder)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
+
     parent: DbFile | None = None
     if parent_file_id is not None:
         parent = db.get(DbFile, parent_file_id)
         if not parent or parent.case_id != case_id:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="parent_file_id is invalid")
+
+    # Session-level lock for the whole upload (including stream) so concurrent recursive
+    # folder delete cannot both succeed and then remove the new object (CL-09).
+    session_folder_locked = False
+    if folder:
+        if not _try_lock_case_folder_ops_session(db, case_id):
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=_FOLDER_BUSY_DETAIL)
+        session_folder_locked = True
+        if not _folder_destination_exists(db, case_id, folder):
+            _unlock_case_folder_ops_session(db, case_id)
+            session_folder_locked = False
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=_FOLDER_GONE_DETAIL)
 
     file_id = uuid.uuid4()
     original = upload.filename or "upload.bin"
@@ -513,6 +531,8 @@ def upload_case_file(
             updated_at=now,
         )
         db.add(row)
+        if folder and not _folder_destination_exists(db, case_id, folder):
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=_FOLDER_GONE_DETAIL)
         log_event(
             db,
             actor_user_id=user.id,
@@ -533,6 +553,12 @@ def upload_case_file(
         db.commit()
         disk_written = False
     finally:
+        if session_folder_locked:
+            try:
+                _unlock_case_folder_ops_session(db, case_id)
+            except Exception:
+                log.exception("failed to release folder-ops session lock case_id=%s", case_id)
+            session_folder_locked = False
         if disk_written:
             unlink_stored_file(paths.abs_path)
 
@@ -586,7 +612,7 @@ def compose_office_document(
     src_bytes, mime = merge_compose_docx_bytes(db, case_id, body, require_precedent_kind=None)
 
     file_id = uuid.uuid4()
-    folder = sanitize_folder_path(body.folder or "")
+    folder = _prepare_upload_folder(db, case_id, body.folder or "")
     paths = case_file_paths(case_id=case_id, file_id=file_id, original_filename=orig, folder_path=folder)
     paths.abs_path.write_bytes(src_bytes)
     size = len(src_bytes)
@@ -1256,6 +1282,104 @@ def _folder_has_non_system_content(db: Session, case_id: uuid.UUID, folder_path:
     return row is not None
 
 
+# Same lock namespace as folder rename (CL-05); try-lock used for upload vs delete (CL-09).
+_FOLDER_OPS_LOCK_KEY1 = 582013712
+_FOLDER_BUSY_DETAIL = "Another folder operation is in progress on this matter. Try again in a moment."
+_FOLDER_GONE_DETAIL = "Destination folder was deleted or no longer exists."
+_FOLDER_ALREADY_DELETED_DETAIL = "Folder was already deleted or no longer exists."
+
+
+def _case_folder_lock_k2(case_id: uuid.UUID) -> int:
+    import zlib
+
+    return zlib.crc32(case_id.bytes) & 0x7FFFFFFF
+
+
+def _lock_case_folder_ops(db: Session, case_id: uuid.UUID, *, blocking: bool = True) -> None:
+    """Serialize folder mutations per matter (PostgreSQL transaction-scoped advisory lock)."""
+    from sqlalchemy import text
+
+    bind = db.get_bind()
+    if bind.dialect.name != "postgresql":
+        return
+    k2 = _case_folder_lock_k2(case_id)
+    if blocking:
+        db.execute(
+            text("SELECT pg_advisory_xact_lock(:k1, :k2)"),
+            {"k1": _FOLDER_OPS_LOCK_KEY1, "k2": k2},
+        )
+        return
+    got = db.execute(
+        text("SELECT pg_try_advisory_xact_lock(:k1, :k2)"),
+        {"k1": _FOLDER_OPS_LOCK_KEY1, "k2": k2},
+    ).scalar()
+    if not got:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=_FOLDER_BUSY_DETAIL)
+
+
+def _try_lock_case_folder_ops_session(db: Session, case_id: uuid.UUID) -> bool:
+    """Non-blocking session-level lock; shares the CL-09 key space with xact locks.
+
+    Held across streaming so a concurrent folder delete cannot commit mid-upload and then
+    remove a just-created file after HTTP 201. Caller must ``_unlock_case_folder_ops_session``.
+    """
+    from sqlalchemy import text
+
+    bind = db.get_bind()
+    if bind.dialect.name != "postgresql":
+        return True
+    k2 = _case_folder_lock_k2(case_id)
+    return bool(
+        db.execute(
+            text("SELECT pg_try_advisory_lock(:k1, :k2)"),
+            {"k1": _FOLDER_OPS_LOCK_KEY1, "k2": k2},
+        ).scalar()
+    )
+
+
+def _unlock_case_folder_ops_session(db: Session, case_id: uuid.UUID) -> None:
+    from sqlalchemy import text
+
+    bind = db.get_bind()
+    if bind.dialect.name != "postgresql":
+        return
+    k2 = _case_folder_lock_k2(case_id)
+    db.execute(
+        text("SELECT pg_advisory_unlock(:k1, :k2)"),
+        {"k1": _FOLDER_OPS_LOCK_KEY1, "k2": k2},
+    )
+
+
+def _folder_destination_exists(db: Session, case_id: uuid.UUID, folder_path: str) -> bool:
+    """True when root, or any file/marker still exists at or under ``folder_path``."""
+    if not folder_path:
+        return True
+    prefix = folder_path
+    like = f"{prefix}/%"
+    row = db.execute(
+        select(DbFile.id)
+        .where(
+            DbFile.case_id == case_id,
+            or_(DbFile.folder_path == prefix, DbFile.folder_path.like(like)),
+        )
+        .limit(1)
+    ).scalar_one_or_none()
+    return row is not None
+
+
+def _prepare_upload_folder(db: Session, case_id: uuid.UUID, folder: str) -> str:
+    """Normalize folder and take a non-blocking folder-ops lock when uploading into a folder (CL-09)."""
+    try:
+        normalized = sanitize_folder_path(folder)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
+    if normalized:
+        _lock_case_folder_ops(db, case_id, blocking=False)
+        if not _folder_destination_exists(db, case_id, normalized):
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=_FOLDER_GONE_DETAIL)
+    return normalized
+
+
 def _folder_marker_exists(db: Session, case_id: uuid.UUID, folder_path: str) -> bool:
     row = db.execute(
         select(DbFile.id)
@@ -1364,62 +1488,113 @@ def rename_case_folder(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    old_path = sanitize_folder_path(payload.old_folder_path)
-    new_path = sanitize_folder_path(payload.new_folder_path)
+    try:
+        old_path = sanitize_folder_path(payload.old_folder_path)
+        new_path = sanitize_folder_path(payload.new_folder_path)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
     if not old_path:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot rename Root")
+    if old_path == new_path:
+        return {"old_folder_path": old_path, "new_folder_path": new_path}
 
     require_case_access(case_id, user, db)
     ensure_files_root()
     from app.file_storage import FILES_ROOT
 
+    # Serialize folder renames per matter so concurrent races cannot 500 on shutil.move (CL-05).
+    _lock_case_folder_ops(db, case_id, blocking=True)
+
     old_prefix = old_path
     old_like = f"{old_prefix}/%"
 
-    rows = db.execute(
-        select(DbFile).where((DbFile.case_id == case_id) & ((DbFile.folder_path == old_prefix) | (DbFile.folder_path.like(old_like))))
-    ).scalars().all()
+    rows = list(
+        db.execute(
+            select(DbFile).where(
+                (DbFile.case_id == case_id)
+                & ((DbFile.folder_path == old_prefix) | (DbFile.folder_path.like(old_like)))
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if not rows:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Folder was already renamed or no longer exists.",
+        )
+
+    moving_ids = [r.id for r in rows]
+    raise_if_files_checked_out(
+        db,
+        [r.id for r in rows if r.category != FileCategory.system],
+        action="rename this folder",
+    )
+
+    dest_conflict = (
+        db.execute(
+            select(DbFile.id)
+            .where(
+                DbFile.case_id == case_id,
+                ~DbFile.id.in_(moving_ids),
+                (DbFile.folder_path == new_path) | (DbFile.folder_path.like(f"{new_path}/%")),
+            )
+            .limit(1)
+        )
+        .scalars()
+        .first()
+    )
+    if dest_conflict is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="A folder or files already exist at the destination path.",
+        )
 
     new_last = new_path.split("/")[-1].strip() if new_path else ""
     if not new_last:
         new_last = "Folder"
 
-    # Move physical files and update DB fields.
-    for row in rows:
-        old_fp = row.folder_path or ""
-        relative = ""
-        if old_fp == old_prefix:
+    try:
+        for row in rows:
+            old_fp = row.folder_path or ""
             relative = ""
-        elif old_fp.startswith(f"{old_prefix}/"):
-            relative = old_fp[len(old_prefix) + 1 :]
-        else:
-            continue
+            if old_fp == old_prefix:
+                relative = ""
+            elif old_fp.startswith(f"{old_prefix}/"):
+                relative = old_fp[len(old_prefix) + 1 :]
+            else:
+                continue
 
-        updated_fp = new_path + (f"/{relative}" if relative else "")
+            updated_fp = new_path + (f"/{relative}" if relative else "")
 
-        updated_original = row.original_filename
-        if row.category == FileCategory.system and row.folder_path == old_prefix:
-            updated_original = new_last
+            updated_original = row.original_filename
+            if row.category == FileCategory.system and row.folder_path == old_prefix:
+                updated_original = new_last
 
-        new_paths = case_file_paths(
-            case_id=case_id,
-            file_id=row.id,
-            original_filename=updated_original,
-            folder_path=updated_fp,
-        )
+            new_paths = case_file_paths(
+                case_id=case_id,
+                file_id=row.id,
+                original_filename=updated_original,
+                folder_path=updated_fp,
+            )
 
-        old_abs = (FILES_ROOT / row.storage_path).resolve()
-        new_abs = new_paths.abs_path
-        if old_abs.exists() and str(old_abs) != str(new_abs):
-            # Ensure destination directory exists (already created by case_file_paths).
-            shutil.move(str(old_abs), str(new_abs))
+            old_abs = (FILES_ROOT / row.storage_path).resolve()
+            new_abs = new_paths.abs_path
+            if old_abs.exists() and str(old_abs) != str(new_abs):
+                shutil.move(str(old_abs), str(new_abs))
 
-        row.storage_path = new_paths.rel_path
-        row.folder_path = updated_fp
-        if updated_original != row.original_filename:
-            row.original_filename = updated_original
-        row.updated_at = datetime.utcnow()
-        db.add(row)
+            row.storage_path = new_paths.rel_path
+            row.folder_path = updated_fp
+            if updated_original != row.original_filename:
+                row.original_filename = updated_original
+            row.updated_at = datetime.utcnow()
+            db.add(row)
+    except OSError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Folder could not be renamed; it may have been moved by another user.",
+        ) from exc
 
     from app.portal_service import rename_portal_grants_for_folder
 
@@ -1452,12 +1627,26 @@ def delete_case_folder(
     ensure_files_root()
     from app.file_storage import FILES_ROOT
 
+    # Non-blocking: concurrent upload-into-folder gets 409 instead of 201-then-deleted (CL-09).
+    _lock_case_folder_ops(db, case_id, blocking=False)
+
     prefix = folder_path
     like = f"{prefix}/%"
 
     rows = db.execute(
         select(DbFile).where((DbFile.case_id == case_id) & ((DbFile.folder_path == prefix) | (DbFile.folder_path.like(like))))
     ).scalars().all()
+    if not rows:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=_FOLDER_ALREADY_DELETED_DETAIL,
+        )
+
+    raise_if_files_checked_out(
+        db,
+        [r.id for r in rows if r.category != FileCategory.system],
+        action="delete this folder",
+    )
 
     # Delete physical files first (best effort).
     for row in rows:
@@ -1859,6 +2048,9 @@ def set_file_portal_quote_tag(
     return {"id": str(row.id), "is_portal_quote": row.is_portal_quote}
 
 
+_FILE_RENAME_CONFLICT_DETAIL = "File was renamed or moved by another user. Refresh and try again."
+
+
 @router.patch("/{file_id}/rename", status_code=status.HTTP_200_OK)
 def rename_case_file(
     case_id: uuid.UUID,
@@ -1868,11 +2060,16 @@ def rename_case_file(
     db: Session = Depends(get_db),
 ):
     require_case_access(case_id, user, db)
-    row = db.get(DbFile, file_id)
+    # Row lock so concurrent renames serialize; loser gets 409 if the object path moved (CL-10).
+    row = db.execute(
+        select(DbFile).where(DbFile.id == file_id).with_for_update()
+    ).scalar_one_or_none()
     if not row or row.case_id != case_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
     if row.category == FileCategory.system:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot rename folder markers here")
+
+    raise_if_files_checked_out(db, [file_id], action="rename")
 
     new_name = Path(payload.original_filename).name
     if not new_name:
@@ -1896,7 +2093,17 @@ def rename_case_file(
     )
     old_abs = (FILES_ROOT / row.storage_path).resolve()
     new_abs = new_paths.abs_path
-    if old_abs.exists() and str(old_abs) != str(new_abs):
+    if str(old_abs) != str(new_abs):
+        if not old_abs.is_file():
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=_FILE_RENAME_CONFLICT_DETAIL,
+            )
+        if new_abs.exists():
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=_FILE_RENAME_CONFLICT_DETAIL,
+            )
         shutil.move(str(old_abs), str(new_abs))
 
     row.storage_path = new_paths.rel_path
@@ -1934,6 +2141,8 @@ def update_comment_file(
     row = db.get(DbFile, file_id)
     if not row or row.case_id != case_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+
+    raise_if_files_checked_out(db, [file_id], action="edit")
 
     ensure_files_root()
 
@@ -2003,21 +2212,27 @@ def move_case_file(
     if row.category == FileCategory.system:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot move folder markers here")
 
-    old_folder = row.folder_path or ""
-    try:
-        new_folder = sanitize_folder_path(payload.folder_path)
-    except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-
-    ensure_files_root()
-    from app.file_storage import FILES_ROOT
-
     # Move parent + its children (attachments) together so indentation/grouping stays consistent.
     rows_to_move = [row]
     children = (
         db.execute(select(DbFile).where(DbFile.case_id == case_id, DbFile.parent_file_id == file_id)).scalars().all()
     )
     rows_to_move.extend(children)
+    raise_if_files_checked_out(db, [r.id for r in rows_to_move], action="move")
+
+    old_folder = row.folder_path or ""
+    try:
+        new_folder = sanitize_folder_path(payload.folder_path)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+    if new_folder:
+        _lock_case_folder_ops(db, case_id, blocking=False)
+        if not _folder_destination_exists(db, case_id, new_folder):
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=_FOLDER_GONE_DETAIL)
+
+    ensure_files_root()
+    from app.file_storage import FILES_ROOT
 
     for r in rows_to_move:
         new_paths = case_file_paths(
@@ -2067,6 +2282,7 @@ def _erase_case_file_tree(db: Session, case_id: uuid.UUID, file_id: uuid.UUID) -
         db.execute(select(DbFile).where(DbFile.case_id == case_id, DbFile.parent_file_id == file_id)).scalars().all()
     )
     rows_to_delete.extend(children)
+    raise_if_files_checked_out(db, [r.id for r in rows_to_delete], action="delete")
     for r in rows_to_delete:
         abs_path = (FILES_ROOT / r.storage_path).resolve()
         backup = Path(str(abs_path) + ".oo_backup")

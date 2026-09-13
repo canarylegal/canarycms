@@ -35,6 +35,7 @@ from app.security import (
 )
 from app.file_storage import FILES_ROOT, case_file_paths, ensure_files_root, path_is_under_files_root, stream_upload_to_path, unlink_stored_file
 from app.upload_limits import content_disposition_for_mime, max_upload_bytes
+from app.download_headers import content_disposition_headers
 from app.models import (
     Case,
     CanarySignRecipient,
@@ -1317,7 +1318,7 @@ def portal_canary_sign_pdf(
     return Response(
         content=raw,
         media_type="application/pdf",
-        headers={"Content-Disposition": f'inline; filename="{filename}"'},
+        headers=content_disposition_headers(filename, disposition="inline"),
     )
 
 

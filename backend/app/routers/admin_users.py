@@ -154,9 +154,16 @@ def update_user(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Staff users must have a permission category assigned.",
         )
+    was_active = bool(user.is_active)
     for k, v in data.items():
         setattr(user, k, v)
     user.updated_at = datetime.utcnow()
+    if was_active and not bool(user.is_active):
+        from app.desktop_edit_session import release_edit_sessions_for_user
+        from app.security import bump_auth_token_version
+
+        bump_auth_token_version(user)
+        release_edit_sessions_for_user(db, user.id)
     db.add(user)
     log_event(
         db,

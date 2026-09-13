@@ -38,12 +38,14 @@ def onlyoffice_callback_require_jwt() -> bool:
     return True
 
 
-def onlyoffice_editor_customization(*, file_type: str) -> dict[str, bool | str]:
+def onlyoffice_editor_customization(*, file_type: str) -> dict:
     """Editor customization block for ONLYOFFICE JWT / DocsAPI config."""
-    custom: dict[str, bool | str] = {
+    custom: dict = {
         "forcesave": True,
         "unit": "cm",
         "compatibleFeatures": True,
+        # Hide first-load "new feature" tips (e.g. Interface theme).
+        "features": {"featuresTips": False},
     }
     # PDF editor omits autosave by default (strict co-editing). Without it, host CommandService
     # forcesave sees no pending changes and Canary storage is not updated until OO toolbar Save.

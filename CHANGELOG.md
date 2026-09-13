@@ -4,6 +4,17 @@ All notable releases of Canary CMS are documented here. Prefer a tagged release 
 
 ## [Unreleased]
 
+### Security
+- Portal browse/upload reject `..` and absolute folder inputs with HTTP 400 (was unhandled 500).
+- Staff and firm-default signature uploads decode and re-encode image bytes; HTML labelled as PNG is rejected.
+- Staff logout bumps ``auth_token_version`` so bearer JWTs stop working immediately (not only the HttpOnly cookie).
+- Desktop/WebDAV edit sessions re-check account active + matter access; disable/deny releases open sessions (CL-07). Browser DocsAPI uses the same WebDAV capability URL; Canary GET/PUT are revoked after deny/disable (open editor tabs may still show a previously fetched copy until closed).
+- Rename/move/delete of checked-out files (and their folders) returns HTTP 409 instead of breaking editor URLs (CL-06).
+- Concurrent folder rename is serialized per matter and returns 409 on conflict instead of intermittent 500 (CL-05).
+- Upload into a folder holds a session-level folder-ops lock for the whole request (including the byte stream) so concurrent recursive delete returns HTTP 409 while the upload is in flight; destination existence is still checked before commit (CL-09).
+- Invoice approval flushes the generated document ``file`` row before linking ``document_file_id``, and wraps document save in a savepoint so a document failure cannot abort financial approval (CL-08). Approval remains idempotent and blocks direct ledger approve/edit/reject of pending invoice-origin pairs.
+- Concurrent same-file rename takes a row lock and returns HTTP 409 if the on-disk object was already moved (CL-10).
+
 ### Ops / release readiness
 - Admin → Deploy defaults to **`latest-release`** (compare to newest GitHub Release tip, not floating `main`).
 - Backend rejects `.env.example` `CHANGE_ME_*` / all-`#` secret placeholders at startup.

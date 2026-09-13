@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import uuid
 from datetime import datetime
 
@@ -15,6 +16,8 @@ from app.case_time_service import mark_time_entries_billed, release_billed_time_
 from app.models import Case, CaseInvoice, CaseInvoiceLine, InvoiceSeq, LedgerEntry, User
 from app.permission_checks import user_may_approve_invoice
 from app.schemas import CaseInvoiceCreate, CaseInvoiceLineOut, CaseInvoiceOut, CaseInvoicesOut, LedgerPostCreate
+
+log = logging.getLogger("canary.invoice")
 
 INV_PENDING = "pending_approval"
 INV_APPROVED = "approved"
@@ -210,20 +213,29 @@ def create_case_invoice(case_id: uuid.UUID, payload: CaseInvoiceCreate, user: Us
 
 
 def approve_case_invoice(case_id: uuid.UUID, invoice_id: uuid.UUID, user: User, db: Session) -> None:
+    """Approve a pending invoice and its linked office posting (CL-08).
+
+    Idempotent when already approved. Does not send e-mail — callers must notify
+    after a successful ``db.commit()`` so alert dispatch cannot commit mid-flow.
+    """
     if not user_may_approve_invoice(user, db):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You do not have permission to approve invoices.",
         )
-    inv = db.get(CaseInvoice, invoice_id)
+    inv = db.execute(
+        select(CaseInvoice).where(CaseInvoice.id == invoice_id).with_for_update()
+    ).scalar_one_or_none()
     if not inv or inv.case_id != case_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invoice not found")
+    if inv.status == INV_APPROVED:
+        return
     if inv.status != INV_PENDING:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invoice is not pending approval.")
     if not inv.ledger_pair_id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invoice has no ledger posting.")
 
-    approve_ledger_pair(case_id, inv.ledger_pair_id, user, db)
+    approve_ledger_pair(case_id, inv.ledger_pair_id, user, db, invoice_workflow=True)
     new_desc = f"Invoice {inv.invoice_number}"
     # Core UPDATE so description / approval are persisted even if ORM instances in the session were stale.
     db.execute(
@@ -246,21 +258,79 @@ def approve_case_invoice(case_id: uuid.UUID, invoice_id: uuid.UUID, user: User, 
         total_pence=int(inv.total_pence),
         pair_id=inv.ledger_pair_id,
     )
-    from app.staff_workflow_notifications import notify_invoice_approved
-
-    notify_invoice_approved(
-        db,
-        case_id=case_id,
-        creator_user_id=inv.created_by_user_id,
-        actor=user,
-        invoice_number=inv.invoice_number,
-        total_pence=int(inv.total_pence),
-    )
     case = db.get(Case, case_id)
     if case is not None:
-        from app.invoice_document_service import save_invoice_document_to_case
+        # Savepoint so a document FK/flush failure cannot abort the approval transaction.
+        try:
+            with db.begin_nested():
+                from app.invoice_document_service import save_invoice_document_to_case
 
-        save_invoice_document_to_case(inv=inv, case=case, actor_user_id=user.id, db=db)
+                save_invoice_document_to_case(inv=inv, case=case, actor_user_id=user.id, db=db)
+        except Exception:
+            # Document can be regenerated on download; do not fail the financial approval.
+            inv.document_file_id = None
+            log.exception(
+                "invoice document save failed after approval invoice_id=%s case_id=%s",
+                invoice_id,
+                case_id,
+            )
+
+
+def notify_invoice_approved_after_commit(
+    db: Session,
+    *,
+    case_id: uuid.UUID,
+    invoice_id: uuid.UUID,
+    actor: User,
+) -> None:
+    """Best-effort staff e-mail after invoice approval has been committed."""
+    inv = db.get(CaseInvoice, invoice_id)
+    if inv is None or inv.case_id != case_id or inv.status != INV_APPROVED:
+        return
+    from app.staff_workflow_notifications import notify_invoice_approved
+
+    try:
+        notify_invoice_approved(
+            db,
+            case_id=case_id,
+            creator_user_id=inv.created_by_user_id,
+            actor=actor,
+            invoice_number=inv.invoice_number,
+            total_pence=int(inv.total_pence),
+        )
+        db.commit()
+    except Exception:
+        log.exception("invoice approved notification failed invoice_id=%s", invoice_id)
+        db.rollback()
+
+
+def notify_invoice_rejected_after_commit(
+    db: Session,
+    *,
+    case_id: uuid.UUID,
+    invoice_id: uuid.UUID,
+    actor: User,
+    reject_comment: str | None,
+) -> None:
+    inv = db.get(CaseInvoice, invoice_id)
+    if inv is None or inv.case_id != case_id or inv.status != INV_VOIDED:
+        return
+    from app.staff_workflow_notifications import notify_invoice_rejected
+
+    try:
+        notify_invoice_rejected(
+            db,
+            case_id=case_id,
+            creator_user_id=inv.created_by_user_id,
+            actor=actor,
+            invoice_number=inv.invoice_number,
+            total_pence=int(inv.total_pence),
+            comment=reject_comment,
+        )
+        db.commit()
+    except Exception:
+        log.exception("invoice rejected notification failed invoice_id=%s", invoice_id)
+        db.rollback()
 
 
 def void_case_invoice(
@@ -299,17 +369,6 @@ def void_case_invoice(
             invoice_number=inv.invoice_number,
             total_pence=int(inv.total_pence),
             was_pending=True,
-        )
-        from app.staff_workflow_notifications import notify_invoice_rejected
-
-        notify_invoice_rejected(
-            db,
-            case_id=case_id,
-            creator_user_id=inv.created_by_user_id,
-            actor=user,
-            invoice_number=inv.invoice_number,
-            total_pence=int(inv.total_pence),
-            comment=reject_comment,
         )
         return
 

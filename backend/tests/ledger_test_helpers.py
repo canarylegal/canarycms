@@ -130,6 +130,46 @@ def add_fee_earner_category(db: Session) -> UserPermissionCategory:
     return row
 
 
+def add_payment_approver_category(db: Session) -> UserPermissionCategory:
+    row = UserPermissionCategory(
+        id=uuid.uuid4(),
+        name="Payment approver",
+        perm_fee_earner=False,
+        perm_post_client=True,
+        perm_post_office=True,
+        perm_post_anticipated=False,
+        perm_approve_payments=True,
+        perm_approve_invoices=False,
+        perm_admin=False,
+        created_at=datetime.utcnow(),
+        updated_at=datetime.utcnow(),
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+def add_invoice_approver_category(db: Session) -> UserPermissionCategory:
+    row = UserPermissionCategory(
+        id=uuid.uuid4(),
+        name="Invoice approver",
+        perm_fee_earner=False,
+        perm_post_client=False,
+        perm_post_office=False,
+        perm_post_anticipated=False,
+        perm_approve_payments=False,
+        perm_approve_invoices=True,
+        perm_admin=False,
+        created_at=datetime.utcnow(),
+        updated_at=datetime.utcnow(),
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return row
+
+
 def add_case(db: Session, *, fee_earner_user_id: uuid.UUID, status: CaseStatus = CaseStatus.open) -> Case:
     row = Case(
         id=uuid.uuid4(),

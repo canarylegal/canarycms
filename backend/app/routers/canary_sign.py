@@ -24,6 +24,7 @@ from app.canary_sign_service import (
 )
 from app.db import get_db
 from app.deps import get_current_user, require_case_access
+from app.download_headers import content_disposition_headers
 from app.models import CanarySignOrderMode, CanarySignRequest, CanarySignStatus, FileCategory, User
 from app.models import File as DbFile
 from app.schemas import (
@@ -116,7 +117,7 @@ def get_canary_sign_preview_pdf(
     return Response(
         content=raw,
         media_type="application/pdf",
-        headers={"Content-Disposition": f'inline; filename="{filename}"'},
+        headers=content_disposition_headers(filename, disposition="inline"),
     )
 
 

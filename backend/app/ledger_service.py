@@ -10,7 +10,16 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.ledger_party import resolve_ledger_party
-from app.models import Case, CaseStatus, LedgerAccount, LedgerAccountType, LedgerDirection, LedgerEntry, User
+from app.models import (
+    Case,
+    CaseInvoice,
+    CaseStatus,
+    LedgerAccount,
+    LedgerAccountType,
+    LedgerDirection,
+    LedgerEntry,
+    User,
+)
 from app.permission_checks import (
     assert_may_approve_anticipated_ledger,
     assert_may_edit_ledger_pair,
@@ -20,6 +29,30 @@ from app.permission_checks import (
 )
 from app.schemas import LedgerAccountSummary, LedgerEntryOut, LedgerOut, LedgerPairUpdate, LedgerPostCreate
 from app.timeutil import utcnow
+
+_INVOICE_PENDING = "pending_approval"
+_INVOICE_PAIR_LEDGER_MSG = (
+    "This posting belongs to a pending invoice. Approve or void it from Invoices — "
+    "not via ledger approval."
+)
+
+
+def pending_invoice_for_ledger_pair(db: Session, pair_id: uuid.UUID) -> CaseInvoice | None:
+    """Return the pending invoice that owns this ledger pair, if any (CL-08)."""
+    return db.execute(
+        select(CaseInvoice).where(
+            CaseInvoice.ledger_pair_id == pair_id,
+            CaseInvoice.status == _INVOICE_PENDING,
+        )
+    ).scalar_one_or_none()
+
+
+def raise_if_pending_invoice_owns_pair(db: Session, pair_id: uuid.UUID) -> None:
+    if pending_invoice_for_ledger_pair(db, pair_id) is not None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=_INVOICE_PAIR_LEDGER_MSG,
+        )
 
 
 @dataclass(frozen=True)
@@ -256,6 +289,7 @@ def update_ledger_pair_unapproved(
     db: Session,
 ) -> None:
     """Edit amount, description, reference, or anticipated date before approval."""
+    raise_if_pending_invoice_owns_pair(db, pair_id)
     accounts, legs = _ledger_pair_legs(case_id, pair_id, db)
     if not legs:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Posting not found")
@@ -314,6 +348,7 @@ def reject_ledger_pair_unapproved(
     reject_comment: str | None = None,
 ) -> None:
     """Remove an unapproved or anticipated posting (reject draft)."""
+    raise_if_pending_invoice_owns_pair(db, pair_id)
     accounts, legs = _ledger_pair_legs(case_id, pair_id, db)
     if not legs:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Posting not found")
@@ -433,8 +468,23 @@ def get_ledger(case_id: uuid.UUID, db: Session) -> LedgerOut:
     )
 
 
-def approve_ledger_pair(case_id: uuid.UUID, pair_id: uuid.UUID, user: User, db: Session) -> None:
-    """Approve a pending posting; anticipated rows become actual and affect balances."""
+def approve_ledger_pair(
+    case_id: uuid.UUID,
+    pair_id: uuid.UUID,
+    user: User,
+    db: Session,
+    *,
+    invoice_workflow: bool = False,
+) -> None:
+    """Approve a pending posting; anticipated rows become actual and affect balances.
+
+    When ``invoice_workflow`` is True (called from invoice approval), payment-approve
+    permission is not required and an already-approved pair is a no-op so concurrent
+    retries can finish the invoice row without a 400/500 (CL-08).
+    """
+    if not invoice_workflow:
+        raise_if_pending_invoice_owns_pair(db, pair_id)
+
     accounts = _get_or_create_accounts(case_id, db, for_update=True)
     aid = {accounts["client"].id, accounts["office"].id}
     legs = (
@@ -452,6 +502,8 @@ def approve_ledger_pair(case_id: uuid.UUID, pair_id: uuid.UUID, user: User, db: 
     if any(e.account_id not in aid for e in legs):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid posting")
     if any(e.is_approved for e in legs):
+        if invoice_workflow:
+            return
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Posting is already approved")
 
     was_anticipated = any(e.is_anticipated for e in legs)
@@ -468,7 +520,10 @@ def approve_ledger_pair(case_id: uuid.UUID, pair_id: uuid.UUID, user: User, db: 
         elif e.account_id == accounts["office"].id:
             office_direction = e.direction.value
 
-    if any(e.is_anticipated for e in legs):
+    if invoice_workflow:
+        # Invoice permission already checked by approve_case_invoice.
+        pass
+    elif any(e.is_anticipated for e in legs):
         assert_may_approve_anticipated_ledger(
             user,
             client_direction=client_direction,

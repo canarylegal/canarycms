@@ -100,6 +100,14 @@ def _load_session(db: Session, token: str) -> tuple[FileEditSession, DbFile] | N
     f = db.get(DbFile, row.file_id)
     if f is None:
         return None
+    from app.desktop_edit_session import session_owner_still_authorized
+
+    if session_owner_still_authorized(db, row) is None:
+        # CL-07: revoke capability when the owner is disabled or lost matter access.
+        row.released_at = _now()
+        db.add(row)
+        db.commit()
+        return None
     return row, f
 
 
