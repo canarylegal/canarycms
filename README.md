@@ -4,6 +4,8 @@ Case-management software for law firms — matters, documents, contacts, tasks, 
 
 **Website:** [canarylegalsoftware.co.uk](https://canarylegalsoftware.co.uk)
 
+**Desktop (Linux):** optional Electron shell — source and `.deb` downloads at [canarylegal/canary-desktop](https://github.com/canarylegal/canary-desktop) ([Releases](https://github.com/canarylegal/canary-desktop/releases)).
+
 ## Quick start
 
 Requires Docker and Docker Compose on a Linux host.
