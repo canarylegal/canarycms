@@ -24,6 +24,7 @@ All notable releases of Canary CMS are documented here. Prefer a tagged release 
 - Portal browse/upload reject `..` and absolute folder inputs with HTTP 400 (was unhandled 500).
 
 ### Fixed
+- Admin → Storage no longer returns HTTP 500 when the backend has no Docker CLI/`docker.sock` (default notify-only deploy); it reports bind-mount and database sizes with a note that Docker image totals are omitted.
 - Documents multi-select Download downloads every selected file (not only the right-clicked one).
 - Editing a contact's type or name while an active portal access code exists prompts to revoke that code, so replacing a person on the same contact record cannot silently leave the previous portal login usable.
 - Contacts can merge a duplicate global contact into the survivor: matter links and portal grants are moved, both portal codes are revoked, and a fresh client portal code is issued when either side had access (optional e-mail of the new code). Merge is available on the global contact card and on the matter contact edit screen. Before confirming, staff review both contacts side by side (mismatches highlighted) plus the merge impact.

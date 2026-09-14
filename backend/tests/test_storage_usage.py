@@ -55,3 +55,40 @@ def test_measure_deployment_storage_splits_compose_and_files(tmp_path: Path, mon
 
     assert snap.files_on_disk_bytes == 100
     assert snap.application_checkout_bytes == len(b"print('hi')")
+
+
+def test_list_compose_volume_names_without_docker_cli() -> None:
+    """Admin → Storage must not 500 when docker.sock/CLI are absent (default prod)."""
+    from app.docker_stack_usage import list_compose_volume_names, _run_docker
+
+    with patch("app.docker_stack_usage.docker_sock_available", return_value=False):
+        assert list_compose_volume_names("canary") == []
+
+    with patch("app.docker_stack_usage.docker_sock_available", return_value=True), patch(
+        "app.docker_stack_usage.subprocess.run", side_effect=FileNotFoundError("docker")
+    ):
+        result = _run_docker(["volume", "ls"])
+        assert result.returncode == 127
+        assert list_compose_volume_names("canary") == []
+
+
+def test_measure_deployment_storage_without_docker(tmp_path: Path, monkeypatch) -> None:
+    compose = tmp_path / "compose"
+    files = compose / "data" / "files"
+    files.mkdir(parents=True)
+    (files / "doc.bin").write_bytes(b"hello")
+    monkeypatch.setenv("CANARY_COMPOSE_PROJECT_DIR", str(compose))
+    monkeypatch.setattr("app.storage_usage.FILES_ROOT", files)
+
+    class _Db:
+        pass
+
+    with patch("app.storage_usage.measure_postgres_logical_bytes", return_value=42), patch(
+        "app.docker_stack_usage.docker_sock_available", return_value=False
+    ), patch("app.docker_stack_usage.subprocess.run", side_effect=FileNotFoundError("docker")):
+        snap = measure_deployment_storage(_Db())  # type: ignore[arg-type]
+
+    assert snap.docker_detected is False
+    assert snap.files_on_disk_bytes == 5
+    assert snap.database_logical_bytes == 42
+    assert snap.measurement_note and "docker.sock" in snap.measurement_note.lower()

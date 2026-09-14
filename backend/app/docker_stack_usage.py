@@ -49,13 +49,46 @@ def compose_project_name() -> str:
 
 
 def _run_docker(args: list[str], *, timeout: float = 60.0) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        ["docker", *args],
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-        check=False,
+    try:
+        return subprocess.run(
+            ["docker", *args],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+        )
+    except FileNotFoundError:
+        # Backend images do not ship a Docker CLI, and docker.sock is not mounted by default.
+        return subprocess.CompletedProcess(
+            args=["docker", *args],
+            returncode=127,
+            stdout="",
+            stderr="docker CLI not available",
+        )
+
+
+def list_compose_container_ids(project: str) -> list[str]:
+    if not docker_sock_available():
+        return []
+    proc = _run_docker(
+        ["ps", "-a", "--filter", f"label=com.docker.compose.project={project}", "--format", "{{.ID}}"],
+        timeout=30,
     )
+    if proc.returncode != 0:
+        return []
+    return [line.strip() for line in proc.stdout.splitlines() if line.strip()]
+
+
+def list_compose_volume_names(project: str) -> list[str]:
+    if not docker_sock_available():
+        return []
+    proc = _run_docker(
+        ["volume", "ls", "--filter", f"label=com.docker.compose.project={project}", "--format", "{{.Name}}"],
+        timeout=30,
+    )
+    if proc.returncode != 0:
+        return []
+    return [line.strip() for line in proc.stdout.splitlines() if line.strip()]
 
 
 def parse_docker_human_size(raw: str) -> int:
@@ -86,26 +119,6 @@ def _short_image_id(image_ref: str) -> str:
     if ref.startswith("sha256:"):
         return ref.split(":", 1)[1][:12]
     return ref[:12]
-
-
-def list_compose_container_ids(project: str) -> list[str]:
-    proc = _run_docker(
-        ["ps", "-a", "--filter", f"label=com.docker.compose.project={project}", "--format", "{{.ID}}"],
-        timeout=30,
-    )
-    if proc.returncode != 0:
-        return []
-    return [line.strip() for line in proc.stdout.splitlines() if line.strip()]
-
-
-def list_compose_volume_names(project: str) -> list[str]:
-    proc = _run_docker(
-        ["volume", "ls", "--filter", f"label=com.docker.compose.project={project}", "--format", "{{.Name}}"],
-        timeout=30,
-    )
-    if proc.returncode != 0:
-        return []
-    return [line.strip() for line in proc.stdout.splitlines() if line.strip()]
 
 
 def measure_docker_volume_bytes(volume_name: str) -> int | None:
