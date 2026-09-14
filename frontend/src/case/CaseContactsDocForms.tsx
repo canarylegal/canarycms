@@ -1,5 +1,5 @@
 import type { Dispatch, SetStateAction } from 'react'
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import {
   GlobalContactCreateForm,
   ContactPersonOrgAddressFields,
@@ -11,7 +11,16 @@ import {
 } from '../GlobalContactCreateForm'
 import { apiFetch } from '../api'
 import type { ApiError } from '../api'
+import { ContactMergePanel } from '../ContactMergePanel'
 import { useDialogs } from '../DialogProvider'
+import {
+  choosePortalActionOnIdentityChange,
+  contactHasActiveMatterPortalAccess,
+  contactHasActivePortalAccess,
+  contactIdentityFieldsChanged,
+  revokeContactPortalAccess,
+  revokeMatterPortalAccess,
+} from '../portalIdentityGuard'
 import { ContactSearchPicker } from '../ContactSearchPicker'
 import { SingleSelectDropdown } from '../SingleSelectDropdown'
 import { defaultLetterSalutationForContact, LetterSalutationFields } from '../LetterSalutationFields'
@@ -492,10 +501,43 @@ export function CaseContactsEditDocForm({
   onDone: () => void
   setActionErr: (v: string | null) => void
 }) {
-  const { askConfirm } = useDialogs()
+  const { askConfirm, askConfirmChoice } = useDialogs()
   const [editMatterTypeOpen, setEditMatterTypeOpen] = useState(false)
   const [saveErr, setSaveErr] = useState<string | null>(null)
   const [lawyerClientsErr, setLawyerClientsErr] = useState<string | null>(null)
+  const saveInFlightRef = useRef(false)
+  const [identityBaseline] = useState(() => ({
+    type: editSnapshot.type,
+    first_name: editSnapshot.first_name,
+    middle_name: editSnapshot.middle_name,
+    last_name: editSnapshot.last_name,
+  }))
+
+  const mergeSurvivor = useMemo((): ContactOut | null => {
+    const globalId = editSnapshot.contact_id
+    if (!globalId) return null
+    return {
+      id: globalId,
+      type: editSnapshot.type,
+      name: resolvedEditSnapshotName,
+      email: editSnapshot.email,
+      phone: editSnapshot.phone,
+      title: editSnapshot.title,
+      first_name: editSnapshot.first_name,
+      middle_name: editSnapshot.middle_name,
+      last_name: editSnapshot.last_name,
+      company_name: editSnapshot.company_name,
+      trading_name: editSnapshot.trading_name,
+      address_line1: editSnapshot.address_line1,
+      address_line2: editSnapshot.address_line2,
+      city: editSnapshot.city,
+      county: editSnapshot.county,
+      postcode: editSnapshot.postcode,
+      country: editSnapshot.country,
+      created_at: editSnapshot.created_at,
+      updated_at: editSnapshot.updated_at,
+    }
+  }, [editSnapshot, resolvedEditSnapshotName])
 
   const editMatterTypeOptions = useMemo(() => {
     const base = matterTypeOptions.map((o) => ({ value: o.value, label: o.label }))
@@ -671,6 +713,15 @@ export function CaseContactsEditDocForm({
           contactEmail={editSnapshot.email}
         />
       )}
+      {mergeSurvivor ? (
+        <ContactMergePanel
+          token={token}
+          survivor={mergeSurvivor}
+          onMerged={() => {
+            onDone()
+          }}
+        />
+      ) : null}
       {saveErr ? <div className="error">{saveErr}</div> : null}
       <div className="row" style={{ justifyContent: 'space-between', marginTop: 8 }}>
         <button
@@ -713,7 +764,7 @@ export function CaseContactsEditDocForm({
             !(editSnapshot.matter_contact_type && editSnapshot.matter_contact_type.trim())
           }
           onClick={async () => {
-            setBusy(true)
+            if (saveInFlightRef.current) return
             setSaveErr(null)
             setLawyerClientsErr(null)
             setActionErr(null)
@@ -744,6 +795,38 @@ export function CaseContactsEditDocForm({
                 setActionErr(msg)
                 return
               }
+              const identityChanged = contactIdentityFieldsChanged(
+                identityBaseline,
+                {
+                  type: payload.type,
+                  first_name: payload.first_name,
+                  middle_name: payload.middle_name,
+                  last_name: payload.last_name,
+                },
+              )
+              let revokePortal = false
+              let revokeClientPortal = false
+              let revokeMatterPortal = false
+              const globalId = editSnapshot.contact_id
+              if (identityChanged && globalId) {
+                const [clientPortal, matterPortal] = await Promise.all([
+                  contactHasActivePortalAccess(token, globalId),
+                  contactHasActiveMatterPortalAccess(token, caseId, globalId),
+                ])
+                const choice = await choosePortalActionOnIdentityChange(askConfirmChoice, {
+                  identityChanged: true,
+                  portalAccessActive: clientPortal || matterPortal,
+                })
+                if (choice === 'cancel') {
+                  // Abort without saving or revoking — leave portal code untouched.
+                  return
+                }
+                revokePortal = choice === 'save_revoke'
+                revokeClientPortal = revokePortal && clientPortal
+                revokeMatterPortal = revokePortal && matterPortal
+              }
+              saveInFlightRef.current = true
+              setBusy(true)
               const resolvedSalutation = coerceLetterSalutation(
                 editSnapshot.letter_salutation,
                 editSnapshot.matter_contact_type ?? '',
@@ -783,12 +866,19 @@ export function CaseContactsEditDocForm({
                 method: 'PATCH',
                 json: patchBody,
               })
+              if (revokePortal && globalId) {
+                const revokes: Promise<unknown>[] = []
+                if (revokeClientPortal) revokes.push(revokeContactPortalAccess(token, globalId))
+                if (revokeMatterPortal) revokes.push(revokeMatterPortalAccess(token, caseId, globalId))
+                await Promise.all(revokes)
+              }
               onDone()
             } catch (e: unknown) {
               const msg = (e as { message?: string })?.message ?? 'Failed to update snapshot'
               setSaveErr(msg)
               setActionErr(msg)
             } finally {
+              saveInFlightRef.current = false
               setBusy(false)
             }
           }}

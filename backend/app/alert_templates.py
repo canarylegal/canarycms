@@ -109,25 +109,33 @@ def portal_staff_upload(
     contact_name: str,
     area_label: str,
     filename: str,
+    matter_label: str = "",
+    matter_url: str = "",
 ) -> tuple[str, str, str]:
-    subject = f"Portal upload: {filename}"
-    body = "\n".join(
-        [
-            f"{contact_name} uploaded a file via Canary Portal.",
-            "",
-            f"Area: {area_label}",
-            f"File: {filename}",
-            "",
-            f"— {_firm_line(firm_name)}",
-        ]
-    )
-    html = _html_email_shell(
-        firm_name=firm_name,
-        inner_html=_html_info_block(
-            title=f"{contact_name} uploaded a file via Canary Portal",
-            lines=[f"Area: {area_label}", f"File: {filename}"],
-        ),
-    )
+    matter = (matter_label or "").strip() or "matter"
+    subject = f"Portal upload — {matter}: {filename}"
+    next_step = "Review the upload on the matter in Canary."
+    body_lines = [
+        f"{contact_name} uploaded a file via Canary Portal.",
+        "",
+        f"Matter: {matter}",
+        f"Area: {area_label}",
+        f"File: {filename}",
+        "",
+        next_step,
+    ]
+    if matter_url:
+        body_lines.extend(["", f"Open matter: {matter_url}"])
+    body_lines.extend(["", f"— {_firm_line(firm_name)}"])
+    body = "\n".join(body_lines)
+    info = [f"Matter: {matter}", f"Area: {area_label}", f"File: {filename}"]
+    html_inner = _html_info_block(
+        title=f"{contact_name} uploaded a file via Canary Portal",
+        lines=info,
+    ) + f"<p>{_escape_html(next_step)}</p>"
+    if matter_url:
+        html_inner += _html_cta_button(matter_url, "Open matter in Canary") + _html_fallback_link(matter_url)
+    html = _html_email_shell(firm_name=firm_name, inner_html=html_inner)
     return subject, body, html
 
 
@@ -138,18 +146,21 @@ def portal_contact_access_granted(
     portal_url: str,
     access_code: str,
 ) -> tuple[str, str, str]:
-    subject = f"Canary Portal access — {_firm_line(firm_name)}"
+    subject = f"Your {_firm_line(firm_name)} client portal access"
     cta_label = "Open client portal"
     body = "\n".join(
         [
             f"Dear {contact_name},",
             "",
-            "You can access your documents using Canary Portal.",
+            f"{_firm_line(firm_name)} has given you access to Canary Portal so you can view shared documents online.",
             "",
             f"{cta_label}: {portal_url}",
-            f"Access code: {access_code}",
+            f"Your access code: {access_code}",
             "",
-            "Keep this code confidential. Contact us if you need a new code.",
+            "Sign in with this access code. Keep it confidential and do not forward it.",
+            "",
+            "If the code does not work, reply to this e-mail or contact the firm and ask them to send a new code.",
+            "You can also request a one-time sign-in code by e-mail from the portal sign-in page.",
             "",
             f"— {_firm_line(firm_name)}",
         ]
@@ -158,12 +169,17 @@ def portal_contact_access_granted(
         firm_name=firm_name,
         inner_html=(
             f"<p>Dear {_escape_html(contact_name)},</p>"
-            "<p>You can access your documents using Canary Portal.</p>"
+            f"<p>{_escape_html(_firm_line(firm_name))} has given you access to Canary Portal so you can view "
+            "shared documents online.</p>"
             f"{_html_cta_button(portal_url, cta_label)}"
             f"{_html_fallback_link(portal_url)}"
             f"{_html_highlight_code('Your access code', access_code)}"
+            '<p style="font-size:13px;color:#64748b;margin:0 0 8px;">'
+            "Sign in with this access code. Keep it confidential and do not forward it."
+            "</p>"
             '<p style="font-size:13px;color:#64748b;margin:0;">'
-            "Keep this code confidential. Contact us if you need a new code."
+            "If the code does not work, reply to this e-mail or contact the firm and ask them to send a new code. "
+            "You can also request a one-time sign-in code by e-mail from the portal sign-in page."
             "</p>"
         ),
     )
@@ -180,18 +196,20 @@ def portal_matter_exchange_shared(
     access_code: str,
 ) -> tuple[str, str, str]:
     subject = f"Documents shared — {matter_label} — {_firm_line(firm_name)}"
-    cta_label = "Open portal"
+    cta_label = "Open client portal"
     body = "\n".join(
         [
             f"Dear {contact_name},",
             "",
-            f"Documents have been shared with you for: {matter_label}",
+            f"{_firm_line(firm_name)} has shared documents with you for: {matter_label}",
             f"Shared folder: {area_label}",
             "",
             f"{cta_label}: {portal_url}",
-            f"Access code: {access_code}",
+            f"Your access code: {access_code}",
             "",
-            "Sign in with this access code on the portal. Keep the code confidential.",
+            "Sign in with this access code. Keep it confidential and do not forward it.",
+            "",
+            "If the code does not work, reply to this e-mail or contact the firm and ask them to send a new code.",
             "",
             f"— {_firm_line(firm_name)}",
         ]
@@ -200,13 +218,17 @@ def portal_matter_exchange_shared(
         firm_name=firm_name,
         inner_html=(
             f"<p>Dear {_escape_html(contact_name)},</p>"
-            f"<p>Documents have been shared with you for: <strong>{_escape_html(matter_label)}</strong></p>"
+            f"<p>{_escape_html(_firm_line(firm_name))} has shared documents with you for: "
+            f"<strong>{_escape_html(matter_label)}</strong></p>"
             f"<p>Shared folder: <strong>{_escape_html(area_label)}</strong></p>"
             f"{_html_cta_button(portal_url, cta_label)}"
             f"{_html_fallback_link(portal_url)}"
             f"{_html_highlight_code('Your access code', access_code)}"
+            '<p style="font-size:13px;color:#64748b;margin:0 0 8px;">'
+            "Sign in with this access code. Keep it confidential and do not forward it."
+            "</p>"
             '<p style="font-size:13px;color:#64748b;margin:0;">'
-            "Sign in with this access code on the portal. Keep the code confidential."
+            "If the code does not work, reply to this e-mail or contact the firm and ask them to send a new code."
             "</p>"
         ),
     )
@@ -249,11 +271,13 @@ def portal_contact_folder_granted(
         [
             f"Dear {contact_name},",
             "",
-            f"Documents have been shared with you: {area_label}",
+            f"{_firm_line(firm_name)} has shared documents with you in Canary Portal:",
+            area_label,
             "",
             f"{cta_label}: {portal_url}",
             "",
-            "Sign in with your personal access code or e-mail sign-in code.",
+            "Sign in with your personal access code, or request a one-time sign-in code by e-mail from the portal sign-in page.",
+            "If you cannot sign in, reply to this e-mail or contact the firm.",
             "",
             f"— {_firm_line(firm_name)}",
         ]
@@ -262,11 +286,13 @@ def portal_contact_folder_granted(
         firm_name=firm_name,
         inner_html=(
             f"<p>Dear {_escape_html(contact_name)},</p>"
-            f"<p>Documents have been shared with you: <strong>{_escape_html(area_label)}</strong></p>"
+            f"<p>{_escape_html(_firm_line(firm_name))} has shared documents with you in Canary Portal:</p>"
+            f"<p><strong>{_escape_html(area_label)}</strong></p>"
             f"{_html_cta_button(portal_url, cta_label)}"
             f"{_html_fallback_link(portal_url)}"
             '<p style="font-size:13px;color:#64748b;margin:0;">'
-            "Sign in with your personal access code or e-mail sign-in code."
+            "Sign in with your personal access code, or request a one-time sign-in code by e-mail from the portal "
+            "sign-in page. If you cannot sign in, reply to this e-mail or contact the firm."
             "</p>"
         ),
     )
@@ -281,12 +307,12 @@ def portal_contact_files_added(
     filenames: list[str],
     portal_url: str,
 ) -> tuple[str, str, str]:
-    subject = f"New documents — {area_label}"
+    subject = f"New documents — {area_label} — {_firm_line(firm_name)}"
     cta_label = "View documents"
     lines = [
         f"Dear {contact_name},",
         "",
-        f"New file(s) are available in {area_label}:",
+        f"{_firm_line(firm_name)} has added new file(s) for you in {area_label}:",
         "",
     ]
     for fn in filenames:
@@ -296,7 +322,7 @@ def portal_contact_files_added(
             "",
             f"{cta_label}: {portal_url}",
             "",
-            "Sign in with your access code or e-mail sign-in code.",
+            "Sign in with your access code, or request a one-time sign-in code by e-mail from the portal sign-in page.",
             "",
             f"— {_firm_line(firm_name)}",
         ]
@@ -306,12 +332,13 @@ def portal_contact_files_added(
         firm_name=firm_name,
         inner_html=(
             f"<p>Dear {_escape_html(contact_name)},</p>"
-            f"<p>New file(s) are available in <strong>{_escape_html(area_label)}</strong>:</p>"
+            f"<p>{_escape_html(_firm_line(firm_name))} has added new file(s) for you in "
+            f"<strong>{_escape_html(area_label)}</strong>:</p>"
             f"{_html_bullet_list(filenames)}"
             f"{_html_cta_button(portal_url, cta_label)}"
             f"{_html_fallback_link(portal_url)}"
             '<p style="font-size:13px;color:#64748b;margin:0;">'
-            "Sign in with your access code or e-mail sign-in code."
+            "Sign in with your access code, or request a one-time sign-in code by e-mail from the portal sign-in page."
             "</p>"
         ),
     )
@@ -324,25 +351,30 @@ def portal_form_completed_staff(
     contact_name: str,
     form_name: str,
     matter_label: str,
+    matter_url: str = "",
 ) -> tuple[str, str, str]:
-    subject = f"Portal form completed — {form_name}"
-    body = "\n".join(
-        [
-            f"{contact_name} completed a portal form.",
-            "",
-            f"Form: {form_name}",
-            f"Matter: {matter_label}",
-            "",
-            f"— {_firm_line(firm_name)}",
-        ]
-    )
-    html = _html_email_shell(
-        firm_name=firm_name,
-        inner_html=_html_info_block(
-            title=f"{contact_name} completed a portal form",
-            lines=[f"Form: {form_name}", f"Matter: {matter_label}"],
-        ),
-    )
+    matter = (matter_label or "").strip() or "matter"
+    subject = f"Portal form completed — {matter}: {form_name}"
+    next_step = "Open the matter in Canary to review the completed form."
+    body_lines = [
+        f"{contact_name} completed a portal form.",
+        "",
+        f"Form: {form_name}",
+        f"Matter: {matter}",
+        "",
+        next_step,
+    ]
+    if matter_url:
+        body_lines.extend(["", f"Open matter: {matter_url}"])
+    body_lines.extend(["", f"— {_firm_line(firm_name)}"])
+    body = "\n".join(body_lines)
+    html_inner = _html_info_block(
+        title=f"{contact_name} completed a portal form",
+        lines=[f"Form: {form_name}", f"Matter: {matter}"],
+    ) + f"<p>{_escape_html(next_step)}</p>"
+    if matter_url:
+        html_inner += _html_cta_button(matter_url, "Open matter in Canary") + _html_fallback_link(matter_url)
+    html = _html_email_shell(firm_name=firm_name, inner_html=html_inner)
     return subject, body, html
 
 
@@ -354,14 +386,18 @@ def _optional_access_code_blocks(access_code: str | None) -> tuple[list[str], st
     lines = [
         "",
         "Portal access has been enabled for you so you can open this link.",
-        f"Access code: {code}",
-        "Keep this code confidential. You can also request a one-time sign-in code by e-mail on the portal.",
+        f"Your access code: {code}",
+        "Keep this code confidential and do not forward it.",
+        "If the code does not work, reply to this e-mail or contact the firm and ask them to send a new code.",
+        "You can also request a one-time sign-in code by e-mail from the portal sign-in page.",
     ]
     html = (
         "<p>Portal access has been enabled for you so you can open this link.</p>"
         f"{_html_highlight_code('Your access code', code)}"
         "<p style=\"margin:12px 0 0;color:#64748b;font-size:13px;\">"
-        "Keep this code confidential. You can also request a one-time sign-in code by e-mail on the portal."
+        "Keep this code confidential and do not forward it. "
+        "If the code does not work, reply to this e-mail or contact the firm and ask them to send a new code. "
+        "You can also request a one-time sign-in code by e-mail from the portal sign-in page."
         "</p>"
     )
     return lines, html
@@ -376,18 +412,21 @@ def portal_form_sent(
     portal_url: str,
     access_code: str | None = None,
 ) -> tuple[str, str, str]:
-    subject = f"Form to complete — {matter_label}"
+    subject = f"Form to complete — {matter_label} — {_firm_line(firm_name)}"
     cta_label = "Complete form"
     code_lines, code_html = _optional_access_code_blocks(access_code)
     body = "\n".join(
         [
             f"Dear {contact_name},",
             "",
-            f"Please complete the form: {form_name}",
+            f"{_firm_line(firm_name)} has asked you to complete a form:",
+            form_name,
             f"Matter: {matter_label}",
             "",
             f"{cta_label}: {portal_url}",
             *code_lines,
+            "",
+            "If you cannot open the link, reply to this e-mail or contact the firm.",
             "",
             f"— {_firm_line(firm_name)}",
         ]
@@ -396,11 +435,15 @@ def portal_form_sent(
         firm_name=firm_name,
         inner_html=(
             f"<p>Dear {_escape_html(contact_name)},</p>"
-            f"<p>Please complete the form: <strong>{_escape_html(form_name)}</strong></p>"
+            f"<p>{_escape_html(_firm_line(firm_name))} has asked you to complete a form:</p>"
+            f"<p><strong>{_escape_html(form_name)}</strong></p>"
             f'<p style="margin:0 0 4px;color:#64748b;">Matter: {_escape_html(matter_label)}</p>'
             f"{_html_cta_button(portal_url, cta_label)}"
             f"{_html_fallback_link(portal_url)}"
             f"{code_html}"
+            '<p style="font-size:13px;color:#64748b;margin:12px 0 0;">'
+            "If you cannot open the link, reply to this e-mail or contact the firm."
+            "</p>"
         ),
     )
     return subject, body, html
@@ -415,18 +458,20 @@ def portal_quote_sent(
     portal_url: str,
     access_code: str | None = None,
 ) -> tuple[str, str, str]:
-    subject = f"Quote — {matter_label}"
+    subject = f"Quote — {matter_label} — {_firm_line(firm_name)}"
     cta_label = "View your quote"
     code_lines, code_html = _optional_access_code_blocks(access_code)
     body = "\n".join(
         [
             f"Dear {contact_name},",
             "",
-            f"Please review your quote for {matter_label}:",
+            f"{_firm_line(firm_name)} has sent you a quote for {matter_label}:",
             quote_filename,
             "",
             f"{cta_label}: {portal_url}",
             *code_lines,
+            "",
+            "If you cannot open the link, reply to this e-mail or contact the firm.",
             "",
             f"— {_firm_line(firm_name)}",
         ]
@@ -435,11 +480,15 @@ def portal_quote_sent(
         firm_name=firm_name,
         inner_html=(
             f"<p>Dear {_escape_html(contact_name)},</p>"
-            f"<p>Please review your quote for <strong>{_escape_html(matter_label)}</strong>:</p>"
+            f"<p>{_escape_html(_firm_line(firm_name))} has sent you a quote for "
+            f"<strong>{_escape_html(matter_label)}</strong>:</p>"
             f'<p style="margin:0 0 4px;color:#64748b;">{_escape_html(quote_filename)}</p>'
             f"{_html_cta_button(portal_url, cta_label)}"
             f"{_html_fallback_link(portal_url)}"
             f"{code_html}"
+            '<p style="font-size:13px;color:#64748b;margin:12px 0 0;">'
+            "If you cannot open the link, reply to this e-mail or contact the firm."
+            "</p>"
         ),
     )
     return subject, body, html
@@ -450,24 +499,31 @@ def portal_quote_accepted(
     firm_name: str,
     contact_name: str,
     quote_filename: str,
+    matter_label: str = "",
+    matter_url: str = "",
 ) -> tuple[str, str, str]:
-    subject = f"Quote accepted: {quote_filename}"
-    body = "\n".join(
-        [
-            f"{contact_name} accepted the quote via Canary Portal.",
-            "",
-            f"File: {quote_filename}",
-            "",
-            f"— {_firm_line(firm_name)}",
-        ]
-    )
-    html = _html_email_shell(
-        firm_name=firm_name,
-        inner_html=_html_info_block(
-            title=f"{contact_name} accepted the quote via Canary Portal",
-            lines=[f"File: {quote_filename}"],
-        ),
-    )
+    matter = (matter_label or "").strip() or "matter"
+    subject = f"Quote accepted — {matter}: {quote_filename}"
+    next_step = "Open the matter in Canary to continue the next steps."
+    body_lines = [
+        f"{contact_name} accepted the quote via Canary Portal.",
+        "",
+        f"Matter: {matter}",
+        f"File: {quote_filename}",
+        "",
+        next_step,
+    ]
+    if matter_url:
+        body_lines.extend(["", f"Open matter: {matter_url}"])
+    body_lines.extend(["", f"— {_firm_line(firm_name)}"])
+    body = "\n".join(body_lines)
+    html_inner = _html_info_block(
+        title=f"{contact_name} accepted the quote via Canary Portal",
+        lines=[f"Matter: {matter}", f"File: {quote_filename}"],
+    ) + f"<p>{_escape_html(next_step)}</p>"
+    if matter_url:
+        html_inner += _html_cta_button(matter_url, "Open matter in Canary") + _html_fallback_link(matter_url)
+    html = _html_email_shell(firm_name=firm_name, inner_html=html_inner)
     return subject, body, html
 
 
@@ -477,21 +533,33 @@ def portal_quote_declined(
     contact_name: str,
     quote_filename: str,
     decline_reason: str,
+    matter_label: str = "",
+    matter_url: str = "",
 ) -> tuple[str, str, str]:
-    subject = f"Quote declined: {quote_filename}"
-    lines = [f"{contact_name} declined the quote via Canary Portal.", "", f"File: {quote_filename}"]
-    info_lines = [f"File: {quote_filename}"]
+    matter = (matter_label or "").strip() or "matter"
+    subject = f"Quote declined — {matter}: {quote_filename}"
+    next_step = "Open the matter in Canary to follow up with the client."
+    lines = [
+        f"{contact_name} declined the quote via Canary Portal.",
+        "",
+        f"Matter: {matter}",
+        f"File: {quote_filename}",
+    ]
+    info_lines = [f"Matter: {matter}", f"File: {quote_filename}"]
     if decline_reason.strip():
         lines.extend(["", f"Reason: {decline_reason.strip()}"])
         info_lines.append(f"Reason: {decline_reason.strip()}")
+    lines.extend(["", next_step])
+    if matter_url:
+        lines.extend(["", f"Open matter: {matter_url}"])
     body = "\n".join(lines + ["", f"— {_firm_line(firm_name)}"])
-    html = _html_email_shell(
-        firm_name=firm_name,
-        inner_html=_html_info_block(
-            title=f"{contact_name} declined the quote via Canary Portal",
-            lines=info_lines,
-        ),
-    )
+    html_inner = _html_info_block(
+        title=f"{contact_name} declined the quote via Canary Portal",
+        lines=info_lines,
+    ) + f"<p>{_escape_html(next_step)}</p>"
+    if matter_url:
+        html_inner += _html_cta_button(matter_url, "Open matter in Canary") + _html_fallback_link(matter_url)
+    html = _html_email_shell(firm_name=firm_name, inner_html=html_inner)
     return subject, body, html
 
 
@@ -508,7 +576,9 @@ def portal_login_otp(
         [
             f"Dear {contact_name},",
             "",
-            f"Your sign-in code is: {otp_code}",
+            f"Use this one-time code to sign in to {_firm_line(firm_name)}'s Canary Portal:",
+            "",
+            f"Your sign-in code: {otp_code}",
             "",
             f"{cta_label}: {portal_url}",
             "",
@@ -523,6 +593,7 @@ def portal_login_otp(
         firm_name=firm_name,
         inner_html=(
             f"<p>Dear {_escape_html(contact_name)},</p>"
+            f"<p>Use this one-time code to sign in to {_escape_html(_firm_line(firm_name))}'s Canary Portal:</p>"
             f"{_html_highlight_code('Your sign-in code', otp_code)}"
             f"{_html_cta_button(portal_url, cta_label)}"
             f"{_html_fallback_link(portal_url)}"

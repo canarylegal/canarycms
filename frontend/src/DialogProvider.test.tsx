@@ -70,4 +70,29 @@ describe('DialogProvider queue', () => {
     await user.click(screen.getByRole('button', { name: 'OK' }))
     await expect(alert).resolves.toBeUndefined()
   })
+
+  it('resolves secondary confirm action', async () => {
+    const user = userEvent.setup()
+    let api: ReturnType<typeof useDialogs> | null = null
+    render(
+      <DialogProvider>
+        <Probe
+          onReady={(a) => {
+            api = a
+          }}
+        />
+      </DialogProvider>,
+    )
+
+    const pending = api!.askConfirmChoice({
+      title: 'Revoke?',
+      message: 'warn',
+      confirmLabel: 'Revoke',
+      secondaryLabel: 'Keep',
+      cancelLabel: 'Cancel',
+    })
+    expect(await screen.findByText('Revoke?')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Keep' }))
+    await expect(pending).resolves.toBe('secondary')
+  })
 })

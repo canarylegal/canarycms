@@ -724,6 +724,102 @@ html.dark .modalOverlay > .card.modal {
   background: transparent !important;
 }
 
+.confirmModalActions .confirmModalCancel {
+  margin-right: auto;
+}
+
+.contactMergeCompareModal {
+  width: min(920px, calc(100vw - 24px));
+  max-height: min(90vh, 860px);
+  display: flex;
+  flex-direction: column;
+  padding: 0 !important;
+  overflow: hidden;
+}
+
+.contactMergeCompareBody {
+  padding: 16px 22px 8px !important;
+  gap: 16px !important;
+}
+
+.contactMergeCompareGrid {
+  display: grid;
+  gap: 0;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  border-radius: 8px;
+  overflow: hidden;
+  background: #fff;
+}
+
+.contactMergeCompareRow {
+  display: grid;
+  grid-template-columns: minmax(100px, 0.7fr) 1fr 1fr;
+  gap: 0;
+  border-top: 1px solid rgba(15, 23, 42, 0.08);
+}
+
+.contactMergeCompareRow:first-child {
+  border-top: 0;
+}
+
+.contactMergeCompareRow > * {
+  padding: 10px 12px;
+  font-size: 13px;
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+.contactMergeCompareHeader {
+  background: #f8fafc;
+  font-weight: 650;
+}
+
+.contactMergeCompareSub {
+  font-weight: 500;
+  font-size: 12px;
+  margin-top: 2px;
+}
+
+.contactMergeCompareLabel {
+  color: #64748b;
+  font-weight: 600;
+}
+
+.contactMergeCompareRow--mismatch > *:nth-child(2),
+.contactMergeCompareRow--mismatch > *:nth-child(3) {
+  background: #fff7ed;
+}
+
+.contactMergeCompareImpactTitle {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 700;
+}
+
+.contactMergeCompareImpactList {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.contactMergeCompareActions {
+  padding: 12px 22px 18px !important;
+  border-top: 1px solid rgba(15, 23, 42, 0.08);
+}
+
+@media (max-width: 640px) {
+  .contactMergeCompareRow,
+  .contactMergeCompareHeader {
+    grid-template-columns: 1fr;
+  }
+
+  .contactMergeCompareLabel {
+    background: #f8fafc;
+    border-bottom: 1px solid rgba(15, 23, 42, 0.06);
+  }
+}
+
 .modalOverlay > .confirmModal > .paneHead,
 .modalOverlay > .card.confirmModal > .paneHead {
   display: none;

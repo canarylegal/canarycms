@@ -5,16 +5,32 @@ All notable releases of Canary CMS are documented here. Prefer a tagged release 
 ## [Unreleased]
 
 ### Security
-- Portal browse/upload reject `..` and absolute folder inputs with HTTP 400 (was unhandled 500).
-- Staff and firm-default signature uploads decode and re-encode image bytes; HTML labelled as PNG is rejected.
-- Staff logout bumps ``auth_token_version`` so bearer JWTs stop working immediately (not only the HttpOnly cookie).
-- Desktop/WebDAV edit sessions re-check account active + matter access; disable/deny releases open sessions (CL-07). Browser DocsAPI uses the same WebDAV capability URL; Canary GET/PUT are revoked after deny/disable (open editor tabs may still show a previously fetched copy until closed).
-- Rename/move/delete of checked-out files (and their folders) returns HTTP 409 instead of breaking editor URLs (CL-06).
-- Concurrent folder rename is serialized per matter and returns 409 on conflict instead of intermittent 500 (CL-05).
+- WebAuthn login begin returns the same HTTP 401 `Invalid credentials` when the account is unknown or has no passkeys (CL-16).
+- Case/contact search rejects queries containing NUL bytes with HTTP 400 instead of HTTP 500 (CL-17).
+- Invoice approve and void lock the invoice row before ledger mutations (same order) and map deadlocks/stale races to HTTP 409 instead of 500 (CL-13).
+- File move takes the matter folder-ops lock and row locks; missing source object or concurrent parent deletion returns HTTP 409 instead of 500 (CL-12).
+- After upload into a folder, recursive delete conflicts for a short settle window (and when files are newer than the delete request start) so a concurrent delete cannot remove an object the uploader was just told exists (CL-09).
+- Pending ledger approve/edit/reject take a per-pair advisory try-lock and row locks; concurrent loss (including rejection winning an approve race) returns HTTP 409 instead of 500 (CL-14). Simultaneous edit versus approve cannot both succeed — the loser receives HTTP 409 (CL-15).
+- Connection pool check-in runs ``pg_advisory_unlock_all()`` then ``rollback`` so session-level folder locks cannot stick on recycled connections (CL-11) without leaving the connection ``INTRANS`` (which caused HTTP 500 on login).
+- Recursive folder delete stamps request start and returns HTTP 409 (without deleting) if a non-system file was created after that instant, so a concurrent upload that already returned 201 keeps a durable object (CL-09).
 - Upload into a folder holds a session-level folder-ops lock for the whole request (including the byte stream) so concurrent recursive delete returns HTTP 409 while the upload is in flight; destination existence is still checked before commit (CL-09).
 - Invoice approval flushes the generated document ``file`` row before linking ``document_file_id``, and wraps document save in a savepoint so a document failure cannot abort financial approval (CL-08). Approval remains idempotent and blocks direct ledger approve/edit/reject of pending invoice-origin pairs.
 - Concurrent same-file rename takes a row lock and returns HTTP 409 if the on-disk object was already moved (CL-10).
+- Rename/move/delete of checked-out files (and their folders) returns HTTP 409 instead of breaking editor URLs (CL-06).
+- Concurrent folder rename is serialized per matter and returns 409 on conflict instead of intermittent 500 (CL-05).
+- Desktop/WebDAV edit sessions re-check account active + matter access; disable/deny releases open sessions (CL-07). Browser DocsAPI uses the same WebDAV capability URL; Canary GET/PUT are revoked after deny/disable (open editor tabs may still show a previously fetched copy until closed).
+- Staff logout bumps ``auth_token_version`` so bearer JWTs stop working immediately (not only the HttpOnly cookie).
+- Staff and firm-default signature uploads decode and re-encode image bytes; HTML labelled as PNG is rejected.
+- Portal browse/upload reject `..` and absolute folder inputs with HTTP 400 (was unhandled 500).
 
+### Fixed
+- Documents multi-select Download downloads every selected file (not only the right-clicked one).
+- Editing a contact's type or name while an active portal access code exists prompts to revoke that code, so replacing a person on the same contact record cannot silently leave the previous portal login usable.
+- Contacts can merge a duplicate global contact into the survivor: matter links and portal grants are moved, both portal codes are revoked, and a fresh client portal code is issued when either side had access (optional e-mail of the new code). Merge is available on the global contact card and on the matter contact edit screen. Before confirming, staff review both contacts side by side (mismatches highlighted) plus the merge impact.
+- Cancelling the portal identity warning aborts the save and does not revoke access; a failed portal status load no longer looks like “no access / grant again”.
+- Portal client e-mails state why access was granted, name the firm, and explain how to recover if a code fails.
+- Portal staff alerts for uploads, completed forms, and quote responses include the matter reference in the subject, a next-step line, and a deep link to open the matter in Canary.
+- Matter portal staff notification recipients use a multi-select of Canary users (empty selection keeps fee-earner default).
 ### Ops / release readiness
 - Admin → Deploy defaults to **`latest-release`** (compare to newest GitHub Release tip, not floating `main`).
 - Backend rejects `.env.example` `CHANGE_ME_*` / all-`#` secret placeholders at startup.

@@ -1848,28 +1848,39 @@ export function CaseDetail({
 
   async function downloadCaseFile(f: FileSummary) {
     if (!caseId) return
+    const res = await fetchCaseFileResponse(caseId, f.id, token)
+    if (res.status === 401) {
+      localStorage.removeItem('token')
+      window.location.reload()
+      return
+    }
+    if (!res.ok) throw new Error((await res.text()) || res.statusText)
+    const blob = await res.blob()
+    const typed = f.mime_type ? new Blob([blob], { type: f.mime_type }) : blob
+    const url = URL.createObjectURL(typed)
+    const safeName = f.original_filename.replace(/[/\\]/g, '_').replace(/^\.+/, '') || 'download'
+    const a = document.createElement('a')
+    a.href = url
+    a.download = safeName
+    a.rel = 'noopener'
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    window.setTimeout(() => URL.revokeObjectURL(url), 120_000)
+  }
+
+  async function downloadCaseFiles(targets: FileSummary[]) {
+    if (!caseId || targets.length === 0) return
     setBusy(true)
     setActionErr(null)
     try {
-      const res = await fetchCaseFileResponse(caseId, f.id, token)
-      if (res.status === 401) {
-        localStorage.removeItem('token')
-        window.location.reload()
-        return
+      for (let i = 0; i < targets.length; i++) {
+        await downloadCaseFile(targets[i])
+        // Browsers often coalesce same-gesture downloads; brief gap keeps each file.
+        if (i < targets.length - 1) {
+          await new Promise((r) => window.setTimeout(r, 350))
+        }
       }
-      if (!res.ok) throw new Error((await res.text()) || res.statusText)
-      const blob = await res.blob()
-      const typed = f.mime_type ? new Blob([blob], { type: f.mime_type }) : blob
-      const url = URL.createObjectURL(typed)
-      const safeName = f.original_filename.replace(/[/\\]/g, '_').replace(/^\.+/, '') || 'download'
-      const a = document.createElement('a')
-      a.href = url
-      a.download = safeName
-      a.rel = 'noopener'
-      document.body.appendChild(a)
-      a.click()
-      a.remove()
-      window.setTimeout(() => URL.revokeObjectURL(url), 120_000)
     } catch (e: unknown) {
       const msg = fetchTimedOutMessage(e)
       const err = e as { message?: string }
@@ -3682,11 +3693,20 @@ export function CaseDetail({
                       <div
                         className="docContextItem"
                         onClick={() => {
+                          const isMultiSelected = selectedDocSet.has(f.id) && selectedDocSet.size > 1
+                          const ids = isMultiSelected
+                            ? [...selectedDocSet].filter((k) => !k.startsWith('folder:'))
+                            : [f.id]
+                          const targets = ids
+                            .map((id) => files.find((x) => x.id === id))
+                            .filter((x): x is FileSummary => Boolean(x))
                           setDocMenu(null)
-                          void downloadCaseFile(f)
+                          void downloadCaseFiles(targets)
                         }}
                       >
-                        Download
+                        {selectedDocSet.has(f.id) && selectedDocSet.size > 1
+                          ? `Download ${[...selectedDocSet].filter((k) => !k.startsWith('folder:')).length} files`
+                          : 'Download'}
                       </div>
                       {portalEnabled && isQuotePortalSendCandidate(f) ? (
                         <div
@@ -3904,7 +3924,7 @@ export function CaseDetail({
                         className="docContextItem"
                         onClick={() => {
                           setDocMenu(null)
-                          void downloadCaseFile(f)
+                          void downloadCaseFiles([f])
                         }}
                       >
                         Export

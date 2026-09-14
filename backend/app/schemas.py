@@ -1291,6 +1291,42 @@ class ContactOut(BaseModel):
     updated_at: datetime
 
 
+class ContactMergeIn(BaseModel):
+    source_contact_id: uuid.UUID
+    """When true and a new client portal code is issued, e-mail it to the survivor contact."""
+    send_email: bool = False
+
+
+class ContactMergePreviewOut(BaseModel):
+    survivor: ContactOut
+    source: ContactOut
+    survivor_matter_links: int
+    source_matter_links: int
+    survivor_grants: int
+    source_grants: int
+    survivor_client_portal_active: bool
+    source_client_portal_active: bool
+    survivor_matter_portal_active: int
+    source_matter_portal_active: int
+    email_mismatch: bool
+    type_mismatch: bool
+    will_reset_client_portal: bool
+    will_reset_matter_portal_cases: int
+
+
+class ContactMergeOut(BaseModel):
+    survivor: ContactOut
+    deleted_source_id: uuid.UUID
+    client_portal_reset: bool
+    new_client_access_code: str | None = None
+    matter_portal_cases_reset: int
+    grants_moved: int
+    grants_deduped: int
+    matter_links_moved: int
+    email_sent: bool = False
+    email_skip_reason: str | None = None
+
+
 class CaseContactCreateFromGlobal(BaseModel):
     contact_id: uuid.UUID
     matter_contact_type: str = Field(min_length=1, max_length=200)

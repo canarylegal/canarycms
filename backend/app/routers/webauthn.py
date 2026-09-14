@@ -159,7 +159,8 @@ def webauthn_login_begin(
 
     creds = db.execute(select(WebAuthnCredential).where(WebAuthnCredential.user_id == user.id)).scalars().all()
     if not creds:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No passkeys registered for this account.")
+        # Same status/body as unknown accounts (CL-16 account enumeration).
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
 
     rp_id = _rp_id_for_request(request)
     allow = [PublicKeyCredentialDescriptor(id=c.credential_id) for c in creds]

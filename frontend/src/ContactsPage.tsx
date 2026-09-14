@@ -9,9 +9,16 @@ import {
   resolveContactNameWithFallback,
 } from './GlobalContactCreateForm'
 import { ContactPortalPanel } from './ContactPortalPanel'
+import { ContactMergePanel } from './ContactMergePanel'
 import { SearchInput } from './SearchInput'
 import { SingleSelectDropdown } from './SingleSelectDropdown'
 import { useDialogs } from './DialogProvider'
+import {
+  choosePortalActionOnIdentityChange,
+  contactHasActivePortalAccess,
+  contactIdentityFieldsChanged,
+  revokeContactPortalAccess,
+} from './portalIdentityGuard'
 import { useDebouncedValue } from './useDebouncedValue'
 import { useColumnWidths } from './useColumnWidths'
 import { useUserUiPreferences } from './useUserUiPreferences'
@@ -453,6 +460,15 @@ export function Contacts({ token, me }: { token: string; me?: UserPublic | null 
                 setEditing(null)
                 await load()
               }}
+              onMerged={async (survivorId) => {
+                await load()
+                try {
+                  const refreshed = await apiFetch<ContactOut>(`/contacts/${survivorId}`, { token })
+                  setEditing(refreshed)
+                } catch {
+                  setEditing(null)
+                }
+              }}
               onDeleted={async () => {
                 setEditing(null)
                 await load()
@@ -470,16 +486,18 @@ function ContactEditor({
   token,
   contact,
   onSaved,
+  onMerged,
   onDeleted,
   onCancel,
 }: {
   token: string
   contact: ContactOut
   onSaved: () => void
+  onMerged?: (survivorId: string) => void
   onDeleted?: () => void
   onCancel: () => void
 }) {
-  const { askConfirm } = useDialogs()
+  const { askConfirm, askConfirmChoice } = useDialogs()
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const [fields, setFields] = useState(() => contactOutToFormFields(contact))
@@ -554,6 +572,30 @@ function ContactEditor({
                 setErr('Name is required.')
                 return
               }
+              const identityChanged = contactIdentityFieldsChanged(
+                {
+                  type: contact.type,
+                  first_name: contact.first_name,
+                  middle_name: contact.middle_name,
+                  last_name: contact.last_name,
+                },
+                {
+                  type: payload.type,
+                  first_name: payload.first_name,
+                  middle_name: payload.middle_name,
+                  last_name: payload.last_name,
+                },
+              )
+              let revokePortal = false
+              if (identityChanged) {
+                const portalActive = await contactHasActivePortalAccess(token, contact.id)
+                const choice = await choosePortalActionOnIdentityChange(askConfirmChoice, {
+                  identityChanged: true,
+                  portalAccessActive: portalActive,
+                })
+                if (choice === 'cancel') return
+                revokePortal = choice === 'save_revoke'
+              }
               setBusy(true)
               setErr(null)
               try {
@@ -562,6 +604,9 @@ function ContactEditor({
                   method: 'PATCH',
                   json: payload,
                 })
+                if (revokePortal) {
+                  await revokeContactPortalAccess(token, contact.id)
+                }
                 onSaved()
               } catch (e: any) {
                 setErr(e?.message ?? 'Save failed')
@@ -582,6 +627,13 @@ function ContactEditor({
           busy={busy}
         />
         <ContactPortalPanel token={token} contactId={contact.id} contactName={contact.name} contactEmail={contact.email} />
+        <ContactMergePanel
+          token={token}
+          survivor={contact}
+          onMerged={(survivorId) => {
+            onMerged?.(survivorId)
+          }}
+        />
       </div>
     </>
   )

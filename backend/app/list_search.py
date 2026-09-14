@@ -17,6 +17,18 @@ CASE_SEARCH_DEFAULT_LIMIT = 50
 CASE_SEARCH_MAX_LIMIT = 100
 
 
+def reject_search_nul(q: str | None) -> str | None:
+    """Reject queries containing NUL (CL-17); PostgreSQL ILIKE rejects them with 500."""
+    if q is not None and "\x00" in q:
+        from fastapi import HTTPException, status
+
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Search query must not contain NUL characters.",
+        )
+    return q
+
+
 def _ilike_pattern(q: str) -> str:
     escaped = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
     return f"%{escaped}%"
@@ -44,6 +56,7 @@ def search_contacts(
         stmt = stmt.where(or_(Contact.phone.is_(None), Contact.phone == ""))
 
     q_trim = (q or "").strip()
+    reject_search_nul(q_trim)
     if q_trim:
         pat = _ilike_pattern(q_trim)
         stmt = stmt.where(
@@ -76,6 +89,7 @@ def search_cases(
     limit: int | None = None,
     status_filter: CaseStatus | None = None,
 ) -> list[Case]:
+    reject_search_nul(q)
     q_trim = q.strip()
     if not q_trim:
         return []

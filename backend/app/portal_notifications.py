@@ -8,7 +8,8 @@ from dataclasses import dataclass
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.alert_dispatch import AlertKind, dispatch_alert, firm_alerts_configured, portal_public_url
+from app.alert_dispatch import AlertKind, dispatch_alert, firm_alerts_configured, matter_deep_link
+from app.case_reference import display_case_number
 from app.models import Case, CasePortalStaffRecipient, Contact, ContactPortalAccess, ContactPortalGrant, User
 from app.portal_service import contact_display_name, default_grant_label, file_folder_in_grant, grant_is_active
 
@@ -17,6 +18,25 @@ ALERTS_NOT_CONFIGURED_MSG = (
     "Automated e-mail is not configured. Ask an administrator to enable Admin → E-mail → "
     "“Enable automated alert e-mail” and set up Graph or SMTP."
 )
+
+
+def staff_matter_label(case: Case | None) -> str:
+    """Matter label for staff alerts (reference + title when available)."""
+    if case is None:
+        return "matter"
+    ref = display_case_number(case.case_number, case.status)
+    title = (case.title or "").strip()
+    if ref and title and title != ref:
+        return f"{ref} — {title}"
+    return ref or title or "matter"
+
+
+def staff_matter_context(db: Session, case_id: uuid.UUID) -> dict[str, str]:
+    case = db.get(Case, case_id)
+    return {
+        "matter_label": staff_matter_label(case),
+        "matter_url": matter_deep_link(case_id),
+    }
 
 
 @dataclass(frozen=True)
@@ -145,6 +165,7 @@ def notify_portal_staff_client_upload(
     if not firm_alerts_configured(db):
         return PortalNotifyResult(0, 0, ALERTS_NOT_CONFIGURED_MSG)
     area = default_grant_label(db, grant)
+    matter_ctx = staff_matter_context(db, case_id)
     staff_sent = 0
     for user in list_portal_staff_recipient_users(db, case_id):
         email = (user.email or "").strip()
@@ -158,6 +179,7 @@ def notify_portal_staff_client_upload(
                 "contact_name": contact_display_name(contact),
                 "area_label": area,
                 "filename": filename,
+                **matter_ctx,
             },
         ):
             staff_sent += 1
@@ -174,6 +196,10 @@ def notify_portal_staff_form_completed(
 ) -> PortalNotifyResult:
     if not firm_alerts_configured(db):
         return PortalNotifyResult(0, 0, ALERTS_NOT_CONFIGURED_MSG)
+    matter_ctx = staff_matter_context(db, case_id)
+    # Prefer staff reference label; fall back to caller-provided client-facing label.
+    if not matter_ctx["matter_label"] or matter_ctx["matter_label"] == "matter":
+        matter_ctx["matter_label"] = (matter_label or "").strip() or "matter"
     staff_sent = 0
     for user in list_portal_staff_recipient_users(db, case_id):
         email = (user.email or "").strip()
@@ -186,7 +212,7 @@ def notify_portal_staff_form_completed(
             context={
                 "contact_name": contact_display_name(contact),
                 "form_name": form_name,
-                "matter_label": matter_label,
+                **matter_ctx,
             },
         ):
             staff_sent += 1

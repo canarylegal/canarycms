@@ -380,7 +380,10 @@ def _notify_staff_quote_response(
 ) -> None:
     if not firm_alerts_configured(db):
         return
+    from app.portal_notifications import staff_matter_context
+
     kind = AlertKind.portal_quote_accepted if accepted else AlertKind.portal_quote_declined
+    matter_ctx = staff_matter_context(db, case_id)
     for user in list_portal_staff_recipient_users(db, case_id):
         addr = (user.email or "").strip()
         if not addr:
@@ -393,6 +396,7 @@ def _notify_staff_quote_response(
                 "contact_name": contact_display_name(contact),
                 "quote_filename": filename,
                 "decline_reason": (decline_reason or "").strip(),
+                **matter_ctx,
             },
         )
 

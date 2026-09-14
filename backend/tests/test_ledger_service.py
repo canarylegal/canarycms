@@ -506,3 +506,23 @@ def test_poster_may_cancel_own_anticipated_before_approval() -> None:
 
     ledger = get_ledger(case.id, db)
     assert not any(e.pair_id == pair_id for e in ledger.entries)
+
+
+def test_flush_ledger_pair_maps_stale_data_error() -> None:
+    from unittest.mock import MagicMock
+    from sqlalchemy.orm.exc import StaleDataError
+    from app.ledger_service import _LEDGER_PAIR_GONE_DETAIL, _flush_ledger_pair_or_conflict
+
+    db = MagicMock()
+    db.flush.side_effect = StaleDataError("stale", "ledger_entry", 1, 0)
+    with pytest.raises(HTTPException) as exc:
+        _flush_ledger_pair_or_conflict(db)
+    assert exc.value.status_code == 409
+    assert exc.value.detail == _LEDGER_PAIR_GONE_DETAIL
+
+
+def test_ledger_pair_lock_noop_on_sqlite() -> None:
+    from app.ledger_service import _try_lock_ledger_pair
+
+    db = ledger_test_session()
+    _try_lock_ledger_pair(db, uuid.uuid4())

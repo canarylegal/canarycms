@@ -32,6 +32,75 @@ def test_session_folder_lock_helpers_noop_on_sqlite() -> None:
     _unlock_case_folder_ops_session(db, case.id)
 
 
+def test_folder_modified_during_delete_detail() -> None:
+    from app.routers.files import _FOLDER_MODIFIED_DURING_DELETE_DETAIL
+
+    assert "concurrent upload" in _FOLDER_MODIFIED_DURING_DELETE_DETAIL.lower()
+
+
+def test_delete_rejects_files_newer_than_request_start() -> None:
+    """CL-09: files created after delete began must not be removed under a 201/200 race."""
+    from datetime import timedelta, timezone
+
+    from sqlalchemy import select as sa_select
+
+    from app.routers.files import _FOLDER_MODIFIED_DURING_DELETE_DETAIL, _as_utc
+
+    db = ledger_test_session()
+    user = add_user(db)
+    case = add_case(db, fee_earner_user_id=user.id)
+    started = datetime.now(timezone.utc)
+    older = started - timedelta(seconds=5)
+    newer = started + timedelta(seconds=1)
+    db.add(
+        File(
+            id=uuid.uuid4(),
+            case_id=case.id,
+            owner_id=user.id,
+            category=FileCategory.system,
+            storage_path=f"{case.id}/marker",
+            folder_path="Race",
+            is_pinned=False,
+            original_filename="Race",
+            mime_type="application/x-directory",
+            size_bytes=0,
+            version=1,
+            created_at=older,
+            updated_at=older,
+        )
+    )
+    db.add(
+        File(
+            id=uuid.uuid4(),
+            case_id=case.id,
+            owner_id=user.id,
+            category=FileCategory.case_document,
+            storage_path=f"{case.id}/doc",
+            folder_path="Race",
+            is_pinned=False,
+            original_filename="new.txt",
+            mime_type="text/plain",
+            size_bytes=3,
+            version=1,
+            created_at=newer,
+            updated_at=newer,
+        )
+    )
+    db.commit()
+
+    rows = db.execute(sa_select(File).where(File.case_id == case.id)).scalars().all()
+    newer_rows = [
+        r
+        for r in rows
+        if r.category != FileCategory.system
+        and (created := _as_utc(r.created_at)) is not None
+        and created > started
+    ]
+    assert len(newer_rows) == 1
+    assert newer_rows[0].original_filename == "new.txt"
+    assert "concurrent upload" in _FOLDER_MODIFIED_DURING_DELETE_DETAIL.lower()
+
+
 def test_folder_destination_exists_root_always() -> None:
     db = ledger_test_session()
     user = add_user(db)

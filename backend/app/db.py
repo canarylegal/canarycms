@@ -57,6 +57,31 @@ else:
 engine = create_engine(DATABASE_URL, **_engine_kwargs)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
+# Session-level advisory locks (CL-09 upload) must not outlive the pooled connection (CL-11).
+# Run unlock_all then rollback so the connection is not left INTRANS (psycopg rejects
+# later autocommit toggles — that was breaking /auth/login with HTTP 500).
+if not DATABASE_URL.startswith("sqlite"):
+    from sqlalchemy import event
+
+    @event.listens_for(engine, "checkin")
+    def _clear_session_advisory_locks_on_checkin(dbapi_connection, connection_record) -> None:  # noqa: ARG001
+        try:
+            try:
+                dbapi_connection.rollback()
+            except Exception:
+                pass
+            cursor = dbapi_connection.cursor()
+            try:
+                cursor.execute("SELECT pg_advisory_unlock_all()")
+            finally:
+                cursor.close()
+            dbapi_connection.rollback()
+        except Exception:
+            try:
+                dbapi_connection.rollback()
+            except Exception:
+                pass
+
 
 class Base(DeclarativeBase):
     pass
