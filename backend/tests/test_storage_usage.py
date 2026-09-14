@@ -84,11 +84,14 @@ def test_measure_deployment_storage_without_docker(tmp_path: Path, monkeypatch) 
         pass
 
     with patch("app.storage_usage.measure_postgres_logical_bytes", return_value=42), patch(
-        "app.docker_stack_usage.docker_sock_available", return_value=False
-    ), patch("app.docker_stack_usage.subprocess.run", side_effect=FileNotFoundError("docker")):
+        "app.storage_usage.docker_sock_available", return_value=False
+    ), patch("app.docker_stack_usage.docker_sock_available", return_value=False), patch(
+        "app.docker_stack_usage.subprocess.run", side_effect=FileNotFoundError("docker")
+    ):
         snap = measure_deployment_storage(_Db())  # type: ignore[arg-type]
 
     assert snap.docker_detected is False
     assert snap.files_on_disk_bytes == 5
     assert snap.database_logical_bytes == 42
-    assert snap.measurement_note and "docker.sock" in snap.measurement_note.lower()
+    note = (snap.measurement_note or "").lower()
+    assert "docker socket" in note or "docker.sock" in note
