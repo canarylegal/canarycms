@@ -6,10 +6,13 @@ interface Props {
   message: string
   confirmLabel?: string
   cancelLabel?: string
+  /** Optional third action (e.g. "Save and keep access"). */
+  secondaryLabel?: string
   danger?: boolean
   busy?: boolean
   onConfirm: () => void
   onCancel: () => void
+  onSecondary?: () => void
 }
 
 export function ConfirmModal({
@@ -18,10 +21,12 @@ export function ConfirmModal({
   message,
   confirmLabel = 'OK',
   cancelLabel = 'Cancel',
+  secondaryLabel,
   danger,
   busy,
   onConfirm,
   onCancel,
+  onSecondary,
 }: Props) {
   useEffect(() => {
     if (!open) return
@@ -48,9 +53,19 @@ export function ConfirmModal({
         </h2>
         <p className="confirmModalMessage">{message}</p>
         <div className="confirmModalActions">
-          <button type="button" className="btn" onClick={onCancel} disabled={busy}>
+          <button
+            type="button"
+            className="btn confirmModalCancel"
+            onClick={onCancel}
+            disabled={busy}
+          >
             {cancelLabel}
           </button>
+          {secondaryLabel && onSecondary ? (
+            <button type="button" className="btn" onClick={onSecondary} disabled={busy}>
+              {secondaryLabel}
+            </button>
+          ) : null}
           <button
             type="button"
             className={`btn${danger ? ' danger' : ' primary'}`}

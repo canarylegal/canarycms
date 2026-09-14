@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { apiFetch } from '../api'
 import { useDialogs } from '../DialogProvider'
-import { SearchInput } from '../SearchInput'
+import { MainMenuFilterCheckboxDropdown } from '../MainMenuFilterCheckboxDropdown'
 import { SendQuoteViaPortalModal } from '../SendQuoteViaPortalModal'
 import { SingleSelectDropdown } from '../SingleSelectDropdown'
 import { CaseFileSelectDropdown } from './CaseFileSelectDropdown'
@@ -67,9 +67,9 @@ export function CasePortalPanel({ token, caseId, onFilesChanged }: Props) {
   const [previewContactId, setPreviewContactId] = useState('')
   const [previewBusy, setPreviewBusy] = useState(false)
   const [selectedStaff, setSelectedStaff] = useState<CasePortalStaffUserOut[]>([])
-  const [staffSearch, setStaffSearch] = useState('')
-  const [staffSearchResults, setStaffSearchResults] = useState<UserSummary[]>([])
-  const [staffSearchBusy, setStaffSearchBusy] = useState(false)
+  const [staffUsers, setStaffUsers] = useState<UserSummary[]>([])
+  const [staffUsersBusy, setStaffUsersBusy] = useState(false)
+  const [staffDropdownOpen, setStaffDropdownOpen] = useState(false)
   const [caseFiles, setCaseFiles] = useState<FileSummary[]>([])
   const [filesBusy, setFilesBusy] = useState(false)
   const [tagBusyFileId, setTagBusyFileId] = useState<string | null>(null)
@@ -102,7 +102,21 @@ export function CasePortalPanel({ token, caseId, onFilesChanged }: Props) {
   }, [])
 
   const staffUserIds = useMemo(() => selectedStaff.map((u) => u.id), [selectedStaff])
-  const selectedIdSet = useMemo(() => new Set(staffUserIds), [staffUserIds])
+
+  const staffOptions = useMemo(() => {
+    const byId = new Map<string, { value: string; label: string }>()
+    for (const u of staffUsers) {
+      if (!u.is_active) continue
+      byId.set(u.id, { value: u.id, label: staffUserLabel(u) })
+    }
+    // Keep currently selected recipients visible even if inactive.
+    for (const u of selectedStaff) {
+      if (!byId.has(u.id)) {
+        byId.set(u.id, { value: u.id, label: staffUserLabel(u) })
+      }
+    }
+    return Array.from(byId.values()).sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: 'base' }))
+  }, [staffUsers, selectedStaff])
 
   const quotableFiles = useMemo(
     () => caseFiles.filter((f) => f.mime_type !== 'application/x-directory' && f.category !== 'system'),
@@ -142,13 +156,15 @@ export function CasePortalPanel({ token, caseId, onFilesChanged }: Props) {
 
   const load = useCallback(async () => {
     setErr(null)
-    const [activityRows, settings, previewRows] = await Promise.all([
+    const [activityRows, settings, previewRows, users] = await Promise.all([
       apiFetch<CasePortalActivityOut[]>(`/cases/${caseId}/portal/activity`, { token }),
       apiFetch<CasePortalNotificationSettingsOut>(`/cases/${caseId}/portal/notification-settings`, { token }),
       apiFetch<CasePortalPreviewContactOut[]>(`/cases/${caseId}/portal/preview-contacts`, { token }),
+      apiFetch<UserSummary[]>('/users', { token }).catch(() => [] as UserSummary[]),
     ])
     setActivity(activityRows)
     setSelectedStaff(settings.staff_users ?? [])
+    setStaffUsers(Array.isArray(users) ? users : [])
     setPreviewContacts(previewRows)
     await loadFormSubmissions()
     setPreviewContactId((current) => {
@@ -193,54 +209,31 @@ export function CasePortalPanel({ token, caseId, onFilesChanged }: Props) {
   useEffect(() => {
     void (async () => {
       setBusy(true)
+      setStaffUsersBusy(true)
       try {
         await load()
       } catch (e: unknown) {
         setErr((e as { message?: string }).message ?? 'Failed to load portal settings')
       } finally {
         setBusy(false)
+        setStaffUsersBusy(false)
       }
     })()
   }, [load])
 
-  useEffect(() => {
-    const q = staffSearch.trim()
-    if (q.length < 2) {
-      setStaffSearchResults([])
-      return
+  function onStaffSelectionChange(nextIds: string[]) {
+    const byId = new Map<string, CasePortalStaffUserOut>()
+    for (const u of selectedStaff) {
+      byId.set(u.id, u)
     }
-    let cancelled = false
-    const timer = window.setTimeout(() => {
-      void (async () => {
-        setStaffSearchBusy(true)
-        try {
-          const rows = await apiFetch<UserSummary[]>(`/users/search?q=${encodeURIComponent(q)}&limit=20`, { token })
-          if (!cancelled) setStaffSearchResults(rows)
-        } catch {
-          if (!cancelled) setStaffSearchResults([])
-        } finally {
-          if (!cancelled) setStaffSearchBusy(false)
-        }
-      })()
-    }, 250)
-    return () => {
-      cancelled = true
-      window.clearTimeout(timer)
+    for (const u of staffUsers) {
+      byId.set(u.id, { id: u.id, display_name: u.display_name, email: u.email })
     }
-  }, [staffSearch, token])
-
-  function addStaffUser(u: UserSummary) {
-    if (!u.is_active || selectedIdSet.has(u.id)) return
-    setSelectedStaff((prev) => [
-      ...prev,
-      { id: u.id, display_name: u.display_name, email: u.email },
-    ])
-    setStaffSearch('')
-    setStaffSearchResults([])
-  }
-
-  function removeStaffUser(userId: string) {
-    setSelectedStaff((prev) => prev.filter((u) => u.id !== userId))
+    setSelectedStaff(
+      nextIds
+        .map((id) => byId.get(id))
+        .filter((u): u is CasePortalStaffUserOut => Boolean(u)),
+    )
   }
 
   async function openClientPreview() {
@@ -303,8 +296,6 @@ export function CasePortalPanel({ token, caseId, onFilesChanged }: Props) {
       setSaving(false)
     }
   }
-
-  const visibleSearchResults = staffSearchResults.filter((u) => u.is_active && !selectedIdSet.has(u.id))
 
   return (
     <>
@@ -524,63 +515,22 @@ export function CasePortalPanel({ token, caseId, onFilesChanged }: Props) {
       <section className="stack" style={{ gap: 8 }}>
         <h4 style={{ margin: 0 }}>Staff e-mail notifications</h4>
         <p className="muted" style={{ margin: 0 }}>
-          When a client uploads via the portal, these staff members receive an e-mail. If none are selected, the fee
-          earner is notified.
+          When a client uploads, completes a form, or responds to a quote via the portal, these staff members receive
+          an e-mail. If none are selected, the fee earner is notified.
         </p>
 
-        {selectedStaff.length > 0 ? (
-          <div className="portalStaffChipRow">
-            {selectedStaff.map((u) => (
-              <span key={u.id} className="portalStaffChip">
-                <span>{staffUserLabel(u)}</span>
-                <button
-                  type="button"
-                  className="portalStaffChipRemove"
-                  aria-label={`Remove ${staffUserLabel(u)}`}
-                  disabled={saving}
-                  onClick={() => removeStaffUser(u.id)}
-                >
-                  ×
-                </button>
-              </span>
-            ))}
-          </div>
-        ) : (
-          <div className="muted">No staff recipients selected (fee earner will be notified).</div>
-        )}
-
-        <SearchInput
-          placeholder="Search staff by name or e-mail…"
-          value={staffSearch}
-          onChange={(e) => setStaffSearch(e.target.value)}
-          onClear={() => {
-            setStaffSearch('')
-            setStaffSearchResults([])
-          }}
-          disabled={saving || busy}
-          aria-label="Search staff to notify"
+        <MainMenuFilterCheckboxDropdown
+          label="Staff to notify"
+          options={staffOptions}
+          selected={staffUserIds}
+          onChange={onStaffSelectionChange}
+          open={staffDropdownOpen}
+          onOpenChange={setStaffDropdownOpen}
+          emptyLabel="Fee earner (default)"
         />
-        {staffSearch.trim().length > 0 && staffSearch.trim().length < 2 ? (
-          <div className="muted">Type at least 2 characters to search.</div>
-        ) : null}
-        {staffSearchBusy ? <div className="muted">Searching…</div> : null}
-        {!staffSearchBusy && staffSearch.trim().length >= 2 && visibleSearchResults.length === 0 ? (
-          <div className="muted">No matching staff.</div>
-        ) : null}
-        {visibleSearchResults.length > 0 ? (
-          <div className="portalStaffSearchResults stack" style={{ gap: 4 }}>
-            {visibleSearchResults.map((u) => (
-              <button
-                key={u.id}
-                type="button"
-                className="portalStaffSearchHit rowbtn"
-                disabled={saving}
-                onClick={() => addStaffUser(u)}
-              >
-                <span>{staffUserLabel(u)}</span>
-              </button>
-            ))}
-          </div>
+        {staffUsersBusy && staffOptions.length === 0 ? <div className="muted">Loading staff…</div> : null}
+        {!staffUsersBusy && staffOptions.length === 0 ? (
+          <div className="muted">No active staff users available.</div>
         ) : null}
 
         <button type="button" className="btn primary" disabled={saving || busy} onClick={() => void saveStaffRecipients()}>

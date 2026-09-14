@@ -88,6 +88,11 @@ def portal_public_url() -> str:
     return f"{base}/portal"
 
 
+def matter_deep_link(case_id: uuid.UUID | str) -> str:
+    """Staff SPA deep link to open a matter (`/case/{uuid}`)."""
+    return f"{canary_public_url().rstrip('/')}/case/{case_id}"
+
+
 def dispatch_alert(
     db: Session,
     kind: AlertKind,
@@ -114,6 +119,8 @@ def dispatch_alert(
             contact_name=str(context.get("contact_name") or "Client"),
             area_label=str(context.get("area_label") or "Documents"),
             filename=str(context.get("filename") or "file"),
+            matter_label=str(context.get("matter_label") or ""),
+            matter_url=str(context.get("matter_url") or ""),
         )
     elif kind == AlertKind.portal_contact_access:
         subject, body, body_html = portal_contact_access_granted(
@@ -170,6 +177,8 @@ def dispatch_alert(
             firm_name=firm,
             contact_name=str(context.get("contact_name") or "Client"),
             quote_filename=str(context.get("quote_filename") or "Quote"),
+            matter_label=str(context.get("matter_label") or ""),
+            matter_url=str(context.get("matter_url") or ""),
         )
     elif kind == AlertKind.portal_quote_declined:
         subject, body, body_html = portal_quote_declined(
@@ -177,6 +186,8 @@ def dispatch_alert(
             contact_name=str(context.get("contact_name") or "Client"),
             quote_filename=str(context.get("quote_filename") or "Quote"),
             decline_reason=str(context.get("decline_reason") or ""),
+            matter_label=str(context.get("matter_label") or ""),
+            matter_url=str(context.get("matter_url") or ""),
         )
     elif kind == AlertKind.portal_form_completed:
         subject, body, body_html = portal_form_completed_staff(
@@ -184,6 +195,7 @@ def dispatch_alert(
             contact_name=str(context.get("contact_name") or "Client"),
             form_name=str(context.get("form_name") or "Form"),
             matter_label=str(context.get("matter_label") or "your matter"),
+            matter_url=str(context.get("matter_url") or ""),
         )
     elif kind == AlertKind.portal_form_sent:
         subject, body, body_html = portal_form_sent(

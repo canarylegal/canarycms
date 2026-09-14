@@ -29,7 +29,7 @@ from app.case_reference import display_case_number
 from app.schemas import CaseCreate, CaseOut, CaseUpdate, MatterSubTypeStandardTaskOut
 from app.audit import log_event
 from app.ledger_service import get_ledger
-from app.list_search import search_cases
+from app.list_search import reject_search_nul, search_cases
 
 
 router = APIRouter(prefix="/cases", tags=["cases"])
@@ -300,6 +300,7 @@ def list_cases(
 ) -> list[CaseOut]:
     q_trim = (q or "").strip()
     if q_trim:
+        reject_search_nul(q_trim)
         cases = search_cases(db, user, q=q_trim, limit=limit, status_filter=status)
         return _cases_to_out_list(cases, db)
 

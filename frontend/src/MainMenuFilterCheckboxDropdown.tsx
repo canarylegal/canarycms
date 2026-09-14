@@ -7,7 +7,11 @@ export type MainMenuFilterOption = { value: string; label: string }
 
 type MenuPos = { top: number; left: number; minWidth: number; maxWidth: number }
 
-function selectionSummary(selected: string[], options: MainMenuFilterOption[], emptyLabel = 'All'): string {
+function selectionSummary(
+  selected: string[],
+  options: MainMenuFilterOption[],
+  emptyLabel = 'All',
+): string {
   if (selected.length === 0) return emptyLabel
   if (selected.length === 1) {
     return options.find((o) => o.value === selected[0])?.label ?? selected[0]!
@@ -22,6 +26,7 @@ export function MainMenuFilterCheckboxDropdown({
   onChange,
   open,
   onOpenChange,
+  emptyLabel = 'All',
 }: {
   label: string
   options: MainMenuFilterOption[]
@@ -29,6 +34,7 @@ export function MainMenuFilterCheckboxDropdown({
   onChange: (next: string[]) => void
   open: boolean
   onOpenChange: (open: boolean) => void
+  emptyLabel?: string
 }) {
   const wrapRef = useRef<HTMLDivElement | null>(null)
   const menuRef = useRef<HTMLDivElement | null>(null)
@@ -131,7 +137,9 @@ export function MainMenuFilterCheckboxDropdown({
               onOpenChange(!open)
             }}
           >
-            <span className="mainMenuFilterSelectTriggerLabel">{selectionSummary(selected, options)}</span>
+            <span className="mainMenuFilterSelectTriggerLabel">
+              {selectionSummary(selected, options, emptyLabel)}
+            </span>
             <span className="mainMenuFilterSelectChevron" aria-hidden>
               ▾
             </span>

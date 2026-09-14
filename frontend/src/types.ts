@@ -1191,6 +1191,36 @@ export type ContactOut = {
   updated_at: string
 }
 
+export type ContactMergePreviewOut = {
+  survivor: ContactOut
+  source: ContactOut
+  survivor_matter_links: number
+  source_matter_links: number
+  survivor_grants: number
+  source_grants: number
+  survivor_client_portal_active: boolean
+  source_client_portal_active: boolean
+  survivor_matter_portal_active: number
+  source_matter_portal_active: number
+  email_mismatch: boolean
+  type_mismatch: boolean
+  will_reset_client_portal: boolean
+  will_reset_matter_portal_cases: number
+}
+
+export type ContactMergeOut = {
+  survivor: ContactOut
+  deleted_source_id: string
+  client_portal_reset: boolean
+  new_client_access_code?: string | null
+  matter_portal_cases_reset: number
+  grants_moved: number
+  grants_deduped: number
+  matter_links_moved: number
+  email_sent?: boolean
+  email_skip_reason?: string | null
+}
+
 export type CaseContactOut = {
   id: string
   case_id: string

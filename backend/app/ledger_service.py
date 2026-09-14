@@ -5,9 +5,10 @@ import uuid
 from dataclasses import dataclass
 
 from fastapi import HTTPException, status
-from sqlalchemy import case, func, select
+from sqlalchemy import case, func, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.exc import ObjectDeletedError, StaleDataError
 
 from app.ledger_party import resolve_ledger_party
 from app.models import (
@@ -35,6 +36,45 @@ _INVOICE_PAIR_LEDGER_MSG = (
     "This posting belongs to a pending invoice. Approve or void it from Invoices — "
     "not via ledger approval."
 )
+# Separate from folder-ops lock namespace (CL-05/CL-09).
+_LEDGER_PAIR_LOCK_KEY1 = 582013713
+_LEDGER_PAIR_BUSY_DETAIL = "This posting is being modified by another user. Refresh and try again."
+_LEDGER_PAIR_GONE_DETAIL = "Posting was modified or removed by another user. Refresh and try again."
+
+
+def _ledger_pair_lock_k2(pair_id: uuid.UUID) -> int:
+    import zlib
+
+    return zlib.crc32(pair_id.bytes) & 0x7FFFFFFF
+
+
+def _try_lock_ledger_pair(db: Session, pair_id: uuid.UUID) -> None:
+    """Non-blocking xact lock per posting pair (CL-14 / CL-15)."""
+    bind = db.get_bind()
+    if bind.dialect.name != "postgresql":
+        return
+    got = db.execute(
+        text("SELECT pg_try_advisory_xact_lock(:k1, :k2)"),
+        {"k1": _LEDGER_PAIR_LOCK_KEY1, "k2": _ledger_pair_lock_k2(pair_id)},
+    ).scalar()
+    if not got:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=_LEDGER_PAIR_BUSY_DETAIL)
+
+
+def _flush_ledger_pair_or_conflict(db: Session) -> None:
+    """Flush pair mutations; map concurrent delete/update races to HTTP 409 (CL-14)."""
+    try:
+        db.flush()
+    except StaleDataError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=_LEDGER_PAIR_GONE_DETAIL,
+        ) from exc
+    except ObjectDeletedError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=_LEDGER_PAIR_GONE_DETAIL,
+        ) from exc
 
 
 def pending_invoice_for_ledger_pair(db: Session, pair_id: uuid.UUID) -> CaseInvoice | None:
@@ -254,19 +294,22 @@ def post_transaction(
     return LedgerPostResult(pair_id=pair_id, is_approved=is_approved, is_anticipated=is_anticipated)
 
 
-def _ledger_pair_legs(case_id: uuid.UUID, pair_id: uuid.UUID, db: Session) -> tuple[dict[str, LedgerAccount], list[LedgerEntry]]:
-    accounts = _get_or_create_accounts(case_id, db)
+def _ledger_pair_legs(
+    case_id: uuid.UUID,
+    pair_id: uuid.UUID,
+    db: Session,
+    *,
+    for_update: bool = False,
+) -> tuple[dict[str, LedgerAccount], list[LedgerEntry]]:
+    accounts = _get_or_create_accounts(case_id, db, for_update=for_update)
     aid = {accounts["client"].id, accounts["office"].id}
-    legs = (
-        db.execute(
-            select(LedgerEntry).where(
-                LedgerEntry.pair_id == pair_id,
-                LedgerEntry.account_id.in_(aid),
-            )
-        )
-        .scalars()
-        .all()
+    q = select(LedgerEntry).where(
+        LedgerEntry.pair_id == pair_id,
+        LedgerEntry.account_id.in_(aid),
     )
+    if for_update:
+        q = q.with_for_update()
+    legs = db.execute(q).scalars().all()
     return accounts, legs
 
 
@@ -290,7 +333,8 @@ def update_ledger_pair_unapproved(
 ) -> None:
     """Edit amount, description, reference, or anticipated date before approval."""
     raise_if_pending_invoice_owns_pair(db, pair_id)
-    accounts, legs = _ledger_pair_legs(case_id, pair_id, db)
+    _try_lock_ledger_pair(db, pair_id)
+    accounts, legs = _ledger_pair_legs(case_id, pair_id, db, for_update=True)
     if not legs:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Posting not found")
     if any(e.is_approved for e in legs):
@@ -324,7 +368,7 @@ def update_ledger_pair_unapproved(
         if payload.anticipated_for_date is not None and e.is_anticipated:
             e.anticipated_for_date = payload.anticipated_for_date
         db.add(e)
-    db.flush()
+    _flush_ledger_pair_or_conflict(db)
     if is_anticipated and poster_user_id is not None and user.id != poster_user_id:
         from app.staff_workflow_notifications import notify_anticipated_payment_amended
 
@@ -349,7 +393,8 @@ def reject_ledger_pair_unapproved(
 ) -> None:
     """Remove an unapproved or anticipated posting (reject draft)."""
     raise_if_pending_invoice_owns_pair(db, pair_id)
-    accounts, legs = _ledger_pair_legs(case_id, pair_id, db)
+    _try_lock_ledger_pair(db, pair_id)
+    accounts, legs = _ledger_pair_legs(case_id, pair_id, db, for_update=True)
     if not legs:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Posting not found")
     if any(e.is_approved for e in legs):
@@ -372,7 +417,7 @@ def reject_ledger_pair_unapproved(
     )
     for e in legs:
         db.delete(e)
-    db.flush()
+    _flush_ledger_pair_or_conflict(db)
     if is_anticipated:
         from app.staff_workflow_notifications import notify_anticipated_payment_rejected
 
@@ -390,18 +435,8 @@ def reject_ledger_pair_unapproved(
 
 def delete_ledger_pair_unapproved(case_id: uuid.UUID, pair_id: uuid.UUID, db: Session) -> None:
     """Remove both legs of an unapproved posting (e.g. void draft invoice)."""
-    accounts = _get_or_create_accounts(case_id, db)
-    aid = {accounts["client"].id, accounts["office"].id}
-    legs = (
-        db.execute(
-            select(LedgerEntry).where(
-                LedgerEntry.pair_id == pair_id,
-                LedgerEntry.account_id.in_(aid),
-            )
-        )
-        .scalars()
-        .all()
-    )
+    _try_lock_ledger_pair(db, pair_id)
+    accounts, legs = _ledger_pair_legs(case_id, pair_id, db, for_update=True)
     if not legs:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Posting not found")
     if any(e.is_approved for e in legs):
@@ -411,7 +446,7 @@ def delete_ledger_pair_unapproved(case_id: uuid.UUID, pair_id: uuid.UUID, db: Se
         )
     for e in legs:
         db.delete(e)
-    db.flush()
+    _flush_ledger_pair_or_conflict(db)
 
 
 def get_ledger(case_id: uuid.UUID, db: Session) -> LedgerOut:
@@ -485,14 +520,17 @@ def approve_ledger_pair(
     if not invoice_workflow:
         raise_if_pending_invoice_owns_pair(db, pair_id)
 
+    _try_lock_ledger_pair(db, pair_id)
     accounts = _get_or_create_accounts(case_id, db, for_update=True)
     aid = {accounts["client"].id, accounts["office"].id}
     legs = (
         db.execute(
-            select(LedgerEntry).where(
+            select(LedgerEntry)
+            .where(
                 LedgerEntry.pair_id == pair_id,
                 LedgerEntry.account_id.in_(aid),
             )
+            .with_for_update()
         )
         .scalars()
         .all()
@@ -556,7 +594,7 @@ def approve_ledger_pair(
         e.is_approved = True
         e.is_anticipated = False
         e.anticipated_for_date = None
-    db.flush()
+    _flush_ledger_pair_or_conflict(db)
 
     # Invoice drafts (and similar) store this suffix until approved; strip when approving from the ledger.
     pending_suffix = " (pending approval)"
@@ -566,7 +604,7 @@ def approve_ledger_pair(
             if stripped:
                 e.description = stripped
             db.add(e)
-    db.flush()
+    _flush_ledger_pair_or_conflict(db)
 
     if was_anticipated:
         from app.staff_workflow_notifications import notify_anticipated_payment_approved

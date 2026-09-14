@@ -27,29 +27,35 @@ export function CaseContactPortalSection({
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
+  const [loadFailed, setLoadFailed] = useState(false)
 
   const load = useCallback(async () => {
     if (!globalContactId) {
       setAccess(null)
+      setLoadFailed(false)
       return
     }
     const row = await apiFetch<ContactPortalAccessOut>(`/contacts/${globalContactId}/portal/access`, { token })
     setAccess(row)
+    setLoadFailed(false)
   }, [globalContactId, token])
 
-  useEffect(() => {
-    void (async () => {
-      setBusy(true)
-      setErr(null)
-      try {
-        await load()
-      } catch (e: unknown) {
-        setErr((e as { message?: string }).message ?? 'Failed to load portal access')
-      } finally {
-        setBusy(false)
-      }
-    })()
+  const reload = useCallback(async () => {
+    setBusy(true)
+    setErr(null)
+    try {
+      await load()
+    } catch (e: unknown) {
+      setLoadFailed(true)
+      setErr((e as { message?: string }).message ?? 'Failed to load portal access')
+    } finally {
+      setBusy(false)
+    }
   }, [load])
+
+  useEffect(() => {
+    void reload()
+  }, [reload])
 
   if (!globalContactId) {
     return (
@@ -116,6 +122,15 @@ export function CaseContactPortalSection({
           Portal is not enabled for this matter. Turn on <strong>Enable portal</strong> in Edit details before granting
           portal access or sharing folders with {contactName}.
         </p>
+      ) : loadFailed && !access ? (
+        <>
+          <p className="muted" style={{ margin: 0, lineHeight: 1.5 }}>
+            Could not load portal status for {contactName}. The access code was not changed — try again.
+          </p>
+          <button type="button" className="btn" disabled={busy} onClick={() => void reload()}>
+            {busy ? 'Loading…' : 'Retry'}
+          </button>
+        </>
       ) : !hasAccess ? (
         <>
           <button type="button" className="btn primary" disabled={busy} onClick={() => void grantAccess()}>

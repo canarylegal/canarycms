@@ -5,7 +5,7 @@ import os
 import re
 import secrets
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from email import message_from_bytes
 from email.header import decode_header, make_header
 from email.utils import parseaddr, parsedate_to_datetime
@@ -501,7 +501,7 @@ def upload_case_file(
                 mail_outbound = _infer_source_mail_is_outbound(smbox, from_email_addr, user.email)
                 mail_header_date = _eml_parse_date_header(paths.abs_path)
 
-        now = _utcnow()
+        now = _db_now(db)
         row = DbFile(
             id=file_id,
             case_id=case_id,
@@ -533,6 +533,8 @@ def upload_case_file(
         db.add(row)
         if folder and not _folder_destination_exists(db, case_id, folder):
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=_FOLDER_GONE_DETAIL)
+        if folder:
+            _touch_folder_upload_settle(db, case_id, folder)
         log_event(
             db,
             actor_user_id=user.id,
@@ -1287,6 +1289,51 @@ _FOLDER_OPS_LOCK_KEY1 = 582013712
 _FOLDER_BUSY_DETAIL = "Another folder operation is in progress on this matter. Try again in a moment."
 _FOLDER_GONE_DETAIL = "Destination folder was deleted or no longer exists."
 _FOLDER_ALREADY_DELETED_DETAIL = "Folder was already deleted or no longer exists."
+_FOLDER_MODIFIED_DURING_DELETE_DETAIL = (
+    "Folder was modified during deletion (a concurrent upload finished first). Try again."
+)
+_FOLDER_UPLOAD_SETTLING_DETAIL = (
+    "A recent upload to this folder is still settling. Try again in a moment."
+)
+_FILE_MOVE_CONFLICT_DETAIL = "File was deleted or moved by another user. Refresh and try again."
+# Brief window after upload so a concurrent recursive delete conflicts instead of
+# removing the object the uploader was just told exists (CL-09).
+_UPLOAD_SETTLE_SECONDS = 5
+
+
+def _as_utc(dt: datetime | None) -> datetime | None:
+    """Normalize DB timestamps for comparison (SQLite may return naive UTC)."""
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+def _db_now(db: Session) -> datetime:
+    from sqlalchemy import func
+
+    return _as_utc(db.execute(select(func.now())).scalar_one()) or _utcnow()
+
+
+def _touch_folder_upload_settle(db: Session, case_id: uuid.UUID, folder_path: str) -> None:
+    """Mark the folder marker protected until now+_UPLOAD_SETTLE_SECONDS (CL-09)."""
+    if not folder_path:
+        return
+    marker = db.execute(
+        select(DbFile)
+        .where(
+            DbFile.case_id == case_id,
+            DbFile.category == FileCategory.system,
+            DbFile.mime_type == "application/x-directory",
+            DbFile.folder_path == folder_path,
+        )
+        .limit(1)
+    ).scalar_one_or_none()
+    if marker is None:
+        return
+    marker.updated_at = _db_now(db) + timedelta(seconds=_UPLOAD_SETTLE_SECONDS)
+    db.add(marker)
 
 
 def _case_folder_lock_k2(case_id: uuid.UUID) -> int:
@@ -1627,6 +1674,11 @@ def delete_case_folder(
     ensure_files_root()
     from app.file_storage import FILES_ROOT
 
+    # Stamp request start before the lock so a concurrent upload that commits first
+    # is visible as "newer than this delete" (CL-09) — then return 409 instead of
+    # removing the just-created object after the uploader already received 201.
+    request_started_at = _db_now(db)
+
     # Non-blocking: concurrent upload-into-folder gets 409 instead of 201-then-deleted (CL-09).
     _lock_case_folder_ops(db, case_id, blocking=False)
 
@@ -1640,6 +1692,57 @@ def delete_case_folder(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=_FOLDER_ALREADY_DELETED_DETAIL,
+        )
+
+    # Settle window: folder marker.updated_at held in the future after upload (CL-09).
+    marker = next(
+        (
+            r
+            for r in rows
+            if r.category == FileCategory.system
+            and r.mime_type == "application/x-directory"
+            and r.folder_path == folder_path
+        ),
+        None,
+    )
+    now = _db_now(db)
+    if marker is not None:
+        marker_until = _as_utc(marker.updated_at)
+        if marker_until is not None and marker_until > now:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=_FOLDER_UPLOAD_SETTLING_DETAIL,
+            )
+
+    # Recent-upload settle window (CL-09): conflict if any document was created within
+    # the last few seconds, covering upload-then-delete interleavings where the upload
+    # finished just before this delete stamped request_started_at.
+    settle_cutoff = now - timedelta(seconds=_UPLOAD_SETTLE_SECONDS)
+    recent_upload = [
+        r
+        for r in rows
+        if r.category != FileCategory.system
+        and (created := _as_utc(r.created_at)) is not None
+        and created > settle_cutoff
+    ]
+    if recent_upload:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=_FOLDER_UPLOAD_SETTLING_DETAIL,
+        )
+
+    newer = [
+        r
+        for r in rows
+        if r.category != FileCategory.system
+        and (created := _as_utc(r.created_at)) is not None
+        and request_started_at is not None
+        and created > request_started_at
+    ]
+    if newer:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=_FOLDER_MODIFIED_DURING_DELETE_DETAIL,
         )
 
     raise_if_files_checked_out(
@@ -2206,18 +2309,27 @@ def move_case_file(
     db: Session = Depends(get_db),
 ):
     require_case_access(case_id, user, db)
-    row = db.get(DbFile, file_id)
+    # Serialize against recursive folder delete on this matter (CL-12).
+    _lock_case_folder_ops(db, case_id, blocking=False)
+    row = db.execute(
+        select(DbFile).where(DbFile.id == file_id).with_for_update()
+    ).scalar_one_or_none()
     if not row or row.case_id != case_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
     if row.category == FileCategory.system:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot move folder markers here")
 
     # Move parent + its children (attachments) together so indentation/grouping stays consistent.
-    rows_to_move = [row]
     children = (
-        db.execute(select(DbFile).where(DbFile.case_id == case_id, DbFile.parent_file_id == file_id)).scalars().all()
+        db.execute(
+            select(DbFile)
+            .where(DbFile.case_id == case_id, DbFile.parent_file_id == file_id)
+            .with_for_update()
+        )
+        .scalars()
+        .all()
     )
-    rows_to_move.extend(children)
+    rows_to_move = [row, *children]
     raise_if_files_checked_out(db, [r.id for r in rows_to_move], action="move")
 
     old_folder = row.folder_path or ""
@@ -2226,45 +2338,68 @@ def move_case_file(
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
-    if new_folder:
-        _lock_case_folder_ops(db, case_id, blocking=False)
-        if not _folder_destination_exists(db, case_id, new_folder):
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=_FOLDER_GONE_DETAIL)
+    if new_folder and not _folder_destination_exists(db, case_id, new_folder):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=_FOLDER_GONE_DETAIL)
 
     ensure_files_root()
     from app.file_storage import FILES_ROOT
+    from sqlalchemy.orm.exc import StaleDataError
 
-    for r in rows_to_move:
-        new_paths = case_file_paths(
-            case_id=case_id,
-            file_id=r.id,
-            original_filename=r.original_filename,
-            folder_path=new_folder,
+    try:
+        for r in rows_to_move:
+            new_paths = case_file_paths(
+                case_id=case_id,
+                file_id=r.id,
+                original_filename=r.original_filename,
+                folder_path=new_folder,
+            )
+            old_abs = (FILES_ROOT / r.storage_path).resolve()
+            new_abs = new_paths.abs_path
+            if str(old_abs) != str(new_abs):
+                if not old_abs.is_file():
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail=_FILE_MOVE_CONFLICT_DETAIL,
+                    )
+                if new_abs.exists():
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail=_FILE_MOVE_CONFLICT_DETAIL,
+                    )
+                try:
+                    shutil.move(str(old_abs), str(new_abs))
+                except OSError as exc:
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail=_FILE_MOVE_CONFLICT_DETAIL,
+                    ) from exc
+
+            r.storage_path = new_paths.rel_path
+            r.folder_path = new_paths.folder_path
+            r.updated_at = datetime.utcnow()
+            db.add(r)
+
+        log_event(
+            db,
+            actor_user_id=user.id,
+            action="case.file.move",
+            entity_type="file",
+            entity_id=str(row.id),
+            meta={
+                "case_id": str(case_id),
+                "filename": row.original_filename,
+                "old_folder_path": old_folder,
+                "new_folder_path": row.folder_path,
+            },
         )
-        old_abs = (FILES_ROOT / r.storage_path).resolve()
-        new_abs = new_paths.abs_path
-        if old_abs.exists() and str(old_abs) != str(new_abs):
-            shutil.move(str(old_abs), str(new_abs))
+        db.commit()
+    except StaleDataError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=_FILE_MOVE_CONFLICT_DETAIL,
+        ) from exc
 
-        r.storage_path = new_paths.rel_path
-        r.folder_path = new_paths.folder_path
-        r.updated_at = datetime.utcnow()
-        db.add(r)
-
-    log_event(
-        db,
-        actor_user_id=user.id,
-        action="case.file.move",
-        entity_type="file",
-        entity_id=str(row.id),
-        meta={
-            "case_id": str(case_id),
-            "filename": row.original_filename,
-            "old_folder_path": old_folder,
-            "new_folder_path": row.folder_path,
-        },
-    )
-    db.commit()
     db.refresh(row)
     if old_folder:
         _ensure_folder_marker_if_empty(db, case_id, user.id, old_folder)

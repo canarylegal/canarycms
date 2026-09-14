@@ -7,18 +7,24 @@ export type ConfirmOptions = {
   message: string
   confirmLabel?: string
   cancelLabel?: string
+  /** When set, shows a third button; use askConfirmChoice to read the result. */
+  secondaryLabel?: string
   danger?: boolean
 }
 
+export type ConfirmChoice = 'confirm' | 'secondary' | 'cancel'
+
 type DialogContextValue = {
   askConfirm: (opts: ConfirmOptions) => Promise<boolean>
+  /** Three-way confirm when `secondaryLabel` is set. */
+  askConfirmChoice: (opts: ConfirmOptions & { secondaryLabel: string }) => Promise<ConfirmChoice>
   alert: (message: string, title?: string) => Promise<void>
 }
 
 type ConfirmQueued = {
   kind: 'confirm'
   opts: ConfirmOptions
-  resolve: (v: boolean) => void
+  resolve: (v: ConfirmChoice) => void
 }
 
 type AlertQueued = {
@@ -53,14 +59,27 @@ export function DialogProvider({ children }: { children: ReactNode }) {
     setActive(queueRef.current[0] ?? null)
   }, [])
 
-  const askConfirm = useCallback(
+  const enqueueConfirm = useCallback(
     (opts: ConfirmOptions) => {
-      return new Promise<boolean>((resolve) => {
+      return new Promise<ConfirmChoice>((resolve) => {
         queueRef.current.push({ kind: 'confirm', opts, resolve })
         pump()
       })
     },
     [pump],
+  )
+
+  const askConfirmChoice = useCallback(
+    (opts: ConfirmOptions & { secondaryLabel: string }) => enqueueConfirm(opts),
+    [enqueueConfirm],
+  )
+
+  const askConfirm = useCallback(
+    (opts: ConfirmOptions) => {
+      const { secondaryLabel: _ignored, ...rest } = opts
+      return enqueueConfirm(rest).then((choice) => choice === 'confirm')
+    },
+    [enqueueConfirm],
   )
 
   const alertFn = useCallback(
@@ -78,7 +97,10 @@ export function DialogProvider({ children }: { children: ReactNode }) {
     pump()
   }, [pump])
 
-  const value = useMemo(() => ({ askConfirm, alert: alertFn }), [askConfirm, alertFn])
+  const value = useMemo(
+    () => ({ askConfirm, askConfirmChoice, alert: alertFn }),
+    [askConfirm, askConfirmChoice, alertFn],
+  )
 
   return (
     <DialogContext.Provider value={value}>
@@ -90,15 +112,24 @@ export function DialogProvider({ children }: { children: ReactNode }) {
           message={active.opts.message}
           confirmLabel={active.opts.confirmLabel ?? 'Confirm'}
           cancelLabel={active.opts.cancelLabel ?? 'Cancel'}
+          secondaryLabel={active.opts.secondaryLabel}
           danger={active.opts.danger}
           onConfirm={() => {
-            active.resolve(true)
+            active.resolve('confirm')
             finishActive()
           }}
           onCancel={() => {
-            active.resolve(false)
+            active.resolve('cancel')
             finishActive()
           }}
+          onSecondary={
+            active.opts.secondaryLabel
+              ? () => {
+                  active.resolve('secondary')
+                  finishActive()
+                }
+              : undefined
+          }
         />
       ) : null}
       {active?.kind === 'alert' ? (

@@ -8,7 +8,9 @@ from datetime import datetime
 
 from fastapi import HTTPException, status
 from sqlalchemy import select, update
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.exc import ObjectDeletedError, StaleDataError
 
 from app.ledger_audit import log_invoice_approve, log_invoice_create, log_invoice_void, log_ledger_post
 from app.ledger_service import approve_ledger_pair, delete_ledger_pair_unapproved, get_ledger, post_transaction
@@ -22,6 +24,19 @@ log = logging.getLogger("canary.invoice")
 INV_PENDING = "pending_approval"
 INV_APPROVED = "approved"
 INV_VOIDED = "voided"
+_INVOICE_CONFLICT_DETAIL = "Invoice was modified by another user. Refresh and try again."
+
+
+def _raise_invoice_conflict_from_db(exc: BaseException) -> None:
+    """Map deadlock / stale concurrent invoice races to HTTP 409 (CL-13)."""
+    if isinstance(exc, (StaleDataError, ObjectDeletedError)):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=_INVOICE_CONFLICT_DETAIL) from exc
+    if isinstance(exc, OperationalError):
+        orig = getattr(exc, "orig", None)
+        msg = f"{orig} {exc}".lower()
+        if "deadlock" in msg:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=_INVOICE_CONFLICT_DETAIL) from exc
+    raise exc
 
 
 def _next_invoice_number(db: Session) -> str:
@@ -223,57 +238,62 @@ def approve_case_invoice(case_id: uuid.UUID, invoice_id: uuid.UUID, user: User, 
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You do not have permission to approve invoices.",
         )
-    inv = db.execute(
-        select(CaseInvoice).where(CaseInvoice.id == invoice_id).with_for_update()
-    ).scalar_one_or_none()
-    if not inv or inv.case_id != case_id:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invoice not found")
-    if inv.status == INV_APPROVED:
-        return
-    if inv.status != INV_PENDING:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invoice is not pending approval.")
-    if not inv.ledger_pair_id:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invoice has no ledger posting.")
+    try:
+        inv = db.execute(
+            select(CaseInvoice).where(CaseInvoice.id == invoice_id).with_for_update()
+        ).scalar_one_or_none()
+        if not inv or inv.case_id != case_id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invoice not found")
+        if inv.status == INV_APPROVED:
+            return
+        if inv.status != INV_PENDING:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invoice is not pending approval.")
+        if not inv.ledger_pair_id:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invoice has no ledger posting.")
 
-    approve_ledger_pair(case_id, inv.ledger_pair_id, user, db, invoice_workflow=True)
-    new_desc = f"Invoice {inv.invoice_number}"
-    # Core UPDATE so description / approval are persisted even if ORM instances in the session were stale.
-    db.execute(
-        update(LedgerEntry)
-        .where(LedgerEntry.pair_id == inv.ledger_pair_id)
-        .values(description=new_desc, is_approved=True)
-    )
-    db.flush()
-    inv.status = INV_APPROVED
-    inv.approved_by_user_id = user.id
-    inv.approved_at = datetime.utcnow()
-    db.add(inv)
-    db.flush()
-    log_invoice_approve(
-        db,
-        actor_user_id=user.id,
-        case_id=case_id,
-        invoice_id=invoice_id,
-        invoice_number=inv.invoice_number,
-        total_pence=int(inv.total_pence),
-        pair_id=inv.ledger_pair_id,
-    )
-    case = db.get(Case, case_id)
-    if case is not None:
-        # Savepoint so a document FK/flush failure cannot abort the approval transaction.
-        try:
-            with db.begin_nested():
-                from app.invoice_document_service import save_invoice_document_to_case
+        approve_ledger_pair(case_id, inv.ledger_pair_id, user, db, invoice_workflow=True)
+        new_desc = f"Invoice {inv.invoice_number}"
+        # Core UPDATE so description / approval are persisted even if ORM instances in the session were stale.
+        db.execute(
+            update(LedgerEntry)
+            .where(LedgerEntry.pair_id == inv.ledger_pair_id)
+            .values(description=new_desc, is_approved=True)
+        )
+        db.flush()
+        inv.status = INV_APPROVED
+        inv.approved_by_user_id = user.id
+        inv.approved_at = datetime.utcnow()
+        db.add(inv)
+        db.flush()
+        log_invoice_approve(
+            db,
+            actor_user_id=user.id,
+            case_id=case_id,
+            invoice_id=invoice_id,
+            invoice_number=inv.invoice_number,
+            total_pence=int(inv.total_pence),
+            pair_id=inv.ledger_pair_id,
+        )
+        case = db.get(Case, case_id)
+        if case is not None:
+            # Savepoint so a document FK/flush failure cannot abort the approval transaction.
+            try:
+                with db.begin_nested():
+                    from app.invoice_document_service import save_invoice_document_to_case
 
-                save_invoice_document_to_case(inv=inv, case=case, actor_user_id=user.id, db=db)
-        except Exception:
-            # Document can be regenerated on download; do not fail the financial approval.
-            inv.document_file_id = None
-            log.exception(
-                "invoice document save failed after approval invoice_id=%s case_id=%s",
-                invoice_id,
-                case_id,
-            )
+                    save_invoice_document_to_case(inv=inv, case=case, actor_user_id=user.id, db=db)
+            except Exception:
+                # Document can be regenerated on download; do not fail the financial approval.
+                inv.document_file_id = None
+                log.exception(
+                    "invoice document save failed after approval invoice_id=%s case_id=%s",
+                    invoice_id,
+                    case_id,
+                )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _raise_invoice_conflict_from_db(exc)
 
 
 def notify_invoice_approved_after_commit(
@@ -346,97 +366,110 @@ def void_case_invoice(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You do not have permission to void invoices.",
         )
-    inv = db.get(CaseInvoice, invoice_id)
-    if not inv or inv.case_id != case_id:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invoice not found")
-    if inv.status == INV_VOIDED:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invoice already voided.")
+    try:
+        # Lock invoice first (same order as approve) to avoid deadlocks with concurrent approval (CL-13).
+        inv = db.execute(
+            select(CaseInvoice).where(CaseInvoice.id == invoice_id).with_for_update()
+        ).scalar_one_or_none()
+        if not inv or inv.case_id != case_id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invoice not found")
+        if inv.status == INV_VOIDED:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invoice already voided.")
 
-    now = datetime.utcnow()
-    if inv.status == INV_PENDING:
-        if inv.ledger_pair_id:
-            delete_ledger_pair_unapproved(case_id, inv.ledger_pair_id, db)
+        now = datetime.utcnow()
+        if inv.status == INV_PENDING:
+            if inv.ledger_pair_id:
+                try:
+                    delete_ledger_pair_unapproved(case_id, inv.ledger_pair_id, db)
+                except HTTPException as exc:
+                    # Pair already removed by a racing void/approve path.
+                    if exc.status_code not in (404, 409):
+                        raise
+            release_billed_time_entries_for_invoice(invoice_id, db)
+            inv.status = INV_VOIDED
+            inv.voided_at = now
+            db.add(inv)
+            db.flush()
+            log_invoice_void(
+                db,
+                actor_user_id=user.id,
+                case_id=case_id,
+                invoice_id=invoice_id,
+                invoice_number=inv.invoice_number,
+                total_pence=int(inv.total_pence),
+                was_pending=True,
+            )
+            return
+
+        # Approved: post reversal (office credit) and require office balance check per spec
+        if inv.status != INV_APPROVED or not inv.ledger_pair_id:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot void this invoice.")
+
+        ledger = get_ledger(case_id, db)
+        office_bal = ledger.office.balance_pence
+        total = int(inv.total_pence)
+        # After reversal (office credit), office balance increases by total (less negative DR).
+        if office_bal + total > 0:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=(
+                    "Voiding this invoice is not allowed: the office account balance would be above £0.00 "
+                    f"after reversal (current office balance {office_bal / 100:.2f})."
+                ),
+            )
+
+        rev_result = post_transaction(
+            case_id,
+            LedgerPostCreate(
+                description=f"Reversal of invoice {inv.invoice_number}",
+                reference=inv.invoice_number,
+                contact_label=None,
+                amount_pence=total,
+                client_direction=None,
+                office_direction="credit",
+            ),
+            user,
+            db,
+        )
+        rev_id = rev_result.pair_id
+
         release_billed_time_entries_for_invoice(invoice_id, db)
         inv.status = INV_VOIDED
         inv.voided_at = now
+        inv.reversal_pair_id = rev_id
         db.add(inv)
         db.flush()
-        log_invoice_void(
-            db,
-            actor_user_id=user.id,
-            case_id=case_id,
-            invoice_id=invoice_id,
-            invoice_number=inv.invoice_number,
-            total_pence=int(inv.total_pence),
-            was_pending=True,
-        )
-        return
-
-    # Approved: post reversal (office credit) and require office balance check per spec
-    if inv.status != INV_APPROVED or not inv.ledger_pair_id:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot void this invoice.")
-
-    ledger = get_ledger(case_id, db)
-    office_bal = ledger.office.balance_pence
-    total = int(inv.total_pence)
-    # After reversal (office credit), office balance increases by total (less negative DR).
-    if office_bal + total > 0:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=(
-                "Voiding this invoice is not allowed: the office account balance would be above £0.00 "
-                f"after reversal (current office balance {office_bal / 100:.2f})."
-            ),
-        )
-
-    rev_result = post_transaction(
-        case_id,
-        LedgerPostCreate(
+        rev_payload = LedgerPostCreate(
             description=f"Reversal of invoice {inv.invoice_number}",
             reference=inv.invoice_number,
             contact_label=None,
             amount_pence=total,
             client_direction=None,
             office_direction="credit",
-        ),
-        user,
-        db,
-    )
-    rev_id = rev_result.pair_id
-
-    release_billed_time_entries_for_invoice(invoice_id, db)
-    inv.status = INV_VOIDED
-    inv.voided_at = now
-    inv.reversal_pair_id = rev_id
-    db.add(inv)
-    db.flush()
-    rev_payload = LedgerPostCreate(
-        description=f"Reversal of invoice {inv.invoice_number}",
-        reference=inv.invoice_number,
-        contact_label=None,
-        amount_pence=total,
-        client_direction=None,
-        office_direction="credit",
-    )
-    log_ledger_post(
-        db,
-        actor_user_id=user.id,
-        case_id=case_id,
-        pair_id=rev_id,
-        payload=rev_payload,
-        is_approved=True,
-        invoice_number=inv.invoice_number,
-    )
-    log_invoice_void(
-        db,
-        actor_user_id=user.id,
-        case_id=case_id,
-        invoice_id=invoice_id,
-        invoice_number=inv.invoice_number,
-        total_pence=total,
-        was_pending=False,
-        reversal_pair_id=rev_id,
-    )
+        )
+        log_ledger_post(
+            db,
+            actor_user_id=user.id,
+            case_id=case_id,
+            pair_id=rev_id,
+            payload=rev_payload,
+            is_approved=True,
+            invoice_number=inv.invoice_number,
+        )
+        log_invoice_void(
+            db,
+            actor_user_id=user.id,
+            case_id=case_id,
+            invoice_id=invoice_id,
+            invoice_number=inv.invoice_number,
+            total_pence=total,
+            was_pending=False,
+            reversal_pair_id=rev_id,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _raise_invoice_conflict_from_db(exc)
 
 
 def list_recent_approved_invoices(

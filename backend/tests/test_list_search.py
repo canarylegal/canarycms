@@ -171,3 +171,17 @@ def test_search_cases_status_filter() -> None:
         quotes = search_cases(db, actor, q="matter", status_filter=CaseStatus.quote)
         assert len(quotes) == 1
         assert quotes[0].case_number == "101/2024"
+
+
+def test_search_rejects_nul_bytes() -> None:
+    from fastapi import HTTPException
+
+    from app.list_search import reject_search_nul
+
+    try:
+        reject_search_nul("ok\x00bad")
+        raise AssertionError("expected HTTPException")
+    except HTTPException as exc:
+        assert exc.status_code == 400
+    assert reject_search_nul("plain") == "plain"
+    assert reject_search_nul(None) is None
