@@ -13,6 +13,10 @@ All notable releases of Canary CMS are documented here. Prefer a tagged release 
 - Backend unit coverage expanded for Canary Sign / WebDAV / Radicale calendar helpers, portal auth/OTP/grants/forms, and Files / OnlyOffice SSRF + mutate / folder / force-save paths.
 
 ### Security
+- WebDAV session GET/HEAD responses send ``Cache-Control: private, no-store`` (and the frontend proxy mirrors that) so CDN/shared caches cannot keep serving a pre-issued session URL after account disable or matter deny (CL-07).
+- Concurrent file rename requires ``expected_original_filename`` (compare-and-swap on the client-observed name) plus a try-lock, so barrier races from the same starting name return 200/409 rather than 200/200 (CL-19).
+- Concurrent invoice approve and void share a non-blocking advisory try-lock so only one mutation succeeds; the other receives HTTP 409 (CL-20).
+- ONLYOffice browser Save Changes / force-save / downloadAs persist are rejected after ``release-edit`` (and the Document Server callback no longer writes bytes without an active authorised edit session), closing post-release writes (CL-18).
 - WebAuthn login begin returns the same HTTP 401 `Invalid credentials` when the account is unknown or has no passkeys (CL-16).
 - Case/contact search rejects queries containing NUL bytes with HTTP 400 instead of HTTP 500 (CL-17).
 - Invoice approve and void lock the invoice row before ledger mutations (same order) and map deadlocks/stale races to HTTP 409 instead of 500 (CL-13).
