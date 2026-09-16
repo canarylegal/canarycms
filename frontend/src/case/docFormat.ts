@@ -52,7 +52,7 @@ export function matterTypeDisplayLine(caseDetail: CaseOut): string {
     return t
   }
 
-  let head = clean(caseDetail.matter_head_type_name)
+  const head = clean(caseDetail.matter_head_type_name)
   let sub = clean(caseDetail.matter_sub_type_name)
   sub = stripEdgeDashes(sub)
   if (head && sub && head.toLowerCase() === sub.toLowerCase()) return head

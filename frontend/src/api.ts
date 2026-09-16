@@ -75,7 +75,7 @@ const API_ERROR_BODY_SNIP_LEN = 2000
 function humanizeHtmlErrorBody(text: string, httpFallback: string, requestUrl?: string): string {
   const t = text.trim()
   const looksHtml =
-    /^<\!DOCTYPE\b/i.test(t) ||
+    /^<!DOCTYPE\b/i.test(t) ||
     /^<html\b/i.test(t) ||
     (t.startsWith('<') && /<\s*head[\s>]/i.test(t.slice(0, 2500)))
 

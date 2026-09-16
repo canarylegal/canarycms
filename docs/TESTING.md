@@ -39,7 +39,22 @@ Environment overrides:
 
 CI: `.github/workflows/portal-smoke.yml` builds `db`+`backend`, ensures the fixture, and runs the same smoke script on portal-related path changes and via **workflow_dispatch**.
 
-Frontend CI runs `npm test` (Vitest) then `npm run build` (TypeScript + Vite). `npm run lint` exists but currently fails on substantial pre-existing React Compiler / eslint debt — wire it into CI only after a dedicated lint cleanup.
+Frontend CI runs `npm run lint:ci` (eslint, zero errors; warnings capped), `npm test` (Vitest), then `npm run build` (TypeScript + Vite). React Compiler / Fast Refresh / `no-explicit-any` debt remains as **warnings** with a `--max-warnings` ratchet in `lint:ci` — lower the cap when cleaning a slice.
+
+### Browser E2E (Playwright)
+
+Thin Chromium smoke against a **running** frontend+backend (not part of the default unit CI job):
+
+```bash
+# Stack UI on :8080; firm staff recommended for matter-open path
+export BASE_URL=http://127.0.0.1:8080
+export E2E_STAFF_EMAIL='…'
+export E2E_STAFF_PASSWORD='…'
+make test-e2e
+# or: cd frontend && npm run test:e2e
+```
+
+Covers staff password login (main menu or master recovery shell), optional open-first-matter → docs panel, and portal `/portal` sign-in chrome. CI: `.github/workflows/browser-e2e.yml` (path-filtered + `workflow_dispatch`) brings up compose `prod`, ensures the portal fixture staff user, and runs Playwright.
 
 ### Frontend unit tests
 
