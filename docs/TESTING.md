@@ -39,7 +39,7 @@ Environment overrides:
 
 CI: `.github/workflows/portal-smoke.yml` builds `db`+`backend`, ensures the fixture, and runs the same smoke script on portal-related path changes and via **workflow_dispatch**.
 
-Frontend CI runs `npm run lint:ci` (eslint, zero errors; warnings capped), `npm test` (Vitest), then `npm run build` (TypeScript + Vite). React Compiler / Fast Refresh / `no-explicit-any` debt remains as **warnings** with a `--max-warnings` ratchet in `lint:ci` — lower the cap when cleaning a slice.
+Frontend unit CI runs `npm test` (Vitest) then `npm run build` (TypeScript + Vite). `npm run lint:ci` is available locally (zero eslint errors; React Compiler / Fast Refresh / `no-explicit-any` capped as warnings via `--max-warnings`) — wire `lint:ci` into `.github/workflows/ci.yml` once a token with the `workflow` scope can push workflow changes. Thin Playwright browser smoke is documented below (`make test-e2e`); the `browser-e2e` workflow file is ready to push with the same scope.
 
 ### Browser E2E (Playwright)
 
