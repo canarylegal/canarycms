@@ -1,0 +1,148 @@
+name: Browser E2E
+
+# Thin Playwright smoke: staff login shell + portal sign-in (+ matter open when fixture exists).
+# Heavier than unit CI — path-filtered and workflow_dispatch, similar to portal-smoke.
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v[0-9]*'
+    branches: [main]
+    paths:
+      - "frontend/e2e/**"
+      - "frontend/playwright.config.ts"
+      - "frontend/src/auth/**"
+      - "frontend/src/PortalPage.tsx"
+      - "frontend/src/App.tsx"
+      - "frontend/package.json"
+      - "frontend/package-lock.json"
+      - ".github/workflows/browser-e2e.yml"
+      - "docker-compose.yml"
+      - "docker-compose.ci.yml"
+  pull_request:
+    paths:
+      - "frontend/e2e/**"
+      - "frontend/playwright.config.ts"
+      - "frontend/src/auth/**"
+      - "frontend/src/PortalPage.tsx"
+      - "frontend/src/App.tsx"
+      - ".github/workflows/browser-e2e.yml"
+
+jobs:
+  browser-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      COMPOSE_FILE: docker-compose.yml:docker-compose.ci.yml
+      BACKEND_CONTAINER: canaryci-backend
+      PORTAL_SMOKE_STAFF_EMAIL: e2e-staff@example.com
+      PORTAL_SMOKE_STAFF_PASSWORD: E2eStaff!ChangeMe99
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Write CI .env
+        run: |
+          set -euo pipefail
+          python3 -m pip install --quiet 'cryptography>=42'
+          FERNET="$(python3 -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())')"
+          {
+            echo "COMPOSE_PROJECT_NAME=canaryci"
+            echo "COMPOSE_PROFILES=prod"
+            echo "JWT_SECRET=$(openssl rand -hex 32)"
+            echo "DATA_ENCRYPTION_KEY=${FERNET}"
+            echo "ONLYOFFICE_JWT_SECRET=$(openssl rand -hex 32)"
+            echo "ONLYOFFICE_SECURE_LINK_SECRET=$(openssl rand -hex 32)"
+            echo "MASTER_ADMIN_LOGIN=ci-master-$(openssl rand -hex 8)"
+            echo "MASTER_ADMIN_PASSWORD=$(openssl rand -hex 24)"
+            echo "MASTER_ADMIN_REQUIRE_2FA=false"
+            echo "MASTER_ADMIN_TOTP_SECRET="
+            echo "POSTGRES_USER=canary"
+            echo "POSTGRES_PASSWORD=$(openssl rand -hex 16)"
+            echo "POSTGRES_DB=canary"
+            echo "CANARY_PUBLIC_URL=http://127.0.0.1:18080"
+            echo "CANARY_CORS_ORIGINS=http://127.0.0.1:18080"
+            echo "ONLYOFFICE_DS_PUBLIC_URL=http://127.0.0.1:18080/office-ds"
+            echo "CANARY_CALDAV_PUBLIC_URL=http://127.0.0.1:18080"
+            echo "CANARY_GITHUB_DEPLOY_REF=latest-release"
+            echo "BACKEND_PORT_PUBLISH=127.0.0.1:18000:8000"
+            echo "POSTGRES_PORT_PUBLISH=127.0.0.1:15432:5432"
+            echo "FRONTEND_PORT_PUBLISH=127.0.0.1:18080:80"
+            echo "ONLYOFFICE_PORT_PUBLISH=127.0.0.1:18084:80"
+            echo "RADICALE_PORT_PUBLISH=127.0.0.1:15232:5232"
+            echo "GIT_COMMIT=${GITHUB_SHA}"
+          } > .env
+
+      - name: Build and start stack
+        run: |
+          set -euo pipefail
+          docker compose config >/dev/null
+          docker compose up -d --build db backend radicale onlyoffice frontend
+          docker compose ps -a
+
+      - name: Wait for frontend
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 120); do
+            if curl -fsS --max-time 5 http://127.0.0.1:18080/ >/dev/null 2>&1; then
+              echo "frontend ready after ${i} attempts"
+              exit 0
+            fi
+            if (( i % 15 == 0 )); then
+              echo "attempt ${i}: still waiting"
+              docker compose ps -a || true
+            fi
+            sleep 3
+          done
+          docker compose logs --tail=200 frontend backend || true
+          exit 1
+
+      - name: Ensure portal/matter fixture (firm staff)
+        run: |
+          set -euo pipefail
+          docker compose exec -T \
+            -e PORTAL_SMOKE_STAFF_EMAIL \
+            -e PORTAL_SMOKE_STAFF_PASSWORD \
+            backend python scripts/ensure_portal_smoke_fixture.py
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install Playwright + Chromium
+        working-directory: frontend
+        run: |
+          npm ci
+          npx playwright install chromium --with-deps
+
+      - name: Run browser E2E
+        working-directory: frontend
+        env:
+          BASE_URL: http://127.0.0.1:18080
+          E2E_STAFF_EMAIL: ${{ env.PORTAL_SMOKE_STAFF_EMAIL }}
+          E2E_STAFF_PASSWORD: ${{ env.PORTAL_SMOKE_STAFF_PASSWORD }}
+          CI: "1"
+        run: npm run test:e2e
+
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            frontend/playwright-report/
+            frontend/test-results/
+          if-no-files-found: ignore
+
+      - name: Dump logs on failure
+        if: failure()
+        run: |
+          {
+            echo "## Browser E2E failure logs"
+            echo '```'
+            docker compose ps -a || true
+            docker compose logs --tail=300 frontend backend db || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
