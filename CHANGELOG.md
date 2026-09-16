@@ -4,6 +4,9 @@ All notable releases of Canary CMS are documented here. Prefer a tagged release 
 
 ## [Unreleased]
 
+### Security
+- Ledger post / approve / edit / reject write audit events in the same DB transaction as the financial mutation (commit once), so a mid-request failure cannot leave money without an audit row.
+
 ### Changed
 - Split monolithic ``schemas.py`` (~3.1k lines) and ``models.py`` (~1.9k lines) into domain packages under ``app/schemas/`` and ``app/models/``; existing ``from app.schemas import …`` / ``from app.models import …`` imports are unchanged.
 - Split frontend ``types.ts`` (~1.8k lines) into ``src/types/`` domain modules with a barrel re-export; existing ``from '../types'`` imports are unchanged.
