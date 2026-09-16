@@ -50,7 +50,9 @@ test('staff can open a matter from the main menu', async ({ page }) => {
   const hasMatter = await matterRow.isVisible().catch(() => false)
   test.skip(!hasMatter, 'No matters in main menu (seed a case or run portal fixture)')
 
-  await matterRow.click()
+  // Single click only focuses the row; open requires double-click (or context menu Open).
+  await matterRow.dblclick()
+  await expect(page.locator('.caseShell')).toBeVisible({ timeout: 30_000 })
   await expect(page.locator('.caseDocsCard, .caseDocsScroll').first()).toBeVisible({
     timeout: 30_000,
   })
