@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import shutil
 import uuid
+import zlib
 from datetime import datetime
 from pathlib import Path
 
 from fastapi import HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from app.audit import log_event
@@ -26,6 +27,26 @@ from app.models import File as DbFile, FileCategory, User
 from app.schemas import CaseFileMoveUpdate, CaseFileRenameUpdate, CommentFileUpdate, FilePinUpdate
 
 _FILE_RENAME_CONFLICT_DETAIL = "File was renamed or moved by another user. Refresh and try again."
+_FILE_RENAME_BUSY_DETAIL = "This file is being renamed by another user. Refresh and try again."
+# Distinct from folder-ops / ledger pair lock namespaces.
+_FILE_RENAME_LOCK_KEY1 = 582013715
+
+
+def _file_rename_lock_k2(file_id: uuid.UUID) -> int:
+    return zlib.crc32(file_id.bytes) & 0x7FFFFFFF
+
+
+def _try_lock_file_rename(db: Session, file_id: uuid.UUID) -> None:
+    """Non-blocking xact lock so concurrent renames cannot both return 200 (CL-19)."""
+    bind = db.get_bind()
+    if bind.dialect.name != "postgresql":
+        return
+    got = db.execute(
+        text("SELECT pg_try_advisory_xact_lock(:k1, :k2)"),
+        {"k1": _FILE_RENAME_LOCK_KEY1, "k2": _file_rename_lock_k2(file_id)},
+    ).scalar()
+    if not got:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=_FILE_RENAME_BUSY_DETAIL)
 
 
 def _normalized_file_suffix(name: str) -> str:
@@ -68,12 +89,21 @@ def rename_case_file(
     db: Session,
 ) -> dict:
     require_case_access(case_id, user, db)
-    # Row lock so concurrent renames serialize; loser gets 409 if the object path moved (CL-10).
+    # CL-19: compare-and-swap on the client-observed name so concurrent renames from the same
+    # starting name cannot both return 200 (even if the loser reaches the server after the winner
+    # commits). Try-lock reduces overlap; the expected-name check is the authoritative guard.
+    expected_name = Path(payload.expected_original_filename).name
+    if not expected_name:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid expected filename")
+
+    _try_lock_file_rename(db, file_id)
     row = db.execute(
         select(DbFile).where(DbFile.id == file_id).with_for_update()
     ).scalar_one_or_none()
     if not row or row.case_id != case_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+    if (row.original_filename or "") != expected_name:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=_FILE_RENAME_BUSY_DETAIL)
     if row.category == FileCategory.system:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot rename folder markers here")
 

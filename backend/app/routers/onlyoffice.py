@@ -33,7 +33,7 @@ from sqlalchemy.orm import Session
 from app.db import get_db
 from app.deps import get_current_user
 from app.file_storage import FILES_ROOT, case_file_paths, commit_keeping_stored_file, ensure_files_root, path_is_under_files_root
-from app.models import FeeScale, File as DbFile, FileCategory, FileEditSession, Precedent, User
+from app.models import FeeScale, File as DbFile, FileCategory, Precedent, User
 from app.audit import log_event
 from app.feature_flags import onlyoffice_callback_require_jwt
 from app.docx_util import finalize_stored_docx_bytes, normalize_onlyoffice_persisted_docx_bytes
@@ -827,39 +827,53 @@ async def onlyoffice_callback(
         db.refresh(row)
         file_id = row.id
 
-        # If the user discarded changes the session is released; skip saving — unless this save was
-        # initiated by POST /oo-force-save (``oo_force_save_pending``). Without that flag, clearing
-        # pending without bumping ``version`` leaves force-save waiters timing out with HTTP 504.
-        active_sess = db.execute(
-            select(FileEditSession).where(
-                FileEditSession.file_id == file_id,
-                FileEditSession.released_at.is_(None),
-            )
-        ).scalars().first()
-        if active_sess is None and not row.oo_force_save_pending:
-            log.warning(
-                "onlyoffice_callback: NO active session for file %s — skipping save (was discarded?)",
-                file_id,
-            )
-            return {"error": 0}
+        # CL-18: never persist Document Server bytes without an active authorised edit session.
+        # Force-save pending alone used to bypass this and let Save Changes write after release-edit.
+        # If a force-save was armed, metadata-ack so /oo-force-save waiters do not HTTP 504.
+        from app.desktop_edit_session import (
+            get_active_edit_session_for_file,
+            session_owner_still_authorized,
+        )
+
+        active_sess = get_active_edit_session_for_file(db, file_id)
         if active_sess is None:
             log.warning(
-                "onlyoffice_callback: NO active session row for file %s — force-save pending; saving from DS url anyway",
+                "onlyoffice_callback: NO active session for file %s — refusing byte persist (pending=%s)",
+                file_id,
+                row.oo_force_save_pending,
+            )
+            if row.oo_force_save_pending:
+                _oo_ack_unchanged_force_save(
+                    db,
+                    row,
+                    precedent_id=precedent_id,
+                    case_id=case_id,
+                    firm_letterhead_kind=firm_letterhead_kind,
+                    status_code=st,
+                )
+            return {"error": 0}
+
+        if session_owner_still_authorized(db, active_sess) is None:
+            log.warning(
+                "onlyoffice_callback: session owner no longer authorised for file %s — skipping save",
                 file_id,
             )
-        else:
-            log.warning("onlyoffice_callback: active session found, proceeding to save file %s", file_id)
-            from app.desktop_edit_session import session_owner_still_authorized
-
-            if session_owner_still_authorized(db, active_sess) is None:
-                log.warning(
-                    "onlyoffice_callback: session owner no longer authorised for file %s — skipping save",
-                    file_id,
+            active_sess.released_at = datetime.now(timezone.utc)
+            db.add(active_sess)
+            if row.oo_force_save_pending:
+                _oo_ack_unchanged_force_save(
+                    db,
+                    row,
+                    precedent_id=precedent_id,
+                    case_id=case_id,
+                    firm_letterhead_kind=firm_letterhead_kind,
+                    status_code=st,
                 )
-                active_sess.released_at = datetime.now(timezone.utc)
-                db.add(active_sess)
+            else:
                 db.commit()
-                return {"error": 1}
+            return {"error": 0}
+
+        log.warning("onlyoffice_callback: active session found, proceeding to save file %s", file_id)
 
         ensure_files_root()
         abs_path = (FILES_ROOT / row.storage_path).resolve()
@@ -934,12 +948,9 @@ async def onlyoffice_callback(
         db.refresh(row)
         if not row.oo_force_save_pending:
             return {"error": 0}
-        active_sess = db.execute(
-            select(FileEditSession).where(
-                FileEditSession.file_id == row.id,
-                FileEditSession.released_at.is_(None),
-            )
-        ).scalars().first()
+        from app.desktop_edit_session import get_active_edit_session_for_file
+
+        active_sess = get_active_edit_session_for_file(db, row.id)
         if active_sess is None:
             log.warning(
                 "onlyoffice_callback: force-save pending but no session row for file %s — metadata-only ack",

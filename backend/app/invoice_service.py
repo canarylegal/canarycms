@@ -25,6 +25,30 @@ INV_PENDING = "pending_approval"
 INV_APPROVED = "approved"
 INV_VOIDED = "voided"
 _INVOICE_CONFLICT_DETAIL = "Invoice was modified by another user. Refresh and try again."
+_INVOICE_BUSY_DETAIL = "This invoice is being modified by another user. Refresh and try again."
+# Distinct from ledger-pair / file-rename advisory namespaces.
+_INVOICE_LOCK_KEY1 = 582013716
+
+
+def _invoice_lock_k2(invoice_id: uuid.UUID) -> int:
+    import zlib
+
+    return zlib.crc32(invoice_id.bytes) & 0x7FFFFFFF
+
+
+def _try_lock_invoice(db: Session, invoice_id: uuid.UUID) -> None:
+    """Non-blocking xact lock so concurrent approve/void cannot both succeed (CL-20)."""
+    from sqlalchemy import text
+
+    bind = db.get_bind()
+    if bind.dialect.name != "postgresql":
+        return
+    got = db.execute(
+        text("SELECT pg_try_advisory_xact_lock(:k1, :k2)"),
+        {"k1": _INVOICE_LOCK_KEY1, "k2": _invoice_lock_k2(invoice_id)},
+    ).scalar()
+    if not got:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=_INVOICE_BUSY_DETAIL)
 
 
 def _raise_invoice_conflict_from_db(exc: BaseException) -> None:
@@ -239,6 +263,7 @@ def approve_case_invoice(case_id: uuid.UUID, invoice_id: uuid.UUID, user: User, 
             detail="You do not have permission to approve invoices.",
         )
     try:
+        _try_lock_invoice(db, invoice_id)
         inv = db.execute(
             select(CaseInvoice).where(CaseInvoice.id == invoice_id).with_for_update()
         ).scalar_one_or_none()
@@ -367,7 +392,9 @@ def void_case_invoice(
             detail="You do not have permission to void invoices.",
         )
     try:
-        # Lock invoice first (same order as approve) to avoid deadlocks with concurrent approval (CL-13).
+        # CL-20: try-lock so concurrent approve/void cannot both return success.
+        # CL-13: lock invoice row (same order as approve) to avoid deadlocks.
+        _try_lock_invoice(db, invoice_id)
         inv = db.execute(
             select(CaseInvoice).where(CaseInvoice.id == invoice_id).with_for_update()
         ).scalar_one_or_none()

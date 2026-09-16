@@ -316,10 +316,16 @@ async def oo_force_save(
 
     Preferred flow (matches toolbar Save): arm → host ``serviceCommand('save')`` → wait.
     """
+    from app.desktop_edit_session import require_user_active_edit_session
+
     require_case_access(case_id, user, db)
     row = db.get(DbFile, file_id)
     if not row or row.case_id != case_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+
+    # Arm/command must not start a save after release-edit (CL-18). Wait may finish an in-flight arm.
+    if phase in ("arm", "command", "command_wait"):
+        require_user_active_edit_session(db, file_id, user)
 
     if phase == "arm":
         return JSONResponse({"base_version": oo_force_save_arm(db, row)})
@@ -375,10 +381,13 @@ async def oo_persist_download(
     db: Session,
 ) -> None:
     """Persist ONLYOFFICE ``downloadAs`` export bytes to case file storage (PDF and Office)."""
+    from app.desktop_edit_session import require_user_active_edit_session
+
     require_case_access(case_id, user, db)
     row = db.get(DbFile, file_id)
     if not row or row.case_id != case_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+    require_user_active_edit_session(db, file_id, user)
     await persist_onlyoffice_browser_url_to_file(
         db,
         row,
@@ -574,19 +583,24 @@ def release_desktop_edit(
         .scalars()
         .all()
     )
-    if not sessions:
-        db.commit()
-        return None
     for s in sessions:
         s.released_at = now
         db.add(s)
-    log_event(
-        db,
-        actor_user_id=user.id,
-        action="case.file.release_edit",
-        entity_type="file",
-        entity_id=str(file_id),
-        meta={"case_id": str(case_id)},
-    )
+    # CL-18: complete any in-flight force-save waiter without accepting later DS bytes.
+    had_pending = bool(row.oo_force_save_pending)
+    if had_pending:
+        row.version = (row.version or 1) + 1
+        row.oo_force_save_pending = False
+        row.updated_at = now
+        db.add(row)
+    if sessions or had_pending:
+        log_event(
+            db,
+            actor_user_id=user.id,
+            action="case.file.release_edit",
+            entity_type="file",
+            entity_id=str(file_id),
+            meta={"case_id": str(case_id)},
+        )
     db.commit()
     return None

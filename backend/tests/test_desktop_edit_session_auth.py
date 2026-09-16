@@ -15,7 +15,7 @@ from app.desktop_edit_session import (
     release_edit_sessions_for_user,
     session_owner_still_authorized,
 )
-from app.models import Base, Case, CaseAccessRule, CaseLockMode, CaseStatus, FileEditSession, User
+from app.models import Base, Case, CaseAccessRule, CaseLockMode, CaseStatus, File as DbFile, FileEditSession, User
 
 
 def _session() -> Session:
@@ -27,7 +27,7 @@ def _session() -> Session:
                 patched.append((column, column.type))
                 column.type = JSON()
     try:
-        for table in (User.__table__, Case.__table__, CaseAccessRule.__table__, FileEditSession.__table__):
+        for table in (User.__table__, Case.__table__, CaseAccessRule.__table__, DbFile.__table__, FileEditSession.__table__):
             table.create(engine)
     finally:
         for column, original in patched:
@@ -118,6 +118,45 @@ def test_inactive_owner_not_authorized() -> None:
     db.add(user)
     db.commit()
     assert session_owner_still_authorized(db, sess) is None
+
+
+def test_webdav_load_session_rejects_inactive_owner() -> None:
+    """CL-07: after account disable, session capability must not resolve for GET or PUT."""
+    from app.models import FileCategory
+    from app.routers.webdav import _load_session
+
+    db = _session()
+    user = _user(db, active=True)
+    case = _case(db, user)
+    fid = uuid.uuid4()
+    now = datetime.now(timezone.utc)
+    frow = DbFile(
+        id=fid,
+        case_id=case.id,
+        owner_id=user.id,
+        category=FileCategory.case_document,
+        folder_path="",
+        original_filename="doc.docx",
+        storage_path=f"cases/{case.id}/{fid}/doc.docx",
+        mime_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        size_bytes=1,
+        version=1,
+        created_at=now,
+        updated_at=now,
+    )
+    db.add(frow)
+    db.commit()
+    sess = _sess(db, user=user, case=case, file_id=fid)
+
+    assert _load_session(db, sess.token) is not None
+
+    user.is_active = False
+    db.add(user)
+    db.commit()
+
+    assert _load_session(db, sess.token) is None
+    db.refresh(sess)
+    assert sess.released_at is not None
 
 
 def test_release_edit_sessions_for_user() -> None:

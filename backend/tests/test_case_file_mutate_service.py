@@ -108,7 +108,10 @@ def test_rename_rejects_extension_change(mutate_db) -> None:
         rename_case_file(
             case.id,
             row.id,
-            CaseFileRenameUpdate(original_filename="letter.pdf"),
+            CaseFileRenameUpdate(
+                original_filename="letter.pdf",
+                expected_original_filename="letter.docx",
+            ),
             user,
             db,
         )
@@ -136,7 +139,10 @@ def test_rename_rejects_system_folder_marker(mutate_db) -> None:
         rename_case_file(
             case.id,
             row.id,
-            CaseFileRenameUpdate(original_filename="Renamed"),
+            CaseFileRenameUpdate(
+                original_filename="Renamed",
+                expected_original_filename="Contracts",
+            ),
             user,
             db,
         )

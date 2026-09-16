@@ -1692,7 +1692,14 @@ class CaseFolderMoveUpdate(BaseModel):
 
 
 class CaseFileRenameUpdate(BaseModel):
+    """Rename a case file.
+
+    ``expected_original_filename`` is the name the client observed before renaming (CAS).
+    Concurrent renames that both target the same starting name yield one 200 and one 409 (CL-19).
+    """
+
     original_filename: str = Field(min_length=1, max_length=512)
+    expected_original_filename: str = Field(min_length=1, max_length=512)
 
 
 class CommentFileUpdate(BaseModel):

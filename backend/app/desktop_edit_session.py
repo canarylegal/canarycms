@@ -82,9 +82,18 @@ def release_edit_sessions_for_user(
     if case_id is not None:
         q = q.where(FileEditSession.case_id == case_id)
     rows = list(db.execute(q).scalars().all())
+    file_ids = {sess.file_id for sess in rows}
     for sess in rows:
         sess.released_at = now
         db.add(sess)
+    # CL-18 / CL-07: do not leave force-save pending after revoke (callback must not persist).
+    for fid in file_ids:
+        frow = db.get(DbFile, fid)
+        if frow is not None and frow.oo_force_save_pending:
+            frow.version = (frow.version or 1) + 1
+            frow.oo_force_save_pending = False
+            frow.updated_at = now
+            db.add(frow)
     return len(rows)
 
 
@@ -98,6 +107,58 @@ def session_owner_still_authorized(db: Session, sess: FileEditSession) -> User |
     if sess.case_id is not None and get_case_if_accessible(sess.case_id, user, db) is None:
         return None
     return user
+
+
+_EDIT_SESSION_REQUIRED_DETAIL = (
+    "This document is no longer checked out for editing. Reload the editor to save changes."
+)
+
+
+def get_active_edit_session_for_file(db: Session, file_id: uuid.UUID) -> FileEditSession | None:
+    """Return any non-expired, unreleased edit session for ``file_id`` (ONLYOFFICE callback path)."""
+    now = _utcnow()
+    return (
+        db.execute(
+            select(FileEditSession)
+            .where(
+                FileEditSession.file_id == file_id,
+                FileEditSession.released_at.is_(None),
+                FileEditSession.expires_at > now,
+            )
+            .order_by(FileEditSession.created_at.desc())
+            .limit(1)
+        )
+        .scalars()
+        .first()
+    )
+
+
+def require_user_active_edit_session(db: Session, file_id: uuid.UUID, user: User) -> FileEditSession:
+    """Require an active edit session owned by ``user`` before staff-initiated save paths (CL-18)."""
+    now = _utcnow()
+    sess = (
+        db.execute(
+            select(FileEditSession)
+            .where(
+                FileEditSession.file_id == file_id,
+                FileEditSession.user_id == user.id,
+                FileEditSession.released_at.is_(None),
+                FileEditSession.expires_at > now,
+            )
+            .order_by(FileEditSession.created_at.desc())
+            .limit(1)
+        )
+        .scalars()
+        .first()
+    )
+    if sess is None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=_EDIT_SESSION_REQUIRED_DETAIL)
+    if session_owner_still_authorized(db, sess) is None:
+        sess.released_at = now
+        db.add(sess)
+        db.commit()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=_EDIT_SESSION_REQUIRED_DETAIL)
+    return sess
 
 
 def acquire_file_edit_session(

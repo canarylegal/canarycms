@@ -671,7 +671,10 @@ export function CaseDocsContextMenu({
                         apiFetch(`/cases/${caseId}/files/${f.id}/rename`, {
                           token,
                           method: 'PATCH',
-                          json: { original_filename: finalName },
+                          json: {
+                            original_filename: finalName,
+                            expected_original_filename: originalName,
+                          },
                         })
                           .then(() => onRefresh())
                           .catch((e: any) => setActionErr(e?.message ?? 'Failed to rename file'))

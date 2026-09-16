@@ -91,11 +91,17 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _as_utc(dt: datetime) -> datetime:
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
 def _load_session(db: Session, token: str) -> tuple[FileEditSession, DbFile] | None:
     row = db.execute(select(FileEditSession).where(FileEditSession.token == token)).scalar_one_or_none()
     if row is None:
         return None
-    if row.released_at is not None or row.expires_at <= _now():
+    if row.released_at is not None or _as_utc(row.expires_at) <= _now():
         return None
     f = db.get(DbFile, row.file_id)
     if f is None:
@@ -445,6 +451,9 @@ def webdav_get_file(
         "Accept-Ranges": "bytes",
         "ETag": etag,
         "MS-Author-Via": "DAV",
+        # Token-in-path capability URL — forbid shared caches so revoke cannot leave GET 200 (CL-07).
+        "Cache-Control": "private, no-store, no-cache, must-revalidate",
+        "Pragma": "no-cache",
     }
     if last_mod_hdr:
         base_headers["Last-Modified"] = last_mod_hdr
