@@ -5863,7 +5863,7 @@ html.dark .emlPreviewBodyWrap {
   align-items: flex-start;
   justify-content: center;
   padding: 32px 16px 24px;
-  background: var(--page-gradient);
+  background: var(--portal-bg, var(--page-gradient));
   background-attachment: fixed;
 }
 

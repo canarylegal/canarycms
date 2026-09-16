@@ -1812,14 +1812,14 @@ html.dark .finTotalCr {
 /* ── Client portal: modern layout on Canary chrome blue ────────── */
 html:has(.portalShell),
 html:has(.portalShell) body {
-  background: var(--local-chrome) !important;
+  background: var(--portal-bg, var(--local-chrome)) !important;
   background-attachment: fixed !important;
 }
 
 .portalShell {
   position: relative;
   isolation: isolate;
-  background: var(--local-chrome) !important;
+  background: var(--portal-bg, var(--local-chrome)) !important;
   background-attachment: fixed !important;
   padding: 40px 20px 28px;
   min-height: 100vh;

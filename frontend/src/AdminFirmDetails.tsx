@@ -1,7 +1,12 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { apiFetch, apiUrl } from './api'
 import type { ApiError } from './api'
 import type { FirmSettingsOut } from './types'
+import {
+  DEFAULT_PORTAL_BACKGROUND,
+  normalizePortalBackgroundColor,
+  portalBackgroundContrastOk,
+} from './portal/portalBackground'
 
 export function AdminFirmDetails({ token }: { token: string }) {
   const [row, setRow] = useState<FirmSettingsOut | null>(null)
@@ -22,6 +27,16 @@ export function AdminFirmDetails({ token }: { token: string }) {
   const [clientBankSort, setClientBankSort] = useState('')
   const [clientBankAccountNumber, setClientBankAccountNumber] = useState('')
   const [clientBankLast4, setClientBankLast4] = useState('')
+  /** Draft hex text (may be partial while typing). Empty = product default. */
+  const [portalBgHex, setPortalBgHex] = useState('')
+
+  const portalBgNormalized = useMemo(() => normalizePortalBackgroundColor(portalBgHex), [portalBgHex])
+  const portalBgPreview = portalBgNormalized ?? DEFAULT_PORTAL_BACKGROUND
+  const portalBgContrastOk = useMemo(
+    () => portalBackgroundContrastOk(portalBgPreview),
+    [portalBgPreview],
+  )
+  const portalBgHexInvalid = Boolean(portalBgHex.trim()) && portalBgNormalized == null
 
   async function load() {
     setErr(null)
@@ -40,6 +55,7 @@ export function AdminFirmDetails({ token }: { token: string }) {
       setClientBankSort(data.client_bank_sort_code ?? '')
       setClientBankAccountNumber(data.client_bank_account_number ?? '')
       setClientBankLast4(data.client_bank_account_number_last4 ?? '')
+      setPortalBgHex((data.portal_background_color || '').trim())
     } catch (e) {
       setErr((e as ApiError).message ?? 'Failed to load firm details')
     }
@@ -54,6 +70,11 @@ export function AdminFirmDetails({ token }: { token: string }) {
     setErr(null)
     setSaved(false)
     try {
+      if (portalBgHexInvalid) {
+        setErr('Enter a valid hex colour such as #1E293B, or clear the field for the default.')
+        setBusy(false)
+        return
+      }
       const data = await apiFetch<FirmSettingsOut>('/admin/firm-settings', {
         token,
         method: 'PATCH',
@@ -69,9 +90,12 @@ export function AdminFirmDetails({ token }: { token: string }) {
           client_bank_sort_code: clientBankSort.trim() || null,
           client_bank_account_number: clientBankAccountNumber.trim() || null,
           client_bank_account_number_last4: clientBankLast4.trim() || null,
+          // Empty string clears to product default on the server.
+          portal_background_color: portalBgNormalized ?? '',
         },
       })
       setRow(data)
+      setPortalBgHex((data.portal_background_color || '').trim())
       setSaved(true)
     } catch (e) {
       setErr((e as ApiError).message ?? 'Save failed')
@@ -199,6 +223,91 @@ export function AdminFirmDetails({ token }: { token: string }) {
                 />
               </label>
             )}
+
+            <div style={{ fontWeight: 600, marginTop: 4 }}>Portal background colour</div>
+            <div className="muted" style={{ fontSize: 13 }}>
+              Solid page colour behind the client portal only (staff UI is unchanged). Use the colour picker or enter a
+              hex code. Leave empty for the Canary default.
+            </div>
+            <div className="row" style={{ gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+              <label className="field" style={{ margin: 0 }}>
+                <span className="muted" style={{ fontSize: 12 }}>
+                  Colour
+                </span>
+                <input
+                  type="color"
+                  value={portalBgPreview.toLowerCase()}
+                  disabled={busy}
+                  aria-label="Portal background colour picker"
+                  onChange={(e) => setPortalBgHex(e.target.value.toUpperCase())}
+                  style={{ width: 48, height: 36, padding: 0, border: '1px solid rgba(15,23,42,0.2)', cursor: 'pointer' }}
+                />
+              </label>
+              <label className="field" style={{ margin: 0, minWidth: 140 }}>
+                <span className="muted" style={{ fontSize: 12 }}>
+                  Hex
+                </span>
+                <input
+                  value={portalBgHex}
+                  onChange={(e) => setPortalBgHex(e.target.value)}
+                  disabled={busy}
+                  placeholder={DEFAULT_PORTAL_BACKGROUND}
+                  spellCheck={false}
+                  autoComplete="off"
+                  aria-invalid={portalBgHexInvalid}
+                />
+              </label>
+              <button
+                type="button"
+                className="btn"
+                disabled={busy || !portalBgHex.trim()}
+                onClick={() => setPortalBgHex('')}
+                style={{ alignSelf: 'flex-end' }}
+              >
+                Use default
+              </button>
+            </div>
+            {portalBgHexInvalid ? (
+              <div className="error" style={{ fontSize: 13 }}>
+                Enter a valid hex colour such as #1E293B or #ABC.
+              </div>
+            ) : null}
+            {!portalBgHexInvalid && !portalBgContrastOk ? (
+              <div className="muted" style={{ fontSize: 13, color: '#b45309' }}>
+                This colour may make the portal title hard to read (light text on the page background). Prefer a darker
+                shade, or check the preview below.
+              </div>
+            ) : null}
+            <div
+              aria-label="Portal background preview"
+              style={{
+                borderRadius: 12,
+                padding: '20px 16px',
+                background: portalBgPreview,
+                border: '1px solid rgba(15,23,42,0.12)',
+              }}
+            >
+              <div style={{ textAlign: 'center', color: '#f8fafc', fontWeight: 700, fontSize: 18 }}>
+                {(tradingName.trim() || 'Firm name') + ' Portal'}
+              </div>
+              <div style={{ textAlign: 'center', color: 'rgba(226,232,240,0.78)', fontSize: 13, marginTop: 4 }}>
+                Signed in as Client Name
+              </div>
+              <div
+                style={{
+                  marginTop: 14,
+                  background: '#fff',
+                  borderRadius: 10,
+                  padding: '14px 12px',
+                  color: '#0f172a',
+                  fontSize: 13,
+                  boxShadow: '0 8px 24px rgba(15,23,42,0.18)',
+                }}
+              >
+                Preview of the white content card on your chosen background.
+              </div>
+            </div>
+
             <div style={{ fontWeight: 600, marginTop: 8 }}>Firm address</div>
             <label className="field">
               <span>Address line 1</span>
@@ -256,7 +365,7 @@ export function AdminFirmDetails({ token }: { token: string }) {
                 inputMode="numeric"
               />
             </label>
-            <button type="button" className="btn primary" onClick={() => void save()} disabled={busy}>
+            <button type="button" className="btn primary" onClick={() => void save()} disabled={busy || portalBgHexInvalid}>
               Save firm details
             </button>
           </div>

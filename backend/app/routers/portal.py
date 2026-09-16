@@ -235,6 +235,8 @@ def _grant_summaries(
 
 @router.get("/config", response_model=PortalConfigOut)
 def portal_config(db: Session = Depends(get_db)) -> PortalConfigOut:
+    from app.portal_background import portal_background_color
+
     firm = db.get(FirmSettings, 1)
     name = firm_display_name(firm)
     logo_url = "/portal/logo" if firm and firm.portal_logo_file_id else None
@@ -242,6 +244,7 @@ def portal_config(db: Session = Depends(get_db)) -> PortalConfigOut:
         firm_name=name,
         portal_title=portal_title(firm),
         portal_logo_url=logo_url,
+        portal_background_color=portal_background_color(firm),
         powered_by_label=POWERED_BY_LABEL,
         powered_by_url=CANARY_LEGAL_SOFTWARE_URL,
     )

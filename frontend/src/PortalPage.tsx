@@ -31,6 +31,7 @@ const DEFAULT_PORTAL_CONFIG: PortalBrandingConfig = {
   firm_name: '',
   portal_title: 'Client Portal',
   portal_logo_url: null,
+  portal_background_color: null,
   powered_by_label: 'Powered by Canary Legal Software',
   powered_by_url: 'https://canarylegalsoftware.co.uk',
 }
@@ -301,6 +302,7 @@ export default function PortalPage() {
         firm_name: cfg.firm_name?.trim() ?? '',
         portal_title: cfg.portal_title?.trim() || DEFAULT_PORTAL_CONFIG.portal_title,
         portal_logo_url: cfg.portal_logo_url ?? null,
+        portal_background_color: cfg.portal_background_color ?? null,
         powered_by_label: cfg.powered_by_label?.trim() || DEFAULT_PORTAL_CONFIG.powered_by_label,
         powered_by_url: cfg.powered_by_url?.trim() || DEFAULT_PORTAL_CONFIG.powered_by_url,
       })

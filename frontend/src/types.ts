@@ -150,6 +150,8 @@ export type FirmSettingsOut = {
   quote_letterhead_original_filename?: string | null
   portal_logo_configured?: boolean
   portal_logo_original_filename?: string | null
+  /** `#RRGGBB` solid portal page background; null = product default. */
+  portal_background_color?: string | null
   default_signature_configured?: boolean
   default_signature_original_filename?: string | null
   default_signature_scale?: number

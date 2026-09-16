@@ -1,4 +1,5 @@
-import type { ReactNode } from 'react'
+import type { CSSProperties, ReactNode } from 'react'
+import { useEffect } from 'react'
 import { apiUrl } from '../api'
 import { CANARY_ICON_32_SRC } from '../AppBrand'
 
@@ -6,6 +7,8 @@ export type PortalBrandingConfig = {
   firm_name: string
   portal_title: string
   portal_logo_url: string | null
+  /** `#RRGGBB` or null for product default chrome. */
+  portal_background_color?: string | null
   powered_by_label: string
   powered_by_url: string
 }
@@ -58,8 +61,24 @@ export function PortalLayout({
   headerActions?: ReactNode
   children: ReactNode
 }) {
+  const bg = (config.portal_background_color || '').trim() || null
+
+  useEffect(() => {
+    const root = document.documentElement
+    if (bg) {
+      root.style.setProperty('--portal-bg', bg)
+    } else {
+      root.style.removeProperty('--portal-bg')
+    }
+    return () => {
+      root.style.removeProperty('--portal-bg')
+    }
+  }, [bg])
+
+  const shellStyle = (bg ? ({ ['--portal-bg' as string]: bg } as CSSProperties) : undefined)
+
   return (
-    <div className="portalShell">
+    <div className="portalShell" style={shellStyle}>
       <div className={`portalLayout${wide ? ' portalLayout--wide' : ' portalLayout--narrow'}`}>
         {wide ? (
           <>
