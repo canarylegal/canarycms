@@ -4,6 +4,10 @@ All notable releases of Canary CMS are documented here. Prefer a tagged release 
 
 ## [Unreleased]
 
+## [1.1.0] — 2026-09-16
+
+Security hardening from pen-test rounds CL-05–20, structural maintainability splits, portal branding, and expanded automated tests.
+
 ### Added
 - Client portal page background is configurable per firm (Admin → Firm details: colour picker + hex); staff UI colours are unchanged.
 
@@ -44,12 +48,17 @@ All notable releases of Canary CMS are documented here. Prefer a tagged release 
 - Portal client e-mails state why access was granted, name the firm, and explain how to recover if a code fails.
 - Portal staff alerts for uploads, completed forms, and quote responses include the matter reference in the subject, a next-step line, and a deep link to open the matter in Canary.
 - Matter portal staff notification recipients use a multi-select of Canary users (empty selection keeps fee-earner default).
+
 ### Ops / release readiness
 - Admin → Deploy defaults to **`latest-release`** (compare to newest GitHub Release tip, not floating `main`).
 - Backend rejects `.env.example` `CHANGE_ME_*` / all-`#` secret placeholders at startup.
 - Go-live checklist and README quick start require generated secrets and tag-pinned checkouts.
 - Portal smoke workflow runs on `v*` tags and on compose/backend image path changes; healthier wait/logging.
 - Fix duplicate Alembic revision id that blocked cold `alembic upgrade head` (portal smoke / fresh installs).
+
+### Operator notes
+- Prefer pin to ``v1.1.0`` (or newer) over floating ``main``.
+- File rename API now requires ``expected_original_filename`` (staff UI updated).
 
 ## [1.0.0] — 2026-09-11
 
@@ -67,4 +76,5 @@ First named production baseline. Active development continues; `1.x` will move w
 - Former GUI Compose updater code is retained fail-closed on purpose; see module docs under `backend/app/local_compose_update.py` and `docs/DEPLOYMENT.md`.
 - Thunderbird add-in versioning remains separate (`thunderbird-addin` / `thunderbird-v*` workflow).
 
+[1.1.0]: https://github.com/canarylegal/canarycms/releases/tag/v1.1.0
 [1.0.0]: https://github.com/canarylegal/canarycms/releases/tag/v1.0.0
