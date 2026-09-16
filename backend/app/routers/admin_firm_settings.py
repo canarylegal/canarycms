@@ -118,6 +118,7 @@ def _to_out(db: Session, row: FirmSettings) -> FirmSettingsOut:
         quote_letterhead_original_filename=quote_name,
         portal_logo_configured=bool(row.portal_logo_file_id),
         portal_logo_original_filename=portal_logo_name,
+        portal_background_color=row.portal_background_color,
         default_signature_configured=bool(row.default_signature_file_id),
         default_signature_original_filename=default_sig_name,
         default_signature_scale=int(row.default_signature_scale or 7),
@@ -276,6 +277,13 @@ def patch_firm_settings(
         digits = "".join(ch for ch in raw if ch.isdigit())
         data["client_bank_account_number"] = digits or None
         data["client_bank_account_number_last4"] = digits[-4:] if digits else None
+    if "portal_background_color" in data:
+        from app.portal_background import normalize_portal_background_color
+
+        try:
+            data["portal_background_color"] = normalize_portal_background_color(data.get("portal_background_color"))
+        except ValueError as e:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
     for k, v in data.items():
         setattr(row, k, v)
     row.updated_at = datetime.utcnow()

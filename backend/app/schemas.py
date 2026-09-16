@@ -469,6 +469,7 @@ class FirmSettingsOut(BaseModel):
     quote_letterhead_original_filename: str | None = None
     portal_logo_configured: bool = False
     portal_logo_original_filename: str | None = None
+    portal_background_color: str | None = None
     default_signature_configured: bool = False
     default_signature_original_filename: str | None = None
     default_signature_scale: int = Field(default=7, ge=1, le=10)
@@ -514,6 +515,8 @@ class FirmSettingsUpdate(BaseModel):
     letterhead_style: LetterheadStyle | None = None
     quote_letterhead_style: LetterheadStyle | None = None
     default_signature_scale: int | None = Field(default=None, ge=1, le=10)
+    # Empty string clears to the product default; omit to leave unchanged.
+    portal_background_color: str | None = Field(default=None, max_length=32)
     mandate_two_factor: bool | None = None
     mandate_password_rotation: bool | None = None
     password_rotation_days: int | None = Field(default=None, ge=1, le=3650)
@@ -2397,6 +2400,7 @@ class PortalConfigOut(BaseModel):
     firm_name: str
     portal_title: str
     portal_logo_url: str | None = None
+    portal_background_color: str | None = None
     powered_by_label: str = "Powered by Canary Legal Software"
     powered_by_url: str = "https://canarylegalsoftware.co.uk"
 

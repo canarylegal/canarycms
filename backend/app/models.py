@@ -407,6 +407,8 @@ class FirmSettings(Base):
     portal_logo_file_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("file.id", ondelete="SET NULL"), nullable=True
     )
+    # Client portal page background only (#RRGGBB). Null = product default chrome.
+    portal_background_color: Mapped[str | None] = mapped_column(String(7), nullable=True)
     default_signature_file_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("file.id", ondelete="SET NULL"), nullable=True
     )
