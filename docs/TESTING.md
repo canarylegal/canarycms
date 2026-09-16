@@ -50,6 +50,11 @@ cd frontend && npm test
 
 Vitest covers pure helpers and a few UI seams (not E2E): portal background/contrast, case finance totals, folder path codec, office/e-mail file detection, doc list formatting, matter labels / close-matter balance checks, portal folder sharing copy, API error humanization, app navigation parse/build/sanitize, dialog queue, contact merge / portal identity guards, and related session / main-menu helpers. Prefer unit tests without heavy network mocks unless a thin `apiFetch` stub is enough.
 
+Backend `pytest` also covers (unit / service level, not full HTTP E2E):
+- **Canary Sign / WebDAV / Radicale** — envelope PDF helpers, WebDAV path/auth/PROPFIND helpers, ICS parse + calendar access, htpasswd sync
+- **Portal** — OTP mint/verify, portal auth service, grant expiry/path rules, form complete + PDF fill
+- **Files / OnlyOffice** — callback SSRF URL checks, editable type sets, case file mutate/folder services, force-save wait/command
+
 ## Live security checks
 
 ```bash

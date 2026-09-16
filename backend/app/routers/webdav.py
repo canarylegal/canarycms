@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session
 from app.db import get_db
 from app.file_storage import FILES_ROOT, StoredFilePaths, ensure_files_root, path_is_under_files_root
 from app.models import File as DbFile, FileCategory, FileEditSession, User
-from app.routers.files import convert_case_upload_msg_to_eml_if_applicable, refresh_root_eml_mail_metadata
+from app.file_eml_service import convert_case_upload_msg_to_eml_if_applicable, refresh_root_eml_mail_metadata
 from app.audit import log_event
 from app.canary_public_url import get_canary_public_base
 from app.docx_util import ensure_docx_proofing_language_en_gb_bytes, finalize_stored_docx_bytes
