@@ -12,7 +12,7 @@ from app.deps import require_case_access
 from app.file_storage import FILES_ROOT, ensure_files_root, path_is_under_files_root
 from app.models import File as DbFile
 from app.models import User
-from app.routers.files import _case_email_compose_bundle
+from app.case_email_compose_service import _case_email_compose_bundle
 from app.schemas import (
     CaseEmailDraftM365In,
     MailPluginComposeAttachmentOut,

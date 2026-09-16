@@ -7,6 +7,10 @@ All notable releases of Canary CMS are documented here. Prefer a tagged release 
 ### Added
 - Client portal page background is configurable per firm (Admin → Firm details: colour picker + hex); staff UI colours are unchanged.
 
+### Changed
+- Structural split of hotspot modules: fat `files`/`portal` routers thinned behind services; `docx_util` packaged by concern; Admin/CaseDetail/Reports/Calendar UI broken into focused modules.
+- Frontend Vitest baseline expanded (portal/case helpers, API error detail, navigation) — still unit-level, not E2E.
+
 ### Security
 - WebAuthn login begin returns the same HTTP 401 `Invalid credentials` when the account is unknown or has no passkeys (CL-16).
 - Case/contact search rejects queries containing NUL bytes with HTTP 400 instead of HTTP 500 (CL-17).
