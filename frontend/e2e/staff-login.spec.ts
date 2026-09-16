@@ -42,9 +42,11 @@ test('staff can open a matter from the main menu', async ({ page }) => {
     test.skip(true, 'Master recovery has no matter main menu — use a firm staff account')
   }
 
-  await expect(page.locator('.mainMenuShell')).toBeVisible({ timeout: 30_000 })
+  // Matters list host (not quote/fee-scale shells — those also use mainMenuShell).
+  const casesHost = page.locator('.mainMenuCasesHost:not(.mainMenuCasesHost--hidden)')
+  await expect(casesHost).toBeVisible({ timeout: 30_000 })
 
-  const matterRow = page.locator('.mainMenuCasesHost tbody tr').first()
+  const matterRow = casesHost.locator('.tr.rowbtn').first()
   const hasMatter = await matterRow.isVisible().catch(() => false)
   test.skip(!hasMatter, 'No matters in main menu (seed a case or run portal fixture)')
 
