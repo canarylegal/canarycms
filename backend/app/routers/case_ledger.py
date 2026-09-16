@@ -68,7 +68,7 @@ def create_posting(
 ) -> None:
     require_case_access(case_id, user, db)
     result = post_transaction(case_id, payload, user, db)
-    db.commit()
+    # Audit in the same transaction as the posting (single commit below).
     log_ledger_post(
         db,
         actor_user_id=user.id,
@@ -77,6 +77,7 @@ def create_posting(
         payload=payload,
         is_approved=result.is_approved,
     )
+    db.commit()
 
 
 @router.post("/{case_id}/ledger/approve/{pair_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -88,8 +89,8 @@ def approve_posting(
 ) -> None:
     require_case_access(case_id, user, db)
     approve_ledger_pair(case_id, pair_id, user, db)
-    db.commit()
     log_ledger_approve(db, actor_user_id=user.id, case_id=case_id, pair_id=pair_id)
+    db.commit()
 
 
 @router.patch("/{case_id}/ledger/pairs/{pair_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -102,8 +103,8 @@ def edit_posting(
 ) -> None:
     require_case_access(case_id, user, db)
     update_ledger_pair_unapproved(case_id, pair_id, payload, user, db)
-    db.commit()
     log_ledger_edit(db, actor_user_id=user.id, case_id=case_id, pair_id=pair_id, payload=payload)
+    db.commit()
 
 
 @router.delete("/{case_id}/ledger/pairs/{pair_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -116,5 +117,5 @@ def reject_posting(
 ) -> None:
     require_case_access(case_id, user, db)
     reject_ledger_pair_unapproved(case_id, pair_id, user, db, reject_comment=payload.comment)
-    db.commit()
     log_ledger_reject(db, actor_user_id=user.id, case_id=case_id, pair_id=pair_id)
+    db.commit()
