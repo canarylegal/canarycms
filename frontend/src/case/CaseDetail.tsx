@@ -1,57 +1,21 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { createPortal } from 'react-dom'
 import { lockBodyWaitCursor, unlockBodyWaitCursor } from '../bodyCursorLock'
-import { CaseEventCreateModal } from '../CaseEventCreateModal'
 import { resolveContactNameWithFallback } from '../GlobalContactCreateForm'
-import { ManageCaseAccessModal } from '../ManageCaseAccessModal'
 import { MATTER_CONTACT_TYPE_OPTIONS_FALLBACK } from '../matterContactTypeOptions'
-import { apiFetch, apiUrl, browserAbsoluteApiUrl } from '../api'
-import {
-  appendOutlookWebAuthHintsForNav,
-  OWA_MESSAGE_WINDOW_FEATURES,
-  openM365ComposeDraft,
-  openOutlookWebAppFromGraphWebLink,
-  OWA_MAIL_WINDOW_NAME,
-} from '../emailClient'
-import {
-  buildMailtoComposeUrl,
-  buildOutlookWebComposeUrl,
-  normalizeComposeQueryPlusAsSpaces,
-  buildOutlookWebReadItemUrl,
-  isLikelyExchangeRestItemId,
-  isUsableOutlookMessageWebLink,
-  normalizeOutlookWebReadLink,
-  shouldUseGraphDraftForMatterEmail,
-} from '../emailLauncher'
-import { ContactSearchPicker } from '../ContactSearchPicker'
+import { apiFetch } from '../api'
 import { useDialogs } from '../DialogProvider'
 import { useNotifications } from '../NotificationsProvider'
-import { SearchInput } from '../SearchInput'
-import { SingleSelectDropdown } from '../SingleSelectDropdown'
 import {
   matterHeadDropdownOptions,
   matterHeadIdForSubType,
   matterSubDropdownOptions,
 } from '../matterTypeOptions'
-import { SendQuoteViaPortalModal } from '../SendQuoteViaPortalModal'
-import { SendPortalFormModal } from '../SendPortalFormModal'
-import { SendDocusignModal } from '../SendDocusignModal'
-import { SendCanarySignModal } from '../SendCanarySignModal'
-import { TaskCreateModal } from '../TaskCreateModal'
 import { useExclusiveDropdownOpen } from '../useExclusiveDropdownOpen'
-import { QuoteWizard } from '../QuoteWizard'
-import { QuoteSendPrompt } from '../QuoteSendPrompt'
 import { useQuoteAwaitingSave, type QuoteAwaitingSaveContext } from '../quoteAwaitingSave'
-import { isQuotePortalSendCandidate } from '../quotePortalFile'
-import { QUOTE_EMAIL_PRECEDENT_REFERENCE, type PendingCaseCompose, type PrecedentPickerState } from '../quoteEmailPrecedent'
-import { CANARY_FOLLOW_UP_STANDARD_TASK_ID } from '../standardTasks'
-import { TextPromptModal } from '../TextPromptModal'
-import { openOnlyOfficeCaseEditor } from '../onlyofficeEditorWindow'
-import { caseHasRevokedUserAccess, formatCaseStatusLabel, type CaseWorkflowStatus } from '../types'
+import { type PendingCaseCompose } from '../quoteEmailPrecedent'
+import { type CaseWorkflowStatus } from '../types'
 import type {
   CaseContactOut,
-  CaseEmailDraftM365Out,
-  CaseEmailMailtoOut,
   CaseEventsOut,
   CaseNoteOut,
   CaseOut,
@@ -65,66 +29,33 @@ import type {
   LedgerOut,
   MatterContactTypeOut,
   MatterHeadTypeOut,
-  PrecedentCategoryOut,
-  PrecedentOut,
   TaskMenuRow,
   UserPublic,
   UserSummary,
   CasePortalFolderAccessGrantOut,
-  CasePortalNotifyFilesOut,
   CasePortalShareStatusOut,
-  OutlookPluginPendingComposeHandoffOut,
 } from '../types'
 import { useUserUiPreferences } from '../useUserUiPreferences'
 import { useColumnWidths } from '../useColumnWidths'
 import { LEGACY_AUTO_TASKS_MENU_COLUMN_WIDTHS, effectiveColumnWidths } from '../columnGridDefaults'
 import { TASKS_MENU_COLUMN_COUNT, TASKS_MENU_COLUMN_WIDTHS_DEFAULT } from '../userUiPreferences'
-import { LAWYER_CLIENTS_REQUIRED_MSG } from './CaseContactsDocForms'
 import { computeDocContextMenuStyle } from './docContextMenu'
-import { dndEventHasFiles, docListPrimaryDate, formatDocFileSize, formatDocModified, matterTypeDisplayLine } from './docFormat'
-import { DocsFileDescCell, DocsFolderDescCell, folderContentsSummary } from './DocCells'
 import { matterContactTypeLabel } from './matterLabels'
-import { EmlPreviewModal, parseEmlForPreview, type EmlPreviewData } from './emlPreview'
-import { isEmlLikeFileSummary, isEmlLikeUploadFile, isOfficeLikeFile } from './officeFiles'
-import {
-  decodeFolderPathForDisplay,
-  decodeFolderPathSegment,
-  joinFolderPath,
-  splitFolderPath,
-} from './folderPathCodec'
-import {
-  isPortalSharedFolder,
-  portalContactsForFolder,
-  portalSharedFolderDeleteConfirmMessage,
-  portalSharedFolderMoveConfirmMessage,
-  portalSharedFolderUploadNotifyMessage,
-} from './portalFolderAccess'
-import {
-  CASE_DOCS_TOOLBAR_ICONS,
-  CaseDocsToolbarBtnIcon,
-} from './caseDetailChrome'
-import {
-  CASE_FILE_FETCH_MS,
-  caseAuthHeaders,
-  fetchCaseFileResponse,
-  fetchEmlTextForPreview,
-  fetchTimedOutMessage,
-  fileDocOwnerLabel,
-  isClientMatterContact,
-  LAWYERS_TYPE_SLUG,
-} from './caseDetailHelpers'
-import {
-  CaseDetailAccountsPanel,
-  CaseDetailContactsPanel,
-  CaseDetailEditDetailsPanel,
-  CaseDetailEventsPanel,
-  CaseDetailFinancePanel,
-  CaseDetailPortalHubPanel,
-  CaseDetailPortalSharePanel,
-  CaseDetailPropertyPanel,
-  CaseDetailTasksPanel,
-} from './CaseDetailDocPanels'
+import type { EmlPreviewData } from './emlPreview'
+import { isClientMatterContact } from './caseDetailHelpers'
+import { isCommentFile } from './caseDocFileOps'
+import { linkPickedGlobalContactIfNeeded } from './caseContactPickOps'
+import { useCaseDocFileHandlers } from './useCaseDocFileHandlers'
+import { useCaseDocsFolderData } from './useCaseDocsFolderData'
+import { useCaseDocsSelection } from './useCaseDocsSelection'
+import { useCasePrecedentPicker } from './useCasePrecedentPicker'
+import { CaseDetailDocuments } from './CaseDetailDocuments'
 import { CaseDetailLeftNav } from './CaseDetailLeftNav'
+import type { CaseDetailLeftDocPanel } from './CaseDetailLeftNav'
+import { CaseDetailPanelHost } from './CaseDetailPanelHost'
+import { CaseMatterHero } from './CaseMatterHero'
+import { CaseDocsContextMenu } from './CaseDocsContextMenu'
+import { CaseDetailOverlayModals } from './CaseDetailOverlayModals'
 
 export type CaseOpenDocPanel = 'accounts'
 
@@ -301,23 +232,12 @@ export function CaseDetail({
     | { kind: 'folder'; folderPath: string; x: number; y: number }
     | { kind: 'surface'; x: number; y: number }
   >(null)
-  // Multi-selection: each entry is a file ID or "folder:<path>"
-  const [selectedDocSet, setSelectedDocSet] = useState<Set<string>>(new Set())
-  const [docFocusKey, setDocFocusKey] = useState<string | null>(null)
-  const docAnchorRef = useRef<string | null>(null)
   const [docSortKey, setDocSortKey] = useState<'description' | 'size' | 'created' | 'user'>('created')
   const [docSortDir, setDocSortDir] = useState<'asc' | 'desc'>('desc')
-  const [docsDragOver, setDocsDragOver] = useState(false)
   const [moveMenu, setMoveMenu] = useState<{ kind: 'file'; fileId: string } | { kind: 'folder'; folderPath: string } | null>(null)
   const [portalMenu, setPortalMenu] = useState<{ folderPath: string } | null>(null)
   const docMenuRef = useRef<HTMLDivElement | null>(null)
   const [docMenuStyle, setDocMenuStyle] = useState<{ left: number; top: number; maxHeight?: number } | null>(null)
-  const importInputRef = useRef<HTMLInputElement | null>(null)
-  const newMenuRef = useRef<HTMLDivElement | null>(null)
-  const newMenuBtnRef = useRef<HTMLButtonElement | null>(null)
-  const newMenuPortalRef = useRef<HTMLDivElement | null>(null)
-  const [newMenuOpen, setNewMenuOpen] = useState(false)
-  const [newMenuPos, setNewMenuPos] = useState<{ top: number; left: number } | null>(null)
   const [quoteWizardOpen, setQuoteWizardOpen] = useState(false)
   const [formSendOpen, setFormSendOpen] = useState(false)
   const [quoteAwaitingSave, setQuoteAwaitingSave] = useState<QuoteAwaitingSaveContext | null>(null)
@@ -395,18 +315,7 @@ export function CaseDetail({
     setTaskCreateOpen(true)
   }, [])
 
-  type CaseDocPanel =
-    | 'documents'
-    | 'events'
-    | 'finance'
-    | 'property'
-    | 'tasks'
-    | 'contacts'
-    | 'edit-details'
-    | 'accounts'
-    | 'portal-share'
-    | 'portal-hub'
-  const [caseDocPanel, setCaseDocPanel] = useState<CaseDocPanel>(() =>
+  const [caseDocPanel, setCaseDocPanel] = useState<CaseDetailLeftDocPanel>(() =>
     openDocPanel === 'accounts' ? 'accounts' : 'documents',
   )
   const goToOverview = useCallback(() => {
@@ -464,18 +373,23 @@ export function CaseDetail({
   const [propertyLoading, setPropertyLoading] = useState(false)
   const [propertyDraft, setPropertyDraft] = useState<CasePropertyPayload | null>(null)
   const [propertyBaseline, setPropertyBaseline] = useState<CasePropertyPayload | null>(null)
-  const [precedentPicker, setPrecedentPicker] = useState<PrecedentPickerState | null>(null)
-  const [precedentChoicesBySubType, setPrecedentChoicesBySubType] = useState<Record<string, PrecedentOut[]>>({})
-  const [precedentCategoriesBySubType, setPrecedentCategoriesBySubType] = useState<
-    Record<string, PrecedentCategoryOut[]>
-  >({})
-  const [precedentPickerSubTypeId, setPrecedentPickerSubTypeId] = useState<string | null>(null)
-  const [precedentPickerCategoryId, setPrecedentPickerCategoryId] = useState<string | null>(null)
-  const [precedentPickerExpandedSubTypes, setPrecedentPickerExpandedSubTypes] = useState<Set<string>>(
-    () => new Set(),
-  )
-  const [precedentSearch, setPrecedentSearch] = useState('')
-  const [precedentChosenId, setPrecedentChosenId] = useState<string | null>(null)
+  const [matterHeadTypes, setMatterHeadTypes] = useState<MatterHeadTypeOut[]>([])
+  const {
+    precedentPicker,
+    setPrecedentPicker,
+    precedentPickerSubTypeGroups,
+    precedentPickerExpandedSubTypes,
+    precedentCategoriesBySubType,
+    togglePrecedentPickerSubTypeExpanded,
+    selectPrecedentPickerNav,
+    precedentPickerSubTypeId,
+    precedentPickerCategoryId,
+    precedentSearch,
+    setPrecedentSearch,
+    precedentChosenId,
+    setPrecedentChosenId,
+    filteredPrecedentChoices,
+  } = useCasePrecedentPicker({ token, caseDetail, matterHeadTypes })
   const [contactPickModal, setContactPickModal] = useState<
     null | { precedentId: string | null; composeKind: 'letter' | 'email'; attachmentFileIds?: string[] }
   >(null)
@@ -499,7 +413,6 @@ export function CaseDetail({
   const [caseSources, setCaseSources] = useState<CaseSourceOut[]>([])
   /** Edit-case save/API errors only (shown inside the edit card, never in the case shell). */
   const [editCaseErr, setEditCaseErr] = useState<string | null>(null)
-  const [matterHeadTypes, setMatterHeadTypes] = useState<MatterHeadTypeOut[]>([])
 
   const [contactAddOpen, setContactAddOpen] = useState(false)
   const [selectedGlobalContactId, setSelectedGlobalContactId] = useState<string | null>(null)
@@ -738,10 +651,10 @@ export function CaseDetail({
     [users, caseDetail?.fee_earner_user_id],
   )
   const editStatusOptions = useMemo(() => {
-    const opts = [
+    const opts: { value: CaseWorkflowStatus; label: string }[] = [
       { value: 'open', label: 'Active' },
-      ...(caseDetail?.status === 'quote' ? [{ value: 'quote', label: 'Quote' }] : []),
-      ...(caseDetail?.status === 'quote_closed' ? [{ value: 'quote_closed', label: 'Closed' }] : []),
+      ...(caseDetail?.status === 'quote' ? [{ value: 'quote' as const, label: 'Quote' }] : []),
+      ...(caseDetail?.status === 'quote_closed' ? [{ value: 'quote_closed' as const, label: 'Closed' }] : []),
       { value: 'post_completion', label: 'Post-completion' },
       { value: 'closed', label: 'Closed' },
       { value: 'archived', label: 'Archived' },
@@ -924,1055 +837,79 @@ export function CaseDetail({
     return () => window.removeEventListener('mousedown', onDocMouseDown)
   }, [docMenu])
 
-  useLayoutEffect(() => {
-    if (!newMenuOpen) {
-      setNewMenuPos(null)
-      return
-    }
-    function updatePos() {
-      const btn = newMenuBtnRef.current
-      if (!btn) return
-      const rect = btn.getBoundingClientRect()
-      setNewMenuPos({ top: rect.bottom + 4, left: rect.left })
-    }
-    updatePos()
-    window.addEventListener('resize', updatePos)
-    window.addEventListener('scroll', updatePos, true)
-    return () => {
-      window.removeEventListener('resize', updatePos)
-      window.removeEventListener('scroll', updatePos, true)
-    }
-  }, [newMenuOpen])
+  const {
+    childFolders,
+    allFolderPaths,
+    sortedChildFolders,
+    sortedPinnedInFolder,
+    sortedRegularInFolder,
+    breadcrumbParts,
+    allDocKeys,
+  } = useCaseDocsFolderData({
+    files,
+    docSearch,
+    docFolder,
+    docSortKey,
+    docSortDir,
+  })
 
-  useEffect(() => {
-    if (!newMenuOpen) return
-    function onDocMouseDown(e: MouseEvent) {
-      const t = e.target as Node
-      if (newMenuRef.current?.contains(t) || newMenuPortalRef.current?.contains(t)) return
-      setNewMenuOpen(false)
-    }
-    function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') setNewMenuOpen(false)
-    }
-    document.addEventListener('mousedown', onDocMouseDown)
-    window.addEventListener('keydown', onKey)
-    return () => {
-      document.removeEventListener('mousedown', onDocMouseDown)
-      window.removeEventListener('keydown', onKey)
-    }
-  }, [newMenuOpen])
-
-  useEffect(() => {
-    if (!precedentPicker) {
-      setPrecedentChoicesBySubType({})
-      setPrecedentCategoriesBySubType({})
-      setPrecedentPickerSubTypeId(null)
-      setPrecedentPickerCategoryId(null)
-      setPrecedentPickerExpandedSubTypes(new Set())
-      setPrecedentSearch('')
-      return
-    }
-    const subId = caseDetail?.matter_sub_type_id
-    const headOnlyId = caseDetail?.matter_head_type_id
-    const kind = precedentPicker.kind
-    const preferReference = precedentPicker.preferPrecedentReference
-    let cancelled = false
-    async function load() {
-      try {
-        if (!subId) {
-          if (headOnlyId) {
-            const list = await apiFetch<PrecedentOut[]>(
-              `/precedents?kind=${kind}&matter_head_type_id=${headOnlyId}`,
-              { token },
-            )
-            if (cancelled) return
-            setPrecedentCategoriesBySubType({})
-            setPrecedentChoicesBySubType({ __head__: list })
-            setPrecedentPickerSubTypeId('__head__')
-            setPrecedentChosenId(
-              preferReference ? list.find((p) => p.reference === preferReference)?.id ?? null : null,
-            )
-            setPrecedentSearch('')
-            setPrecedentPickerCategoryId(null)
-            setPrecedentPickerExpandedSubTypes(new Set())
-            return
-          }
-          const list = await apiFetch<PrecedentOut[]>(
-            `/precedents?kind=${kind}&global_precedents_only=true`,
-            { token },
-          )
-          if (cancelled) return
-          setPrecedentCategoriesBySubType({})
-          setPrecedentChoicesBySubType({ __global__: list })
-          setPrecedentPickerSubTypeId('__global__')
-          setPrecedentChosenId(
-            preferReference ? list.find((p) => p.reference === preferReference)?.id ?? null : null,
-          )
-          setPrecedentSearch('')
-          setPrecedentPickerCategoryId(null)
-          setPrecedentPickerExpandedSubTypes(new Set())
-          return
-        }
-
-        const headId = caseDetail?.matter_head_type_id
-        const head = headId ? matterHeadTypes.find((h) => h.id === headId) : null
-        const subGroups =
-          head && head.sub_types.length > 0
-            ? head.sub_types.map((s) => ({ subId: s.id, subName: s.name }))
-            : [{ subId: subId, subName: caseDetail?.matter_sub_type_name ?? 'This sub-type' }]
-
-        const catEntries = await Promise.all(
-          subGroups.map(async (g) => {
-            const cats = await apiFetch<PrecedentCategoryOut[]>(
-              `/matter-types/sub-types/${g.subId}/precedent-categories`,
-              { token },
-            )
-            return [g.subId, cats] as const
-          }),
-        )
-        const list = await apiFetch<PrecedentOut[]>(
-          `/precedents?kind=${kind}&matter_sub_type_id=${subId}`,
-          { token },
-        )
-        if (cancelled) return
-        setPrecedentCategoriesBySubType(Object.fromEntries(catEntries))
-        setPrecedentChoicesBySubType({ [subId]: list })
-        setPrecedentPickerSubTypeId(subId)
-        setPrecedentPickerCategoryId(null)
-        setPrecedentPickerExpandedSubTypes(new Set([subId]))
-        setPrecedentChosenId(
-          preferReference ? list.find((p) => p.reference === preferReference)?.id ?? null : null,
-        )
-        setPrecedentSearch('')
-      } catch {
-        if (!cancelled) {
-          setPrecedentCategoriesBySubType({})
-          setPrecedentChoicesBySubType({})
-          setPrecedentPickerSubTypeId(null)
-          setPrecedentPickerCategoryId(null)
-          setPrecedentPickerExpandedSubTypes(new Set())
-        }
-      }
-    }
-    void load()
-    return () => {
-      cancelled = true
-    }
-  }, [
-    precedentPicker,
+  const {
+    previewEmlFileRef,
+    openCaseFileRef,
+    uploadFilesToCurrentFolder,
+    createFolderAtCurrentPath,
+    composeOfficeFile,
+    composeEmailMailto,
+    previewEmlFile,
+    openCaseFile,
+    downloadCaseFiles,
+    downloadCaseExportZip,
+    downloadCaseFolderZip,
+  } = useCaseDocFileHandlers({
+    caseId,
+    caseDetail,
     token,
-    caseDetail?.matter_sub_type_id,
-    caseDetail?.matter_head_type_id,
-    caseDetail?.matter_sub_type_name,
-    caseDetail?.id,
-    matterHeadTypes,
-  ])
+    docFolder,
+    files,
+    portalEnabled,
+    portalFolderGrants,
+    currentUser,
+    askConfirm,
+    pushNotification,
+    onRefresh,
+    setBusy,
+    setActionErr,
+    setTextPrompt,
+    setCommentText,
+    setCommentEditFileId,
+    setCommentErr,
+    setCommentOpen,
+    setEmlPreviewOpen,
+    setEmlPreviewFile,
+    setEmlPreviewData,
+    setEmlPreviewErr,
+    setEmlPreviewBusy,
+    setDocMenu,
+  })
 
-  const precedentPickerSubTypeGroups = useMemo(() => {
-    const caseSubId = caseDetail?.matter_sub_type_id
-    const headId = caseDetail?.matter_head_type_id
-    if (!caseSubId) return []
-    const head = headId ? matterHeadTypes.find((h) => h.id === headId) : null
-    if (head && head.sub_types.length > 0) {
-      return head.sub_types.map((s) => ({ subId: s.id, subName: s.name }))
-    }
-    return [{ subId: caseSubId, subName: caseDetail?.matter_sub_type_name ?? 'This sub-type' }]
-  }, [matterHeadTypes, caseDetail?.matter_head_type_id, caseDetail?.matter_sub_type_id, caseDetail?.matter_sub_type_name])
-
-  async function ensurePrecedentChoicesForSubType(subTypeId: string) {
-    if (!precedentPicker || precedentChoicesBySubType[subTypeId]) return
-    const kind = precedentPicker.kind
-    try {
-      const list = await apiFetch<PrecedentOut[]>(
-        `/precedents?kind=${kind}&matter_sub_type_id=${subTypeId}`,
-        { token },
-      )
-      setPrecedentChoicesBySubType((prev) => ({ ...prev, [subTypeId]: list }))
-    } catch {
-      setPrecedentChoicesBySubType((prev) => ({ ...prev, [subTypeId]: [] }))
-    }
-  }
-
-  function togglePrecedentPickerSubTypeExpanded(subTypeId: string) {
-    setPrecedentPickerExpandedSubTypes((prev) => {
-      const opening = !prev.has(subTypeId)
-      if (opening) void ensurePrecedentChoicesForSubType(subTypeId)
-      const next = new Set(prev)
-      if (next.has(subTypeId)) next.delete(subTypeId)
-      else next.add(subTypeId)
-      return next
-    })
-  }
-
-  function selectPrecedentPickerNav(subTypeId: string, categoryId: string | null) {
-    setPrecedentPickerSubTypeId(subTypeId)
-    setPrecedentPickerCategoryId(categoryId)
-    setPrecedentChosenId(null)
-    setPrecedentPickerExpandedSubTypes((prev) => new Set(prev).add(subTypeId))
-    void ensurePrecedentChoicesForSubType(subTypeId)
-  }
-
-  const filteredPrecedentChoices = useMemo(() => {
-    const headOnly =
-      !!caseDetail && !caseDetail.matter_sub_type_id && !!caseDetail.matter_head_type_id
-    const globalOnly = !!caseDetail && !caseDetail.matter_sub_type_id && !caseDetail.matter_head_type_id
-    const filterBySearch = (rows: PrecedentOut[]) => {
-      const s = precedentSearch.trim().toLowerCase()
-      if (!s) return rows
-      return rows.filter(
-        (p) => p.name.toLowerCase().includes(s) || p.reference.toLowerCase().includes(s),
-      )
-    }
-    if (headOnly) {
-      return filterBySearch(precedentChoicesBySubType.__head__ ?? [])
-    }
-    if (globalOnly) {
-      return filterBySearch(precedentChoicesBySubType.__global__ ?? [])
-    }
-    const activeSubId = precedentPickerSubTypeId ?? caseDetail?.matter_sub_type_id
-    if (!activeSubId) return []
-    const rows = precedentChoicesBySubType[activeSubId] ?? []
-    const cats = precedentCategoriesBySubType[activeSubId] ?? []
-    if (cats.length === 0 || precedentPickerCategoryId === null) {
-      return filterBySearch(rows)
-    }
-    const base = rows.filter(
-      (p) => !p.category_id || p.category_id === precedentPickerCategoryId,
-    )
-    return filterBySearch(base)
-  }, [
-    precedentChoicesBySubType,
-    precedentCategoriesBySubType,
-    precedentPickerSubTypeId,
-    precedentPickerCategoryId,
-    precedentSearch,
-    caseDetail?.matter_sub_type_id,
-    caseDetail?.matter_head_type_id,
-  ])
-
-  const filteredFiles = useMemo(() => {
-    const s = docSearch.trim().toLowerCase()
-    if (!s) return files
-    const matches = (f: FileSummary) => {
-      if ((f.original_filename || '').toLowerCase().includes(s)) return true
-      if ((f.source_mail_from_name || '').toLowerCase().includes(s)) return true
-      if ((f.source_mail_from_email || '').toLowerCase().includes(s)) return true
-      return false
-    }
-    const expanded = new Set<string>(files.filter(matches).map((f) => f.id))
-    let changed = true
-    while (changed) {
-      changed = false
-      for (const f of files) {
-        if (expanded.has(f.id)) continue
-        if (f.parent_file_id && expanded.has(f.parent_file_id)) {
-          expanded.add(f.id)
-          changed = true
-        }
-      }
-      for (const f of files) {
-        if (!expanded.has(f.id)) continue
-        if (f.parent_file_id && !expanded.has(f.parent_file_id)) {
-          expanded.add(f.parent_file_id)
-          changed = true
-        }
-      }
-    }
-    return files.filter((f) => expanded.has(f.id))
-  }, [files, docSearch])
-
-  const filesInFolder = useMemo(() => {
-    return filteredFiles.filter((f) => (f.folder_path ?? '') === docFolder && f.category !== 'system')
-  }, [filteredFiles, docFolder])
-
-  // Group artifacts (e.g. imported emails with attachments) under a parent `.eml` row.
-  // Attachments are represented as child files with `parent_file_id` set.
-  const topLevelInFolder = useMemo(() => {
-    return filesInFolder.filter((f) => !f.parent_file_id)
-  }, [filesInFolder])
-
-  const childrenByParentId = useMemo(() => {
-    const map = new Map<string, FileSummary[]>()
-    for (const f of filesInFolder) {
-      if (!f.parent_file_id) continue
-      const pid = f.parent_file_id
-      const arr = map.get(pid) ?? []
-      arr.push(f)
-      map.set(pid, arr)
-    }
-    return map
-  }, [filesInFolder])
-
-  const childFolders = useMemo(() => {
-    const set = new Set<string>()
-    const basePrefix = docFolder ? `${docFolder}/` : ''
-    // Use full file list (not search-filtered) so empty folders with only a system marker stay visible.
-    for (const f of files) {
-      const fp = (f.folder_path ?? '').trim()
-      if (!fp) continue
-      if (fp === docFolder) continue
-      if (docFolder && !fp.startsWith(basePrefix)) continue
-      const rest = docFolder ? fp.slice(basePrefix.length) : fp
-      const [first] = rest.split('/').filter(Boolean)
-      if (first) set.add(first)
-    }
-    return Array.from(set).sort((a, b) => a.localeCompare(b))
-  }, [files, docFolder])
-
-  const allFolderPaths = useMemo(() => {
-    const set = new Set<string>()
-    for (const f of files) {
-      const fp = (f.folder_path ?? '').trim()
-      if (!fp) continue
-      const parts = fp.split('/').filter(Boolean)
-      let cur = ''
-      for (const p of parts) {
-        cur = cur ? `${cur}/${p}` : p
-        set.add(cur)
-      }
-    }
-    return Array.from(set).sort((a, b) => a.localeCompare(b))
-  }, [files])
-
-  const sortedChildFolders = useMemo(() => {
-    const dir = docSortDir === 'asc' ? 1 : -1
-    return [...childFolders].sort((a, b) => a.localeCompare(b) * dir)
-  }, [childFolders, docSortDir])
-
-  const sortedPinnedInFolder = useMemo(() => {
-    const dir = docSortDir === 'asc' ? 1 : -1
-    const compare = (a: FileSummary, b: FileSummary) => {
-      const av =
-        docSortKey === 'description'
-          ? a.original_filename
-          : docSortKey === 'size'
-            ? a.size_bytes
-            : docSortKey === 'created'
-              ? docListPrimaryDate(a)
-              : fileDocOwnerLabel(a)
-      const bv =
-        docSortKey === 'description'
-          ? b.original_filename
-          : docSortKey === 'size'
-            ? b.size_bytes
-            : docSortKey === 'created'
-              ? docListPrimaryDate(b)
-              : fileDocOwnerLabel(b)
-      if (typeof av === 'number' && typeof bv === 'number') return (av - bv) * dir
-      return String(av).localeCompare(String(bv)) * dir
-    }
-
-    const pinnedParents = topLevelInFolder.filter((f) => f.is_pinned)
-    const sortedParents = [...pinnedParents].sort(compare)
-
-    const out: FileSummary[] = []
-    for (const p of sortedParents) {
-      out.push(p)
-      const kids = childrenByParentId.get(p.id) ?? []
-      out.push(...kids.sort(compare))
-    }
-    return out
-  }, [topLevelInFolder, childrenByParentId, docSortDir, docSortKey])
-
-  const sortedRegularInFolder = useMemo(() => {
-    const dir = docSortDir === 'asc' ? 1 : -1
-    const compare = (a: FileSummary, b: FileSummary) => {
-      const av =
-        docSortKey === 'description'
-          ? a.original_filename
-          : docSortKey === 'size'
-            ? a.size_bytes
-            : docSortKey === 'created'
-              ? docListPrimaryDate(a)
-              : fileDocOwnerLabel(a)
-      const bv =
-        docSortKey === 'description'
-          ? b.original_filename
-          : docSortKey === 'size'
-            ? b.size_bytes
-            : docSortKey === 'created'
-              ? docListPrimaryDate(b)
-              : fileDocOwnerLabel(b)
-      if (typeof av === 'number' && typeof bv === 'number') return (av - bv) * dir
-      return String(av).localeCompare(String(bv)) * dir
-    }
-
-    const regularParents = topLevelInFolder.filter((f) => !f.is_pinned)
-    const sortedParents = [...regularParents].sort(compare)
-
-    const out: FileSummary[] = []
-    for (const p of sortedParents) {
-      out.push(p)
-      const kids = childrenByParentId.get(p.id) ?? []
-      out.push(...kids.sort(compare))
-    }
-    return out
-  }, [topLevelInFolder, childrenByParentId, docSortDir, docSortKey])
-
-  const breadcrumbParts = useMemo(() => {
-    if (!docFolder) return []
-    return splitFolderPath(docFolder)
-  }, [docFolder])
-
-  // Flat ordered key list for shift-range selection.
-  // Files use their ID; folders use "folder:<path>".
-  const allDocKeys = useMemo(() => [
-    ...sortedPinnedInFolder.map((f) => f.id),
-    ...sortedChildFolders.map((name) => `folder:${docFolder ? `${docFolder}/${name}` : name}`),
-    ...sortedRegularInFolder.map((f) => f.id),
-  ], [sortedPinnedInFolder, sortedChildFolders, sortedRegularInFolder, docFolder])
-
-  useEffect(() => {
-    setDocFocusKey((prev) => {
-      if (prev && allDocKeys.includes(prev)) return prev
-      return allDocKeys[0] ?? null
-    })
-  }, [allDocKeys])
-
-  function activateDocFocusKey(key: string) {
-    if (key.startsWith('folder:')) {
-      setDocFolder(key.slice('folder:'.length))
-      return
-    }
-    const f = files.find((x) => x.id === key)
-    if (!f) return
-    if (isEmlLikeFileSummary(f)) void previewEmlFile(f)
-    else void openCaseFile(f)
-  }
-
-  function handleDocsKeyDown(e: React.KeyboardEvent) {
-    if (caseDocPanel !== 'documents') return
-    if (docMenu || commentOpen || precedentPicker || contactPickModal) return
-    const target = e.target as HTMLElement
-    if (target.closest('input, textarea, select, button')) return
-    if (allDocKeys.length === 0) return
-
-    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-      e.preventDefault()
-      const currentIdx = docFocusKey ? allDocKeys.indexOf(docFocusKey) : -1
-      const delta = e.key === 'ArrowDown' ? 1 : -1
-      let nextIdx = currentIdx + delta
-      if (nextIdx < 0) nextIdx = 0
-      if (nextIdx >= allDocKeys.length) nextIdx = allDocKeys.length - 1
-      const nextKey = allDocKeys[nextIdx]!
-      setDocFocusKey(nextKey)
-      setSelectedDocSet(new Set([nextKey]))
-      docAnchorRef.current = nextKey
-      return
-    }
-
-    if (e.key === 'Enter' && docFocusKey) {
-      e.preventDefault()
-      activateDocFocusKey(docFocusKey)
-    }
-  }
-
-  function handleDocItemClick(key: string, e: React.MouseEvent) {
-    e.stopPropagation()
-    if (e.shiftKey && docAnchorRef.current) {
-      const anchorIdx = allDocKeys.indexOf(docAnchorRef.current)
-      const currentIdx = allDocKeys.indexOf(key)
-      if (anchorIdx !== -1 && currentIdx !== -1) {
-        const [lo, hi] = anchorIdx <= currentIdx ? [anchorIdx, currentIdx] : [currentIdx, anchorIdx]
-        const range = new Set(allDocKeys.slice(lo, hi + 1))
-        setSelectedDocSet(e.ctrlKey || e.metaKey ? (prev) => new Set([...prev, ...range]) : range)
-      }
-    } else if (e.ctrlKey || e.metaKey) {
-      setSelectedDocSet((prev) => {
-        const next = new Set(prev)
-        if (next.has(key)) { next.delete(key) } else { next.add(key) }
-        return next
-      })
-      docAnchorRef.current = key
-    } else {
-      setSelectedDocSet(new Set([key]))
-      docAnchorRef.current = key
-      setDocFocusKey(key)
-    }
-  }
-
-  async function uploadFilesToCurrentFolder(incomingFiles: File[]) {
-    if (incomingFiles.length === 0) return
-    let notifyPortalContacts = false
-    const sharedContacts = portalEnabled ? portalContactsForFolder(docFolder, portalFolderGrants) : []
-    if (portalEnabled && isPortalSharedFolder(docFolder, portalFolderGrants)) {
-      const choice = await askConfirm({
-        title: 'Notify portal contacts?',
-        message: portalSharedFolderUploadNotifyMessage(sharedContacts, incomingFiles.length),
-        confirmLabel: 'Send e-mail',
-        cancelLabel: 'Skip',
-      })
-      notifyPortalContacts = choice
-    }
-    setBusy(true)
-    setActionErr(null)
-    try {
-      for (const f of incomingFiles) {
-        const form = new FormData()
-        form.append('upload', f)
-        form.append('folder', docFolder)
-        await fetch(apiUrl(`/cases/${caseId}/files`), {
-          method: 'POST',
-          headers: caseAuthHeaders(token),
-          body: form,
-        }).then(async (r) => {
-          if (r.status === 401) {
-            localStorage.removeItem('token')
-            window.location.reload()
-            return
-          }
-          if (!r.ok) throw new Error((await r.text()) || r.statusText)
-        })
-      }
-      if (notifyPortalContacts) {
-        const notifyOut = await apiFetch<CasePortalNotifyFilesOut>(`/cases/${caseId}/portal/notify-files-added`, {
-          token,
-          method: 'POST',
-          json: {
-            folder_path: docFolder,
-            filenames: incomingFiles.map((f) => f.name),
-          },
-        })
-        if (notifyOut.alerts_skipped_reason) {
-          pushNotification(notifyOut.alerts_skipped_reason)
-        } else if (notifyOut.contacts_notified > 0) {
-          pushNotification(
-            notifyOut.contacts_notified === 1
-              ? 'Portal contact notified by e-mail.'
-              : `${notifyOut.contacts_notified} portal contacts notified by e-mail.`,
-          )
-        }
-      }
-      onRefresh()
-    } catch (err: any) {
-      setActionErr(err?.message ?? 'Upload failed')
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  function createFolderAtCurrentPath() {
-    setTextPrompt({
-      title: 'New folder',
-      hint: 'Enter a folder name.',
-      initial: '',
-      confirmLabel: 'Create',
-      onConfirm: (name) => {
-        const trimmed = name.trim()
-        setTextPrompt(null)
-        if (!trimmed) return
-        const folder_path = joinFolderPath(docFolder, trimmed)
-        if (!folder_path) return
-        setBusy(true)
-        setActionErr(null)
-        apiFetch(`/cases/${caseId}/files/folders`, { token, method: 'POST', json: { folder_path } })
-          .then(() => onRefresh())
-          .catch((e: any) => setActionErr(e?.message ?? 'Failed to create folder'))
-          .finally(() => setBusy(false))
-      },
-    })
-  }
-
-  async function composeOfficeFile(
-    originalFilename: string,
-    precedentId: string | null,
-    caseContactId?: string | null,
-    globalContactId?: string | null,
-    precedentMergeAllClients?: boolean,
-    composeOfficeRole?: 'letter' | 'document' | null,
-  ) {
-    if (!caseId) return
-    setBusy(true)
-    setActionErr(null)
-    try {
-      const res = await apiFetch<{ id: string }>(`/cases/${caseId}/files/compose-office`, {
-        token,
-        json: {
-          original_filename: originalFilename,
-          folder: docFolder,
-          precedent_id: precedentId,
-          case_contact_id: caseContactId ?? null,
-          global_contact_id: globalContactId ?? null,
-          precedent_merge_all_clients: Boolean(precedentMergeAllClients),
-          compose_office_role: composeOfficeRole ?? null,
-        },
-      })
-      openOnlyOfficeCaseEditor(caseId, res.id)
-    } catch (e: any) {
-      setActionErr(e?.message ?? 'Could not create document')
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  async function composeEmailMailto(
-    precedentId: string | null,
-    caseContactId: string | null,
-    globalContactId: string | null,
-    precedentMergeAllClients: boolean,
-    composeOfficeRole?: 'letter' | 'document' | null,
-    attachmentFileIds: string[] = [],
-  ) {
-    if (!caseId) return
-    setBusy(true)
-    setActionErr(null)
-    try {
-      const composePayload = {
-        folder: docFolder,
-        precedent_id: precedentId,
-        case_contact_id: caseContactId,
-        global_contact_id: globalContactId,
-        precedent_merge_all_clients: precedentMergeAllClients,
-        compose_office_role: composeOfficeRole ?? null,
-        attachment_file_ids: attachmentFileIds,
-      }
-
-      const useGraphDraft = shouldUseGraphDraftForMatterEmail(currentUser, attachmentFileIds)
-
-      if (useGraphDraft) {
-        try {
-          const res = await apiFetch<CaseEmailDraftM365Out>(`/cases/${caseId}/files/email-drafts/m365`, {
-            token,
-            json: composePayload,
-          })
-          try {
-            await apiFetch(`/mail-plugin/pending-send`, {
-              token,
-              method: 'PUT',
-              json: {
-                case_id: caseId,
-                source_file_id: attachmentFileIds[0] ?? null,
-                ttl_seconds: 86400,
-              },
-            })
-          } catch {
-            /* Best-effort: add-in send capture works without this if user files manually. */
-          }
-          const attachNames = (res.attachment_files ?? []).map((f) => f.filename).filter(Boolean)
-          const attachLabel =
-            attachNames.length === 1
-              ? attachNames[0]
-              : attachNames.length > 1
-                ? `${attachNames.length} files`
-                : res.attachment_count === 1
-                  ? '1 file'
-                  : res.attachment_count
-                    ? `${res.attachment_count} files`
-                    : 'attachments'
-          const launchPref = currentUser?.email_launch_preference ?? 'desktop'
-          if (launchPref === 'outlook_web') {
-            const opened = openM365ComposeDraft(res, currentUser?.email?.trim() || null)
-            if (!opened) {
-              setActionErr('Your browser blocked opening Outlook. Allow pop-ups for this site.')
-              return
-            }
-            pushNotification(
-              `Outlook draft created with ${attachLabel} attached. Review and send from the draft window.`,
-            )
-          } else {
-            if (res.compose_handoff_token) {
-              try {
-                await apiFetch<OutlookPluginPendingComposeHandoffOut>(`/mail-plugin/pending-compose-handoff`, {
-                  token,
-                  method: 'PUT',
-                  json: {
-                    handoff_token: res.compose_handoff_token,
-                    ttl_seconds: 3600,
-                  },
-                })
-              } catch {
-                /* Best-effort: user can open Drafts or use Compose from matter manually. */
-              }
-            }
-            pushNotification(
-              `Draft created with ${attachLabel} attached. If Outlook is open with the Canary add-in signed in, a compose window should appear shortly — otherwise open Drafts in Outlook or use Compose from matter in the add-in.`,
-            )
-          }
-          return
-        } catch (e: unknown) {
-          const err = e as { status?: number; message?: string }
-          if (err.status !== 503) {
-            throw e
-          }
-          pushNotification(
-            'Microsoft Graph drafts are unavailable — opening compose without automatic attachment.',
-          )
-        }
-      }
-
-      const res = await apiFetch<CaseEmailMailtoOut>(`/cases/${caseId}/files/email-mailto`, {
-        token,
-        json: composePayload,
-      })
-      try {
-        await apiFetch(`/mail-plugin/pending-send`, {
-          token,
-          method: 'PUT',
-          json: {
-            case_id: caseId,
-            source_file_id: attachmentFileIds[0] ?? null,
-            ttl_seconds: 86400,
-          },
-        })
-      } catch {
-        /* Best-effort: add-in send capture works without this if user files manually. */
-      }
-      const launchPref = currentUser?.email_launch_preference ?? 'desktop'
-      if (launchPref === 'outlook_web') {
-        let url = buildOutlookWebComposeUrl(currentUser?.email_outlook_web_url, {
-          to: res.to,
-          subject: res.subject,
-          body: res.body,
-        })
-        url = appendOutlookWebAuthHintsForNav(url, currentUser?.email?.trim() || null)
-        url = normalizeComposeQueryPlusAsSpaces(url)
-        const w = window.open(url, OWA_MAIL_WINDOW_NAME, OWA_MESSAGE_WINDOW_FEATURES)
-        if (!w) {
-          setActionErr('Your browser blocked opening Outlook. Allow pop-ups for this site.')
-          return
-        }
-      } else {
-        const a = document.createElement('a')
-        a.href = buildMailtoComposeUrl({ to: res.to, subject: res.subject, body: res.body })
-        a.rel = 'noopener'
-        document.body.appendChild(a)
-        a.click()
-        document.body.removeChild(a)
-      }
-    } catch (e: unknown) {
-      const err = e as { message?: string }
-      setActionErr(err?.message ?? 'Could not prepare e-mail')
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  function isCommentFile(f: FileSummary) {
-    return (
-      (f.mime_type || '').toLowerCase().startsWith('text/plain') ||
-      (f.original_filename || '').toLowerCase().endsWith('.txt')
-    )
-  }
-
-  async function openCommentForEdit(f: FileSummary) {
-    if (!caseId) return
-    setBusy(true)
-    setActionErr(null)
-    try {
-      const res = await fetchCaseFileResponse(caseId, f.id, token)
-      if (res.status === 401) { localStorage.removeItem('token'); window.location.reload(); return }
-      if (!res.ok) throw new Error((await res.text()) || res.statusText)
-      const text = await res.text()
-      setCommentText(text)
-      setCommentEditFileId(f.id)
-      setCommentErr(null)
-      setCommentOpen(true)
-    } catch (e: any) {
-      setActionErr(e?.message ?? 'Could not load comment')
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  async function previewEmlFile(f: FileSummary) {
-    if (!caseId) return
-    setEmlPreviewOpen(true)
-    setEmlPreviewFile(f)
-    setEmlPreviewData(null)
-    setEmlPreviewErr(null)
-    setEmlPreviewBusy(true)
-    try {
-      const raw = await fetchEmlTextForPreview(caseId, f.id, token)
-      if (!raw) return
-      let parsed: EmlPreviewData
-      try {
-        parsed = parseEmlForPreview(raw)
-      } catch (pe: unknown) {
-        setEmlPreviewErr(pe instanceof Error ? pe.message : 'Could not parse e-mail')
-        return
-      }
-      setEmlPreviewData(parsed)
-    } catch (e: unknown) {
-      const msg = fetchTimedOutMessage(e)
-      const err = e as { message?: string }
-      setEmlPreviewErr(msg ?? err.message ?? 'Could not load preview')
-    } finally {
-      setEmlPreviewBusy(false)
-    }
-  }
-
-  async function openCaseFile(f: FileSummary) {
-    if (!caseId) return
-    /** Prefer the row from the live ``files`` list so OWA fields (REST item id, Message-ID) stay current. */
-    const file = files.find((x) => x.id === f.id) ?? f
-    // Comment files (.txt) open in the comment editor, not the browser
-    if (isCommentFile(file)) {
-      void openCommentForEdit(file)
-      return
-    }
-
-    if (isOfficeLikeFile(file)) {
-      openOnlyOfficeCaseEditor(caseId, file.id)
-      return
-    }
-
-    if (isEmlLikeFileSummary(file)) {
-      const pref = currentUser?.email_launch_preference ?? 'desktop'
-      if (pref === 'outlook_web') {
-        setBusy(true)
-        setActionErr(null)
-            try {
-          const owaBase = currentUser?.email_outlook_web_url ?? null
-          const owaBaseQ = owaBase ? `?owa_base=${encodeURIComponent(owaBase)}` : ''
-          let hints: {
-            outlook_graph_message_id: string | null
-            outlook_web_link: string | null
-            owa_read_url?: string | null
-            open_in_owa_supported?: boolean
-          } | null = null
-          try {
-            hints = await apiFetch<{
-              outlook_graph_message_id: string | null
-              outlook_web_link: string | null
-              owa_read_url?: string | null
-              open_in_owa_supported?: boolean
-            }>(`/cases/${caseId}/files/${file.id}/outlook-open-hints${owaBaseQ}`, { token })
-          } catch {
-            hints = null
-          }
-          const gid = (
-            (hints?.outlook_graph_message_id ?? file.source_outlook_item_id ?? file.outlook_graph_message_id) ||
-            ''
-          ).trim()
-          const webLink = (hints?.outlook_web_link ?? file.outlook_web_link ?? '').trim()
-          let readUrl = (hints?.owa_read_url || '').trim()
-          if (!readUrl && isUsableOutlookMessageWebLink(webLink)) {
-            readUrl = webLink
-          }
-          if (!readUrl && webLink) {
-            readUrl = normalizeOutlookWebReadLink(webLink, owaBase) || ''
-          }
-          if (!readUrl && gid && isLikelyExchangeRestItemId(gid)) {
-            readUrl = buildOutlookWebReadItemUrl(owaBase, gid, webLink || null)
-          }
-          const openOwaRead = (url: string) => {
-            const abs = appendOutlookWebAuthHintsForNav(
-              browserAbsoluteApiUrl(url),
-              currentUser?.email?.trim() || null,
-            )
-            const ok = openOutlookWebAppFromGraphWebLink(abs, {
-              windowFeatures: OWA_MESSAGE_WINDOW_FEATURES,
-              windowName: OWA_MAIL_WINDOW_NAME,
-            })
-            if (!ok) {
-              setActionErr('Your browser blocked the Outlook window. Allow pop-ups for this site, then try again.')
-            }
-          }
-          if (readUrl) {
-            openOwaRead(readUrl)
-            return
-          }
-          await previewEmlFile(file)
-          pushNotification(
-            'Showing the Canary copy in preview. This filing has no live Outlook message link — file from Outlook read mode, or open the original from your Sent or Inbox.',
-          )
-        } catch (e: unknown) {
-          const msg = fetchTimedOutMessage(e)
-          const err = e as { message?: string }
-          setActionErr(msg ?? err.message ?? 'Open failed')
-        } finally {
-          setBusy(false)
-        }
-        return
-      }
-
-      /* Desktop / default: hand off to the OS mail app via a one-shot download (no about:blank tab —
-       * attachment responses do not navigate the tab, which left a stray blank page). */
-      setBusy(true)
-      setActionErr(null)
-      try {
-        try {
-          await apiFetch(`/mail-plugin/pending-send`, {
-            token,
-            method: 'PUT',
-            json: { case_id: caseId, source_file_id: file.id, ttl_seconds: 86400 },
-          })
-        } catch {
-          /* Best-effort: Thunderbird reply prefill uses this when relatedMessageId is unavailable. */
-        }
-        const data = await apiFetch<{ token: string }>(`/cases/${caseId}/files/${file.id}/eml-open-token`, {
-          method: 'POST',
-          token,
-        })
-        const url = browserAbsoluteApiUrl(
-          apiUrl(`/cases/${caseId}/files/${file.id}/eml-open?token=${encodeURIComponent(data.token)}`),
-        )
-        const a = document.createElement('a')
-        a.href = url
-        a.rel = 'noopener'
-        document.body.appendChild(a)
-        a.click()
-        a.remove()
-      } catch (e: unknown) {
-        const msg = fetchTimedOutMessage(e) ?? (e as { message?: string }).message ?? 'Could not open e-mail'
-        setActionErr(msg)
-      } finally {
-        setBusy(false)
-      }
-      return
-    }
-
-    setBusy(true)
-    setActionErr(null)
-    try {
-      const res = await fetchCaseFileResponse(caseId, file.id, token)
-      if (res.status === 401) {
-        localStorage.removeItem('token')
-        window.location.reload()
-        return
-      }
-      if (!res.ok) throw new Error((await res.text()) || res.statusText)
-      const blob = await res.blob()
-      const typed = file.mime_type ? new Blob([blob], { type: file.mime_type }) : blob
-      const url = URL.createObjectURL(typed)
-      window.open(url, '_blank', 'noopener,noreferrer')
-      window.setTimeout(() => URL.revokeObjectURL(url), 120_000)
-    } catch (e: unknown) {
-      const msg = fetchTimedOutMessage(e)
-      const err = e as { message?: string }
-      setActionErr(msg ?? err.message ?? 'Open failed')
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  async function downloadCaseFile(f: FileSummary) {
-    if (!caseId) return
-    const res = await fetchCaseFileResponse(caseId, f.id, token)
-    if (res.status === 401) {
-      localStorage.removeItem('token')
-      window.location.reload()
-      return
-    }
-    if (!res.ok) throw new Error((await res.text()) || res.statusText)
-    const blob = await res.blob()
-    const typed = f.mime_type ? new Blob([blob], { type: f.mime_type }) : blob
-    const url = URL.createObjectURL(typed)
-    const safeName = f.original_filename.replace(/[/\\]/g, '_').replace(/^\.+/, '') || 'download'
-    const a = document.createElement('a')
-    a.href = url
-    a.download = safeName
-    a.rel = 'noopener'
-    document.body.appendChild(a)
-    a.click()
-    a.remove()
-    window.setTimeout(() => URL.revokeObjectURL(url), 120_000)
-  }
-
-  async function downloadCaseFiles(targets: FileSummary[]) {
-    if (!caseId || targets.length === 0) return
-    setBusy(true)
-    setActionErr(null)
-    try {
-      for (let i = 0; i < targets.length; i++) {
-        await downloadCaseFile(targets[i])
-        // Browsers often coalesce same-gesture downloads; brief gap keeps each file.
-        if (i < targets.length - 1) {
-          await new Promise((r) => window.setTimeout(r, 350))
-        }
-      }
-    } catch (e: unknown) {
-      const msg = fetchTimedOutMessage(e)
-      const err = e as { message?: string }
-      setActionErr(msg ?? err.message ?? 'Download failed')
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  async function downloadCaseExportZip() {
-    if (!caseId || !caseDetail) return
-    setBusy(true)
-    setActionErr(null)
-    const ctrl = new AbortController()
-    const tid = window.setTimeout(() => ctrl.abort(), CASE_FILE_FETCH_MS)
-    try {
-      const res = await fetch(apiUrl(`/cases/${caseId}/files/export-zip`), {
-        headers: caseAuthHeaders(token),
-        signal: ctrl.signal,
-      })
-      if (res.status === 401) {
-        localStorage.removeItem('token')
-        window.location.reload()
-        return
-      }
-      if (!res.ok) throw new Error((await res.text()) || res.statusText)
-      const blob = await res.blob()
-      const typed = new Blob([blob], { type: 'application/zip' })
-      const url = URL.createObjectURL(typed)
-      const safeBase =
-        caseDetail.case_number.replace(/[/\\]/g, '_').replace(/^\.+/, '').trim() || 'matter'
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `${safeBase}-export.zip`
-      a.rel = 'noopener'
-      document.body.appendChild(a)
-      a.click()
-      a.remove()
-      window.setTimeout(() => URL.revokeObjectURL(url), 120_000)
-    } catch (e: unknown) {
-      const msg = fetchTimedOutMessage(e)
-      const err = e as { message?: string }
-      setActionErr(msg ?? err.message ?? 'Export failed')
-    } finally {
-      clearTimeout(tid)
-      setBusy(false)
-    }
-  }
-
-  async function downloadCaseFolderZip(folderPath: string) {
-    if (!caseId) return
-    setBusy(true)
-    setActionErr(null)
-    setDocMenu(null)
-    const ctrl = new AbortController()
-    const tid = window.setTimeout(() => ctrl.abort(), CASE_FILE_FETCH_MS)
-    try {
-      const q = new URLSearchParams({ folder_path: folderPath })
-      const res = await fetch(apiUrl(`/cases/${caseId}/files/folders/download-zip?${q}`), {
-        headers: caseAuthHeaders(token),
-        signal: ctrl.signal,
-      })
-      if (res.status === 401) {
-        localStorage.removeItem('token')
-        window.location.reload()
-        return
-      }
-      if (!res.ok) throw new Error((await res.text()) || res.statusText)
-      const blob = await res.blob()
-      const typed = new Blob([blob], { type: 'application/zip' })
-      const url = URL.createObjectURL(typed)
-      const parts = splitFolderPath(folderPath)
-      const leaf = parts[parts.length - 1] ?? ''
-      const safeBase =
-        decodeFolderPathSegment(leaf).replace(/[/\\]/g, '_').replace(/^\.+/, '').trim() || 'folder'
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `${safeBase}.zip`
-      a.rel = 'noopener'
-      document.body.appendChild(a)
-      a.click()
-      a.remove()
-      window.setTimeout(() => URL.revokeObjectURL(url), 120_000)
-    } catch (e: unknown) {
-      const msg = fetchTimedOutMessage(e)
-      const err = e as { message?: string }
-      setActionErr(msg ?? err.message ?? 'Download failed')
-    } finally {
-      clearTimeout(tid)
-      setBusy(false)
-    }
-  }
+  const {
+    selectedDocSet,
+    setSelectedDocSet,
+    docFocusKey,
+    handleDocsKeyDown,
+    handleDocItemClick,
+  } = useCaseDocsSelection({
+    allDocKeys,
+    caseDocPanel,
+    docMenu,
+    commentOpen,
+    precedentPicker,
+    contactPickModal,
+    files,
+    setDocFolder,
+    previewEmlFile: (f) => previewEmlFileRef.current(f),
+    openCaseFile: (f) => openCaseFileRef.current(f),
+  })
 
   function resetContactPickForm() {
     setPickMatterCcId('none')
@@ -2014,30 +951,18 @@ export function CaseDetail({
     setActionErr(null)
     setContactPickErr(null)
     try {
-      if (pickSelectedContact) {
-        if (pickLinkGlobal) {
-          if (!pickLinkType.trim()) {
-            setContactPickErr('Contact type is required when linking to this matter.')
-            return
-          }
-          if (pickLinkType.trim().toLowerCase() === LAWYERS_TYPE_SLUG && pickLawyerClientIds.length < 1) {
-            setContactPickErr(LAWYER_CLIENTS_REQUIRED_MSG)
-            return
-          }
-          const linkJson: Record<string, unknown> = {
-            contact_id: pickSelectedContact.id,
-            matter_contact_type: pickLinkType.trim(),
-            matter_contact_reference: null,
-          }
-          if (pickLinkType.trim().toLowerCase() === LAWYERS_TYPE_SLUG) {
-            linkJson.lawyer_client_ids = pickLawyerClientIds
-          }
-          await apiFetch(`/cases/${caseId}/contacts`, {
-            token,
-            json: linkJson,
-          })
-          onRefresh()
-        }
+      const linkErr = await linkPickedGlobalContactIfNeeded({
+        caseId,
+        token,
+        pickSelectedContact,
+        pickLinkGlobal,
+        pickLinkType,
+        pickLawyerClientIds,
+        onRefresh,
+      })
+      if (linkErr) {
+        setContactPickErr(linkErr)
+        return
       }
 
       let label = 'Letter'
@@ -2106,84 +1031,18 @@ export function CaseDetail({
         }}
       >
         <div className="caseLeft caseLeft--rail">
-          <div className="caseMatterHero">
-            <div className="caseMatterHeroTop">
-              <span className="caseMatterHeroRef mono">{caseDetail.case_number}</span>
-              {onBackToMainMenu ? (
-                <button
-                  type="button"
-                  className="btn caseMatterHeroBack"
-                  onClick={() => onBackToMainMenu()}
-                  aria-label={backNavLabel}
-                  title={backNavLabel}
-                >
-                  <svg
-                    className="caseMatterHeroBackIcon"
-                    width="16"
-                    height="16"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    xmlns="http://www.w3.org/2000/svg"
-                    aria-hidden="true"
-                  >
-                    <path
-                      d="M19 12H5"
-                      stroke="currentColor"
-                      strokeWidth="2.25"
-                      strokeLinecap="round"
-                    />
-                    <path
-                      d="M12 5 5 12l7 7"
-                      stroke="currentColor"
-                      strokeWidth="2.25"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    />
-                  </svg>
-                </button>
-              ) : null}
-            </div>
-            <h2 className="caseMatterHeroClient">{caseDetail.matter_description || 'No description'}</h2>
-            <p className="caseMatterHeroType">{matterTypeDisplayLine(caseDetail)}</p>
-            <dl className="caseDetailsList caseMatterHeroDetails">
-              <div className="caseDetailRow">
-                <dt>Client</dt>
-                <dd>{caseDetail.client_name ?? '—'}</dd>
-              </div>
-              <div className="caseDetailRow">
-                <dt>Fee earner</dt>
-                <dd>{users.find((u) => u.id === caseDetail.fee_earner_user_id)?.display_name ?? '—'}</dd>
-              </div>
-              {caseDetail.source_name ? (
-                <div className="caseDetailRow">
-                  <dt>Source</dt>
-                  <dd>{caseDetail.source_name}</dd>
-                </div>
-              ) : null}
-              <div className="caseDetailRow">
-                <dt>Status</dt>
-                <dd className={`caseMatterHeroStatusText caseMatterHeroStatusText--${caseDetail.status}`}>
-                  {formatCaseStatusLabel(caseDetail.status)}
-                </dd>
-              </div>
-              <div className="caseDetailRow">
-                <dt>Lock</dt>
-                <dd>{caseHasRevokedUserAccess(caseDetail) ? 'Locked' : 'Unlocked'}</dd>
-              </div>
-            </dl>
-            <button
-              type="button"
-              className="btn primary caseMatterHeroEdit"
-              disabled={busy}
-              onClick={() => {
-                setActionErr(null)
-                setEditCaseErr(null)
-                setCaseDocPanel('edit-details')
-              }}
-            >
-              Matter details
-            </button>
-          </div>
+          <CaseMatterHero
+            caseDetail={caseDetail}
+            users={users}
+            busy={busy}
+            backNavLabel={backNavLabel}
+            onBackToMainMenu={onBackToMainMenu}
+            onEditMatterDetails={() => {
+              setActionErr(null)
+              setEditCaseErr(null)
+              setCaseDocPanel('edit-details')
+            }}
+          />
 
           <CaseDetailLeftNav
             busy={busy}
@@ -2226,1933 +1085,282 @@ export function CaseDetail({
 
         <div className="caseRight">
           {caseDocPanel === 'documents' ? (
-            <div
-              className="caseDocsToolbarBar"
-              role="toolbar"
-              aria-label="Documents actions"
-              onClick={(e) => e.stopPropagation()}
-              onContextMenu={(e) => e.stopPropagation()}
-            >
-              <div className="caseDocsToolbar">
-                <div className="caseDocsToolbarMain">
-                  <div className="caseToolbarDropdownWrap" ref={newMenuRef}>
-                    <button
-                      ref={newMenuBtnRef}
-                      type="button"
-                      className="btn btnCaseChrome caseDocsNewMenuBtn"
-                      disabled={busy}
-                      aria-haspopup="menu"
-                      aria-expanded={newMenuOpen}
-                      onClick={() => setNewMenuOpen((o) => !o)}
-                    >
-                      New <span className="caseDocsNewMenuChevron" aria-hidden>▾</span>
-                    </button>
-                    {newMenuOpen && newMenuPos
-                      ? createPortal(
-                          <div
-                            ref={newMenuPortalRef}
-                            className="caseToolbarDropdown caseToolbarDropdown--portal"
-                            role="menu"
-                            style={{ top: newMenuPos.top, left: newMenuPos.left }}
-                          >
-                            <button
-                              type="button"
-                              className="caseToolbarDropdownItem"
-                              role="menuitem"
-                              onClick={() => {
-                                setNewMenuOpen(false)
-                                createFolderAtCurrentPath()
-                              }}
-                            >
-                              Folder
-                            </button>
-                            <button
-                              type="button"
-                              className="caseToolbarDropdownItem"
-                              role="menuitem"
-                              onClick={() => {
-                                setNewMenuOpen(false)
-                                openTaskCreateModal()
-                              }}
-                            >
-                              Task
-                            </button>
-                            <button
-                              type="button"
-                              className="caseToolbarDropdownItem"
-                              role="menuitem"
-                              onClick={() => {
-                                setNewMenuOpen(false)
-                                openCaseEventModal()
-                              }}
-                            >
-                              Event
-                            </button>
-                            <button
-                              type="button"
-                              className="caseToolbarDropdownItem"
-                              role="menuitem"
-                              onClick={() => {
-                                setNewMenuOpen(false)
-                                setQuoteWizardOpen(true)
-                              }}
-                            >
-                              Quote
-                            </button>
-                            {portalEnabled ? (
-                              <button
-                                type="button"
-                                className="caseToolbarDropdownItem"
-                                role="menuitem"
-                                onClick={() => {
-                                  setNewMenuOpen(false)
-                                  setFormSendOpen(true)
-                                }}
-                              >
-                                Portal form
-                              </button>
-                            ) : null}
-                            <button
-                              type="button"
-                              className="caseToolbarDropdownItem"
-                              role="menuitem"
-                              onClick={() => {
-                                setNewMenuOpen(false)
-                                setPrecedentPicker({ kind: 'letter' })
-                              }}
-                            >
-                              Letter
-                            </button>
-                            <button
-                              type="button"
-                              className="caseToolbarDropdownItem"
-                              role="menuitem"
-                              onClick={() => {
-                                setNewMenuOpen(false)
-                                setPrecedentPicker({ kind: 'document' })
-                              }}
-                            >
-                              Document
-                            </button>
-                            <button
-                              type="button"
-                              className="caseToolbarDropdownItem"
-                              role="menuitem"
-                              onClick={() => {
-                                setNewMenuOpen(false)
-                                setPrecedentPicker({ kind: 'email' })
-                              }}
-                            >
-                              E-mail
-                            </button>
-                            <button
-                              type="button"
-                              className="caseToolbarDropdownItem"
-                              role="menuitem"
-                              onClick={() => {
-                                setNewMenuOpen(false)
-                                setCommentText('')
-                                setCommentErr(null)
-                                setCommentOpen(true)
-                              }}
-                            >
-                              Comment
-                            </button>
-                          </div>,
-                          document.body,
-                        )
-                      : null}
-                  </div>
-                  <button
-                    type="button"
-                    className="btn btnCaseChrome caseDocsToolbarActionBtn"
-                    disabled={busy}
-                    onClick={() => importInputRef.current?.click()}
-                  >
-                    <CaseDocsToolbarBtnIcon d={CASE_DOCS_TOOLBAR_ICONS.import} />
-                    Import
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btnCaseChrome caseDocsToolbarActionBtn"
-                    disabled={busy || !caseDetail}
-                    onClick={() => void downloadCaseExportZip()}
-                  >
-                    <CaseDocsToolbarBtnIcon d={CASE_DOCS_TOOLBAR_ICONS.export} />
-                    Export
-                  </button>
-                  {portalEnabled ? (
-                    <button
-                      type="button"
-                      className="btn btnCaseChrome caseDocsToolbarActionBtn"
-                      disabled={busy}
-                      onClick={() => setCaseDocPanel('portal-hub')}
-                    >
-                      <CaseDocsToolbarBtnIcon d={CASE_DOCS_TOOLBAR_ICONS.portal} />
-                      Portal
-                    </button>
-                  ) : null}
-                  <button
-                    type="button"
-                    className="btn btnCaseChrome caseDocsToolbarActionBtn"
-                    disabled={busy}
-                    onClick={() => onRefresh()}
-                  >
-                    <CaseDocsToolbarBtnIcon d={CASE_DOCS_TOOLBAR_ICONS.refresh} />
-                    Refresh
-                  </button>
-                </div>
-                <SearchInput
-                  className="caseDocsToolbarSearch"
-                  placeholder="Search documents…"
-                  value={docSearch}
-                  onChange={(e) => setDocSearch(e.target.value)}
-                  onClear={() => setDocSearch('')}
-                  aria-label="Search documents"
-                />
-              </div>
-            </div>
-          ) : null}
-          <div
-            className={`card caseDocsCard${docsDragOver ? ' caseDocsCard--dragOver' : ''}`}
-            onDragEnter={(e) => {
-              if (caseDocPanel !== 'documents') return
-              e.preventDefault()
-              e.stopPropagation()
-              if (!dndEventHasFiles(e)) return
-              setDocsDragOver(true)
-            }}
-            onDragLeave={(e) => {
-              if (caseDocPanel !== 'documents') return
-              const cur = e.currentTarget as HTMLElement
-              const rel = e.relatedTarget as Node | null
-              if (rel && cur.contains(rel)) return
-              setDocsDragOver(false)
-            }}
-            onDragOver={(e) => {
-              if (caseDocPanel !== 'documents') return
-              e.preventDefault()
-              e.stopPropagation()
-              if (dndEventHasFiles(e)) {
-                e.dataTransfer.dropEffect = 'copy'
-              } else {
-                e.dataTransfer.dropEffect = 'none'
-              }
-            }}
-            onClick={() => {
-              if (caseDocPanel === 'documents') setSelectedDocSet(new Set())
-            }}
-            onContextMenu={(e) => {
-              if (caseDocPanel !== 'documents') return
-              e.preventDefault()
-              e.stopPropagation()
-              setDocMenu({ kind: 'surface', x: e.clientX, y: e.clientY })
-            }}
-            onDrop={async (e) => {
-              if (caseDocPanel !== 'documents') return
-              e.preventDefault()
-              e.stopPropagation()
-              setDocsDragOver(false)
-              if (!dndEventHasFiles(e)) return
-              const droppedFiles = [...e.dataTransfer.files]
-              if (droppedFiles.some(isEmlLikeUploadFile)) {
-                setActionErr(
-                  'To file an e-mail in Canary, please use the add-in appropriate to your e-mail client.',
-                )
-                return
-              }
-              await uploadFilesToCurrentFolder(droppedFiles)
-            }}
-          >
-            <div
-              className={
-                caseDocPanel === 'documents' ? 'caseDocsScroll' : 'caseDocsScroll caseDocsScroll--panelOnly'
-              }
-              tabIndex={caseDocPanel === 'documents' ? 0 : undefined}
-              onKeyDown={handleDocsKeyDown}
-            >
-              {caseDocPanel === 'documents' ? (
-              <>
-              <div className="caseDocsListHead">
-              <div className="docsTr docsTh">
-                <button
-                  type="button"
-                  className="thbtn"
-                  onClick={() => {
-                    if (docSortKey === 'description') setDocSortDir(docSortDir === 'asc' ? 'desc' : 'asc')
-                    else {
-                      setDocSortKey('description')
-                      setDocSortDir('asc')
-                    }
-                  }}
-                >
-                  Description
-                </button>
-                <button
-                  type="button"
-                  className="thbtn docsCenter"
-                  onClick={() => {
-                    if (docSortKey === 'size') setDocSortDir(docSortDir === 'asc' ? 'desc' : 'asc')
-                    else {
-                      setDocSortKey('size')
-                      setDocSortDir('asc')
-                    }
-                  }}
-                >
-                  Size
-                </button>
-                <button
-                  type="button"
-                  className="thbtn docsCenter"
-                  onClick={() => {
-                    if (docSortKey === 'created') setDocSortDir(docSortDir === 'asc' ? 'desc' : 'asc')
-                    else {
-                      setDocSortKey('created')
-                      setDocSortDir('desc')
-                    }
-                  }}
-                >
-                  Created
-                </button>
-                <button
-                  type="button"
-                  className="thbtn docsCenter"
-                  onClick={() => {
-                    if (docSortKey === 'user') setDocSortDir(docSortDir === 'asc' ? 'desc' : 'asc')
-                    else {
-                      setDocSortKey('user')
-                      setDocSortDir('asc')
-                    }
-                  }}
-                >
-                  User
-                </button>
-              </div>
-              </div>
-              <div
-                className="muted"
-                style={{ padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}
-                onContextMenu={(e) => e.stopPropagation()}
-              >
-                <span
-                  style={{ cursor: 'pointer', textDecoration: 'underline' }}
-                  onClick={() => setDocFolder('')}
-                  title="Home"
-                >
-                  Home
-                </span>
-                {breadcrumbParts.map((p, idx) => {
-                  const path = breadcrumbParts.slice(0, idx + 1).join('/')
-                  return (
-                    <span key={path} style={{ display: 'inline-flex', gap: 8, alignItems: 'center' }}>
-                      <span aria-hidden> / </span>
-                      <span style={{ cursor: 'pointer', textDecoration: 'underline' }} onClick={() => setDocFolder(path)}>
-                        {decodeFolderPathSegment(p)}
-                      </span>
-                    </span>
-                  )
-                })}
-              </div>
-
-              {sortedPinnedInFolder.map((f) => (
-                <div
-                  key={f.id}
-                  className={`docsTr rowbtn ${f.parent_file_id ? 'attachmentChild' : ''} ${selectedDocSet.has(f.id) ? 'active' : ''} ${docFocusKey === f.id ? 'docsTr--focused' : ''}`}
-                  onMouseDown={(e) => { if (e.shiftKey) e.preventDefault() }}
-                  onClick={(e) => handleDocItemClick(f.id, e)}
-                  onDoubleClick={(e) => {
-                    e.stopPropagation()
-                    if (isEmlLikeFileSummary(f)) void previewEmlFile(f)
-                    else void openCaseFile(f)
-                  }}
-                  onContextMenu={(e) => {
-                    e.preventDefault()
-                    e.stopPropagation()
-                    setDocMenu({ kind: 'file', fileId: f.id, x: e.clientX, y: e.clientY })
-                  }}
-                >
-                  <DocsFileDescCell f={f} showPin={!f.parent_file_id} />
-                  <div className="td docsCenter">{formatDocFileSize(f.size_bytes)}</div>
-                  <div className="td docsCenter">{formatDocModified(docListPrimaryDate(f))}</div>
-                  <div className="td docsCenter">{fileDocOwnerLabel(f)}</div>
-                </div>
-              ))}
-
-              {sortedChildFolders.map((folderName) => {
-                const next = docFolder ? `${docFolder}/${folderName}` : folderName
-                const folderKey = `folder:${next}`
-                return (
-                  <div
-                    key={next}
-                    className={`docsTr rowbtn ${selectedDocSet.has(folderKey) ? 'active' : ''} ${docFocusKey === folderKey ? 'docsTr--focused' : ''}`}
-                    onMouseDown={(e) => { if (e.shiftKey) e.preventDefault() }}
-                    onClick={(e) => handleDocItemClick(folderKey, e)}
-                    onDoubleClick={() => setDocFolder(next)}
-                    onContextMenu={(e) => {
-                      e.preventDefault()
-                      e.stopPropagation()
-                      setDocMenu({ kind: 'folder', folderPath: next, x: e.clientX, y: e.clientY })
-                    }}
-                  >
-                    <DocsFolderDescCell
-                      name={decodeFolderPathSegment(folderName)}
-                      shared={portalEnabled && isPortalSharedFolder(next, portalFolderGrants)}
-                      contentsSummary={folderContentsSummary(files, next)}
-                    />
-                    <div className="td muted docsCenter">—</div>
-                    <div className="td muted docsCenter">—</div>
-                    <div className="td muted docsCenter">—</div>
-                  </div>
-                )
-              })}
-
-              {sortedRegularInFolder.map((f) => (
-                <div
-                  key={f.id}
-                  className={`docsTr rowbtn ${f.parent_file_id ? 'attachmentChild' : ''} ${selectedDocSet.has(f.id) ? 'active' : ''} ${docFocusKey === f.id ? 'docsTr--focused' : ''}`}
-                  onMouseDown={(e) => { if (e.shiftKey) e.preventDefault() }}
-                  onClick={(e) => handleDocItemClick(f.id, e)}
-                  onDoubleClick={(e) => {
-                    e.stopPropagation()
-                    if (isEmlLikeFileSummary(f)) void previewEmlFile(f)
-                    else void openCaseFile(f)
-                  }}
-                  onContextMenu={(e) => {
-                    e.preventDefault()
-                    e.stopPropagation()
-                    setDocMenu({ kind: 'file', fileId: f.id, x: e.clientX, y: e.clientY })
-                  }}
-                >
-                  <DocsFileDescCell f={f} showPin={false} />
-                  <div className="td docsCenter">{formatDocFileSize(f.size_bytes)}</div>
-                  <div className="td docsCenter">{formatDocModified(docListPrimaryDate(f))}</div>
-                  <div className="td docsCenter">{fileDocOwnerLabel(f)}</div>
-                </div>
-              ))}
-
-              {sortedPinnedInFolder.length === 0 && sortedRegularInFolder.length === 0 && childFolders.length === 0 ? (
-                <div className="muted" style={{ padding: 12 }}>
-                  No documents in this folder.
-                </div>
-              ) : null}
-              </>
-              ) : caseDocPanel === 'events' && caseId ? (
-                <CaseDetailEventsPanel
-                  caseId={caseId}
-                  token={token}
-                  currentUser={currentUser}
-                  caseDetail={caseDetail}
-                  backToDocuments={backToDocuments}
-                  openCaseEventModal={openCaseEventModal}
-                  setCaseDocPanel={setCaseDocPanel}
-                  setEventsPreview={setEventsPreview}
-                />
-              ) : caseDocPanel === 'finance' && caseId ? (
-                <CaseDetailFinancePanel
-                  caseId={caseId}
-                  token={token}
-                  backToDocuments={backToDocuments}
-                  setFinancePreview={setFinancePreview}
-                />
-              ) : caseDocPanel === 'edit-details' && caseId ? (
-                <CaseDetailEditDetailsPanel
-                  caseId={caseId}
-                  busy={busy}
-                  setBusy={setBusy}
-                  backToDocuments={backToDocuments}
-                  editMatterHeadOptions={editMatterHeadOptions}
-                  editMatterHeadTypeId={editMatterHeadTypeId}
-                  setEditMatterHeadTypeId={setEditMatterHeadTypeId}
-                  setEditPracticeArea={setEditPracticeArea}
-                  editMatterSubOptions={editMatterSubOptions}
-                  editPracticeArea={editPracticeArea}
-                  editMatterDescription={editMatterDescription}
-                  setEditMatterDescription={setEditMatterDescription}
-                  editFeeEarnerOptions={editFeeEarnerOptions}
-                  editFeeEarner={editFeeEarner}
-                  setEditFeeEarner={setEditFeeEarner}
-                  editStatusOptions={editStatusOptions}
-                  editCaseStatus={editCaseStatus}
-                  setEditCaseStatus={setEditCaseStatus}
-                  editSourceOptions={editSourceOptions}
-                  editSourceId={editSourceId}
-                  setEditSourceId={setEditSourceId}
-                  editPortalEnabled={editPortalEnabled}
-                  onEditPortalEnabledChange={onEditPortalEnabledChange}
-                  editCaseDropdown={editCaseDropdown}
-                  editCaseErr={editCaseErr}
-                  setEditCaseErr={setEditCaseErr}
-                  setManageAccessOpen={setManageAccessOpen}
-                  token={token}
-                  onRefresh={onRefresh}
-                  onCaseListInvalidate={onCaseListInvalidate}
-                />
-              ) : caseDocPanel === 'portal-hub' && caseId && portalEnabled ? (
-                <CaseDetailPortalHubPanel
-                  caseId={caseId}
-                  token={token}
-                  busy={busy}
-                  backToDocuments={backToDocuments}
-                  onRefresh={onRefresh}
-                />
-              ) : caseDocPanel === 'portal-share' && caseId && portalEnabled && portalShareFolderPath !== null ? (
-                <CaseDetailPortalSharePanel
-                  caseId={caseId}
-                  token={token}
-                  busy={busy}
-                  portalShareFolderPath={portalShareFolderPath}
-                  backToDocuments={backToDocuments}
-                  refreshPortalFolderGrants={refreshPortalFolderGrants}
-                  onRefresh={onRefresh}
-                />
-              ) : caseDocPanel === 'accounts' && caseId ? (
-                <CaseDetailAccountsPanel
-                  caseId={caseId}
-                  token={token}
-                  currentUser={currentUser}
-                  accountsSubTab={accountsSubTab}
-                  setAccountsSubTab={setAccountsSubTab}
-                  backToDocuments={backToDocuments}
-                  onRefresh={onRefresh}
-                />
-              ) : caseDocPanel === 'tasks' && caseId ? (
-                <CaseDetailTasksPanel
-                  caseId={caseId}
-                  token={token}
-                  busy={busy}
-                  backToDocuments={backToDocuments}
-                  openTaskCreateModal={openTaskCreateModal}
-                  uiPrefs={uiPrefs}
-                  setUiPreference={setUiPreference}
-                  caseTasksLayoutOpen={caseTasksLayoutOpen}
-                  setCaseTasksLayoutOpen={setCaseTasksLayoutOpen}
-                  caseTasksSearch={caseTasksSearch}
-                  setCaseTasksSearch={setCaseTasksSearch}
-                  caseTaskMenuRows={caseTaskMenuRows}
-                  setCaseTaskMenuRows={setCaseTaskMenuRows}
-                  askConfirm={askConfirm}
-                  onRefresh={onRefresh}
-                  onTaskMenuInvalidate={onTaskMenuInvalidate}
-                  currentUser={currentUser}
-                  users={users}
-                  tasksGridColumns={tasksGridColumns}
-                  tasksStartResize={tasksStartResize}
-                />
-              ) : caseDocPanel === 'property' && propertyDraft ? (
-                <CaseDetailPropertyPanel
-                  caseId={caseId}
-                  token={token}
-                  busy={busy}
-                  setBusy={setBusy}
-                  propertyDraft={propertyDraft}
-                  setPropertyDraft={setPropertyDraft}
-                  propertyBaseline={propertyBaseline}
-                  setPropertyDetails={setPropertyDetails}
-                  setCaseDocPanel={setCaseDocPanel}
-                  setActionErr={setActionErr}
-                  backToDocuments={backToDocuments}
-                  caseContacts={caseContacts}
-                  onRefresh={onRefresh}
-                />
-              ) : caseDocPanel === 'contacts' && caseId && (contactAddOpen || editSnapshot) ? (
-                <CaseDetailContactsPanel
-                  caseId={caseId}
-                  token={token}
-                  portalEnabled={portalEnabled}
-                  busy={busy}
-                  setBusy={setBusy}
-                  contactAddOpen={contactAddOpen}
-                  setContactAddErr={setContactAddErr}
-                  backToDocuments={backToDocuments}
-                  finishContactsDoc={finishContactsDoc}
-                  matterContactType={matterContactType}
-                  setMatterContactType={setMatterContactType}
-                  matterContactReference={matterContactReference}
-                  setMatterContactReference={setMatterContactReference}
-                  lawyerLinkClientIds={lawyerLinkClientIds}
-                  setLawyerLinkClientIds={setLawyerLinkClientIds}
-                  selectedGlobalContactId={selectedGlobalContactId}
-                  setSelectedGlobalContactId={setSelectedGlobalContactId}
-                  matterTypeOptions={matterTypeOptions}
-                  lawyerLinkableContacts={lawyerLinkableMatterContacts}
-                  contactAddErr={contactAddErr}
-                  setActionErr={setActionErr}
-                  editSnapshot={editSnapshot}
-                  setEditSnapshot={setEditSnapshot}
-                  editLawyerLinkClientIds={editLawyerLinkClientIds}
-                  setEditLawyerLinkClientIds={setEditLawyerLinkClientIds}
-                  pushToGlobal={pushToGlobal}
-                  setPushToGlobal={setPushToGlobal}
-                  resolvedEditSnapshotName={resolvedEditSnapshotName}
-                />              ) : null}
-            </div>
-          </div>
-
-          <input
-            ref={importInputRef}
-            type="file"
-            multiple
-            style={{ display: 'none' }}
-            onChange={(e) => {
-              const selectedFiles = Array.from(e.target.files ?? [])
-              void uploadFilesToCurrentFolder(selectedFiles)
-              e.target.value = ''
-            }}
-          />
+            <CaseDetailDocuments
+              busy={busy}
+              portalEnabled={portalEnabled}
+              caseDetail={caseDetail}
+              createFolderAtCurrentPath={createFolderAtCurrentPath}
+              openTaskCreateModal={openTaskCreateModal}
+              openCaseEventModal={openCaseEventModal}
+              setQuoteWizardOpen={setQuoteWizardOpen}
+              setFormSendOpen={setFormSendOpen}
+              setPrecedentPicker={setPrecedentPicker}
+              setCommentText={setCommentText}
+              setCommentErr={setCommentErr}
+              setCommentOpen={setCommentOpen}
+              downloadCaseExportZip={downloadCaseExportZip}
+              setCaseDocPanel={setCaseDocPanel}
+              onRefresh={onRefresh}
+              docSearch={docSearch}
+              setDocSearch={setDocSearch}
+              docSortKey={docSortKey}
+              setDocSortKey={setDocSortKey}
+              docSortDir={docSortDir}
+              setDocSortDir={setDocSortDir}
+              breadcrumbParts={breadcrumbParts}
+              setDocFolder={setDocFolder}
+              sortedPinnedInFolder={sortedPinnedInFolder}
+              sortedChildFolders={sortedChildFolders}
+              sortedRegularInFolder={sortedRegularInFolder}
+              childFolders={childFolders}
+              docFolder={docFolder}
+              selectedDocSet={selectedDocSet}
+              setSelectedDocSet={setSelectedDocSet}
+              docFocusKey={docFocusKey}
+              handleDocItemClick={handleDocItemClick}
+              handleDocsKeyDown={handleDocsKeyDown}
+              previewEmlFile={previewEmlFile}
+              openCaseFile={openCaseFile}
+              setDocMenu={setDocMenu}
+              portalFolderGrants={portalFolderGrants}
+              files={files}
+              uploadFilesToCurrentFolder={uploadFilesToCurrentFolder}
+              setActionErr={setActionErr}
+            />
+          ) : (
+            <CaseDetailPanelHost
+              caseDocPanel={caseDocPanel}
+              caseId={caseId}
+              token={token}
+              currentUser={currentUser}
+              caseDetail={caseDetail}
+              busy={busy}
+              setBusy={setBusy}
+              portalEnabled={portalEnabled}
+              backToDocuments={backToDocuments}
+              openCaseEventModal={openCaseEventModal}
+              setCaseDocPanel={setCaseDocPanel}
+              setEventsPreview={setEventsPreview}
+              setFinancePreview={setFinancePreview}
+              editMatterHeadOptions={editMatterHeadOptions}
+              editMatterHeadTypeId={editMatterHeadTypeId}
+              setEditMatterHeadTypeId={setEditMatterHeadTypeId}
+              setEditPracticeArea={setEditPracticeArea}
+              editMatterSubOptions={editMatterSubOptions}
+              editPracticeArea={editPracticeArea}
+              editMatterDescription={editMatterDescription}
+              setEditMatterDescription={setEditMatterDescription}
+              editFeeEarnerOptions={editFeeEarnerOptions}
+              editFeeEarner={editFeeEarner}
+              setEditFeeEarner={setEditFeeEarner}
+              editStatusOptions={editStatusOptions}
+              editCaseStatus={editCaseStatus}
+              setEditCaseStatus={setEditCaseStatus}
+              editSourceOptions={editSourceOptions}
+              editSourceId={editSourceId}
+              setEditSourceId={setEditSourceId}
+              editPortalEnabled={editPortalEnabled}
+              onEditPortalEnabledChange={onEditPortalEnabledChange}
+              editCaseDropdown={editCaseDropdown}
+              editCaseErr={editCaseErr}
+              setEditCaseErr={setEditCaseErr}
+              setManageAccessOpen={setManageAccessOpen}
+              onRefresh={onRefresh}
+              onCaseListInvalidate={onCaseListInvalidate}
+              portalShareFolderPath={portalShareFolderPath}
+              refreshPortalFolderGrants={refreshPortalFolderGrants}
+              accountsSubTab={accountsSubTab}
+              setAccountsSubTab={setAccountsSubTab}
+              openTaskCreateModal={openTaskCreateModal}
+              uiPrefs={uiPrefs}
+              setUiPreference={setUiPreference}
+              caseTasksLayoutOpen={caseTasksLayoutOpen}
+              setCaseTasksLayoutOpen={setCaseTasksLayoutOpen}
+              caseTasksSearch={caseTasksSearch}
+              setCaseTasksSearch={setCaseTasksSearch}
+              caseTaskMenuRows={caseTaskMenuRows}
+              setCaseTaskMenuRows={setCaseTaskMenuRows}
+              askConfirm={askConfirm}
+              onTaskMenuInvalidate={onTaskMenuInvalidate}
+              users={users}
+              tasksGridColumns={tasksGridColumns}
+              tasksStartResize={tasksStartResize}
+              propertyDraft={propertyDraft}
+              setPropertyDraft={setPropertyDraft}
+              propertyBaseline={propertyBaseline}
+              setPropertyDetails={setPropertyDetails}
+              setActionErr={setActionErr}
+              caseContacts={caseContacts}
+              contactAddOpen={contactAddOpen}
+              setContactAddErr={setContactAddErr}
+              finishContactsDoc={finishContactsDoc}
+              matterContactType={matterContactType}
+              setMatterContactType={setMatterContactType}
+              matterContactReference={matterContactReference}
+              setMatterContactReference={setMatterContactReference}
+              lawyerLinkClientIds={lawyerLinkClientIds}
+              setLawyerLinkClientIds={setLawyerLinkClientIds}
+              selectedGlobalContactId={selectedGlobalContactId}
+              setSelectedGlobalContactId={setSelectedGlobalContactId}
+              matterTypeOptions={matterTypeOptions}
+              lawyerLinkableMatterContacts={lawyerLinkableMatterContacts}
+              contactAddErr={contactAddErr}
+              editSnapshot={editSnapshot}
+              setEditSnapshot={setEditSnapshot}
+              editLawyerLinkClientIds={editLawyerLinkClientIds}
+              setEditLawyerLinkClientIds={setEditLawyerLinkClientIds}
+              pushToGlobal={pushToGlobal}
+              setPushToGlobal={setPushToGlobal}
+              resolvedEditSnapshotName={resolvedEditSnapshotName}
+            />
+          )}
         </div>
 
-        {commentOpen ? (
-          <div
-            className="modalOverlay"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="comment-modal-title"
-            onClick={(e) => e.target === e.currentTarget && !commentBusy && (() => { setCommentOpen(false); setCommentEditFileId(null) })()}
-          >
-            <div className="modal card" style={{ maxWidth: 520 }} onClick={(e) => e.stopPropagation()}>
-              <div className="paneHead">
-                <h2 id="comment-modal-title" style={{ margin: 0, fontSize: 18 }}>
-                  {commentEditFileId ? 'Edit comment' : 'New comment'}
-                </h2>
-                <button
-                  type="button"
-                  className="btn"
-                  disabled={commentBusy}
-                  onClick={() => { setCommentOpen(false); setCommentEditFileId(null) }}
-                >
-                  Cancel
-                </button>
-              </div>
-              <div className="stack" style={{ marginTop: 12 }}>
-                {commentErr ? <div className="error">{commentErr}</div> : null}
-                <textarea
-                  autoFocus
-                  rows={8}
-                  style={{ resize: 'vertical', width: '100%', boxSizing: 'border-box', fontFamily: 'inherit', fontSize: 14, padding: 8, borderRadius: 6, border: '1px solid #cbd5e1' }}
-                  placeholder="Type your comment here…"
-                  value={commentText}
-                  disabled={commentBusy}
-                  onChange={(e) => setCommentText(e.target.value)}
-                />
-                <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                  <button
-                    type="button"
-                    className="btn primary"
-                    disabled={commentBusy || !commentText.trim()}
-                    onClick={async () => {
-                      if (!caseId) return
-                      setCommentBusy(true)
-                      setCommentErr(null)
-                      try {
-                        if (commentEditFileId) {
-                          // Edit mode: PATCH existing comment file
-                          await apiFetch(`/cases/${caseId}/files/${commentEditFileId}/comment`, {
-                            token,
-                            method: 'PATCH',
-                            json: { text: commentText },
-                          })
-                        } else {
-                          // Create mode: upload as new .txt file
-                          const firstLine = commentText.trim().split('\n')[0].trim()
-                          const label = firstLine.length > 80 ? firstLine.slice(0, 77) + '…' : firstLine
-                          const filename = `${label || 'Comment'}.txt`
-                          const blob = new Blob([commentText], { type: 'text/plain' })
-                          const fd = new FormData()
-                          fd.set('upload', blob, filename)
-                          fd.set('folder', docFolder)
-                          const res = await fetch(apiUrl(`/cases/${caseId}/files`), {
-                            method: 'POST',
-                            headers: caseAuthHeaders(token),
-                            body: fd,
-                          })
-                          if (!res.ok) {
-                            const body = await res.json().catch(() => ({}))
-                            throw new Error((body as { detail?: string }).detail ?? res.statusText)
-                          }
-                        }
-                        setCommentOpen(false)
-                        setCommentEditFileId(null)
-                        setCommentText('')
-                        onRefresh()
-                      } catch (e: any) {
-                        setCommentErr(e?.message ?? 'Failed to save comment')
-                      } finally {
-                        setCommentBusy(false)
-                      }
-                    }}
-                  >
-                    {commentBusy ? 'Saving…' : 'Save comment'}
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        ) : null}
-
-        {emlPreviewOpen && emlPreviewFile ? (
-          <EmlPreviewModal
-            file={emlPreviewFile}
-            data={emlPreviewData}
-            loading={emlPreviewBusy}
-            error={emlPreviewErr}
-            onClose={() => {
-              setEmlPreviewOpen(false)
-              setEmlPreviewFile(null)
-              setEmlPreviewData(null)
-              setEmlPreviewErr(null)
-            }}
-            onOpenExternal={() => {
-              const f = emlPreviewFile
-              setEmlPreviewOpen(false)
-              setEmlPreviewFile(null)
-              setEmlPreviewData(null)
-              setEmlPreviewErr(null)
-              if (f) void openCaseFile(f)
-            }}
-          />
-        ) : null}
-
-        <TaskCreateModal
-          open={taskCreateOpen}
+        <CaseDetailOverlayModals
+          caseId={caseId}
           token={token}
+          caseDetail={caseDetail}
+          files={files}
+          caseContacts={caseContacts}
           users={users}
-          caseIdFixed={caseId ?? null}
-          preset={taskCreatePreset}
-          onClose={() => {
-            setTaskCreateOpen(false)
-            setTaskCreatePreset(null)
-          }}
-          onCreated={() => {
-            onRefresh()
-            onTaskMenuInvalidate?.()
-            if (caseId) {
-              void apiFetch<TaskMenuRow[]>(`/tasks?case_id=${encodeURIComponent(caseId)}`, { token })
-                .then((data) => setCaseTaskMenuRows(Array.isArray(data) ? data : []))
-                .catch(() => setCaseTaskMenuRows([]))
-            }
-          }}
+          currentUser={currentUser}
+          busy={busy}
+          onRefresh={onRefresh}
+          onCaseListInvalidate={onCaseListInvalidate}
+          onTaskMenuInvalidate={onTaskMenuInvalidate}
+          commentOpen={commentOpen}
+          docFolder={docFolder}
+          commentEditFileId={commentEditFileId}
+          commentBusy={commentBusy}
+          setCommentBusy={setCommentBusy}
+          commentErr={commentErr}
+          setCommentErr={setCommentErr}
+          commentText={commentText}
+          setCommentText={setCommentText}
+          setCommentOpen={setCommentOpen}
+          setCommentEditFileId={setCommentEditFileId}
+          emlPreviewOpen={emlPreviewOpen}
+          emlPreviewFile={emlPreviewFile}
+          emlPreviewData={emlPreviewData}
+          emlPreviewBusy={emlPreviewBusy}
+          emlPreviewErr={emlPreviewErr}
+          setEmlPreviewOpen={setEmlPreviewOpen}
+          setEmlPreviewFile={setEmlPreviewFile}
+          setEmlPreviewData={setEmlPreviewData}
+          setEmlPreviewErr={setEmlPreviewErr}
+          openCaseFile={openCaseFile}
+          taskCreateOpen={taskCreateOpen}
+          taskCreatePreset={taskCreatePreset}
+          setTaskCreateOpen={setTaskCreateOpen}
+          setTaskCreatePreset={setTaskCreatePreset}
+          setCaseTaskMenuRows={setCaseTaskMenuRows}
+          portalQuoteSend={portalQuoteSend}
+          setPortalQuoteSend={setPortalQuoteSend}
+          docusignSend={docusignSend}
+          setDocusignSend={setDocusignSend}
+          canarySignSend={canarySignSend}
+          setCanarySignSend={setCanarySignSend}
+          caseEventModalOpen={caseEventModalOpen}
+          setCaseEventModalOpen={setCaseEventModalOpen}
+          setEventsPreview={setEventsPreview}
+          quoteWizardOpen={quoteWizardOpen}
+          closeQuoteWizard={closeQuoteWizard}
+          quoteWasCreatedRef={quoteWasCreatedRef}
+          setQuoteAwaitingSave={setQuoteAwaitingSave}
+          quoteAwaitingSave={quoteAwaitingSave}
+          quoteSendOpen={quoteSendOpen}
+          setQuoteSendOpen={setQuoteSendOpen}
+          setCaseDocPanel={setCaseDocPanel}
+          setPrecedentPicker={setPrecedentPicker}
+          formSendOpen={formSendOpen}
+          setFormSendOpen={setFormSendOpen}
+          precedentPicker={precedentPicker}
+          precedentPickerSubTypeGroups={precedentPickerSubTypeGroups}
+          precedentPickerExpandedSubTypes={precedentPickerExpandedSubTypes}
+          precedentCategoriesBySubType={precedentCategoriesBySubType}
+          togglePrecedentPickerSubTypeExpanded={togglePrecedentPickerSubTypeExpanded}
+          selectPrecedentPickerNav={selectPrecedentPickerNav}
+          precedentPickerSubTypeId={precedentPickerSubTypeId}
+          precedentPickerCategoryId={precedentPickerCategoryId}
+          precedentSearch={precedentSearch}
+          setPrecedentSearch={setPrecedentSearch}
+          precedentChosenId={precedentChosenId}
+          setPrecedentChosenId={setPrecedentChosenId}
+          filteredPrecedentChoices={filteredPrecedentChoices}
+          confirmPrecedentPicker={confirmPrecedentPicker}
+          contactPickModal={contactPickModal}
+          contactPickErr={contactPickErr}
+          contactPickMatterOptions={contactPickMatterOptions}
+          pickMatterCcId={pickMatterCcId}
+          setPickMatterCcId={setPickMatterCcId}
+          contactPickMatterOpen={contactPickMatterOpen}
+          setContactPickMatterOpen={setContactPickMatterOpen}
+          pickSelectedContact={pickSelectedContact}
+          setPickSelectedContact={setPickSelectedContact}
+          pickLinkType={pickLinkType}
+          pickLinkGlobal={pickLinkGlobal}
+          setPickLinkGlobal={setPickLinkGlobal}
+          contactPickTypeOptions={contactPickTypeOptions}
+          setPickLinkType={setPickLinkType}
+          setContactPickErr={setContactPickErr}
+          pickLawyerClientIds={pickLawyerClientIds}
+          setPickLawyerClientIds={setPickLawyerClientIds}
+          contactPickTypeOpen={contactPickTypeOpen}
+          setContactPickTypeOpen={setContactPickTypeOpen}
+          lawyerLinkableMatterContacts={lawyerLinkableMatterContacts}
+          matterTypeOptions={matterTypeOptions}
+          setContactPickModal={setContactPickModal}
+          resetContactPickForm={resetContactPickForm}
+          confirmContactPick={confirmContactPick}
+          textPrompt={textPrompt}
+          setTextPrompt={setTextPrompt}
+          manageAccessOpen={manageAccessOpen}
+          setManageAccessOpen={setManageAccessOpen}
         />
 
-        {caseId && portalQuoteSend ? (
-          <SendQuoteViaPortalModal
-            token={token}
-            caseId={caseId}
-            fileId={portalQuoteSend.fileId}
-            fileName={portalQuoteSend.fileName}
-            folderPath={portalQuoteSend.folderPath}
-            open
-            onClose={() => setPortalQuoteSend(null)}
-            onSent={() => {
-              onRefresh()
-            }}
-          />
-        ) : null}
-
-        {caseId && docusignSend ? (
-          <SendDocusignModal
-            token={token}
-            caseId={caseId}
-            fileId={docusignSend.fileId}
-            fileName={docusignSend.fileName}
-            caseContacts={caseContacts}
-            amendFromId={docusignSend.amendFromId ?? null}
-            existing={
-              files.find((x) => x.id === docusignSend.fileId)?.docusign_signing ?? null
-            }
-            open
-            onClose={() => setDocusignSend(null)}
-            onSent={() => {
-              onRefresh()
-            }}
-          />
-        ) : null}
-
-        {caseId && canarySignSend ? (
-          <SendCanarySignModal
-            token={token}
-            caseId={caseId}
-            fileId={canarySignSend.fileId}
-            fileName={canarySignSend.fileName}
-            caseContacts={caseContacts}
-            amendFromId={canarySignSend.amendFromId ?? null}
-            existing={files.find((x) => x.id === canarySignSend.fileId)?.canary_signing ?? null}
-            open
-            onClose={() => setCanarySignSend(null)}
-            onSent={() => {
-              setCanarySignSend(null)
-              onRefresh()
-            }}
-          />
-        ) : null}
-
-        {caseId ? (
-          <CaseEventCreateModal
-            open={caseEventModalOpen}
-            caseId={caseId}
-            token={token}
-            caseLabel={
-              caseDetail
-                ? `${caseDetail.case_number}${caseDetail.matter_description ? ` — ${caseDetail.matter_description}` : ''}`.trim()
-                : ''
-            }
-            onClose={() => setCaseEventModalOpen(false)}
-            onSaved={() => {
-              void apiFetch<CaseEventsOut>(`/cases/${caseId}/events`, { token })
-                .then(setEventsPreview)
-                .catch(() => {})
-              onRefresh()
-            }}
-          />
-        ) : null}
-
-        {quoteWizardOpen && caseDetail ? (
-          <QuoteWizard
-            token={token}
-            open={quoteWizardOpen}
-            presetCase={caseDetail}
-            onClose={closeQuoteWizard}
-            onOpenNewMatter={() => {}}
-            onCaseCreatedRefresh={() => {}}
-            pendingNewCaseId={null}
-            onClearPendingNewCase={() => {}}
-            onQuoteCreated={() => {
-              quoteWasCreatedRef.current = true
-            }}
-            onAwaitingQuoteSave={setQuoteAwaitingSave}
-          />
-        ) : null}
-
-        {quoteAwaitingSave ? (
-          <QuoteSendPrompt
-            token={token}
-            caseId={quoteAwaitingSave.caseId}
-            fileId={quoteAwaitingSave.fileId}
-            preferredContactId={quoteAwaitingSave.preferredContactId}
-            portalEnabled={quoteAwaitingSave.portalEnabled}
-            open={quoteSendOpen}
-            onClose={() => {
-              setQuoteSendOpen(false)
-              setQuoteAwaitingSave(null)
-            }}
-            onSendLetter={(_caseId) => {
-              setCaseDocPanel('documents')
-              setPrecedentPicker({ kind: 'letter' })
-            }}
-            onSendEmail={(_caseId) => {
-              setCaseDocPanel('documents')
-              setPrecedentPicker({
-                kind: 'email',
-                preferPrecedentReference: QUOTE_EMAIL_PRECEDENT_REFERENCE,
-                attachmentFileId: quoteAwaitingSave?.fileId,
-              })
-            }}
-            onSent={() => {
-              quoteWasCreatedRef.current = true
-              onRefresh()
-            }}
-          />
-        ) : null}
-
-        {formSendOpen && caseId ? (
-          <SendPortalFormModal
-            token={token}
-            caseId={caseId}
-            open={formSendOpen}
-            onClose={() => setFormSendOpen(false)}
-            onSent={() => onRefresh()}
-          />
-        ) : null}
-
-        {precedentPicker ? (
-          <div
-            className="modalOverlay"
-            role="dialog"
-            aria-modal="true"
-            onClick={(e) => e.target === e.currentTarget && setPrecedentPicker(null)}
-          >
-            <div className="modal card precedentPickerModal" onClick={(e) => e.stopPropagation()}>
-              <div className="paneHead">
-                <div>
-                  <h2 className="precedentPickerTitle">Precedent</h2>
-                  <div className="muted">Choose a category, then a template — or blank.</div>
-                  {!caseDetail?.matter_sub_type_id && !caseDetail?.matter_head_type_id ? (
-                    <div className="muted" style={{ marginTop: 4 }}>
-                      This case has no matter type set — only precedents that apply to all cases are available.
-                    </div>
-                  ) : null}
-                </div>
-                <button type="button" className="btn" onClick={() => setPrecedentPicker(null)}>
-                  Close
-                </button>
-              </div>
-              <div className="precedentPickerBody">
-                <div className="precedentPickerCats">
-                  <div className="precedentPickerCatsTitle">Category</div>
-                  <div className="precedentPickerCatList">
-                    {caseDetail?.matter_sub_type_id ? (
-                      precedentPickerSubTypeGroups.map((group) => {
-                        const expanded = precedentPickerExpandedSubTypes.has(group.subId)
-                        const categories = precedentCategoriesBySubType[group.subId] ?? []
-                        const isCurrentCaseSubType = group.subId === caseDetail.matter_sub_type_id
-                        return (
-                          <div key={group.subId} className="precedentPickerSubTypeGroup">
-                            <button
-                              type="button"
-                              className={`precedentPickerSubTypeToggle${isCurrentCaseSubType ? ' precedentPickerSubTypeToggle--current' : ''}`}
-                              aria-expanded={expanded}
-                              onClick={() => togglePrecedentPickerSubTypeExpanded(group.subId)}
-                            >
-                              <span className="precedentPickerSubTypeChevron" aria-hidden>
-                                {expanded ? '▾' : '▸'}
-                              </span>
-                              <span>{group.subName}</span>
-                            </button>
-                            {expanded ? (
-                              <div className="precedentPickerSubTypeCategories">
-                                <button
-                                  type="button"
-                                  className={`precedentPickerCatBtn precedentPickerCatBtn--nested${
-                                    precedentPickerSubTypeId === group.subId &&
-                                    precedentPickerCategoryId === null
-                                      ? ' active'
-                                      : ''
-                                  }`}
-                                  onClick={() => selectPrecedentPickerNav(group.subId, null)}
-                                >
-                                  All
-                                </button>
-                                {categories.map((c) => (
-                                  <button
-                                    key={c.id}
-                                    type="button"
-                                    className={`precedentPickerCatBtn precedentPickerCatBtn--nested${
-                                      precedentPickerSubTypeId === group.subId &&
-                                      precedentPickerCategoryId === c.id
-                                        ? ' active'
-                                        : ''
-                                    }`}
-                                    onClick={() => selectPrecedentPickerNav(group.subId, c.id)}
-                                  >
-                                    {c.name}
-                                  </button>
-                                ))}
-                                {categories.length === 0 ? (
-                                  <div className="muted precedentPickerSubTypeEmpty">
-                                    No named categories for this sub-type.
-                                  </div>
-                                ) : null}
-                              </div>
-                            ) : null}
-                          </div>
-                        )
-                      })
-                    ) : caseDetail?.matter_head_type_id ? (
-                      <div className="muted" style={{ padding: '8px 0' }}>
-                        All templates for {caseDetail.matter_head_type_name ?? 'this matter type'}
-                      </div>
-                    ) : null}
-                  </div>
-                </div>
-                <div className="precedentPickerMain">
-                  <label className="field" style={{ marginBottom: 8 }}>
-                    <span>Search by name or reference</span>
-                    <SearchInput
-                      placeholder="Search…"
-                      value={precedentSearch}
-                      onChange={(e) => setPrecedentSearch(e.target.value)}
-                      onClear={() => setPrecedentSearch('')}
-                      disabled={!caseDetail?.matter_sub_type_id && !caseDetail?.matter_head_type_id}
-                      aria-label="Search precedents"
-                    />
-                  </label>
-                  {!caseDetail?.matter_sub_type_id && !caseDetail?.matter_head_type_id ? (
-                    <div className="muted precedentPickerEmpty">
-                      Set a matter type on this case (practice head or sub-type) to use scoped precedents.
-                    </div>
-                  ) : (
-                    <>
-                      <div className="precedentPickerTableHead row">
-                        <span className="precedentPickerColPick" />
-                        <span className="precedentPickerColName">Name</span>
-                        <span className="precedentPickerColRef">Reference</span>
-                      </div>
-                      <div className="precedentPickerTableBody">
-                        <label className="precedentPickerRow rowbtn row">
-                          <span className="precedentPickerColPick">
-                            <input
-                              type="radio"
-                              name="precedentChoice"
-                              checked={precedentChosenId === null}
-                              onChange={() => setPrecedentChosenId(null)}
-                            />
-                          </span>
-                          <span className="precedentPickerColName">Blank (no precedent)</span>
-                          <span className="precedentPickerColRef muted">—</span>
-                        </label>
-                        {filteredPrecedentChoices.map((p) => (
-                          <label
-                            key={p.id}
-                            className={`precedentPickerRow rowbtn row ${precedentChosenId === p.id ? 'active' : ''}`}
-                          >
-                            <span className="precedentPickerColPick">
-                              <input
-                                type="radio"
-                                name="precedentChoice"
-                                checked={precedentChosenId === p.id}
-                                onChange={() => setPrecedentChosenId(p.id)}
-                              />
-                            </span>
-                            <span className="precedentPickerColName">{p.name}</span>
-                            <span className="precedentPickerColRef mono">{p.reference}</span>
-                          </label>
-                        ))}
-                        {filteredPrecedentChoices.length === 0 ? (
-                          <div className="muted precedentPickerEmpty">
-                            No precedents match this category and search.
-                          </div>
-                        ) : null}
-                      </div>
-                    </>
-                  )}
-                  <div className="row precedentPickerActions">
-                    <button type="button" className="btn" onClick={() => setPrecedentPicker(null)}>
-                      Cancel
-                    </button>
-                    <button type="button" className="btn primary" onClick={() => confirmPrecedentPicker()}>
-                      Continue
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        ) : null}
-
-        {contactPickModal ? (
-          <div
-            className="modalOverlay"
-            role="dialog"
-            aria-modal="true"
-          >
-            <div className="modal card modal--scrollBody" style={{ maxWidth: 520 }} onClick={(e) => e.stopPropagation()}>
-              <div className="paneHead">
-                <div>
-                  <h2 style={{ margin: 0, fontSize: 18 }}>
-                    {contactPickModal.composeKind === 'email' ? 'E-mail recipient' : 'Letter recipient'}
-                  </h2>
-                  <div className="muted">
-                    {contactPickModal.composeKind === 'email' ? (
-                      <>
-                        Optional: pick a recipient to pre-fill <strong>To</strong>.
-                        {(contactPickModal.attachmentFileIds?.length ?? 0) > 0 &&
-                        shouldUseGraphDraftForMatterEmail(
-                          currentUser,
-                          contactPickModal.attachmentFileIds ?? [],
-                        ) ? (
-                          <>
-                            {' '}
-                            Canary creates an Outlook draft via Microsoft Graph with the quote attached.
-                            {currentUser?.email_launch_preference === 'outlook_web' ? (
-                              <> Outlook on the web opens for review.</>
-                            ) : (
-                              <>
-                                {' '}
-                                With <strong>Outlook</strong> selected under desktop e-mail settings, the Canary Outlook
-                                add-in opens compose; the draft is also in Drafts as a fallback.
-                              </>
-                            )}
-                          </>
-                        ) : (contactPickModal.attachmentFileIds?.length ?? 0) > 0 ? (
-                          <>
-                            {' '}
-                            Compose opens in your mail program with merged subject and body. Attach the quote using{' '}
-                            <strong>Compose from matter</strong> in the Canary Thunderbird or Outlook add-in.
-                          </>
-                        ) : (
-                          <>
-                            {' '}
-                            Compose opens in your mail program (or Outlook on the web) with merged subject and body.
-                            Attach case files with <strong>Compose from matter</strong> in the Canary Outlook or
-                            Thunderbird add-in.
-                          </>
-                        )}
-                      </>
-                    ) : (
-                      <>
-                        Matter contact (choose &quot;All clients&quot; to fill every client merge slot), none, or search for a
-                        global contact below.
-                      </>
-                    )}
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  className="btn"
-                  onClick={() => {
-                    setContactPickModal(null)
-                    resetContactPickForm()
-                  }}
-                >
-                  Close
-                </button>
-              </div>
-              <div className="stack modalBodyScroll" style={{ marginTop: 12 }}>
-                {contactPickErr ? <div className="error">{contactPickErr}</div> : null}
-                <SingleSelectDropdown
-                  label="Matter contact"
-                  options={contactPickMatterOptions}
-                  value={pickMatterCcId}
-                  onChange={(v) => {
-                    setPickMatterCcId(v)
-                    setPickSelectedContact(null)
-                  }}
-                  open={contactPickMatterOpen}
-                  onOpenChange={(next) => {
-                    setContactPickMatterOpen(next)
-                    if (next) setContactPickTypeOpen(false)
-                  }}
-                  emptyMessage="No matter contacts on this case yet."
-                />
-                <div className="muted" style={{ fontSize: 12 }}>
-                  Or search for a global contact (results appear when your search matches):
-                </div>
-                <ContactSearchPicker
-                  token={token}
-                  value={pickSelectedContact?.id ?? null}
-                  onChange={(id, contact) => {
-                    setPickSelectedContact(contact ?? null)
-                    if (id) setPickMatterCcId('none')
-                  }}
-                  disabled={busy}
-                  organisationOnly={pickLinkType.trim().toLowerCase() === LAWYERS_TYPE_SLUG}
-                  listMaxHeight={120}
-                  searchPlaceholder="Search global…"
-                />
-                {pickSelectedContact ? (
-                  <label className="row" style={{ alignItems: 'center', gap: 8 }}>
-                    <input
-                      type="checkbox"
-                      checked={pickLinkGlobal}
-                      onChange={(e) => setPickLinkGlobal(e.target.checked)}
-                    />
-                    <span className="muted">Link this contact to the current matter</span>
-                  </label>
-                ) : null}
-                {pickLinkGlobal ? (
-                  <SingleSelectDropdown
-                    label="Contact type (required to link)"
-                    options={contactPickTypeOptions}
-                    value={pickLinkType}
-                    onChange={(v) => {
-                      setPickLinkType(v)
-                      setContactPickErr(null)
-                      if (v.trim().toLowerCase() !== LAWYERS_TYPE_SLUG) {
-                        setPickLawyerClientIds([])
-                      } else if (pickSelectedContact?.type === 'person') {
-                        setPickSelectedContact(null)
-                      }
-                    }}
-                    open={contactPickTypeOpen}
-                    onOpenChange={(next) => {
-                      setContactPickTypeOpen(next)
-                      if (next) setContactPickMatterOpen(false)
-                    }}
-                    placeholder="— select —"
-                  />
-                ) : null}
-                {pickLinkGlobal && pickLinkType.trim().toLowerCase() === LAWYERS_TYPE_SLUG ? (
-                  <div className="field">
-                    <span>Linked contacts (required)</span>
-                    <div className="stack" style={{ gap: 6, maxHeight: 120, overflow: 'auto' }}>
-                      {lawyerLinkableMatterContacts.length === 0 ? (
-                        <div className="muted">Add at least one other matter contact on this case first.</div>
-                      ) : (
-                        lawyerLinkableMatterContacts.map((c) => (
-                          <label key={c.id} className="row" style={{ gap: 8, cursor: 'pointer', alignItems: 'flex-start' }}>
-                            <input
-                              type="checkbox"
-                              checked={pickLawyerClientIds.includes(c.id)}
-                              style={{ marginTop: 3 }}
-                              onChange={(e) => {
-                                setPickLawyerClientIds((prev) => {
-                                  let next: string[]
-                                  if (e.target.checked) {
-                                    if (prev.includes(c.id) || prev.length >= 4) return prev
-                                    next = [...prev, c.id]
-                                  } else {
-                                    next = prev.filter((x) => x !== c.id)
-                                  }
-                                  if (next.length > 0) setContactPickErr(null)
-                                  return next
-                                })
-                              }}
-                            />
-                            <span>
-                              {c.name}
-                              <span className="muted" style={{ display: 'block', fontSize: 12 }}>
-                                {matterContactTypeLabel(c.matter_contact_type, matterTypeOptions)}
-                              </span>
-                            </span>
-                          </label>
-                        ))
-                      )}
-                    </div>
-                  </div>
-                ) : null}
-                <div className="row" style={{ justifyContent: 'flex-end', marginTop: 12 }}>
-                  <button
-                    type="button"
-                    className="btn"
-                    onClick={() => {
-                      setContactPickModal(null)
-                      resetContactPickForm()
-                    }}
-                  >
-                    Cancel
-                  </button>
-                  <button type="button" className="btn primary" disabled={busy} onClick={() => void confirmContactPick()}>
-                    Continue
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        ) : null}
-
         {docMenu ? (
-          <div
-            ref={docMenuRef}
-            className="docContextMenu"
-            style={{
-              left: docMenuStyle?.left ?? docMenu.x,
-              top: docMenuStyle?.top ?? docMenu.y,
-              ...(docMenuStyle?.maxHeight != null
-                ? { maxHeight: docMenuStyle.maxHeight, overflowY: 'auto' as const }
-                : {}),
-            }}
-            onMouseDown={(e) => e.stopPropagation()}
-            onMouseLeave={() => {
-              setMoveMenu(null)
-              setPortalMenu(null)
-            }}
-          >
-            {docMenu.kind === 'surface' ? (
-              <div
-                className="docContextItem"
-                onClick={() => {
-                  setDocMenu(null)
-                  createFolderAtCurrentPath()
-                }}
-              >
-                New folder
-              </div>
-            ) : null}
-
-            {docMenu.kind === 'folder' ? (
-              <div
-                className="docContextItem"
-                onClick={() => {
-                  setDocFolder(docMenu.folderPath)
-                  setDocMenu(null)
-                }}
-              >
-                Open
-              </div>
-            ) : null}
-
-            {docMenu.kind === 'folder' ? (
-              <div
-                className="docContextItem"
-                onClick={() => {
-                  void downloadCaseFolderZip(docMenu.folderPath)
-                }}
-              >
-                Download
-              </div>
-            ) : null}
-
-            {docMenu.kind === 'folder' ? (
-              <>
-                <div
-                  className="docContextItem"
-                  onClick={() => {
-                    const current = docMenu.folderPath
-                    const parts = splitFolderPath(current)
-                    const parent = parts.length > 1 ? parts.slice(0, -1).join('/') : ''
-                    const leafEnc = parts[parts.length - 1] || ''
-                    const leaf = decodeFolderPathSegment(leafEnc)
-                    setDocMenu(null)
-                    setTextPrompt({
-                      title: 'Rename folder',
-                      hint: 'Name only (not the full path).',
-                      initial: leaf,
-                      confirmLabel: 'Rename',
-                      onConfirm: (newName) => {
-                        const trimmed = newName.trim()
-                        setTextPrompt(null)
-                        if (!trimmed) return
-                        const newFolderPath = joinFolderPath(parent, trimmed)
-                        if (docFolder === current) setDocFolder(newFolderPath)
-                        setBusy(true)
-                        setActionErr(null)
-                        apiFetch(`/cases/${caseId}/files/folders/rename`, {
-                          token,
-                          method: 'POST',
-                          json: { old_folder_path: current, new_folder_path: newFolderPath },
-                        })
-                          .then(() => {
-                            onRefresh()
-                          })
-                          .catch((e: any) => {
-                            setActionErr(e?.message ?? 'Failed to rename folder')
-                          })
-                          .finally(() => {
-                            setBusy(false)
-                          })
-                      },
-                    })
-                  }}
-                >
-                  Rename
-                </div>
-
-                <div
-                  className="docContextSubWrap"
-                  onMouseEnter={() => setMoveMenu({ kind: 'folder', folderPath: docMenu.folderPath })}
-                  onMouseLeave={() => setMoveMenu(null)}
-                >
-                  <div className="docContextItem docContextItemRow">
-                    <span>Move</span>
-                    <span className="docMenuChevron" aria-hidden>
-                      ▸
-                    </span>
-                  </div>
-                  {moveMenu?.kind === 'folder' && moveMenu.folderPath === docMenu.folderPath ? (
-                    <div className="docSubMenu" role="menu">
-                      {(() => {
-                        const current = docMenu.folderPath
-                        const currentParts = splitFolderPath(current)
-                        const leaf = currentParts[currentParts.length - 1] ?? ''
-                        const forbiddenPrefix = `${current}/`
-                        const currentParent = currentParts.length > 1 ? currentParts.slice(0, -1).join('/') : ''
-                        const options = [
-                          { label: 'Home', parent: '' },
-                          ...allFolderPaths
-                            .filter(
-                              (p) => p !== current && !p.startsWith(forbiddenPrefix),
-                            )
-                            .map((p) => ({ label: decodeFolderPathForDisplay(p), parent: p })),
-                        ]
-                        return options.map((opt) => {
-                          const isCurrentParent = opt.parent === currentParent
-                          return (
-                          <div
-                            key={`folder-move-${opt.parent || 'home'}`}
-                            className={`docContextItem${isCurrentParent ? ' docContextItemDisabled' : ''}`}
-                            role="menuitem"
-                            aria-disabled={isCurrentParent}
-                            onClick={() => {
-                              if (isCurrentParent) return
-                              const newFullPath = opt.parent ? `${opt.parent}/${leaf}` : leaf
-                              if (docFolder === current) setDocFolder(newFullPath)
-                              else if (docFolder.startsWith(`${current}/`)) {
-                                setDocFolder(`${newFullPath}/${docFolder.slice(current.length + 1)}`)
-                              }
-                              setBusy(true)
-                              setActionErr(null)
-                              apiFetch(`/cases/${caseId}/files/folders/move`, {
-                                token,
-                                method: 'POST',
-                                json: { old_folder_path: current, new_parent_path: opt.parent },
-                              })
-                                .then(() => onRefresh())
-                                .catch((e: any) => setActionErr(e?.message ?? 'Failed to move folder'))
-                                .finally(() => setBusy(false))
-                              setMoveMenu(null)
-                              setDocMenu(null)
-                            }}
-                          >
-                            {opt.label}
-                          </div>
-                          )
-                        })
-                      })()}
-                    </div>
-                  ) : null}
-                </div>
-
-                {portalEnabled ? (
-                <div
-                  className="docContextSubWrap"
-                  onMouseEnter={() => setPortalMenu({ folderPath: docMenu.folderPath })}
-                  onMouseLeave={() => setPortalMenu(null)}
-                >
-                  <div className="docContextItem docContextItemRow">
-                    <span>Portal</span>
-                    <span className="docMenuChevron" aria-hidden>
-                      ▸
-                    </span>
-                  </div>
-                  {portalMenu?.folderPath === docMenu.folderPath ? (
-                    <div className="docSubMenu" role="menu">
-                      <div
-                        className="docContextItem"
-                        role="menuitem"
-                        onClick={() => {
-                          setDocMenu(null)
-                          setPortalMenu(null)
-                          setCaseDocPanel('portal-hub')
-                        }}
-                      >
-                        Activity & settings
-                      </div>
-                      <div
-                        className="docContextItem"
-                        role="menuitem"
-                        onClick={() => openPortalSharePanel(docMenu.folderPath)}
-                      >
-                        Share
-                      </div>
-                    </div>
-                  ) : null}
-                </div>
-                ) : null}
-
-                <div
-                  className="docContextItem"
-                  onClick={() => {
-                    void (async () => {
-                      const current = docMenu.folderPath
-                      const sharedContacts = portalEnabled ? portalContactsForFolder(current, portalFolderGrants) : []
-                      const ok = await askConfirm({
-                        title: 'Delete folder',
-                        message: portalSharedFolderDeleteConfirmMessage(
-                          decodeFolderPathForDisplay(current),
-                          sharedContacts,
-                        ),
-                        danger: true,
-                        confirmLabel: 'Delete',
-                      })
-                      if (!ok) return
-                      setDocMenu(null)
-                      setBusy(true)
-                      setActionErr(null)
-                      apiFetch(`/cases/${caseId}/files/folders/delete`, {
-                        token,
-                        method: 'POST',
-                        json: { folder_path: current },
-                      })
-                        .then(() => {
-                          if (docFolder === current) setDocFolder('')
-                          onRefresh()
-                        })
-                        .catch((e: any) => {
-                          setActionErr(e?.message ?? 'Failed to delete folder')
-                        })
-                        .finally(() => {
-                          setBusy(false)
-                        })
-                      setMoveMenu(null)
-                    })()
-                  }}
-                >
-                  Delete
-                </div>
-              </>
-            ) : null}
-
-            {docMenu.kind === 'file' ? (
-              <>
-                {(() => {
-                  const f = files.find((x) => x.id === docMenu.fileId)
-                  if (!f) return null
-                  const canOpenDownload = f.category !== 'system' && f.mime_type !== 'application/x-directory'
-                  if (!canOpenDownload) return null
-                  return (
-                    <>
-                      {isEmlLikeFileSummary(f) ? (
-                        <div
-                          className="docContextItem"
-                          onClick={() => {
-                            setDocMenu(null)
-                            void previewEmlFile(f)
-                          }}
-                        >
-                          Preview
-                        </div>
-                      ) : null}
-                      <div
-                        className="docContextItem"
-                        onClick={() => {
-                          setDocMenu(null)
-                          void openCaseFile(f)
-                        }}
-                      >
-                        Open
-                      </div>
-                      <div
-                        className="docContextItem"
-                        onClick={() => {
-                          const isMultiSelected = selectedDocSet.has(f.id) && selectedDocSet.size > 1
-                          const ids = isMultiSelected
-                            ? [...selectedDocSet].filter((k) => !k.startsWith('folder:'))
-                            : [f.id]
-                          const targets = ids
-                            .map((id) => files.find((x) => x.id === id))
-                            .filter((x): x is FileSummary => Boolean(x))
-                          setDocMenu(null)
-                          void downloadCaseFiles(targets)
-                        }}
-                      >
-                        {selectedDocSet.has(f.id) && selectedDocSet.size > 1
-                          ? `Download ${[...selectedDocSet].filter((k) => !k.startsWith('folder:')).length} files`
-                          : 'Download'}
-                      </div>
-                      {portalEnabled && isQuotePortalSendCandidate(f) ? (
-                        <div
-                          className="docContextItem"
-                          onClick={() => {
-                            setDocMenu(null)
-                            setPortalQuoteSend({
-                              fileId: f.id,
-                              fileName: f.original_filename,
-                              folderPath: f.folder_path ?? '',
-                            })
-                          }}
-                        >
-                          Send quote via portal
-                        </div>
-                      ) : null}
-                      {docusignEnabled && f.category !== 'system' ? (
-                        <>
-                          {f.docusign_signing?.status === 'pending' ? (
-                            <>
-                              <div
-                                className="docContextItem"
-                                onClick={() => {
-                                  setDocMenu(null)
-                                  void (async () => {
-                                    if (!caseId) return
-                                    setBusy(true)
-                                    try {
-                                      await apiFetch(`/cases/${caseId}/docusign/requests/${f.docusign_signing!.id}/resend`, {
-                                        token,
-                                        method: 'POST',
-                                      })
-                                      pushNotification('Signing reminders sent.')
-                                    } catch (e: any) {
-                                      setActionErr(e?.message ?? 'Resend failed')
-                                    } finally {
-                                      setBusy(false)
-                                    }
-                                  })()
-                                }}
-                              >
-                                Resend DocuSign link
-                              </div>
-                              <div
-                                className="docContextItem"
-                                onClick={() => {
-                                  setDocMenu(null)
-                                  setDocusignSend({
-                                    fileId: f.id,
-                                    fileName: f.original_filename,
-                                    amendFromId: f.docusign_signing!.id,
-                                  })
-                                }}
-                              >
-                                Amend & re-send
-                              </div>
-                              <div
-                                className="docContextItem"
-                                onClick={() => {
-                                  setDocMenu(null)
-                                  void (async () => {
-                                    if (!caseId) return
-                                    const ok = await askConfirm({
-                                      title: 'Void DocuSign envelope',
-                                      message: 'Void this envelope? Recipients will no longer be able to sign.',
-                                    })
-                                    if (!ok) return
-                                    setBusy(true)
-                                    try {
-                                      await apiFetch(`/cases/${caseId}/docusign/requests/${f.docusign_signing!.id}/void`, {
-                                        token,
-                                        method: 'POST',
-                                        json: { reason: 'Voided from Canary' },
-                                      })
-                                      onRefresh()
-                                    } catch (e: any) {
-                                      setActionErr(e?.message ?? 'Void failed')
-                                    } finally {
-                                      setBusy(false)
-                                    }
-                                  })()
-                                }}
-                              >
-                                Void DocuSign envelope
-                              </div>
-                            </>
-                          ) : (
-                            <div
-                              className="docContextItem"
-                              onClick={() => {
-                                setDocMenu(null)
-                                setDocusignSend({ fileId: f.id, fileName: f.original_filename })
-                              }}
-                            >
-                              Send for signature (DocuSign)
-                            </div>
-                          )}
-                        </>
-                      ) : null}
-                      {canarySignEnabled && portalEnabled && f.category !== 'system' ? (
-                        <>
-                          {f.canary_signing?.status === 'pending' ? (
-                            <>
-                              <div
-                                className="docContextItem"
-                                onClick={() => {
-                                  setDocMenu(null)
-                                  void (async () => {
-                                    if (!caseId || !f.canary_signing) return
-                                    setBusy(true)
-                                    try {
-                                      await apiFetch(`/cases/${caseId}/canary-sign/requests/${f.canary_signing.id}/remind`, {
-                                        token,
-                                        method: 'POST',
-                                      })
-                                      pushNotification('Signing reminders sent.')
-                                    } catch (e: any) {
-                                      setActionErr(e?.message ?? 'Remind failed')
-                                    } finally {
-                                      setBusy(false)
-                                    }
-                                  })()
-                                }}
-                              >
-                                Remind Canary Sign
-                              </div>
-                              <div
-                                className="docContextItem"
-                                onClick={() => {
-                                  setDocMenu(null)
-                                  setCanarySignSend({
-                                    fileId: f.id,
-                                    fileName: f.original_filename,
-                                    amendFromId: f.canary_signing!.id,
-                                  })
-                                }}
-                              >
-                                Amend & re-send (Canary Sign)
-                              </div>
-                              <div
-                                className="docContextItem"
-                                onClick={() => {
-                                  setDocMenu(null)
-                                  void (async () => {
-                                    if (!caseId || !f.canary_signing) return
-                                    const ok = await askConfirm({
-                                      title: 'Void Canary Sign request',
-                                      message: 'Void this signing request? Recipients will no longer be able to sign.',
-                                    })
-                                    if (!ok) return
-                                    setBusy(true)
-                                    try {
-                                      await apiFetch(`/cases/${caseId}/canary-sign/requests/${f.canary_signing.id}/void`, {
-                                        token,
-                                        method: 'POST',
-                                        json: { reason: 'Voided from Canary' },
-                                      })
-                                      pushNotification('Canary Sign request voided.')
-                                      onRefresh()
-                                    } catch (e: any) {
-                                      setActionErr(e?.message ?? 'Void failed')
-                                    } finally {
-                                      setBusy(false)
-                                    }
-                                  })()
-                                }}
-                              >
-                                Void Canary Sign
-                              </div>
-                            </>
-                          ) : (
-                            <div
-                              className="docContextItem"
-                              onClick={() => {
-                                setDocMenu(null)
-                                setCanarySignSend({ fileId: f.id, fileName: f.original_filename })
-                              }}
-                            >
-                              Send for signature (Canary Sign)
-                            </div>
-                          )}
-                        </>
-                      ) : null}
-                    </>
-                  )
-                })()}
-
-                {(() => {
-                  const f = files.find((x) => x.id === docMenu.fileId)
-                  if (!f || f.mime_type === 'application/x-directory') return null
-                  return (
-                    <div
-                      className="docContextItem"
-                      onClick={() => {
-                        setDocMenu(null)
-                        const name = f.original_filename.trim() || 'Document'
-                        setTaskCreatePreset({
-                          standardTaskId: CANARY_FOLLOW_UP_STANDARD_TASK_ID,
-                          title: `Follow up: ${name}`,
-                        })
-                        setTaskCreateOpen(true)
-                      }}
-                    >
-                      Follow up
-                    </div>
-                  )
-                })()}
-
-                {(() => {
-                  const f = files.find((x) => x.id === docMenu.fileId)
-                  if (!f) return null
-                  if (isCommentFile(f)) {
-                    return (
-                      <div
-                        className="docContextItem"
-                        onClick={() => {
-                          setDocMenu(null)
-                          void downloadCaseFiles([f])
-                        }}
-                      >
-                        Export
-                      </div>
-                    )
-                  }
-                  return (
-                    <div
-                      className="docContextItem"
-                      onClick={() => {
-                        setDocMenu(null)
-                        const originalName = f.original_filename.trim()
-                        const extIdx = originalName.lastIndexOf('.')
-                        const hasEditableExt = extIdx > 0 && extIdx < originalName.length - 1
-                        const lockedExt = hasEditableExt ? originalName.slice(extIdx) : ''
-                        const initialBase = hasEditableExt ? originalName.slice(0, extIdx) : originalName
-                        setTextPrompt({
-                          title: lockedExt ? `Rename file (extension ${lockedExt} is fixed)` : 'Rename file',
-                          initial: initialBase,
-                          confirmLabel: 'Rename',
-                          onConfirm: (newName) => {
-                            const trimmedBase = newName.trim()
-                            setTextPrompt(null)
-                            if (!trimmedBase) return
-                            const finalName = `${trimmedBase}${lockedExt}`
-                            if (finalName === f.original_filename) return
-                            setBusy(true)
-                            setActionErr(null)
-                            apiFetch(`/cases/${caseId}/files/${f.id}/rename`, {
-                              token,
-                              method: 'PATCH',
-                              json: { original_filename: finalName },
-                            })
-                              .then(() => onRefresh())
-                              .catch((e: any) => setActionErr(e?.message ?? 'Failed to rename file'))
-                              .finally(() => setBusy(false))
-                          },
-                        })
-                      }}
-                    >
-                      Rename
-                    </div>
-                  )
-                })()}
-
-                <div
-                  className="docContextItem"
-                  onClick={async () => {
-                    const f = files.find((x) => x.id === docMenu.fileId)
-                    if (!f) return
-                    setBusy(true)
-                    setActionErr(null)
-                    try {
-                      await apiFetch(`/cases/${caseId}/files/${f.id}/pin`, {
-                        token,
-                        method: 'PATCH',
-                        json: { is_pinned: !f.is_pinned },
-                      })
-                      onRefresh()
-                      setDocMenu(null)
-                      setMoveMenu(null)
-                    } catch (e: any) {
-                      setActionErr(e?.message ?? 'Failed to update pin')
-                    } finally {
-                      setBusy(false)
-                    }
-                  }}
-                >
-                  {files.find((x) => x.id === docMenu.fileId)?.is_pinned ? 'Unpin' : 'Pin'}
-                </div>
-
-                <div
-                  className="docContextSubWrap"
-                  onMouseEnter={() => setMoveMenu({ kind: 'file', fileId: docMenu.fileId })}
-                  onMouseLeave={() => setMoveMenu(null)}
-                >
-                  <div className="docContextItem docContextItemRow">
-                    <span>Move</span>
-                    <span className="docMenuChevron" aria-hidden>
-                      ▸
-                    </span>
-                  </div>
-                  {moveMenu?.kind === 'file' && moveMenu.fileId === docMenu.fileId ? (
-                    <div className="docSubMenu" role="menu">
-                      {(() => {
-                        const f = files.find((x) => x.id === docMenu.fileId)
-                        if (!f) return null
-                        const here = (f.folder_path ?? '').trim()
-                        return [
-                          { label: 'Home', path: '' },
-                          ...allFolderPaths.map((p) => ({ label: decodeFolderPathForDisplay(p), path: p })),
-                        ].map((opt) => {
-                            const isHere = here === (opt.path ?? '').trim()
-                            return (
-                          <div
-                            key={`file-move-${opt.path || 'home'}`}
-                            className={`docContextItem${isHere ? ' docContextItemDisabled' : ''}`}
-                            role="menuitem"
-                            aria-disabled={isHere}
-                            onClick={() => {
-                              if (isHere) return
-                              void (async () => {
-                                const file = files.find((x) => x.id === moveMenu.fileId)
-                                if (!file) return
-                                const targetContacts = portalContactsForFolder(opt.path, portalFolderGrants)
-                                if (targetContacts.length) {
-                                  const ok = await askConfirm({
-                                    title: 'Move to shared folder',
-                                    message: portalSharedFolderMoveConfirmMessage(targetContacts),
-                                  })
-                                  if (!ok) return
-                                }
-                                const isMultiSelected =
-                                  selectedDocSet.has(file.id) && selectedDocSet.size > 1
-                                const idsToMove = isMultiSelected
-                                  ? [...selectedDocSet].filter((k) => !k.startsWith('folder:'))
-                                  : [file.id]
-                                setBusy(true)
-                                setActionErr(null)
-                                try {
-                                  for (const id of idsToMove) {
-                                    await apiFetch(`/cases/${caseId}/files/${id}/move`, {
-                                      token,
-                                      method: 'POST',
-                                      json: { folder_path: opt.path },
-                                    })
-                                  }
-                                  setSelectedDocSet(new Set())
-                                  onRefresh()
-                                } catch (e: any) {
-                                  setActionErr(e?.message ?? 'Failed to move file(s)')
-                                } finally {
-                                  setBusy(false)
-                                }
-                                setMoveMenu(null)
-                                setDocMenu(null)
-                              })()
-                            }}
-                          >
-                            {opt.label}
-                          </div>
-                            )
-                          },
-                        )
-                      })()}
-                    </div>
-                  ) : null}
-                </div>
-
-                <div
-                  className="docContextItem"
-                  onClick={async () => {
-                    const f = files.find((x) => x.id === docMenu.fileId)
-                    if (!f) return
-                    // If this file is in a multi-selection, delete all selected files
-                    const isMultiSelected = selectedDocSet.has(f.id) && selectedDocSet.size > 1
-                    const idsToDelete = isMultiSelected
-                      ? [...selectedDocSet].filter((k) => !k.startsWith('folder:'))
-                      : [f.id]
-                    const label = isMultiSelected
-                      ? `${idsToDelete.length} selected files`
-                      : `"${f.original_filename}"`
-                    const ok = await askConfirm({
-                      title: 'Delete file',
-                      message: `Delete ${label}?`,
-                      danger: true,
-                      confirmLabel: 'Delete',
-                    })
-                    if (!ok) return
-                    setDocMenu(null)
-                    setMoveMenu(null)
-                    setBusy(true)
-                    setActionErr(null)
-                    try {
-                      await Promise.all(
-                        idsToDelete.map((id) =>
-                          apiFetch(`/cases/${caseId}/files/${id}`, { token, method: 'DELETE' }),
-                        ),
-                      )
-                      setSelectedDocSet(new Set())
-                      onRefresh()
-                    } catch (e: any) {
-                      setActionErr(e?.message ?? 'Failed to delete file(s)')
-                    } finally {
-                      setBusy(false)
-                    }
-                  }}
-                >
-                  Delete
-                </div>
-              </>
-            ) : null}
-          </div>
-        ) : null}
-        {textPrompt ? (
-          <TextPromptModal
-            title={textPrompt.title}
-            hint={textPrompt.hint}
-            initial={textPrompt.initial}
-            confirmLabel={textPrompt.confirmLabel}
-            busy={busy}
-            onConfirm={textPrompt.onConfirm}
-            onCancel={() => setTextPrompt(null)}
-          />
-        ) : null}
-
-        {manageAccessOpen && caseId && caseDetail ? (
-          <ManageCaseAccessModal
-            token={token}
+          <CaseDocsContextMenu
+            docMenu={docMenu}
+            docMenuRef={docMenuRef}
+            docMenuStyle={docMenuStyle}
+            moveMenu={moveMenu}
+            setMoveMenu={setMoveMenu}
+            portalMenu={portalMenu}
+            setPortalMenu={setPortalMenu}
+            setDocMenu={setDocMenu}
+            createFolderAtCurrentPath={createFolderAtCurrentPath}
+            setDocFolder={setDocFolder}
+            downloadCaseFolderZip={downloadCaseFolderZip}
+            docFolder={docFolder}
+            setTextPrompt={setTextPrompt}
             caseId={caseId}
-            users={users}
-            feeEarnerUserId={caseDetail.fee_earner_user_id}
-            lockMode={caseDetail.lock_mode}
-            canSetLockMode={Boolean(
-              currentUser?.admin_console_access ||
-                currentUser?.role === 'admin' ||
-                (caseDetail.fee_earner_user_id && currentUser?.id === caseDetail.fee_earner_user_id),
-            )}
-            onClose={() => setManageAccessOpen(false)}
-            onSaved={() => {
-              onRefresh()
-              onCaseListInvalidate?.()
-            }}
+            token={token}
+            onRefresh={onRefresh}
+            setBusy={setBusy}
+            setActionErr={setActionErr}
+            allFolderPaths={allFolderPaths}
+            portalEnabled={portalEnabled}
+            setCaseDocPanel={setCaseDocPanel}
+            openPortalSharePanel={openPortalSharePanel}
+            portalFolderGrants={portalFolderGrants}
+            askConfirm={askConfirm}
+            files={files}
+            selectedDocSet={selectedDocSet}
+            setSelectedDocSet={setSelectedDocSet}
+            previewEmlFile={previewEmlFile}
+            openCaseFile={openCaseFile}
+            downloadCaseFiles={downloadCaseFiles}
+            setPortalQuoteSend={setPortalQuoteSend}
+            docusignEnabled={docusignEnabled}
+            pushNotification={pushNotification}
+            setDocusignSend={setDocusignSend}
+            canarySignEnabled={canarySignEnabled}
+            setCanarySignSend={setCanarySignSend}
+            setTaskCreatePreset={setTaskCreatePreset}
+            setTaskCreateOpen={setTaskCreateOpen}
+            isCommentFile={isCommentFile}
           />
         ) : null}
-
-
-
       </div>
     </div>
   )

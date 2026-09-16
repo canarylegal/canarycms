@@ -48,7 +48,7 @@ cd frontend && npm test
 # or: npm run test:watch
 ```
 
-Coverage is intentionally small and behaviour-focused: UI preference cache scoping, dialog FIFO queue, navigation push/replace, contact-search request sequencing, and HTML e-mail remote-content stripping.
+Vitest covers pure helpers and a few UI seams (not E2E): portal background/contrast, case finance totals, folder path codec, office/e-mail file detection, doc list formatting, matter labels / close-matter balance checks, portal folder sharing copy, API error humanization, app navigation parse/build/sanitize, dialog queue, contact merge / portal identity guards, and related session / main-menu helpers. Prefer unit tests without heavy network mocks unless a thin `apiFetch` stub is enough.
 
 ## Live security checks
 

@@ -62,7 +62,7 @@ def build_firm_letterhead_onlyoffice_config(
     from app.canary_public_url import onlyoffice_browser_public_base
     from app.feature_flags import onlyoffice_editor_customization
     from app.onlyoffice_ssrf_url import default_internal_base_for_ds, normalize_onlyoffice_ssrf_base
-    from app.routers.files import _correct_file_type, _onlyoffice_types_for_file, _ONLYOFFICE_DOC_PERMISSIONS
+    from app.onlyoffice_file_types import _correct_file_type, _onlyoffice_types_for_file, _ONLYOFFICE_DOC_PERMISSIONS
 
     row = firm_letterhead_file_row(db, kind)
     secret = (os.getenv("ONLYOFFICE_JWT_SECRET") or "").strip()

@@ -95,4 +95,35 @@ describe('DialogProvider queue', () => {
     await user.click(screen.getByRole('button', { name: 'Keep' }))
     await expect(pending).resolves.toBe('secondary')
   })
+
+  it('resolves askConfirmChoice cancel as cancel', async () => {
+    const user = userEvent.setup()
+    let api: ReturnType<typeof useDialogs> | null = null
+    render(
+      <DialogProvider>
+        <Probe
+          onReady={(a) => {
+            api = a
+          }}
+        />
+      </DialogProvider>,
+    )
+
+    const pending = api!.askConfirmChoice({
+      title: 'Three-way',
+      message: 'pick',
+      confirmLabel: 'Yes',
+      secondaryLabel: 'Maybe',
+      cancelLabel: 'No thanks',
+    })
+    expect(await screen.findByText('Three-way')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'No thanks' }))
+    await expect(pending).resolves.toBe('cancel')
+  })
+
+  it('throws when useDialogs is used outside the provider', () => {
+    expect(() => render(<Probe onReady={() => undefined} />)).toThrow(
+      /useDialogs must be used within DialogProvider/,
+    )
+  })
 })
