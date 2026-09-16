@@ -4,6 +4,12 @@ All notable releases of Canary CMS are documented here. Prefer a tagged release 
 
 ## [Unreleased]
 
+### Changed
+- Split monolithic ``schemas.py`` (~3.1k lines) and ``models.py`` (~1.9k lines) into domain packages under ``app/schemas/`` and ``app/models/``; existing ``from app.schemas import …`` / ``from app.models import …`` imports are unchanged.
+- Split frontend ``types.ts`` (~1.8k lines) into ``src/types/`` domain modules with a barrel re-export; existing ``from '../types'`` imports are unchanged.
+- Frontend CI runs ``npm run lint:ci`` (zero eslint errors; React Compiler / ``any`` debt capped as warnings).
+- Thin Playwright browser smoke (staff login + portal sign-in) via ``make test-e2e`` / ``browser-e2e`` workflow.
+
 ## [1.1.0] — 2026-09-16
 
 Security hardening from pen-test rounds CL-05–20, structural maintainability splits, portal branding, and expanded automated tests.

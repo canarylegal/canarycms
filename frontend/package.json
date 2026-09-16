@@ -8,18 +8,20 @@
     "build": "tsc -b && vite build",
     "postbuild": "node scripts/sync-and-verify-thunderbird-addin.mjs && node scripts/generate-outlook-manifest.mjs --target dist && node scripts/verify-outlook-addin.mjs",
     "lint": "eslint .",
+    "lint:ci": "eslint . --max-warnings 223",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:e2e": "playwright test",
     "preview": "vite preview"
   },
   "dependencies": {
-    "@simplewebauthn/browser": "^13.2.2",
     "@fullcalendar/core": "^6.1.20",
     "@fullcalendar/daygrid": "^6.1.20",
     "@fullcalendar/interaction": "^6.1.20",
     "@fullcalendar/list": "^6.1.20",
     "@fullcalendar/react": "^6.1.20",
     "@fullcalendar/timegrid": "^6.1.20",
+    "@simplewebauthn/browser": "^13.2.2",
     "dompurify": "^3.2.4",
     "pdfjs-dist": "^4.10.38",
     "react": "^19.2.4",
@@ -27,6 +29,10 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.39.4",
+    "@playwright/test": "^1.55.0",
+    "@testing-library/jest-dom": "^6.8.0",
+    "@testing-library/react": "^16.3.0",
+    "@testing-library/user-event": "^14.6.1",
     "@types/node": "^24.12.0",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
@@ -35,14 +41,11 @@
     "eslint-plugin-react-hooks": "^7.0.1",
     "eslint-plugin-react-refresh": "^0.5.2",
     "globals": "^17.4.0",
+    "jsdom": "^26.1.0",
     "typescript": "~5.9.3",
     "typescript-eslint": "^8.56.1",
     "vite": "^8.0.0",
-    "vitest": "^3.2.4",
-    "@testing-library/jest-dom": "^6.8.0",
-    "@testing-library/react": "^16.3.0",
-    "@testing-library/user-event": "^14.6.1",
-    "jsdom": "^26.1.0"
+    "vitest": "^3.2.4"
   },
   "allowScripts": {
     "esbuild@0.27.7": true
