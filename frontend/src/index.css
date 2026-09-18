@@ -49,6 +49,14 @@
   --local-surface-border: 1px solid rgba(15, 23, 42, 0.1);
   --local-surface-shadow: 0 10px 28px rgba(15, 23, 42, 0.07);
   --local-chip: #e7edf7;
+  /* Type scale — use these instead of one-off px sizes where practical. */
+  --text-xs: 0.75rem; /* 12px */
+  --text-sm: 0.8125rem; /* 13px */
+  --text-base: 0.9375rem; /* 15px */
+  --text-lg: 1.125rem; /* 18px */
+  --text-xl: 1.375rem; /* 22px */
+  --leading-tight: 1.25;
+  --leading-normal: 1.45;
   /* Main menu cases table + case documents list (shared row rhythm / type). */
   --canary-table-row-gap: calc(8px * 0.85);
   --canary-table-row-padding: calc(12px * 0.85);
@@ -186,6 +194,54 @@ body {
   background-attachment: fixed;
   color: var(--text);
   font-family: var(--app-font-stack);
+  font-size: var(--text-base);
+  line-height: var(--leading-normal);
+}
+
+/* Section titles in cards / settings — share one scale instead of UA defaults. */
+.card > h2,
+.card > h3,
+.paneHead h2,
+.paneHead h3 {
+  font-size: var(--text-lg);
+  line-height: var(--leading-tight);
+  font-weight: 650;
+  letter-spacing: -0.02em;
+}
+
+.card > h2 {
+  font-size: var(--text-xl);
+}
+
+/*
+ * Global keyboard focus — visible ring on interactive controls.
+ * Components may refine colour; do not remove outline without an equivalent.
+ */
+:focus {
+  outline: none;
+}
+
+:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--primary) 70%, #0f172a);
+  outline-offset: 2px;
+}
+
+.appSidebar :focus-visible,
+.mainMenuFilterBar :focus-visible,
+.caseDocPanelBar :focus-visible,
+.caseLeft.caseLeft--rail :focus-visible {
+  outline-color: color-mix(in srgb, var(--primary) 85%, #fff);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
 
 /*
@@ -2317,7 +2373,7 @@ html.dark .singleSelectDropdownTrigger {
 
 .muted {
   color: var(--muted);
-  font-size: 13px;
+  font-size: var(--text-sm);
 }
 
 .mutedFlush {
@@ -2327,16 +2383,16 @@ html.dark .singleSelectDropdownTrigger {
 .mutedSm {
   margin: 0;
   color: var(--muted);
-  font-size: 13px;
+  font-size: var(--text-sm);
 }
 
 .textXs {
-  font-size: 12px;
+  font-size: var(--text-xs);
 }
 
 .monoSm {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
-  font-size: 13px;
+  font-size: var(--text-sm);
 }
 
 .row.wrap,
@@ -2443,7 +2499,6 @@ textarea {
   border: 1px solid var(--border);
   border-radius: 10px;
   padding: 10px 10px;
-  outline: none;
 }
 
 input[type='checkbox'] {
@@ -2485,7 +2540,6 @@ select {
   border: 1px solid var(--border);
   border-radius: 10px;
   padding: 10px 10px;
-  outline: none;
 }
 
 /** Tasks toolbar: List/Kanban select aligned with adjacent `.btn` rows (main + case tasks). */
