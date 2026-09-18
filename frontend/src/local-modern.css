@@ -1,6 +1,6 @@
 /**
  * Product surface layer — floating chrome, pale wash refinements, case ribbons.
- * Loaded after index.css via canary-theme.css (single theme entry).
+ * Loaded after index.css via canary-theme.css. Token ownership lives in index.css :root only.
  */
 
 @font-face {
@@ -37,38 +37,6 @@
   font-weight: 400;
   font-style: normal;
   font-display: swap;
-}
-
-:root {
-  /* Align with index.css product tokens (surface layer must not fight the base theme). */
-  --app-font-stack: "DM Sans", system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-  --bg: #e8edf5;
-  --page-bg: #e8edf5;
-  --page-gradient: linear-gradient(165deg, #dce5f4 0%, #e8edf5 40%, #f2f5fa 100%);
-  --panel: #f7f9fc;
-  --panel2: #eef2f8;
-  --text: #0f172a;
-  --muted: #5b6b82;
-  --border: rgba(15, 23, 42, 0.12);
-  --card: #f7f9fc;
-  --sidebar-bg: #172554;
-  --primary: #f0d010;
-  --primary-rgb: 240, 208, 16;
-  --text-on-primary: #0f172a;
-  --shadow: 0 18px 50px rgba(15, 23, 42, 0.12);
-  --shadow-soft: 0 8px 24px rgba(15, 23, 42, 0.08);
-  --local-ink: #0b1220;
-  /* Solid Canary chrome — darker end of the navy pack */
-  --local-chrome: #172554;
-  --local-rail: var(--local-chrome);
-  --local-accent: var(--primary);
-  --local-accent-soft: rgba(var(--primary-rgb), 0.14);
-  --local-surface: #f3f6fb;
-  --local-surface-raised: #ffffff;
-  --local-surface-radius: 16px;
-  --local-surface-border: 1px solid rgba(15, 23, 42, 0.1);
-  --local-surface-shadow: 0 10px 28px rgba(15, 23, 42, 0.07);
-  --local-chip: #e7edf7;
 }
 
 /* Slate chrome pack — earlier darker grey-blue navigation / ribbons */
