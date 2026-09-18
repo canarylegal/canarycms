@@ -495,7 +495,7 @@ export function QuoteReviewEditor({
                 />
                 <button
                   className="btn"
-                  style={{ background: 'var(--primary)', color: '#fff', borderColor: 'var(--primary)' }}
+                  style={{ background: 'var(--primary)', color: 'var(--text-on-primary)', borderColor: 'var(--primary)' }}
                   disabled={!addLineName.trim()}
                   onClick={() => addLine(cat.key)}
                 >
@@ -539,7 +539,7 @@ export function QuoteReviewEditor({
           />
           <button
             className="btn"
-            style={{ background: 'var(--primary)', color: '#fff', borderColor: 'var(--primary)' }}
+            style={{ background: 'var(--primary)', color: 'var(--text-on-primary)', borderColor: 'var(--primary)' }}
             disabled={!addCatName.trim()}
             onClick={addCategory}
           >

@@ -1,15 +1,14 @@
-# Local UI modernisation (this machine only)
+# Product UI theme (local deploy notes)
 
-These changes live under `/home/colin/canarycms` and are **not** intended for GitHub.
+Canary’s product theme is a single entry:
 
-Files of note:
-- `frontend/src/local-modern.css`
-- `frontend/src/main.tsx` (imports the CSS)
-- `frontend/src/AppSidebar.tsx` (persisted expand/collapse)
-- `frontend/src/case/CaseDetail.tsx` (case left rail)
-- `frontend/src/AdminConsole.tsx` (admin tab strip)
+- `frontend/src/canary-theme.css` — imports base + surface layer
+- `frontend/src/index.css` — tokens, shared components, utilities
+- `frontend/src/local-modern.css` — floating chrome / pale wash surfaces
 
-Rebuild after edits:
+Brand defaults: **DM Sans**, canary yellow primary (`#f0d010`) with dark ink on primary buttons, pale page wash.
+
+Rebuild after theme edits:
 
 ```bash
 cd /home/colin/canarycms

@@ -9,13 +9,14 @@ const KEYS = {
   pageBg: 'canary.pageBackground',
 } as const
 
-export const DEFAULT_ACCENT = '#2563eb'
-/** Stored in ``appearance_accent`` to select slate navigation chrome (primary buttons stay blue). */
+/** Brand canary yellow — primary action colour (dark ink on buttons). */
+export const DEFAULT_ACCENT = '#f0d010'
+/** Stored in ``appearance_accent`` to select slate navigation chrome (primary buttons stay yellow). */
 export const SLATE_CHROME_ACCENT = '#1e293b'
 export type ChromeStyle = 'canary' | 'slate'
 
-/** Default light-theme page backdrop (matches `index.css` :root). */
-export const DEFAULT_PAGE_BG = '#1e3a8a'
+/** Default light-theme page backdrop (matches `index.css` :root pale wash). */
+export const DEFAULT_PAGE_BG = '#e8edf5'
 /** Default dark-theme page backdrop (matches `index.css` `html.dark`). */
 export const DARK_DEFAULT_PAGE_BG = '#0f172a'
 
@@ -34,11 +35,11 @@ export function accentForChromeStyle(chrome: ChromeStyle): string {
   return chrome === 'slate' ? SLATE_CHROME_ACCENT : DEFAULT_ACCENT
 }
 
-/** Quick picks restored in Appearance — navigation chrome only (buttons stay Canary blue). */
+/** Quick picks restored in Appearance — navigation chrome only (buttons stay Canary yellow). */
 export const CHROME_STYLE_OPTIONS: { id: ChromeStyle; label: string; swatch: string; hint: string }[] = [
   {
     id: 'canary',
-    label: 'Canary blue',
+    label: 'Canary navy',
     swatch: '#172554',
     hint: 'Current navigation and ribbon colour',
   },
@@ -86,9 +87,9 @@ export function themeFromAppearance(a: UserAppearanceOut): ThemePreferences {
 export function applyThemePreferences(p: ThemePreferences): void {
   const root = document.documentElement
   const mode = p.mode === 'dark' ? 'dark' : 'light'
-  // Dark mode always uses slate chrome; Canary blue is light-mode only.
+  // Dark mode always uses slate chrome; Canary navy is light-mode only.
   const chrome: ChromeStyle = mode === 'dark' ? 'slate' : chromeStyleFromAccent(p.accent)
-  // Keep action buttons on Canary blue for both chrome packs.
+  // Keep action buttons on Canary yellow for both chrome packs.
   const accent = DEFAULT_ACCENT
 
   root.dataset.canaryChrome = chrome
@@ -98,6 +99,7 @@ export function applyThemePreferences(p: ThemePreferences): void {
   if (rgb) {
     root.style.setProperty('--primary-rgb', `${rgb.r}, ${rgb.g}, ${rgb.b}`)
   }
+  root.style.setProperty('--text-on-primary', textOnPageBackground(accent))
 
   if (p.font.trim()) {
     root.style.setProperty('--app-font-stack', p.font.trim())
@@ -147,7 +149,7 @@ export function saveThemePreferences(p: ThemePreferences): void {
 }
 
 export const FONT_OPTIONS: { value: string; label: string }[] = [
-  { value: '', label: 'App default (System UI)' },
+  { value: '', label: 'App default (DM Sans)' },
   { value: '"DM Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif', label: 'DM Sans' },
   { value: 'system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif', label: 'System UI' },
   { value: '"Open Sans", "Helvetica Neue", Helvetica, Arial, sans-serif', label: 'Open Sans (if installed)' },
@@ -164,6 +166,7 @@ export const FONT_OPTIONS: { value: string; label: string }[] = [
 
 /** Quick picks for accent — any hex still works in the field above. */
 export const ACCENT_COLOR_PRESETS: { label: string; value: string }[] = [
+  { label: 'Canary', value: '#f0d010' },
   { label: 'Blue', value: '#2563eb' },
   { label: 'Sky', value: '#0284c7' },
   { label: 'Teal', value: '#0d9488' },
@@ -178,6 +181,7 @@ export const ACCENT_COLOR_PRESETS: { label: string; value: string }[] = [
 /** Quick picks for page background — empty string = built‑in default for light/dark mode. */
 export const PAGE_BG_COLOR_PRESETS: { label: string; value: string }[] = [
   { label: 'App default', value: '' },
+  { label: 'Pale wash', value: '#e8edf5' },
   { label: 'Navy', value: '#1e3a8a' },
   { label: 'Deep slate', value: '#0f172a' },
   { label: 'Charcoal', value: '#1c1917' },

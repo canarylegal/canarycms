@@ -768,36 +768,36 @@ export function LedgerPage({ caseId, token, currentUserId, onCaseChanged }: Prop
           <table className="ledgerTable ledgerTable--fixed ledgerTable--fourAmt" style={{ tableLayout: 'fixed', width: '100%' }}>
             {filter === 'all' ? (
               <colgroup>
-                <col style={{ width: '8%' }} />
-                <col style={{ width: '9%' }} />
-                <col style={{ width: '22%' }} />
-                <col style={{ width: '7%' }} />
-                <col style={{ width: '8%' }} />
-                <col style={{ width: '8%' }} />
-                <col style={{ width: '8%' }} />
-                <col style={{ width: '8%' }} />
-                <col style={{ width: '11%' }} />
-                <col style={{ width: '11%' }} />
+                <col className="ledgerColW8" />
+                <col className="ledgerColW9" />
+                <col className="ledgerColW22" />
+                <col className="ledgerColW7" />
+                <col className="ledgerColW8" />
+                <col className="ledgerColW8" />
+                <col className="ledgerColW8" />
+                <col className="ledgerColW8" />
+                <col className="ledgerColW11" />
+                <col className="ledgerColW11" />
               </colgroup>
             ) : filter === 'client' ? (
               <colgroup>
-                <col style={{ width: '9%' }} />
-                <col style={{ width: '10%' }} />
-                <col style={{ width: '36%' }} />
-                <col style={{ width: '9%' }} />
-                <col style={{ width: '12%' }} />
-                <col style={{ width: '12%' }} />
-                <col style={{ width: '12%' }} />
+                <col className="ledgerColW9" />
+                <col className="ledgerColW10" />
+                <col className="ledgerColW36" />
+                <col className="ledgerColW9" />
+                <col className="ledgerColW12" />
+                <col className="ledgerColW12" />
+                <col className="ledgerColW12" />
               </colgroup>
             ) : (
               <colgroup>
-                <col style={{ width: '9%' }} />
-                <col style={{ width: '10%' }} />
-                <col style={{ width: '36%' }} />
-                <col style={{ width: '9%' }} />
-                <col style={{ width: '12%' }} />
-                <col style={{ width: '12%' }} />
-                <col style={{ width: '12%' }} />
+                <col className="ledgerColW9" />
+                <col className="ledgerColW10" />
+                <col className="ledgerColW36" />
+                <col className="ledgerColW9" />
+                <col className="ledgerColW12" />
+                <col className="ledgerColW12" />
+                <col className="ledgerColW12" />
               </colgroup>
             )}
             <thead>

@@ -81,7 +81,7 @@ class User(Base):
     email_desktop_client: Mapped[str] = mapped_column(String(32), nullable=False, default="outlook")
 
     appearance_font: Mapped[str | None] = mapped_column(Text, nullable=True)
-    appearance_accent: Mapped[str] = mapped_column(String(7), nullable=False, default="#2563eb")
+    appearance_accent: Mapped[str] = mapped_column(String(7), nullable=False, default="#f0d010")
     appearance_mode: Mapped[str] = mapped_column(String(8), nullable=False, default="light")
     appearance_page_bg: Mapped[str | None] = mapped_column(String(7), nullable=True)
 

@@ -1,7 +1,6 @@
 import { Component, type ReactNode, StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
-import './index.css'
-import './local-modern.css'
+import './canary-theme.css'
 import { applyStoredTheme } from './theme'
 import { DialogProvider } from './DialogProvider'
 import { NotificationsProvider } from './NotificationsProvider'

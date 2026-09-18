@@ -404,8 +404,8 @@ export function UserSettingsPage({
         {accountLoadErr ? <div className="error">{accountLoadErr}</div> : null}
         {!securitySetupOnly && !passwordChangeRequiredOnly ? (
         <section className="card" style={{ padding: 16 }}>
-          <h3 style={{ marginTop: 0 }}>Signature image</h3>
-          <p className="muted" style={{ marginTop: 0 }}>
+          <h3 className="mutedFlush">Signature image</h3>
+          <p className="muted mutedFlush">
             Upload a PNG, JPEG, GIF, or WebP image of your signature. Use merge code{' '}
             <code>[FEE_EARNER_SIGNATURE]</code> on its own line in letter precedents — Canary replaces it with your
             image when composing documents (fee earner on the matter). Scale controls width (7 ≈ 2 inches). If you
@@ -440,7 +440,7 @@ export function UserSettingsPage({
               ? `Current file: ${account.signature_original_filename ?? 'signature image'}`
               : 'No signature uploaded yet.'}
           </div>
-          <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
+          <div className="row wrap gap8">
             <label className="btn" style={{ cursor: signatureBusy ? 'not-allowed' : 'pointer' }}>
               Upload signature…
               <input
@@ -509,8 +509,8 @@ export function UserSettingsPage({
         ) : null}
         {!securitySetupOnly && !passwordChangeRequiredOnly ? (
         <section className="card" style={{ padding: 16 }}>
-          <h3 style={{ marginTop: 0 }}>Appearance</h3>
-          <p className="muted" style={{ marginTop: 0 }}>
+          <h3 className="mutedFlush">Appearance</h3>
+          <p className="muted mutedFlush">
             Font, navigation colour, and light or dark mode are saved to your account and follow you on any device when
             you sign in.
           </p>
@@ -526,10 +526,10 @@ export function UserSettingsPage({
             />
             <fieldset className="field" style={{ border: 'none', margin: 0, padding: 0 }}>
               <legend style={{ marginBottom: 6 }}>Navigation colour</legend>
-              <p className="muted" style={{ margin: '0 0 8px', fontSize: 13 }}>
+              <p className="mutedSm" style={{ marginBottom: 8 }}>
                 {appMode === 'dark'
-                  ? 'Dark mode always uses slate for sidebar and ribbons. Primary buttons stay Canary blue.'
-                  : 'Sidebar and ribbons. Primary buttons stay Canary blue.'}
+                  ? 'Dark mode always uses slate for sidebar and ribbons. Primary buttons stay Canary yellow.'
+                  : 'Sidebar and ribbons. Primary buttons stay Canary yellow.'}
               </p>
               <div className="stack" style={{ gap: 10 }}>
                 {(appMode === 'dark' ? CHROME_STYLE_OPTIONS.filter((o) => o.id === 'slate') : CHROME_STYLE_OPTIONS).map(
@@ -546,7 +546,7 @@ export function UserSettingsPage({
                         padding: '8px 10px',
                         borderRadius: 10,
                         border: selected ? '2px solid var(--primary)' : '2px solid var(--border)',
-                        background: selected ? 'rgba(37, 99, 235, 0.06)' : 'transparent',
+                        background: selected ? 'rgba(var(--primary-rgb), 0.1)' : 'transparent',
                         width: '100%',
                         boxSizing: 'border-box',
                         alignItems: 'flex-start',
@@ -577,7 +577,7 @@ export function UserSettingsPage({
                       />
                       <span>
                         <span style={{ display: 'block', fontWeight: 650 }}>{opt.label}</span>
-                        <span className="muted" style={{ fontSize: 12 }}>
+                        <span className="muted textXs">
                           {opt.hint}
                         </span>
                       </span>
@@ -619,7 +619,7 @@ export function UserSettingsPage({
             </fieldset>
             {themeSaveErr ? <div className="error">{themeSaveErr}</div> : null}
             {themeSavedHint ? <div className="muted">Appearance saved.</div> : null}
-            <div className="row" style={{ gap: 8 }}>
+            <div className="row gap8">
               <button
                 type="button"
                 className="btn primary"
@@ -678,7 +678,7 @@ export function UserSettingsPage({
               </button>
             </div>
             <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid var(--border)' }}>
-              <div className="muted" style={{ fontSize: 13, marginBottom: 8 }}>
+              <div className="muted" style={{ marginBottom: 8 }}>
                 Menu tables (main menu, quotes, tasks, contacts) remember column widths when you drag column edges.
               </div>
               <div className="row" style={{ gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -713,10 +713,10 @@ export function UserSettingsPage({
         ) : null}
 
         <section className="card" style={{ padding: 16, marginTop: securitySetupOnly || passwordChangeRequiredOnly ? 0 : 16 }}>
-          <h3 style={{ marginTop: 0 }}>
+          <h3 className="mutedFlush">
             {passwordChangeRequiredOnly ? 'New password' : securitySetupOnly ? 'Authenticator & passkeys' : 'Password & two-factor authentication'}
           </h3>
-          <p className="muted" style={{ marginTop: 0 }}>
+          <p className="muted mutedFlush">
             {passwordChangeRequiredOnly
               ? 'Your organisation requires periodic password updates. Choose a new password that is at least 12 characters.'
               : securitySetupOnly
@@ -758,12 +758,12 @@ export function UserSettingsPage({
                     disabled={busy || secBusy}
                   />
                 </label>
-                <div className="muted" style={{ fontSize: 13 }}>
+                <div className="muted">
                   At least 12 characters.
                 </div>
                 {pwdErr ? <div className="error">{pwdErr}</div> : null}
                 {pwdOk ? <div className="muted">Password updated.</div> : null}
-                <div className="row" style={{ gap: 8 }}>
+                <div className="row gap8">
                   <button
                     type="button"
                     className="btn primary"
@@ -782,7 +782,7 @@ export function UserSettingsPage({
           <h4 style={{ margin: securitySetupOnly ? '0 0 8px' : '20px 0 8px', fontSize: '1rem', fontWeight: 600 }}>
             Authenticator (2FA)
           </h4>
-          <p className="muted" style={{ marginTop: 0, fontSize: 13 }}>
+          <p className="muted mutedFlush">
             Status:{' '}
             <strong>{account?.is_2fa_enabled ? 'Enabled' : 'Not enabled'}</strong>
           </p>
@@ -792,7 +792,7 @@ export function UserSettingsPage({
 
           {account?.is_2fa_enabled ? (
             <div className="stack" style={{ maxWidth: 480, gap: 10, marginTop: 8 }}>
-              <p className="muted" style={{ margin: 0, fontSize: 13 }}>
+              <p className="mutedSm">
                 To turn off 2FA, enter your Canary password and a current code from your authenticator app.
               </p>
               <label className="field">
@@ -827,7 +827,7 @@ export function UserSettingsPage({
             </div>
           ) : !faSetup ? (
             <div className="stack" style={{ maxWidth: 560, gap: 10, marginTop: 8 }}>
-              <p className="muted" style={{ margin: 0, fontSize: 13 }}>
+              <p className="mutedSm">
                 Use an app such as Google Authenticator, Microsoft Authenticator, or 1Password. You will scan a QR code or
                 enter the secret key, then confirm with a one-time code.
               </p>
@@ -858,7 +858,7 @@ export function UserSettingsPage({
             </div>
           ) : (
             <div className="stack" style={{ maxWidth: 560, gap: 12, marginTop: 8 }}>
-              <p className="muted" style={{ margin: 0, fontSize: 13 }}>
+              <p className="mutedSm">
                 Scan this QR code in your authenticator app, or add the account manually using the secret key below. Then
                 enter a 6-digit code to confirm.
               </p>
@@ -873,7 +873,7 @@ export function UserSettingsPage({
                 <div className="stack" style={{ gap: 8, flex: '1 1 200px', minWidth: 0 }}>
                   <label className="field">
                     <span>Secret key (manual entry)</span>
-                    <input readOnly value={faSetup.secret} style={{ fontFamily: 'monospace', fontSize: 13 }} />
+                    <input readOnly value={faSetup.secret} className="monoSm" />
                   </label>
                   <button
                     type="button"
@@ -889,7 +889,7 @@ export function UserSettingsPage({
                   </button>
                 </div>
               </div>
-              <p className="muted" style={{ margin: 0, fontSize: 12 }}>
+              <p className="mutedSm textXs">
                 The QR image is generated by a third-party service from your setup link (no password is sent).
               </p>
               <label className="field">
@@ -903,7 +903,7 @@ export function UserSettingsPage({
                   placeholder="000000"
                 />
               </label>
-              <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
+              <div className="row wrap gap8">
                 <button
                   type="button"
                   className="btn primary"
@@ -914,7 +914,7 @@ export function UserSettingsPage({
                 </button>
                 <div className="stack" style={{ gap: 6, flex: '1 1 220px' }}>
                   <label className="field" style={{ marginBottom: 0 }}>
-                    <span className="muted" style={{ fontSize: 12 }}>
+                    <span className="muted textXs">
                       Cancel setup (your Canary password)
                     </span>
                     <input
@@ -940,14 +940,14 @@ export function UserSettingsPage({
           )}
 
           <h4 style={{ margin: '24px 0 8px', fontSize: '1rem', fontWeight: 600 }}>Passkeys</h4>
-          <p className="muted" style={{ marginTop: 0, fontSize: 13 }}>
+          <p className="muted mutedFlush">
             Passkeys let you sign in with your device (Face ID, Touch ID, Windows Hello, or a security key). You can register
             several and remove ones you no longer use.
           </p>
           {pkErr ? <div className="error">{pkErr}</div> : null}
           <div className="stack" style={{ maxWidth: 520, gap: 10, marginTop: 8 }}>
             <label className="field">
-              <span className="muted" style={{ fontSize: 12 }}>
+              <span className="muted textXs">
                 Label (optional)
               </span>
               <input
@@ -1018,8 +1018,8 @@ export function UserSettingsPage({
 
         {!securitySetupOnly && !passwordChangeRequiredOnly ? (
         <section className="card" style={{ padding: 16, marginTop: 16 }}>
-          <h3 style={{ marginTop: 0 }}>E-mail</h3>
-          <p className="muted" style={{ marginTop: 0 }}>
+          <h3 className="mutedFlush">E-mail</h3>
+          <p className="muted mutedFlush">
             Choose how <strong>New → E-mail</strong> and <strong>Send by e-mail</strong> open compose.{' '}
             <strong>Outlook on the web</strong> uses your tenant&apos;s OWA URL. <strong>Desktop app</strong> uses either
             Microsoft 365 + the Canary Outlook add-in, or <code>mailto:</code> for Thunderbird and other clients (attach
@@ -1060,7 +1060,7 @@ export function UserSettingsPage({
               />
             ) : null}
             {emailPref === 'desktop' ? (
-              <p className="muted" style={{ margin: 0, fontSize: 13 }}>
+              <p className="mutedSm">
                 {emailDesktopClient === 'outlook' ? (
                   <>
                     With Microsoft 365 configured, <strong>Send by e-mail</strong> creates an Exchange draft and opens
@@ -1096,7 +1096,7 @@ export function UserSettingsPage({
             ) : null}
             {emailSaveErr ? <div className="error">{emailSaveErr}</div> : null}
             {emailSaveOk ? <div className="muted">Saved.</div> : null}
-            <div className="row" style={{ gap: 8 }}>
+            <div className="row gap8">
               <button
                 type="button"
                 className="btn primary"
@@ -1112,8 +1112,8 @@ export function UserSettingsPage({
 
         {!securitySetupOnly && !passwordChangeRequiredOnly ? (
         <section className="card" style={{ padding: 16, marginTop: 16 }}>
-          <h3 style={{ marginTop: 0 }}>Calendar (CalDAV)</h3>
-          <p className="muted" style={{ marginTop: 0 }}>
+          <h3 className="mutedFlush">Calendar (CalDAV)</h3>
+          <p className="muted mutedFlush">
             Subscribe in Apple Calendar, Thunderbird, etc. Use the CalDAV app password — not your Canary login. You can show
             the app password again anytime by confirming your Canary password. Extra calendars and sharing are managed in
             your client and on the server (Radicale).
@@ -1128,13 +1128,13 @@ export function UserSettingsPage({
             <div className="stack" style={{ maxWidth: 560, gap: 10 }}>
               <label className="field">
                 <span>Server / principal URL</span>
-                <input readOnly value={caldav.caldav_url} style={{ fontFamily: 'monospace', fontSize: 13 }} />
+                <input readOnly value={caldav.caldav_url} className="monoSm" />
               </label>
               <label className="field">
                 <span>CalDAV username</span>
-                <input readOnly value={caldav.caldav_username} style={{ fontFamily: 'monospace', fontSize: 13 }} />
+                <input readOnly value={caldav.caldav_username} className="monoSm" />
               </label>
-              <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
+              <div className="row wrap gap8">
                 <button
                   type="button"
                   className="btn"
@@ -1173,12 +1173,12 @@ export function UserSettingsPage({
               }}
             >
               <div style={{ fontWeight: 600, marginBottom: 8 }}>CalDAV app password</div>
-              <p className="muted" style={{ marginTop: 0, fontSize: 13 }}>
+              <p className="muted mutedFlush">
                 {caldavProvision.note}
               </p>
               <label className="field">
                 <span>Password</span>
-                <input readOnly value={caldavProvision.caldav_password} style={{ fontFamily: 'monospace', fontSize: 13 }} />
+                <input readOnly value={caldavProvision.caldav_password} className="monoSm" />
               </label>
               <div className="row" style={{ gap: 8, flexWrap: 'wrap', marginTop: 8 }}>
                 <button

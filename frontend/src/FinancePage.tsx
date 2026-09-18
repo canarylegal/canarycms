@@ -439,7 +439,7 @@ export function FinancePage({ caseId, token, onSaved, embedded = false }: Props)
             <button
               type="button"
               className="btn"
-              style={{ background: 'var(--primary)', color: '#fff', borderColor: 'var(--primary)' }}
+              style={{ background: 'var(--primary)', color: 'var(--text-on-primary)', borderColor: 'var(--primary)' }}
               disabled={busy}
               onClick={() => void save()}
             >
@@ -457,7 +457,7 @@ export function FinancePage({ caseId, token, onSaved, embedded = false }: Props)
           <button
             type="button"
             className="btn"
-            style={{ background: 'var(--primary)', color: '#fff', borderColor: 'var(--primary)' }}
+            style={{ background: 'var(--primary)', color: 'var(--text-on-primary)', borderColor: 'var(--primary)' }}
             disabled={busy}
             onClick={() => void save()}
           >
@@ -508,7 +508,7 @@ export function FinancePage({ caseId, token, onSaved, embedded = false }: Props)
           <button
             type="button"
             className="btn"
-            style={{ background: 'var(--primary)', color: '#fff', borderColor: 'var(--primary)' }}
+            style={{ background: 'var(--primary)', color: 'var(--text-on-primary)', borderColor: 'var(--primary)' }}
             disabled={busy || genBusy || !finance}
             onClick={() => void generateCompletionStatement()}
             title="Save current values and generate a completion statement in Word format"
@@ -713,7 +713,7 @@ export function FinancePage({ caseId, token, onSaved, embedded = false }: Props)
                 />
                 <button
                   className="btn"
-                  style={{ background: 'var(--primary)', color: '#fff', borderColor: 'var(--primary)' }}
+                  style={{ background: 'var(--primary)', color: 'var(--text-on-primary)', borderColor: 'var(--primary)' }}
                   disabled={busy || !addItemName.trim()}
                   onClick={() => void addItem(cat.id)}
                 >
@@ -758,7 +758,7 @@ export function FinancePage({ caseId, token, onSaved, embedded = false }: Props)
           />
           <button
             className="btn"
-            style={{ background: 'var(--primary)', color: '#fff', borderColor: 'var(--primary)' }}
+            style={{ background: 'var(--primary)', color: 'var(--text-on-primary)', borderColor: 'var(--primary)' }}
             disabled={busy || !addCatName.trim()}
             onClick={() => void addCategory()}
           >

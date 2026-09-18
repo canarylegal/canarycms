@@ -620,7 +620,7 @@ export function TasksTable({
                 <button
                   type="button"
                   className="btn"
-                  style={{ background: 'var(--primary)', color: '#fff', borderColor: 'var(--primary)' }}
+                  style={{ background: 'var(--primary)', color: 'var(--text-on-primary)', borderColor: 'var(--primary)' }}
                   disabled={editBusy}
                   onClick={() => void saveEdit()}
                 >

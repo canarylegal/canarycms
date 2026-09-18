@@ -369,7 +369,7 @@ export function EventsPage({
             <button
               type="button"
               className="btn"
-              style={{ background: 'var(--primary)', color: '#fff', borderColor: 'var(--primary)' }}
+              style={{ background: 'var(--primary)', color: 'var(--text-on-primary)', borderColor: 'var(--primary)' }}
               disabled={busy}
               onClick={() => void saveAllAndClose()}
             >
@@ -399,7 +399,7 @@ export function EventsPage({
             <button
               type="button"
               className="btn"
-              style={{ background: 'var(--primary)', color: '#fff', borderColor: 'var(--primary)' }}
+              style={{ background: 'var(--primary)', color: 'var(--text-on-primary)', borderColor: 'var(--primary)' }}
               disabled={busy}
               onClick={() => void saveAllAndClose()}
             >

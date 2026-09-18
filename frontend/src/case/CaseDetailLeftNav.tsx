@@ -286,7 +286,7 @@ export function CaseDetailLeftNav({
             </button>
             {leftOpen.tasks ? (
               <div className="accBody">
-                <div className="muted" style={{ fontSize: 13 }}>
+                <div className="caseLeftRailPreview">
                   {sidebarTaskRows.length === 0 ? 'No tasks yet.' : `${sidebarTaskRows.length} task(s).`}
                 </div>
                 <button
