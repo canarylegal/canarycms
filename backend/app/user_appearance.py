@@ -7,7 +7,7 @@ import re
 from app.models import User
 from app.schemas import UserAppearanceOut
 
-DEFAULT_ACCENT = "#2563eb"
+DEFAULT_ACCENT = "#f0d010"
 _HEX6 = re.compile(r"^#[0-9a-fA-F]{6}$")
 
 

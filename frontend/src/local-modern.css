@@ -1,6 +1,6 @@
 /**
- * LOCAL-ONLY visual modernisation for this machine's Canary deploy.
- * Do not push to GitHub. Loaded after index.css.
+ * Product surface layer — floating chrome, pale wash refinements, case ribbons.
+ * Loaded after index.css via canary-theme.css (single theme entry).
  */
 
 @font-face {
@@ -40,8 +40,8 @@
 }
 
 :root {
-  --app-font-stack: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-  /* Pale modern page wash */
+  /* Align with index.css product tokens (surface layer must not fight the base theme). */
+  --app-font-stack: "DM Sans", system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --bg: #e8edf5;
   --page-bg: #e8edf5;
   --page-gradient: linear-gradient(165deg, #dce5f4 0%, #e8edf5 40%, #f2f5fa 100%);
@@ -52,16 +52,17 @@
   --border: rgba(15, 23, 42, 0.12);
   --card: #f7f9fc;
   --sidebar-bg: #172554;
-  --primary: #1d4ed8;
-  --primary-rgb: 29, 78, 216;
+  --primary: #f0d010;
+  --primary-rgb: 240, 208, 16;
+  --text-on-primary: #0f172a;
   --shadow: 0 18px 50px rgba(15, 23, 42, 0.12);
   --shadow-soft: 0 8px 24px rgba(15, 23, 42, 0.08);
   --local-ink: #0b1220;
-  /* Solid Canary chrome — darker end of the old blue gradient (default pack) */
+  /* Solid Canary chrome — darker end of the navy pack */
   --local-chrome: #172554;
   --local-rail: var(--local-chrome);
-  --local-accent: #2563eb;
-  --local-accent-soft: rgba(37, 99, 235, 0.12);
+  --local-accent: var(--primary);
+  --local-accent-soft: rgba(var(--primary-rgb), 0.14);
   --local-surface: #f3f6fb;
   --local-surface-raised: #ffffff;
   --local-surface-radius: 16px;
@@ -139,7 +140,7 @@ body {
 }
 
 .appSidebar .sidebarNavBtn.navBtn {
-  color: #aeb8cb;
+  color: #d5dbe8;
   background: transparent;
   border-color: transparent;
   border-radius: 12px;
@@ -251,15 +252,24 @@ body {
 }
 
 .btn.primary {
-  background: linear-gradient(180deg, #2b6bed 0%, #1d4ed8 100%);
-  border-color: transparent;
-  color: #fff;
-  box-shadow: 0 8px 18px rgba(29, 78, 216, 0.28);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--primary) 88%, #fff) 0%,
+    var(--primary) 100%
+  );
+  border-color: color-mix(in srgb, var(--primary) 75%, #0f172a);
+  color: var(--text-on-primary);
+  box-shadow: 0 8px 18px rgba(var(--primary-rgb), 0.28);
 }
 
 .btn.primary:hover:not(:disabled) {
-  background: linear-gradient(180deg, #3b78f2 0%, #1e40af 100%);
-  border-color: transparent;
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--primary) 92%, #fff) 0%,
+    color-mix(in srgb, var(--primary) 82%, #0f172a) 100%
+  );
+  border-color: color-mix(in srgb, var(--primary) 70%, #0f172a);
+  color: var(--text-on-primary);
 }
 
 .btn.danger {
@@ -325,14 +335,14 @@ body {
 .caseDocsToolbar .btn.btnCaseChrome.caseDocsNewMenuBtn {
   background: var(--primary);
   border-color: var(--primary);
-  color: #fff;
+  color: var(--text-on-primary);
   font-weight: 700;
 }
 
 .caseDocsToolbar .btn.btnCaseChrome.caseDocsNewMenuBtn:hover:not(:disabled) {
   background: color-mix(in srgb, var(--primary) 88%, #0f172a);
   border-color: color-mix(in srgb, var(--primary) 88%, #0f172a);
-  color: #fff;
+  color: var(--text-on-primary);
 }
 
 .caseDocsToolbar .btn.btnCaseChrome.caseDocsToolbarActionBtn {
@@ -493,6 +503,10 @@ body {
   display: inline-flex;
   align-items: center;
   line-height: 1;
+}
+
+.mainMenuFilterBar .btn:not(.primary):not(.mainMenuFilterBtn):not(.danger) {
+  color: var(--text-on-chrome, #f1f5f9);
 }
 
 .mainMenuFilterBar .mainMenuSearchInput .searchInputField {
@@ -1072,19 +1086,19 @@ select:focus {
 .loginScreen .loginPasswordToggle:focus-visible,
 .loginScreen .loginForgotLink:focus-visible {
   outline: none;
-  border-color: #2563eb !important;
+  border-color: var(--primary) !important;
   box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.4);
 }
 
 .loginScreen .btn:focus-visible {
-  outline: 2px solid #2563eb;
+  outline: 2px solid var(--primary);
   outline-offset: 2px;
   box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.28);
 }
 
 .loginScreen .loginForgotLink:focus-visible {
   border-radius: 4px;
-  border: 1px solid #2563eb;
+  border: 1px solid var(--primary);
   box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.35);
 }
 
@@ -1482,6 +1496,11 @@ select:focus {
   gap: 8px;
 }
 
+/* Preview / status lines use .muted elsewhere; on the dark rail keep them readable (not slate-grey). */
+.caseLeft.caseLeft--rail .accBody .muted {
+  color: #c7d0e0;
+}
+
 .caseLeft.caseLeft--rail .accBody strong {
   color: #edf2fb;
 }
@@ -1714,13 +1733,13 @@ select:focus {
 .caseDocPanelBar .btn.primary {
   background: var(--primary);
   border-color: var(--primary);
-  color: #fff;
+  color: var(--text-on-primary);
 }
 
 .caseDocPanelBar .btn.primary:hover:not(:disabled) {
   background: color-mix(in srgb, var(--primary) 88%, #0f172a);
   border-color: color-mix(in srgb, var(--primary) 88%, #0f172a);
-  color: #fff;
+  color: var(--text-on-primary);
 }
 
 .caseDocPanelBar .tasksToolbarLayoutLabel {
@@ -2117,14 +2136,14 @@ html.dark .navBtn:not(.sidebarNavBtn) {
 }
 
 html.dark .navBtn:not(.sidebarNavBtn):hover {
-  background: rgba(37, 99, 235, 0.2);
+  background: rgba(var(--primary-rgb), 0.2);
   color: #f8fafc;
 }
 
 html.dark .navBtn:not(.sidebarNavBtn).active {
-  background: #2563eb;
-  color: #fff;
-  border-color: #2563eb;
+  background: var(--primary);
+  color: var(--text-on-primary);
+  border-color: var(--primary);
 }
 
 html.dark input,
@@ -2378,7 +2397,7 @@ html.dark .reportsDdTriggerSummary {
 .portalMatterNewLabel {
   margin-top: 2px;
   font-size: 0.8rem;
-  color: #2563eb;
+  color: var(--primary);
 }
 
 .portalNewBadge {

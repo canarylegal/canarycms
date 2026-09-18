@@ -1,18 +1,16 @@
 :root {
   --app-font-stack: "DM Sans", system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-  /* Dark blue page + white interactive surfaces (cards, sidebar, chrome) */
-  --bg: #1e3a8a;
-  /* Solid mid-tone for chrome on the gradient (top bar buttons, color-mix borders). */
-  --page-bg: #1e3a8a;
-  --page-gradient: linear-gradient(165deg, #1e3a8a 0%, #1e40af 42%, #172554 100%);
-  --panel: #ffffff;
-  /* Nested rows / chrome inside white panels — still reads as “white” on blue */
-  --panel2: #f8fafc;
+  /* Pale modern page wash + white interactive surfaces (product default). */
+  --bg: #e8edf5;
+  --page-bg: #e8edf5;
+  --page-gradient: linear-gradient(165deg, #dce5f4 0%, #e8edf5 40%, #f2f5fa 100%);
+  --panel: #f7f9fc;
+  --panel2: #eef2f8;
   --text: #0f172a;
-  --muted: #64748b;
-  --border: rgba(15, 23, 42, 0.1);
-  --shadow: rgba(15, 23, 42, 0.07) 0 2px 6px, rgba(15, 23, 42, 0.05) 0 12px 28px;
-  --shadow-soft: rgba(15, 23, 42, 0.04) 0 1px 2px, rgba(15, 23, 42, 0.06) 0 6px 18px;
+  --muted: #5b6b82;
+  --border: rgba(15, 23, 42, 0.12);
+  --shadow: 0 18px 50px rgba(15, 23, 42, 0.12);
+  --shadow-soft: 0 8px 24px rgba(15, 23, 42, 0.08);
   /* Shared horizontal inset for top bar nav and main content (matters list toolbar, etc.). */
   --app-page-padding-x: 20px;
   --app-sidebar-width-collapsed: 60px;
@@ -28,14 +26,29 @@
   --app-main-menu-toolbar-height: 2.75rem;
   /* First primary CTA in nav / list toolbars (Cases, New matter, New quote, …). */
   --toolbar-lead-btn-width: 7.5rem;
-  --primary: #2563eb;
-  --primary-rgb: 37, 99, 235;
+  /* Brand canary yellow — dark ink on primary buttons for contrast. */
+  --primary: #f0d010;
+  --primary-rgb: 240, 208, 16;
+  --text-on-primary: #0f172a;
   /* Text on top bar buttons that use ``--page-bg`` as fill (set from ``theme.ts``). */
-  --text-on-page-bg: #f8fafc;
+  --text-on-page-bg: #0f172a;
+  /* Text on dark navigation chrome (sidebar, filter ribbons) — independent of pale page wash. */
+  --text-on-chrome: #f1f5f9;
   --danger: #dc2626;
-  --card: #ffffff;
-  --sidebar-bg: #ffffff;
+  --card: #f7f9fc;
+  --sidebar-bg: #172554;
   --hover: rgba(15, 23, 42, 0.06);
+  --local-ink: #0b1220;
+  --local-chrome: #172554;
+  --local-rail: var(--local-chrome);
+  --local-accent: var(--primary);
+  --local-accent-soft: rgba(var(--primary-rgb), 0.14);
+  --local-surface: #f3f6fb;
+  --local-surface-raised: #ffffff;
+  --local-surface-radius: 16px;
+  --local-surface-border: 1px solid rgba(15, 23, 42, 0.1);
+  --local-surface-shadow: 0 10px 28px rgba(15, 23, 42, 0.07);
+  --local-chip: #e7edf7;
   /* Main menu cases table + case documents list (shared row rhythm / type). */
   --canary-table-row-gap: calc(8px * 0.85);
   --canary-table-row-padding: calc(12px * 0.85);
@@ -100,7 +113,7 @@ html.dark .btn:not(.primary):not(.danger) {
 html.dark .btn.primary {
   background: var(--primary);
   border-color: var(--primary);
-  color: #f8fafc;
+  color: var(--text-on-primary);
 }
 
 html.dark .navBtn:not(.active) {
@@ -564,19 +577,20 @@ button.appSidebarBrand--button:focus-visible {
   padding: 10px 0;
   border-color: transparent;
   background: transparent;
-  color: var(--text);
+  color: var(--text-on-chrome);
   min-width: 0;
 }
 
 .sidebarNavBtn:not(.active):hover {
-  background: var(--hover);
+  background: rgba(255, 255, 255, 0.07);
   border-color: transparent;
+  color: #fff;
 }
 
 .sidebarNavBtn.active {
-  border-color: var(--primary);
-  background: var(--primary);
-  color: #f8fafc;
+  border-color: transparent;
+  background: rgba(var(--primary-rgb), 0.18);
+  color: #fff;
 }
 
 .appMainColumn > .main {
@@ -822,7 +836,7 @@ a.navBtn {
 .navBtn.active {
   border-color: var(--primary);
   background: var(--primary);
-  color: #f8fafc;
+  color: var(--text-on-primary);
 }
 
 /* Main app header: ribbon buttons match Appearance → page background */
@@ -835,7 +849,7 @@ a.navBtn {
 .topbar .navBtn.active {
   border-color: var(--primary);
   background: var(--primary);
-  color: #f8fafc;
+  color: var(--text-on-primary);
 }
 
 .topbar .btn:not(.primary):not(.danger) {
@@ -2306,6 +2320,34 @@ html.dark .singleSelectDropdownTrigger {
   font-size: 13px;
 }
 
+.mutedFlush {
+  margin-top: 0;
+}
+
+.mutedSm {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.textXs {
+  font-size: 12px;
+}
+
+.monoSm {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 13px;
+}
+
+.row.wrap,
+.row--wrap {
+  flex-wrap: wrap;
+}
+
+.gap8 {
+  gap: 8px;
+}
+
 .error {
   border: 1px solid rgba(220, 38, 38, 0.35);
   background: rgba(220, 38, 38, 0.08);
@@ -2341,7 +2383,7 @@ html.dark .singleSelectDropdownTrigger {
 .btn.primary {
   background: var(--primary);
   border-color: var(--primary);
-  color: #f8fafc;
+  color: var(--text-on-primary);
   font-weight: 600;
 }
 
@@ -2350,11 +2392,11 @@ html.dark .singleSelectDropdownTrigger {
   border-color: color-mix(in srgb, var(--primary) 88%, #0f172a);
 }
 
-/* Primary CTAs in main-menu toolbars sit on --page-bg (dark blue in light mode). */
+/* Primary CTAs in main-menu toolbars sit on dark chrome ribbons. */
 .mainMenuFilterBar .btn.primary {
   background: var(--primary);
   border-color: var(--primary);
-  color: var(--text-on-page-bg);
+  color: var(--text-on-primary);
   box-shadow: 0 1px 2px rgba(15, 23, 42, 0.12);
 }
 
@@ -2366,24 +2408,25 @@ html.dark .singleSelectDropdownTrigger {
 .mainMenuFilterBar .btn:not(.primary):not(.mainMenuFilterBtn):not(.danger) {
   background: rgba(255, 255, 255, 0.1);
   border-color: rgba(255, 255, 255, 0.22);
-  color: var(--text-on-page-bg);
+  color: var(--text-on-chrome);
 }
 
 .mainMenuFilterBar .btn:not(.primary):not(.mainMenuFilterBtn):not(.danger):hover:not(:disabled) {
   background: rgba(255, 255, 255, 0.16);
   border-color: rgba(255, 255, 255, 0.32);
+  color: #fff;
 }
 
 html.dark .mainMenuFilterBar .btn.primary {
   background: var(--primary);
   border-color: var(--primary);
-  color: var(--text-on-page-bg);
+  color: var(--text-on-primary);
 }
 
 html.dark .mainMenuFilterBar .btn:not(.primary):not(.mainMenuFilterBtn):not(.danger) {
   background: rgba(255, 255, 255, 0.08);
   border-color: rgba(255, 255, 255, 0.16);
-  color: var(--text-on-page-bg);
+  color: var(--text-on-chrome);
 }
 
 .btn.danger {
@@ -4374,13 +4417,13 @@ select {
 
 .ledgerFilterActive {
   background: var(--primary) !important;
-  color: #fff !important;
+  color: var(--text-on-primary) !important;
   border-color: var(--primary) !important;
 }
 
 .ledgerPostBtn {
   background: var(--primary) !important;
-  color: #fff !important;
+  color: var(--text-on-primary) !important;
   border-color: var(--primary) !important;
 }
 .ledgerPostBtn:hover:not(:disabled) {
@@ -4421,6 +4464,15 @@ select {
 .ledgerTable--fixed {
   table-layout: fixed;
 }
+
+.ledgerColW7 { width: 7%; }
+.ledgerColW8 { width: 8%; }
+.ledgerColW9 { width: 9%; }
+.ledgerColW10 { width: 10%; }
+.ledgerColW11 { width: 11%; }
+.ledgerColW12 { width: 12%; }
+.ledgerColW22 { width: 22%; }
+.ledgerColW36 { width: 36%; }
 
 .ledgerColDate {
   width: 96px;
@@ -4766,7 +4818,7 @@ html.dark .ledgerBalanceBand--client {
 
 .finAddCatBtn {
   background: var(--primary) !important;
-  color: #fff !important;
+  color: var(--text-on-primary) !important;
   border-color: var(--primary) !important;
 }
 

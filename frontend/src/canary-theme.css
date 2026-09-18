@@ -1,0 +1,6 @@
+/**
+ * Single product theme entry — base tokens/components, then surface chrome.
+ * Import this from main.tsx only (do not import index.css / local-modern.css separately).
+ */
+@import './index.css';
+@import './local-modern.css';

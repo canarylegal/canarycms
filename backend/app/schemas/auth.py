@@ -32,13 +32,13 @@ class PluginTokenIn(BaseModel):
 
 class UserAppearanceOut(BaseModel):
     font: str = ""
-    accent: str = "#2563eb"
+    accent: str = "#f0d010"
     mode: Literal["light", "dark"] = "light"
     page_bg: str = ""
 
 class UserAppearanceUpdate(BaseModel):
     font: str = Field(default="", max_length=500)
-    accent: str = Field(default="#2563eb", max_length=7)
+    accent: str = Field(default="#f0d010", max_length=7)
     mode: Literal["light", "dark"] = "light"
     page_bg: str = Field(default="", max_length=7)
 
