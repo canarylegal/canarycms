@@ -3843,7 +3843,12 @@ select {
   position: fixed;
   inset: 0;
   background: rgba(15, 23, 42, 0.35);
-  z-index: 10;
+  /*
+   * Above case chrome: .caseDocsToolbarBar (20), .caseToolbarDropdown (200),
+   * and portaled New/Import menus (.caseToolbarDropdown--portal, 5000).
+   * emlPreviewOverlay stays higher (6000) for nested preview dialogs.
+   */
+  z-index: 5500;
   /* Allow scrolling when a dialog is taller than the viewport (tall forms, small screens). */
   display: flex;
   align-items: flex-start;

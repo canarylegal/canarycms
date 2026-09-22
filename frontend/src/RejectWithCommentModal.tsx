@@ -46,7 +46,6 @@ export function RejectWithCommentModal({
   return (
     <div
       className="modalOverlay"
-      style={{ zIndex: 100 }}
       role="dialog"
       aria-modal="true"
       aria-labelledby="rejectCommentModalTitle"

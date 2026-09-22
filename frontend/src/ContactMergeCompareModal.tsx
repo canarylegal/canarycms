@@ -40,7 +40,6 @@ export function ContactMergeCompareModal({
   return (
     <div
       className="modalOverlay"
-      style={{ zIndex: 110 }}
       role="dialog"
       aria-modal="true"
       aria-labelledby="contactMergeCompareTitle"
