@@ -487,7 +487,6 @@ export function EventsPage({
       {eventDetail ? (
         <div
           className="modalOverlay"
-          style={{ zIndex: 40 }}
           role="dialog"
           aria-modal="true"
           aria-labelledby="caseEventDetailTitle"

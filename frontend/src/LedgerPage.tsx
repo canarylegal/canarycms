@@ -1323,7 +1323,6 @@ export function LedgerPage({ caseId, token, currentUserId, onCaseChanged }: Prop
       {invoiceModalOpen ? (
         <div
           className="modalOverlay"
-          style={{ zIndex: 25 }}
           role="dialog"
           aria-modal="true"
           aria-labelledby="ledgerInvTitle"
