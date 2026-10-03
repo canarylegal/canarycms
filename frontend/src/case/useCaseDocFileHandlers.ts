@@ -331,7 +331,7 @@ export function useCaseDocFileHandlers({
           pushNotification('Opened in Thunderbird.')
         } else {
           pushNotification(
-            'Sent to Thunderbird. Keep Thunderbird running with the Canary add-on — the message should open in a moment.',
+            'Sent to Thunderbird. Sign in via the Canary button in Thunderbird (same Canary site), then wait a couple of seconds — or click the Canary toolbar button to wake the add-on.',
           )
         }
       } catch (e: unknown) {

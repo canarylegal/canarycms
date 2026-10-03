@@ -1363,6 +1363,15 @@
   }
 
   try {
+    // Wake pending e-mail opens queued from the Canary web app.
+    try {
+      const ext0 = typeof messenger !== 'undefined' ? messenger : browser
+      if (ext0 && ext0.runtime && ext0.runtime.sendMessage) {
+        void ext0.runtime.sendMessage({ type: 'canary-poll-pending-eml-open' })
+      }
+    } catch (_) {
+      /* optional */
+    }
     if (document.readyState === 'loading') {
       document.addEventListener('DOMContentLoaded', main)
     } else {

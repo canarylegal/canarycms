@@ -261,7 +261,11 @@
           let name = typeof message.filename === 'string' && message.filename.trim() ? message.filename.trim() : 'message.eml'
           if (!/\.eml$/i.test(name)) name = name.replace(/\.[^.]+$/, '') + '.eml'
           const file = new File([buf], name, { type: 'message/rfc822' })
-          await ext.messageDisplay.open({ file: file, where: 'window' })
+          try {
+            await ext.messageDisplay.open({ file: file, location: 'window' })
+          } catch (_) {
+            await ext.messageDisplay.open({ file: file, location: 'tab' })
+          }
           sendResponse({ ok: true })
         } catch (e) {
           sendResponse({ ok: false, detail: (e && e.message) || String(e) })
