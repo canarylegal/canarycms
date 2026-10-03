@@ -65,6 +65,10 @@ class User(Base):
     permission_category_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("user_permission_category.id", ondelete="SET NULL"), nullable=True
     )
+    # Supervising partner / SRO for this fee earner (Admin → Users); used by [SUPERVISOR*] merge codes.
+    supervisor_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("user.id", ondelete="SET NULL"), nullable=True
+    )
 
     totp_secret: Mapped[str | None] = mapped_column(Text, nullable=True)
     is_2fa_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)

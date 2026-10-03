@@ -30,6 +30,7 @@ from app.models import File as DbFile
 from app.schemas import (
     CanarySignAcroFormFieldOut,
     CanarySignMenuRowOut,
+    CanarySignRemindIn,
     CanarySignSendIn,
     CanarySignSigningRequestOut,
     CanarySignStaffOptionsOut,
@@ -201,6 +202,7 @@ def post_void_canary_sign(
 def post_remind_canary_sign(
     case_id: uuid.UUID,
     request_id: uuid.UUID,
+    payload: CanarySignRemindIn = CanarySignRemindIn(),
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -208,7 +210,12 @@ def post_remind_canary_sign(
     req = db.get(CanarySignRequest, request_id)
     if not req or req.case_id != case_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Signing request not found")
-    remind_signing_request(db, req=req, actor=user)
+    remind_signing_request(
+        db,
+        req=req,
+        actor=user,
+        recipient_ids=payload.recipient_ids,
+    )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 

@@ -37,6 +37,7 @@ class FileCategory(str, enum.Enum):
     system = "system"
     firm_letterhead = "firm_letterhead"
     firm_portal_logo = "firm_portal_logo"
+    firm_portal_background = "firm_portal_background"
     firm_default_signature = "firm_default_signature"
     user_signature = "user_signature"
 

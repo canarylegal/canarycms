@@ -4,12 +4,14 @@
   const sh = () => globalThis.canaryShared
   const cs = () => globalThis.canaryComposeStore
 
-  /** Automatic reply prefill disabled — manual matter selection only (avoids wrong-case filing). */
+  /** Automatic reply→matter prefill stays off (wrong-case risk). Canary→mailto uses pending-send. */
   const ENABLE_REPLY_PREFILL = false
 
   const prefillDoneForTab = new Set()
   const prefillTimersByTab = new Map()
   const lastRelatedByTab = new Map()
+  /** Allow pending-send claim retries for a few seconds after compose opens (mailto race). */
+  const pendingRetryDeadlineByTab = new Map()
 
   function isReplyOrForward(details) {
     if (!details || !details.type) return false
@@ -31,6 +33,53 @@
   async function setPrefillStatus(ext, tabId, status) {
     if (tabId == null) return
     await cs().setTabState(ext, tabId, { prefillStatus: status || '' })
+  }
+
+  async function fetchCaseSummary(token, origin, caseId) {
+    try {
+      const res = await fetch(sh().apiRoot(origin) + '/cases/' + encodeURIComponent(String(caseId)), {
+        headers: sh().authHeaders(token),
+      })
+      const body = await res.json().catch(function () {
+        return null
+      })
+      if (!res.ok || !body || typeof body !== 'object') return null
+      return body
+    } catch (_) {
+      return null
+    }
+  }
+
+  /**
+   * When Canary web launches mailto, it PUTs /mail-plugin/pending-send with the matter.
+   * Bind that matter to this compose tab and claim (clear) the pending row so a later blank
+   * Write is not incorrectly linked.
+   */
+  async function tryBindPendingSend(ext, tabId, jwt, origin) {
+    const pending = await sh().fetchPendingSend(jwt, origin)
+    if (!pending || !pending.active || !pending.case_id) return false
+
+    const caseId = String(pending.case_id)
+    const caseRow = await fetchCaseSummary(jwt, origin, caseId)
+    const matterTitle =
+      (caseRow && (caseRow.matter_description || caseRow.title || '').trim()) || ''
+    await cs().setTabState(ext, tabId, {
+      caseId: caseId,
+      parentFileId: pending.source_file_id != null ? String(pending.source_file_id) : null,
+      folder: '',
+      userOverridden: false,
+      prefilledFromPending: true,
+      prefilledFromReply: false,
+      composeAutoApplied: false,
+      prefilledCaseNumber: (caseRow && caseRow.case_number) || '',
+      prefilledClientName: (caseRow && caseRow.client_name) || '',
+      prefilledMatterTitle: matterTitle,
+      prefillStatus: 'pending-send',
+    })
+    await cs().setActiveComposeTab(ext, tabId)
+    // Claim so the next unrelated Write does not inherit this matter.
+    await clearPendingSend(jwt, origin)
+    return true
   }
 
   async function resetComposeTabForManualMatter(ext, tabId, jwt, origin, status) {
@@ -63,26 +112,46 @@
       prefillDoneForTab.delete(key)
     }
 
+    if (prefillDoneForTab.has(key)) return false
+
+    const st = await cs().getTabState(ext, tabId)
+    if (st.userOverridden) {
+      prefillDoneForTab.add(key)
+      return false
+    }
+    // Already bound (e.g. user opened the panel and confirmed) — do not re-claim.
+    if (st.caseId && (st.prefilledFromPending || st.composeAutoApplied)) {
+      prefillDoneForTab.add(key)
+      return false
+    }
+
     if (isDefiniteNonReplyCompose(details)) {
-      if (!prefillDoneForTab.has(key)) {
+      const { jwt, origin } = await sh().getStoredAuth(ext)
+      if (!jwt || !origin) {
         prefillDoneForTab.add(key)
-        const { jwt, origin } = await sh().getStoredAuth(ext)
-        if (jwt && origin) await resetComposeTabForManualMatter(ext, tabId, jwt, origin, 'not-reply:new')
-        else await cs().clearTabState(ext, tabId)
+        await setPrefillStatus(ext, tabId, 'not-signed-in')
+        return false
+      }
+      const bound = await tryBindPendingSend(ext, tabId, jwt, origin)
+      if (bound) {
+        prefillDoneForTab.add(key)
+        pendingRetryDeadlineByTab.delete(key)
+        return true
+      }
+      // Mailto can open before Canary's pending-send PUT lands — retry briefly, then stop.
+      if (!pendingRetryDeadlineByTab.has(key)) {
+        pendingRetryDeadlineByTab.set(key, Date.now() + 6000)
+      }
+      if (Date.now() > pendingRetryDeadlineByTab.get(key)) {
+        prefillDoneForTab.add(key)
+        pendingRetryDeadlineByTab.delete(key)
+        await setPrefillStatus(ext, tabId, 'not-reply:new')
       }
       return false
     }
 
     if (!isReplyOrForward(details)) {
       await setPrefillStatus(ext, tabId, 'waiting-type:' + (details.type || ''))
-      return false
-    }
-
-    if (prefillDoneForTab.has(key)) return false
-
-    const st = await cs().getTabState(ext, tabId)
-    if (st.userOverridden) {
-      prefillDoneForTab.add(key)
       return false
     }
 
@@ -108,7 +177,8 @@
     if (prev) {
       for (let i = 0; i < prev.length; i++) clearTimeout(prev[i])
     }
-    const delays = [0, 400, 1000, 2500]
+    // Include a short delayed retry so Canary's pending-send PUT can win the race with mailto.
+    const delays = [0, 400, 1000, 2500, 5000]
     const timers = delays.map(function (ms) {
       return setTimeout(function () {
         void tryPrefillComposeTab(ext, tabId)
@@ -122,19 +192,12 @@
     if (ext.compose.onComposeStateChanged) {
       ext.compose.onComposeStateChanged.addListener(function (tab) {
         if (!tab || tab.id == null) return
-        const key = String(tab.id)
-        if (prefillDoneForTab.has(key)) {
-          void (async function () {
-            try {
-              const details = await ext.compose.getComposeDetails(tab.id)
-              if (isDefiniteNonReplyCompose(details)) return
-            } catch (_) {
-              return
-            }
-            schedulePrefillAttempts(ext, tab.id)
-          })()
-          return
-        }
+        schedulePrefillAttempts(ext, tab.id)
+      })
+    }
+    if (ext.tabs && ext.tabs.onCreated) {
+      ext.tabs.onCreated.addListener(function (tab) {
+        if (!tab || tab.id == null || tab.type !== 'messageCompose') return
         schedulePrefillAttempts(ext, tab.id)
       })
     }
@@ -146,7 +209,10 @@
         if (!jwt) return
         void (async function () {
           const active = await cs().getActiveComposeTab(ext)
-          if (active != null) schedulePrefillAttempts(ext, active)
+          if (active != null) {
+            prefillDoneForTab.delete(String(active))
+            schedulePrefillAttempts(ext, active)
+          }
         })()
       })
     }
@@ -155,6 +221,7 @@
         const key = String(tabId)
         prefillDoneForTab.delete(key)
         lastRelatedByTab.delete(key)
+        pendingRetryDeadlineByTab.delete(key)
         const prev = prefillTimersByTab.get(key)
         if (prev) {
           for (let i = 0; i < prev.length; i++) clearTimeout(prev[i])

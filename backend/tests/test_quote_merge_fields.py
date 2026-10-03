@@ -29,7 +29,7 @@ def test_quote_line_merge_fields_indexed() -> None:
         ),
     ]
     fields = _quote_line_merge_fields(lines, property_value_pence=300_000_00)
-    assert fields["[QUOTE_PROPERTY_VALUE]"] == "£300,000.00"
+    assert fields["[QUOTE_PROPERTY_VALUE]"] == "\u00a0£300,000.00"
     assert fields["[QUOTE_01_LABEL]"] == "Legal Fees on Sale"
     assert fields["[QUOTE_01_AMOUNT]"] == "£1,290.00"
     assert fields["[QUOTE_01_VAT]"] == "£258.00"

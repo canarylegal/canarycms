@@ -1,6 +1,8 @@
 """Precedent merge field catalog and contact/letter merge helpers."""
 from __future__ import annotations
 
+import re
+import uuid
 from datetime import date
 from typing import Any
 
@@ -70,6 +72,9 @@ PRECEDENT_CODES: dict[str, str] = {
     "[FEE_EARNER]": "Fee earner display name (from the case fee earner)",
     "[FEE_EARNER_JOB_TITLE]": "Fee earner job title (from the case fee earner user)",
     "[FEE_EARNER_INITIALS]": "Fee earner initials (from the case fee earner user)",
+    "[SUPERVISOR]": "Supervising partner display name (from the fee earner's supervisor in Admin → Users)",
+    "[SUPERVISOR_JOB_TITLE]": "Supervising partner job title (from the fee earner's supervisor)",
+    "[SUPERVISOR_INITIALS]": "Supervising partner initials (from the fee earner's supervisor)",
     "[CONTACT_REF]": "Contact's reference (as stored in canary)",
     # Firm (Admin → Firm details); narrow scope — precedents / compose merge only for now.
     "[FIRM_TRADING_NAME]": "Firm trading name",
@@ -262,7 +267,12 @@ for _base_key in _ADDITIONAL_CLIENT_NAME_CODES:
 
 PRECEDENT_CODES["[QUOTE_PROPERTY_VALUE]"] = "Property value used for banded fee scales (formatted GBP)."
 PRECEDENT_CODES["[PROPERTY_ADDRESS_BLOCK]"] = (
-    "Property address from the Property sub-menu (line breaks between parts)."
+    "Property address from the Property sub-menu (line breaks between parts). "
+    "Falls back to the address portion of the matter description when Property details are empty."
+)
+PRECEDENT_CODES["[PROPERTY_ADDRESS]"] = (
+    "Property address on one line (comma-separated), from the Property sub-menu or matter description. "
+    "Prefer this in subject lines such as “Re: Your sale of …”."
 )
 PRECEDENT_CODES["[PROPERTY_CHARGE_DATE]"] = "Charge / mortgage charge date from the Property sub-menu (dd/mm/yyyy)."
 PRECEDENT_CODES["[PRIMARY_CLIENT_NAME]"] = (
@@ -651,6 +661,9 @@ def build_merge_fields(
     fee_earner_name: str = "",
     fee_earner_job_title: str = "",
     fee_earner_initials: str = "",
+    supervisor_name: str = "",
+    supervisor_job_title: str = "",
+    supervisor_initials: str = "",
     merge_date: date | None = None,
     *,
     merge_all_clients: bool = False,
@@ -715,6 +728,9 @@ def build_merge_fields(
     out["[FEE_EARNER]"] = fee_earner_name
     out["[FEE_EARNER_JOB_TITLE]"] = fee_earner_job_title
     out["[FEE_EARNER_INITIALS]"] = _s_str(fee_earner_initials)
+    out["[SUPERVISOR]"] = supervisor_name
+    out["[SUPERVISOR_JOB_TITLE]"] = supervisor_job_title
+    out["[SUPERVISOR_INITIALS]"] = _s_str(supervisor_initials)
 
     if firm is not None:
         out["[FIRM_TRADING_NAME]"] = _s_str(getattr(firm, "trading_name", None))
@@ -816,6 +832,12 @@ def build_merge_fields(
         out["[CLIENT_1_LETTER_SIGN_OFF]"] = _letter_sign_off_line(selected_contact)
     return finalize(out)
 
+_MATTER_DESCRIPTION_ADDRESS_PREFIX_RE = re.compile(
+    r"^(?:Sale|Purchase|Remortgage)\s+of\s+",
+    re.IGNORECASE,
+)
+
+
 def _property_payload_address_lines(payload: dict[str, Any]) -> list[str]:
     if payload.get("is_non_postal"):
         raw = payload.get("free_lines") or []
@@ -836,12 +858,37 @@ def _property_payload_address_lines(payload: dict[str, Any]) -> list[str]:
     return [p for p in parts if p]
 
 
+def _address_lines_from_matter_title(title: str | None) -> list[str]:
+    """Best-effort address lines from a conveyancing matter description / title."""
+    raw = _s_str(title)
+    if not raw:
+        return []
+    rest = _MATTER_DESCRIPTION_ADDRESS_PREFIX_RE.sub("", raw, count=1).strip()
+    if not rest or rest == raw:
+        return []
+    return [p.strip() for p in rest.split(",") if p.strip()]
+
+
+def _join_property_address_one_line(lines: list[str]) -> str:
+    """Match frontend ``joinAddressLinesForMatterDescription`` (space beside pure numeric parts)."""
+    parts = [p.strip() for p in lines if p and p.strip()]
+    if not parts:
+        return ""
+    out = parts[0]
+    for i in range(1, len(parts)):
+        prev, cur = parts[i - 1], parts[i]
+        sep = " " if prev.isdigit() or cur.isdigit() else ", "
+        out += sep + cur
+    return out
+
+
 def property_merge_fields(db: Session, case_id: uuid.UUID) -> dict[str, str]:
     """Merge codes from Property sub-menu (address, existing lender + charge date)."""
-    from app.models import CaseContact, CasePropertyDetails
+    from app.models import Case, CaseContact, CasePropertyDetails
 
     out: dict[str, str] = {
         "[PROPERTY_ADDRESS_BLOCK]": "",
+        "[PROPERTY_ADDRESS]": "",
         "[PROPERTY_CHARGE_DATE]": "",
         "[EXISTING_LENDER_NAME]": "",
         "[EXISTING_LENDER_COMPANY_NAME]": "",
@@ -849,12 +896,16 @@ def property_merge_fields(db: Session, case_id: uuid.UUID) -> dict[str, str]:
         "[EXISTING_LENDER_ADDRESS_BLOCK]": "",
     }
     row = db.get(CasePropertyDetails, case_id)
-    if not row or not isinstance(row.payload, dict):
-        return out
-    payload = row.payload
-    addr_lines = _property_payload_address_lines(payload)
+    payload = row.payload if row and isinstance(row.payload, dict) else None
+    addr_lines = _property_payload_address_lines(payload) if payload else []
+    if not addr_lines:
+        case_row = db.get(Case, case_id)
+        addr_lines = _address_lines_from_matter_title(getattr(case_row, "title", None) if case_row else None)
     if addr_lines:
         out["[PROPERTY_ADDRESS_BLOCK]"] = "\n".join(addr_lines)
+        out["[PROPERTY_ADDRESS]"] = _join_property_address_one_line(addr_lines)
+    if not payload:
+        return out
     charge_raw = _s_str(payload.get("charge_date"))
     if charge_raw:
         try:

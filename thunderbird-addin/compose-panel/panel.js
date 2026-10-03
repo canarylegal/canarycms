@@ -307,25 +307,183 @@
     summary.textContent = text
   }
 
-  async function openAttachPickerWindow() {
-    const caseId =
-      selectedCase && selectedCase.id != null
-        ? String(selectedCase.id)
-        : (await readFormStateFromStore(sh().getGecko())).caseId
-    if (!caseId || composeTabId == null) {
+  function setAttachPickerVisible(show) {
+    const view = $('attach-picker-view')
+    const wrap = document.querySelector('.wrap')
+    if (!view) {
+      out('Attach picker UI missing — reload the Canary add-on.', true)
+      return
+    }
+    view.hidden = !show
+    if (wrap) wrap.hidden = !!show
+  }
+
+  function updateAttachPickerFooter() {
+    const line = $('attach-selection-line')
+    const btn = $('btn-attach-confirm')
+    const n = selectedAttachIds.length
+    const max = (attachUi() && attachUi().MAX_ATTACH) || 25
+    if (line) {
+      line.textContent =
+        n === 0
+          ? 'Click files to select (up to ' + max + ').'
+          : n + ' file' + (n === 1 ? '' : 's') + ' selected'
+    }
+    if (btn) btn.disabled = n === 0
+  }
+
+  function toggleAttachFile(id) {
+    const sid = String(id)
+    const max = (attachUi() && attachUi().MAX_ATTACH) || 25
+    const idx = selectedAttachIds.indexOf(sid)
+    if (idx >= 0) {
+      selectedAttachIds = selectedAttachIds.filter(function (x) {
+        return x !== sid
+      })
+    } else {
+      if (selectedAttachIds.length >= max) {
+        out('At most ' + max + ' attachments.', true)
+        return
+      }
+      selectedAttachIds = selectedAttachIds.concat([sid])
+    }
+    updateAttachPickerFooter()
+    renderInlineAttachPicker()
+  }
+
+  function renderInlineAttachPicker() {
+    const root = $('attach-picker-root')
+    const ui = attachUi()
+    if (!root || !ui) return
+    root.innerHTML = ''
+
+    const crumbs = document.createElement('div')
+    crumbs.className = 'attach-crumbs'
+    const home = document.createElement('button')
+    home.type = 'button'
+    home.className = 'attach-crumb'
+    home.textContent = 'All files'
+    home.onclick = function () {
+      attachBrowseFolder = ''
+      renderInlineAttachPicker()
+    }
+    crumbs.appendChild(home)
+    const parts = String(attachBrowseFolder || '')
+      .split('/')
+      .filter(Boolean)
+    let acc = ''
+    for (let i = 0; i < parts.length; i++) {
+      const sep = document.createElement('span')
+      sep.className = 'attach-crumb-sep'
+      sep.textContent = ' / '
+      crumbs.appendChild(sep)
+      acc = acc ? acc + '/' + parts[i] : parts[i]
+      const seg = acc
+      const btn = document.createElement('button')
+      btn.type = 'button'
+      btn.className = 'attach-crumb'
+      btn.textContent = ui.decodeFolderSegment(parts[i])
+      btn.onclick = function () {
+        attachBrowseFolder = seg
+        renderInlineAttachPicker()
+      }
+      crumbs.appendChild(btn)
+    }
+    root.appendChild(crumbs)
+
+    const folders = ui.childFolders(caseFiles, attachBrowseFolder)
+    let docs = ui.filesInBrowseFolder(caseFiles, attachBrowseFolder)
+    if (!folders.length && !docs.length && attachBrowseFolder === '') {
+      docs = ui.allAttachableFiles(caseFiles)
+    }
+    if (!folders.length && !docs.length) {
+      const empty = document.createElement('div')
+      empty.className = 'attach-picker-empty muted'
+      empty.textContent = 'No attachable files in this matter.'
+      root.appendChild(empty)
+      return
+    }
+    for (let i = 0; i < folders.length; i++) {
+      const name = folders[i]
+      const next = attachBrowseFolder ? attachBrowseFolder + '/' + name : name
+      const row = document.createElement('button')
+      row.type = 'button'
+      row.className = 'tb-list-row tb-list-row--folder'
+      row.innerHTML =
+        '<span class="tb-row-icon" aria-hidden="true">📁</span>' +
+        '<span class="tb-row-label">' +
+        ui.decodeFolderSegment(name) +
+        '</span>'
+      row.onclick = function () {
+        attachBrowseFolder = next
+        renderInlineAttachPicker()
+      }
+      root.appendChild(row)
+    }
+    for (let j = 0; j < docs.length; j++) {
+      const f = docs[j]
+      const id = String(f.id)
+      const row = document.createElement('button')
+      row.type = 'button'
+      row.className =
+        'tb-list-row tb-list-row--file' + (selectedAttachIds.indexOf(id) >= 0 ? ' is-selected' : '')
+      row.innerHTML =
+        '<span class="tb-row-icon" aria-hidden="true">📄</span>' +
+        '<span class="tb-row-label">' +
+        (f.original_filename || id) +
+        '</span>' +
+        '<span class="tb-row-check" aria-hidden="true">✓</span>'
+      row.onclick = function () {
+        toggleAttachFile(id)
+      }
+      root.appendChild(row)
+    }
+  }
+
+  async function openAttachPickerInline() {
+    if (!selectedCase) {
       out('Select a matter first.', true)
       return
     }
+    if (!attachUi()) {
+      out('Attach UI failed to load. Reload the Canary add-on.', true)
+      return
+    }
+    const line = $('attach-matter-line')
+    if (line) {
+      line.textContent =
+        caseFiles.length === 0
+          ? 'No files in this matter'
+          : caseFiles.length + ' file' + (caseFiles.length === 1 ? '' : 's') + ' in matter'
+    }
+    attachBrowseFolder = ''
+    updateAttachPickerFooter()
+    renderInlineAttachPicker()
+    setAttachPickerVisible(true)
+    out('', false)
+  }
+
+  async function confirmInlineAttach() {
+    if (!selectedCase || composeTabId == null || !selectedAttachIds.length) return
+    const btn = $('btn-attach-confirm')
+    if (btn) btn.disabled = true
     const ext = sh().getGecko()
-    await persistState(ext)
-    const r = await sendRuntimeMessage(ext, {
-      type: 'canary-open-attach-picker',
-      caseId: caseId,
-      composeTabId: composeTabId,
-      selectedIds: selectedAttachIds,
-    })
-    if (!r || !r.ok) {
-      out((r && r.detail) || 'Could not open attach picker.', true)
+    try {
+      await persistState(ext)
+      const r = await sendRuntimeMessage(ext, {
+        type: 'canary-apply-compose-attachments',
+        composeTabId: composeTabId,
+        caseId: String(selectedCase.id),
+      })
+      if (!r || !r.ok) {
+        throw new Error((r && r.detail) || 'Could not attach files to the message.')
+      }
+      setAttachPickerVisible(false)
+      updateAttachSummary()
+      out('Attached ' + selectedAttachIds.length + ' file(s) from Canary.', false)
+    } catch (e) {
+      out((e && e.message) || String(e), true)
+      if (btn) btn.disabled = selectedAttachIds.length === 0
     }
   }
 
@@ -478,6 +636,14 @@
       statusEl.hidden = false
       statusEl.textContent =
         'Sign in via Canary toolbar (Server & sign-in) to file this message to a matter.'
+    } else if (s === 'pending-send' && st && st.caseId) {
+      statusEl.hidden = false
+      const label = sh().matterLabel({
+        case_number: st.prefilledCaseNumber,
+        client_name: st.prefilledClientName,
+        matter_description: st.prefilledMatterTitle,
+      })
+      statusEl.textContent = 'Matter from Canary: ' + label + '. Attachments and Apply are ready.'
     } else if (s.indexOf('waiting-type') === 0) {
       statusEl.hidden = false
       statusEl.textContent = 'Waiting for Thunderbird to finish opening the reply…'
@@ -562,8 +728,9 @@
     await maybeAutoApplyFromStore(ext)
   }
 
-  function shouldApplyStoredMatter() {
-    return false
+  function shouldApplyStoredMatter(st) {
+    if (!st || !st.caseId || st.userOverridden) return false
+    return !!(st.prefilledFromPending || st.prefilledFromReply || st.composeAutoApplied)
   }
 
   async function detectReplyCompose(ext) {
@@ -606,6 +773,13 @@
       const details = await ext.compose.getComposeDetails(composeTabId)
       const t = details && details.type ? String(details.type).toLowerCase() : ''
       if (t !== 'new' && t !== 'draft') return
+      const st = await cs().getTabState(ext, composeTabId)
+      // Keep Canary→mailto pending matter; do not wipe UI before restoreState applies it.
+      if (st && st.caseId && st.prefilledFromPending && !st.userOverridden) {
+        userMatterModeDirty = false
+        if ($('matter-mode')) $('matter-mode').value = 'pick'
+        return
+      }
       userMatterModeDirty = false
       selectedCase = null
       if ($('matter-mode')) $('matter-mode').value = 'pick'
@@ -799,9 +973,33 @@
     })
 
     const btnAttach = $('btn-attach-from-file')
-    if (btnAttach) {
-      btnAttach.addEventListener('click', () => {
-        void openAttachPickerWindow()
+    if (btnAttach && !btnAttach.dataset.canaryAttachBound) {
+      btnAttach.dataset.canaryAttachBound = '1'
+      btnAttach.addEventListener('click', function (ev) {
+        if (ev) {
+          ev.preventDefault()
+          ev.stopPropagation()
+        }
+        void openAttachPickerInline()
+      })
+    }
+    const btnAttachCancel = $('btn-attach-cancel')
+    if (btnAttachCancel && !btnAttachCancel.dataset.canaryAttachBound) {
+      btnAttachCancel.dataset.canaryAttachBound = '1'
+      btnAttachCancel.addEventListener('click', function () {
+        setAttachPickerVisible(false)
+        updateAttachSummary()
+      })
+    }
+    const btnAttachConfirm = $('btn-attach-confirm')
+    if (btnAttachConfirm && !btnAttachConfirm.dataset.canaryAttachBound) {
+      btnAttachConfirm.dataset.canaryAttachBound = '1'
+      btnAttachConfirm.addEventListener('click', function (ev) {
+        if (ev) {
+          ev.preventDefault()
+          ev.stopPropagation()
+        }
+        void confirmInlineAttach()
       })
     }
 

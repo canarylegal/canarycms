@@ -33,6 +33,8 @@ export function AdminUsers({ token, embedded }: { token: string; embedded?: bool
   const [editRole, setEditRole] = useState<'admin' | 'user'>('user')
   const [editActive, setEditActive] = useState(true)
   const [editCategoryId, setEditCategoryId] = useState('')
+  const [editSupervisorUserId, setEditSupervisorUserId] = useState('')
+  const [newSupervisorUserId, setNewSupervisorUserId] = useState('')
   const [editPw, setEditPw] = useState('')
   const [editPw2, setEditPw2] = useState('')
   const [newCatName, setNewCatName] = useState('')
@@ -71,6 +73,32 @@ export function AdminUsers({ token, embedded }: { token: string; embedded?: bool
       ...permissionCategoryOptions,
     ],
     [editRole, permissionCategoryOptions],
+  )
+
+  const supervisorOptionsForCreate = useMemo(
+    () => [
+      { value: '', label: '— None —' },
+      ...users
+        .filter((u) => u.is_active)
+        .map((u) => ({
+          value: u.id,
+          label: `${u.display_name} (${u.initials ?? '—'})`,
+        })),
+    ],
+    [users],
+  )
+
+  const supervisorOptionsForEdit = useMemo(
+    () => [
+      { value: '', label: '— None —' },
+      ...users
+        .filter((u) => u.id !== editingUser?.id)
+        .map((u) => ({
+          value: u.id,
+          label: `${u.display_name} (${u.initials ?? '—'})${u.is_active ? '' : ' · inactive'}`,
+        })),
+    ],
+    [users, editingUser?.id],
   )
 
   const passwordRotationOptions = useMemo(
@@ -126,6 +154,7 @@ export function AdminUsers({ token, embedded }: { token: string; embedded?: bool
     setEditRole(u.role)
     setEditActive(u.is_active)
     setEditCategoryId(u.permission_category_id ?? '')
+    setEditSupervisorUserId(u.supervisor_user_id ?? '')
     setEditPw('')
     setEditPw2('')
   }
@@ -485,6 +514,14 @@ export function AdminUsers({ token, embedded }: { token: string; embedded?: bool
             disabled={busy}
             placeholder="— Select category —"
           />
+          <SingleSelectDropdown
+            label="Supervisor"
+            options={supervisorOptionsForCreate}
+            value={newSupervisorUserId}
+            onChange={setNewSupervisorUserId}
+            disabled={busy}
+            placeholder="— None —"
+          />
           <button
             className="btn primary"
             style={creatingUser ? { cursor: 'wait' } : undefined}
@@ -513,6 +550,7 @@ export function AdminUsers({ token, embedded }: { token: string; embedded?: bool
                     job_title: newJobTitle.trim() || null,
                     password,
                     permission_category_id: newUserCategoryId,
+                    supervisor_user_id: newSupervisorUserId || null,
                   },
                 })
                 setEmail('')
@@ -521,6 +559,7 @@ export function AdminUsers({ token, embedded }: { token: string; embedded?: bool
                 setNewJobTitle('')
                 setPassword('')
                 setNewUserCategoryId('')
+                setNewSupervisorUserId('')
                 await load()
               } catch (e: unknown) {
                 const msg = ((e as ApiError).message ?? '').trim()
@@ -539,10 +578,13 @@ export function AdminUsers({ token, embedded }: { token: string; embedded?: bool
       <div className="card">
         <h3>Users</h3>
         <p className="muted" style={{ marginTop: 0 }}>
-          Edit a user to change e-mail, display name, job title, role, category, active state, or set a new password (optional).
+          Edit a user to change e-mail, display name, job title, supervisor, role, category, active state, or set a new
+          password (optional). Supervisor is used for the <code>[SUPERVISOR]</code> merge code on client care letters.
         </p>
         <div className="list">
-          {users.map((u) => (
+          {users.map((u) => {
+            const supervisor = users.find((x) => x.id === u.supervisor_user_id)
+            return (
             <div key={u.id} className="listCard row" style={{ justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
               <div style={{ flex: '1 1 220px' }}>
                 <div className="listTitle">
@@ -551,6 +593,7 @@ export function AdminUsers({ token, embedded }: { token: string; embedded?: bool
                 <div className="muted">
                   {u.display_name} ({u.initials ?? '—'}) · {u.is_active ? 'active' : 'disabled'} · 2FA{' '}
                   {u.is_2fa_enabled ? 'on' : 'off'}
+                  {supervisor ? ` · Supervisor: ${supervisor.display_name}` : ''}
                 </div>
               </div>
               <div className="row" style={{ gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -577,7 +620,8 @@ export function AdminUsers({ token, embedded }: { token: string; embedded?: bool
                 </button>
               </div>
             </div>
-          ))}
+            )
+          })}
         </div>
       </div>
 
@@ -661,6 +705,18 @@ export function AdminUsers({ token, embedded }: { token: string; embedded?: bool
                 disabled={busy}
                 placeholder={editRole === 'admin' ? '— None —' : '— Select category —'}
               />
+              <SingleSelectDropdown
+                label="Supervisor"
+                options={supervisorOptionsForEdit}
+                value={editSupervisorUserId}
+                onChange={setEditSupervisorUserId}
+                disabled={busy}
+                placeholder="— None —"
+              />
+              <p className="muted" style={{ margin: 0, fontSize: 13 }}>
+                Used for merge codes <code>[SUPERVISOR]</code>, <code>[SUPERVISOR_JOB_TITLE]</code>, and{' '}
+                <code>[SUPERVISOR_INITIALS]</code> when this user is the matter fee earner.
+              </p>
               <label className="row" style={{ gap: 8, cursor: 'pointer' }}>
                 <input type="checkbox" checked={editActive} onChange={(e) => setEditActive(e.target.checked)} disabled={busy} />
                 <span>Account active</span>
@@ -806,6 +862,7 @@ export function AdminUsers({ token, embedded }: { token: string; embedded?: bool
                           is_active: editActive,
                           permission_category_id: editCategoryId || null,
                           charge_rate_pence_per_hour: chargeRatePence,
+                          supervisor_user_id: editSupervisorUserId || null,
                         },
                       })
                       if (editPw.length >= 12) {
@@ -833,6 +890,7 @@ export function AdminUsers({ token, embedded }: { token: string; embedded?: bool
                             role: updatedUser.role,
                             is_active: updatedUser.is_active,
                             permission_category_id: updatedUser.permission_category_id,
+                            supervisor_user_id: updatedUser.supervisor_user_id,
                           }
                         }),
                       )

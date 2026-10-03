@@ -1799,14 +1799,22 @@ html.dark .finTotalCr {
 /* ── Client portal: modern layout on Canary chrome blue ────────── */
 html:has(.portalShell),
 html:has(.portalShell) body {
-  background: var(--portal-bg, var(--local-chrome)) !important;
+  background-color: var(--portal-bg, var(--local-chrome)) !important;
+  background-image: var(--portal-bg-image, none) !important;
+  background-size: cover !important;
+  background-position: center center !important;
+  background-repeat: no-repeat !important;
   background-attachment: fixed !important;
 }
 
 .portalShell {
   position: relative;
   isolation: isolate;
-  background: var(--portal-bg, var(--local-chrome)) !important;
+  background-color: var(--portal-bg, var(--local-chrome)) !important;
+  background-image: var(--portal-bg-image, none) !important;
+  background-size: cover !important;
+  background-position: center center !important;
+  background-repeat: no-repeat !important;
   background-attachment: fixed !important;
   padding: 40px 20px 28px;
   min-height: 100vh;
@@ -1855,16 +1863,16 @@ html:has(.portalShell) body {
 }
 
 .portalSignOutBtn {
-  background: rgba(255, 255, 255, 0.1) !important;
-  border-color: rgba(255, 255, 255, 0.22) !important;
-  color: #e2e8f0 !important;
+  background: color-mix(in srgb, var(--portal-brand-ink, #f8fafc) 12%, transparent) !important;
+  border-color: color-mix(in srgb, var(--portal-brand-ink, #f8fafc) 28%, transparent) !important;
+  color: var(--portal-brand-ink, #e2e8f0) !important;
   box-shadow: none !important;
 }
 
 .portalSignOutBtn:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.16) !important;
-  border-color: rgba(255, 255, 255, 0.32) !important;
-  color: #fff !important;
+  background: color-mix(in srgb, var(--portal-brand-ink, #f8fafc) 20%, transparent) !important;
+  border-color: color-mix(in srgb, var(--portal-brand-ink, #f8fafc) 40%, transparent) !important;
+  color: var(--portal-brand-ink, #fff) !important;
   transform: none;
 }
 
@@ -1894,21 +1902,25 @@ html:has(.portalShell) body {
 
 .portalLayout--wide .portalBrandTitle,
 .portalBrandTitle {
-  color: #f8fafc;
+  color: var(--portal-brand-ink, #f8fafc);
 }
 
 .portalLayout--wide .portalBrandSubtitle,
 .portalBrandSubtitle {
-  color: rgba(226, 232, 240, 0.78);
+  color: color-mix(in srgb, var(--portal-brand-ink, #f8fafc) 78%, transparent);
 }
 
-/* Narrow (sign-in) keeps title inside the white card — dark ink */
+/* Narrow (sign-in): title sits on the white card — default dark ink, honour firm font colour when set */
 .portalLayout--narrow .portalBrandTitle {
-  color: #0f172a;
+  color: var(--portal-brand-ink, #0f172a);
 }
 
 .portalLayout--narrow .portalBrandSubtitle {
-  color: #64748b;
+  color: color-mix(in srgb, var(--portal-brand-ink, #64748b) 100%, transparent);
+}
+
+.portalLayout--narrow .portalBrandSubtitle.muted {
+  color: color-mix(in srgb, var(--portal-brand-ink, #64748b) 88%, transparent);
 }
 
 /* Powered-by: canvas-only chrome — never compete with the white card */
@@ -1924,14 +1936,14 @@ html:has(.portalShell) body {
 }
 
 .portalPoweredByLink {
-  color: rgba(255, 255, 255, 0.72) !important;
+  color: color-mix(in srgb, var(--portal-brand-ink, #ffffff) 72%, transparent) !important;
   font-size: 0.82rem;
   font-weight: 500;
   letter-spacing: 0.01em;
 }
 
 .portalPoweredByLink:hover {
-  color: rgba(255, 255, 255, 0.95) !important;
+  color: color-mix(in srgb, var(--portal-brand-ink, #ffffff) 95%, transparent) !important;
 }
 
 .portalPoweredByMark {

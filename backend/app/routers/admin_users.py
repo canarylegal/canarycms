@@ -26,6 +26,25 @@ log = logging.getLogger(__name__)
 router = APIRouter(prefix="/admin/users", tags=["admin-users"])
 
 
+def _validate_supervisor_user_id(
+    db: Session,
+    *,
+    supervisor_user_id: uuid.UUID | None,
+    for_user_id: uuid.UUID | None,
+) -> uuid.UUID | None:
+    if supervisor_user_id is None:
+        return None
+    if for_user_id is not None and supervisor_user_id == for_user_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="A user cannot be their own supervisor.",
+        )
+    supervisor = db.get(User, supervisor_user_id)
+    if supervisor is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Supervisor user not found")
+    return supervisor_user_id
+
+
 def _clear_user_second_factors(db: Session, user_id: uuid.UUID) -> None:
     db.execute(delete(WebAuthnCredential).where(WebAuthnCredential.user_id == user_id))
 
@@ -72,6 +91,9 @@ def create_user(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Permission category not found")
 
     jt = (payload.job_title or "").strip() or None
+    supervisor_user_id = _validate_supervisor_user_id(
+        db, supervisor_user_id=payload.supervisor_user_id, for_user_id=None
+    )
     user = User(
         email=email,
         password_hash=hash_password(payload.password),
@@ -81,6 +103,7 @@ def create_user(
         role=payload.role,
         is_active=payload.is_active,
         permission_category_id=payload.permission_category_id,
+        supervisor_user_id=supervisor_user_id,
         is_2fa_enabled=False,
         totp_secret=None,
         password_changed_at=datetime.utcnow(),
@@ -144,6 +167,10 @@ def update_user(
     if "permission_category_id" in data and data["permission_category_id"] is not None:
         if db.get(UserPermissionCategory, data["permission_category_id"]) is None:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Permission category not found")
+    if "supervisor_user_id" in fields_set:
+        data["supervisor_user_id"] = _validate_supervisor_user_id(
+            db, supervisor_user_id=data.get("supervisor_user_id"), for_user_id=user_id
+        )
     final_role = data.get("role", user.role)
     if "permission_category_id" in fields_set:
         final_category_id = data.get("permission_category_id")

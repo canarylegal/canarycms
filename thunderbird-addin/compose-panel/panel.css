@@ -167,6 +167,111 @@ textarea {
   padding: 8px 10px;
   margin: 0;
 }
+/* In-flow (not position:fixed): Thunderbird compose popups size to content;
+   hiding .wrap while the picker is fixed collapses the popup to nothing. */
+.attach-picker-view {
+  display: flex;
+  flex-direction: column;
+  min-height: 380px;
+  max-width: 420px;
+  background: #f8fafc;
+}
+.attach-picker-view[hidden] {
+  display: none !important;
+}
+.attach-picker-view-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 12px;
+  background: #fff;
+  border-bottom: 1px solid #cbd5e1;
+}
+.attach-picker-view-head h2 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+}
+.attach-matter-line {
+  margin: 0;
+  padding: 6px 12px;
+  font-size: 0.75rem;
+  background: #fff;
+  border-bottom: 1px solid #e2e8f0;
+}
+.attach-picker-root {
+  flex: 1;
+  min-height: 220px;
+  max-height: 50vh;
+  overflow: auto;
+  background: #fff;
+  border-bottom: 1px solid #cbd5e1;
+}
+.attach-picker-view-foot {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px 14px;
+  background: #fff;
+}
+.attach-picker-view-foot .primary {
+  width: 100%;
+}
+.tb-list-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 28px;
+  padding: 4px 12px;
+  border: none;
+  border-bottom: 1px solid #eef2f7;
+  background: #fff;
+  font: inherit;
+  text-align: left;
+  cursor: default;
+  color: inherit;
+}
+.tb-list-row:hover {
+  background: #e8f4fc;
+}
+.tb-list-row--folder {
+  cursor: pointer;
+  font-weight: 500;
+}
+.tb-list-row--file {
+  cursor: pointer;
+}
+.tb-list-row.is-selected {
+  background: #dbeafe;
+}
+.tb-row-icon {
+  flex: 0 0 20px;
+  width: 20px;
+  text-align: center;
+  font-size: 14px;
+  opacity: 0.85;
+}
+.tb-row-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tb-row-check {
+  flex: 0 0 16px;
+  color: #2563eb;
+  font-weight: 700;
+  opacity: 0;
+}
+.tb-list-row.is-selected .tb-row-check {
+  opacity: 1;
+}
+.attach-crumbs {
+  padding: 6px 12px;
+}
 .row-actions {
   display: flex;
   gap: 8px;

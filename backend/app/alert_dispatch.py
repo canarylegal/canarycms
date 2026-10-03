@@ -22,6 +22,7 @@ from app.alert_templates import (
     docusign_sign_completed_staff,
     docusign_sign_requested,
     docusign_sign_sent_staff,
+    email_branding,
     invoice_approved_staff,
     invoice_rejected_staff,
     portal_contact_access_granted,
@@ -39,7 +40,9 @@ from app.alert_templates import (
 from app.audit import log_event
 from app.canary_public_url import canary_public_url
 from app.firm_email_service import FirmEmailMessage, resolve_alert_transport, try_send_firm_email
-from app.models import FirmSettings
+from app.models import File as DbFile
+from app.models import FileCategory, FirmSettings
+from app.file_storage import FILES_ROOT, path_is_under_files_root
 
 log = logging.getLogger(__name__)
 
@@ -83,6 +86,21 @@ def _firm_name(db: Session) -> str:
     return (firm.trading_name or "").strip() or (firm.registered_company_name or "").strip() or ""
 
 
+def _firm_portal_logo_url(db: Session) -> str | None:
+    """Public absolute URL for the firm portal logo, if configured and on disk."""
+    firm = db.get(FirmSettings, 1)
+    if firm is None or not firm.portal_logo_file_id:
+        return None
+    frow = db.get(DbFile, firm.portal_logo_file_id)
+    if frow is None or frow.category != FileCategory.firm_portal_logo:
+        return None
+    abs_path = (FILES_ROOT / frow.storage_path).resolve()
+    if not abs_path.is_file() or not path_is_under_files_root(abs_path):
+        return None
+    # Browser/nginx path is /api/...; public origin is the site host.
+    return f"{canary_public_url().rstrip('/')}/api/portal/logo"
+
+
 def portal_public_url() -> str:
     base = canary_public_url().rstrip("/")
     return f"{base}/portal"
@@ -108,222 +126,223 @@ def dispatch_alert(
 
     firm = _firm_name(db)
     body_html: str | None = None
-    if kind == AlertKind.calendar_event_reminder:
-        subject, body = calendar_event_reminder(
-            title=str(context.get("title") or ""),
-            anchor_label=str(context.get("anchor_label") or "unknown"),
-        )
-    elif kind == AlertKind.portal_staff_upload:
-        subject, body, body_html = portal_staff_upload(
-            firm_name=firm,
-            contact_name=str(context.get("contact_name") or "Client"),
-            area_label=str(context.get("area_label") or "Documents"),
-            filename=str(context.get("filename") or "file"),
-            matter_label=str(context.get("matter_label") or ""),
-            matter_url=str(context.get("matter_url") or ""),
-        )
-    elif kind == AlertKind.portal_contact_access:
-        subject, body, body_html = portal_contact_access_granted(
-            firm_name=firm,
-            contact_name=str(context.get("contact_name") or "Client"),
-            portal_url=str(context.get("portal_url") or portal_public_url()),
-            access_code=str(context.get("access_code") or ""),
-        )
-    elif kind == AlertKind.portal_contact_folder:
-        subject, body, body_html = portal_contact_folder_granted(
-            firm_name=firm,
-            contact_name=str(context.get("contact_name") or "Client"),
-            area_label=str(context.get("area_label") or "Documents"),
-            portal_url=str(context.get("portal_url") or portal_public_url()),
-        )
-    elif kind == AlertKind.portal_matter_exchange_shared:
-        subject, body, body_html = portal_matter_exchange_shared(
-            firm_name=firm,
-            contact_name=str(context.get("contact_name") or "Contact"),
-            matter_label=str(context.get("matter_label") or "your matter"),
-            area_label=str(context.get("area_label") or "Documents"),
-            portal_url=str(context.get("portal_url") or portal_public_url()),
-            access_code=str(context.get("access_code") or ""),
-        )
-    elif kind == AlertKind.portal_contact_files_added:
-        filenames = context.get("filenames") or []
-        if isinstance(filenames, str):
-            filenames = [filenames]
-        subject, body, body_html = portal_contact_files_added(
-            firm_name=firm,
-            contact_name=str(context.get("contact_name") or "Client"),
-            area_label=str(context.get("area_label") or "Documents"),
-            filenames=[str(x) for x in filenames],
-            portal_url=str(context.get("portal_url") or portal_public_url()),
-        )
-    elif kind == AlertKind.portal_login_otp:
-        subject, body, body_html = portal_login_otp(
-            firm_name=firm,
-            contact_name=str(context.get("contact_name") or "Client"),
-            portal_url=str(context.get("portal_url") or portal_public_url()),
-            otp_code=str(context.get("otp_code") or ""),
-        )
-    elif kind == AlertKind.portal_quote_sent:
-        subject, body, body_html = portal_quote_sent(
-            firm_name=firm,
-            contact_name=str(context.get("contact_name") or "Client"),
-            quote_filename=str(context.get("quote_filename") or "Quote"),
-            matter_label=str(context.get("matter_label") or "your matter"),
-            portal_url=str(context.get("portal_url") or portal_public_url()),
-            access_code=str(context.get("access_code") or "") or None,
-        )
-    elif kind == AlertKind.portal_quote_accepted:
-        subject, body, body_html = portal_quote_accepted(
-            firm_name=firm,
-            contact_name=str(context.get("contact_name") or "Client"),
-            quote_filename=str(context.get("quote_filename") or "Quote"),
-            matter_label=str(context.get("matter_label") or ""),
-            matter_url=str(context.get("matter_url") or ""),
-        )
-    elif kind == AlertKind.portal_quote_declined:
-        subject, body, body_html = portal_quote_declined(
-            firm_name=firm,
-            contact_name=str(context.get("contact_name") or "Client"),
-            quote_filename=str(context.get("quote_filename") or "Quote"),
-            decline_reason=str(context.get("decline_reason") or ""),
-            matter_label=str(context.get("matter_label") or ""),
-            matter_url=str(context.get("matter_url") or ""),
-        )
-    elif kind == AlertKind.portal_form_completed:
-        subject, body, body_html = portal_form_completed_staff(
-            firm_name=firm,
-            contact_name=str(context.get("contact_name") or "Client"),
-            form_name=str(context.get("form_name") or "Form"),
-            matter_label=str(context.get("matter_label") or "your matter"),
-            matter_url=str(context.get("matter_url") or ""),
-        )
-    elif kind == AlertKind.portal_form_sent:
-        subject, body, body_html = portal_form_sent(
-            firm_name=firm,
-            contact_name=str(context.get("contact_name") or "Client"),
-            form_name=str(context.get("form_name") or "Form"),
-            matter_label=str(context.get("matter_label") or "your matter"),
-            portal_url=str(context.get("portal_url") or portal_public_url()),
-            access_code=str(context.get("access_code") or "") or None,
-        )
-    elif kind == AlertKind.docusign_sign_requested:
-        subject, body, body_html = docusign_sign_requested(
-            firm_name=firm,
-            recipient_name=str(context.get("recipient_name") or "Client"),
-            document_name=str(context.get("document_name") or "Document"),
-            matter_label=str(context.get("matter_label") or "your matter"),
-            sign_url=str(context.get("sign_url") or portal_public_url()),
-        )
-    elif kind == AlertKind.docusign_sign_sent_staff:
-        subject, body, body_html = docusign_sign_sent_staff(
-            firm_name=firm,
-            staff_name=str(context.get("staff_name") or "Colleague"),
-            document_name=str(context.get("document_name") or "Document"),
-            sender_name=str(context.get("sender_name") or "A colleague"),
-        )
-    elif kind == AlertKind.docusign_sign_completed_staff:
-        subject, body, body_html = docusign_sign_completed_staff(
-            firm_name=firm,
-            staff_name=str(context.get("staff_name") or "Colleague"),
-            document_name=str(context.get("document_name") or "Document"),
-        )
-    elif kind == AlertKind.canary_sign_requested:
-        subject, body, body_html = canary_sign_requested(
-            firm_name=firm,
-            recipient_name=str(context.get("recipient_name") or "Client"),
-            document_name=str(context.get("document_name") or "Document"),
-            matter_label=str(context.get("matter_label") or "your matter"),
-            sign_url=str(context.get("sign_url") or portal_public_url()),
-            access_code=str(context.get("access_code") or "") or None,
-        )
-    elif kind == AlertKind.canary_sign_reminded:
-        subject, body, body_html = canary_sign_reminded(
-            firm_name=firm,
-            recipient_name=str(context.get("recipient_name") or "Client"),
-            document_name=str(context.get("document_name") or "Document"),
-            matter_label=str(context.get("matter_label") or "your matter"),
-            sign_url=str(context.get("sign_url") or portal_public_url()),
-        )
-    elif kind == AlertKind.canary_sign_sent_staff:
-        subject, body, body_html = canary_sign_sent_staff(
-            firm_name=firm,
-            staff_name=str(context.get("staff_name") or "Colleague"),
-            document_name=str(context.get("document_name") or "Document"),
-            sender_name=str(context.get("sender_name") or "A colleague"),
-        )
-    elif kind == AlertKind.canary_sign_completed_staff:
-        subject, body, body_html = canary_sign_completed_staff(
-            firm_name=firm,
-            staff_name=str(context.get("staff_name") or "Colleague"),
-            document_name=str(context.get("document_name") or "Document"),
-        )
-    elif kind == AlertKind.canary_sign_declined_staff:
-        subject, body, body_html = canary_sign_declined_staff(
-            firm_name=firm,
-            staff_name=str(context.get("staff_name") or "Colleague"),
-            document_name=str(context.get("document_name") or "Document"),
-            recipient_name=str(context.get("recipient_name") or "Client"),
-            decline_reason=str(context.get("decline_reason") or ""),
-        )
-    elif kind == AlertKind.anticipated_payment_approved:
-        subject, body, body_html = anticipated_payment_approved(
-            firm_name=firm,
-            staff_name=str(context.get("staff_name") or "Colleague"),
-            decider_name=str(context.get("decider_name") or "A colleague"),
-            case_number=str(context.get("case_number") or ""),
-            matter_label=str(context.get("matter_label") or ""),
-            description=str(context.get("description") or ""),
-            amount_gbp=str(context.get("amount_gbp") or ""),
-            reference=str(context.get("reference") or ""),
-        )
-    elif kind == AlertKind.anticipated_payment_rejected:
-        subject, body, body_html = anticipated_payment_rejected(
-            firm_name=firm,
-            staff_name=str(context.get("staff_name") or "Colleague"),
-            decider_name=str(context.get("decider_name") or "A colleague"),
-            case_number=str(context.get("case_number") or ""),
-            matter_label=str(context.get("matter_label") or ""),
-            description=str(context.get("description") or ""),
-            amount_gbp=str(context.get("amount_gbp") or ""),
-            reference=str(context.get("reference") or ""),
-            comment=str(context.get("comment") or ""),
-        )
-    elif kind == AlertKind.anticipated_payment_amended:
-        subject, body, body_html = anticipated_payment_amended(
-            firm_name=firm,
-            staff_name=str(context.get("staff_name") or "Colleague"),
-            editor_name=str(context.get("editor_name") or "A colleague"),
-            poster_name=str(context.get("poster_name") or "A colleague"),
-            case_number=str(context.get("case_number") or ""),
-            matter_label=str(context.get("matter_label") or ""),
-            description=str(context.get("description") or ""),
-            amount_gbp=str(context.get("amount_gbp") or ""),
-            reference=str(context.get("reference") or ""),
-        )
-    elif kind == AlertKind.invoice_approved:
-        subject, body, body_html = invoice_approved_staff(
-            firm_name=firm,
-            staff_name=str(context.get("staff_name") or "Colleague"),
-            decider_name=str(context.get("decider_name") or "A colleague"),
-            case_number=str(context.get("case_number") or ""),
-            matter_label=str(context.get("matter_label") or ""),
-            invoice_number=str(context.get("invoice_number") or ""),
-            amount_gbp=str(context.get("amount_gbp") or ""),
-        )
-    elif kind == AlertKind.invoice_rejected:
-        subject, body, body_html = invoice_rejected_staff(
-            firm_name=firm,
-            staff_name=str(context.get("staff_name") or "Colleague"),
-            decider_name=str(context.get("decider_name") or "A colleague"),
-            case_number=str(context.get("case_number") or ""),
-            matter_label=str(context.get("matter_label") or ""),
-            invoice_number=str(context.get("invoice_number") or ""),
-            amount_gbp=str(context.get("amount_gbp") or ""),
-            comment=str(context.get("comment") or ""),
-        )
-    else:
-        log.warning("alert_dispatch: unknown kind %s", kind)
-        return False
+    with email_branding(logo_url=_firm_portal_logo_url(db)):
+        if kind == AlertKind.calendar_event_reminder:
+            subject, body = calendar_event_reminder(
+                title=str(context.get("title") or ""),
+                anchor_label=str(context.get("anchor_label") or "unknown"),
+            )
+        elif kind == AlertKind.portal_staff_upload:
+            subject, body, body_html = portal_staff_upload(
+                firm_name=firm,
+                contact_name=str(context.get("contact_name") or "Client"),
+                area_label=str(context.get("area_label") or "Documents"),
+                filename=str(context.get("filename") or "file"),
+                matter_label=str(context.get("matter_label") or ""),
+                matter_url=str(context.get("matter_url") or ""),
+            )
+        elif kind == AlertKind.portal_contact_access:
+            subject, body, body_html = portal_contact_access_granted(
+                firm_name=firm,
+                contact_name=str(context.get("contact_name") or "Client"),
+                portal_url=str(context.get("portal_url") or portal_public_url()),
+                access_code=str(context.get("access_code") or ""),
+            )
+        elif kind == AlertKind.portal_contact_folder:
+            subject, body, body_html = portal_contact_folder_granted(
+                firm_name=firm,
+                contact_name=str(context.get("contact_name") or "Client"),
+                area_label=str(context.get("area_label") or "Documents"),
+                portal_url=str(context.get("portal_url") or portal_public_url()),
+            )
+        elif kind == AlertKind.portal_matter_exchange_shared:
+            subject, body, body_html = portal_matter_exchange_shared(
+                firm_name=firm,
+                contact_name=str(context.get("contact_name") or "Contact"),
+                matter_label=str(context.get("matter_label") or "your matter"),
+                area_label=str(context.get("area_label") or "Documents"),
+                portal_url=str(context.get("portal_url") or portal_public_url()),
+                access_code=str(context.get("access_code") or ""),
+            )
+        elif kind == AlertKind.portal_contact_files_added:
+            filenames = context.get("filenames") or []
+            if isinstance(filenames, str):
+                filenames = [filenames]
+            subject, body, body_html = portal_contact_files_added(
+                firm_name=firm,
+                contact_name=str(context.get("contact_name") or "Client"),
+                area_label=str(context.get("area_label") or "Documents"),
+                filenames=[str(x) for x in filenames],
+                portal_url=str(context.get("portal_url") or portal_public_url()),
+            )
+        elif kind == AlertKind.portal_login_otp:
+            subject, body, body_html = portal_login_otp(
+                firm_name=firm,
+                contact_name=str(context.get("contact_name") or "Client"),
+                portal_url=str(context.get("portal_url") or portal_public_url()),
+                otp_code=str(context.get("otp_code") or ""),
+            )
+        elif kind == AlertKind.portal_quote_sent:
+            subject, body, body_html = portal_quote_sent(
+                firm_name=firm,
+                contact_name=str(context.get("contact_name") or "Client"),
+                quote_filename=str(context.get("quote_filename") or "Quote"),
+                matter_label=str(context.get("matter_label") or "your matter"),
+                portal_url=str(context.get("portal_url") or portal_public_url()),
+                access_code=str(context.get("access_code") or "") or None,
+            )
+        elif kind == AlertKind.portal_quote_accepted:
+            subject, body, body_html = portal_quote_accepted(
+                firm_name=firm,
+                contact_name=str(context.get("contact_name") or "Client"),
+                quote_filename=str(context.get("quote_filename") or "Quote"),
+                matter_label=str(context.get("matter_label") or ""),
+                matter_url=str(context.get("matter_url") or ""),
+            )
+        elif kind == AlertKind.portal_quote_declined:
+            subject, body, body_html = portal_quote_declined(
+                firm_name=firm,
+                contact_name=str(context.get("contact_name") or "Client"),
+                quote_filename=str(context.get("quote_filename") or "Quote"),
+                decline_reason=str(context.get("decline_reason") or ""),
+                matter_label=str(context.get("matter_label") or ""),
+                matter_url=str(context.get("matter_url") or ""),
+            )
+        elif kind == AlertKind.portal_form_completed:
+            subject, body, body_html = portal_form_completed_staff(
+                firm_name=firm,
+                contact_name=str(context.get("contact_name") or "Client"),
+                form_name=str(context.get("form_name") or "Form"),
+                matter_label=str(context.get("matter_label") or "your matter"),
+                matter_url=str(context.get("matter_url") or ""),
+            )
+        elif kind == AlertKind.portal_form_sent:
+            subject, body, body_html = portal_form_sent(
+                firm_name=firm,
+                contact_name=str(context.get("contact_name") or "Client"),
+                form_name=str(context.get("form_name") or "Form"),
+                matter_label=str(context.get("matter_label") or "your matter"),
+                portal_url=str(context.get("portal_url") or portal_public_url()),
+                access_code=str(context.get("access_code") or "") or None,
+            )
+        elif kind == AlertKind.docusign_sign_requested:
+            subject, body, body_html = docusign_sign_requested(
+                firm_name=firm,
+                recipient_name=str(context.get("recipient_name") or "Client"),
+                document_name=str(context.get("document_name") or "Document"),
+                matter_label=str(context.get("matter_label") or "your matter"),
+                sign_url=str(context.get("sign_url") or portal_public_url()),
+            )
+        elif kind == AlertKind.docusign_sign_sent_staff:
+            subject, body, body_html = docusign_sign_sent_staff(
+                firm_name=firm,
+                staff_name=str(context.get("staff_name") or "Colleague"),
+                document_name=str(context.get("document_name") or "Document"),
+                sender_name=str(context.get("sender_name") or "A colleague"),
+            )
+        elif kind == AlertKind.docusign_sign_completed_staff:
+            subject, body, body_html = docusign_sign_completed_staff(
+                firm_name=firm,
+                staff_name=str(context.get("staff_name") or "Colleague"),
+                document_name=str(context.get("document_name") or "Document"),
+            )
+        elif kind == AlertKind.canary_sign_requested:
+            subject, body, body_html = canary_sign_requested(
+                firm_name=firm,
+                recipient_name=str(context.get("recipient_name") or "Client"),
+                document_name=str(context.get("document_name") or "Document"),
+                matter_label=str(context.get("matter_label") or "your matter"),
+                sign_url=str(context.get("sign_url") or portal_public_url()),
+                access_code=str(context.get("access_code") or "") or None,
+            )
+        elif kind == AlertKind.canary_sign_reminded:
+            subject, body, body_html = canary_sign_reminded(
+                firm_name=firm,
+                recipient_name=str(context.get("recipient_name") or "Client"),
+                document_name=str(context.get("document_name") or "Document"),
+                matter_label=str(context.get("matter_label") or "your matter"),
+                sign_url=str(context.get("sign_url") or portal_public_url()),
+            )
+        elif kind == AlertKind.canary_sign_sent_staff:
+            subject, body, body_html = canary_sign_sent_staff(
+                firm_name=firm,
+                staff_name=str(context.get("staff_name") or "Colleague"),
+                document_name=str(context.get("document_name") or "Document"),
+                sender_name=str(context.get("sender_name") or "A colleague"),
+            )
+        elif kind == AlertKind.canary_sign_completed_staff:
+            subject, body, body_html = canary_sign_completed_staff(
+                firm_name=firm,
+                staff_name=str(context.get("staff_name") or "Colleague"),
+                document_name=str(context.get("document_name") or "Document"),
+            )
+        elif kind == AlertKind.canary_sign_declined_staff:
+            subject, body, body_html = canary_sign_declined_staff(
+                firm_name=firm,
+                staff_name=str(context.get("staff_name") or "Colleague"),
+                document_name=str(context.get("document_name") or "Document"),
+                recipient_name=str(context.get("recipient_name") or "Client"),
+                decline_reason=str(context.get("decline_reason") or ""),
+            )
+        elif kind == AlertKind.anticipated_payment_approved:
+            subject, body, body_html = anticipated_payment_approved(
+                firm_name=firm,
+                staff_name=str(context.get("staff_name") or "Colleague"),
+                decider_name=str(context.get("decider_name") or "A colleague"),
+                case_number=str(context.get("case_number") or ""),
+                matter_label=str(context.get("matter_label") or ""),
+                description=str(context.get("description") or ""),
+                amount_gbp=str(context.get("amount_gbp") or ""),
+                reference=str(context.get("reference") or ""),
+            )
+        elif kind == AlertKind.anticipated_payment_rejected:
+            subject, body, body_html = anticipated_payment_rejected(
+                firm_name=firm,
+                staff_name=str(context.get("staff_name") or "Colleague"),
+                decider_name=str(context.get("decider_name") or "A colleague"),
+                case_number=str(context.get("case_number") or ""),
+                matter_label=str(context.get("matter_label") or ""),
+                description=str(context.get("description") or ""),
+                amount_gbp=str(context.get("amount_gbp") or ""),
+                reference=str(context.get("reference") or ""),
+                comment=str(context.get("comment") or ""),
+            )
+        elif kind == AlertKind.anticipated_payment_amended:
+            subject, body, body_html = anticipated_payment_amended(
+                firm_name=firm,
+                staff_name=str(context.get("staff_name") or "Colleague"),
+                editor_name=str(context.get("editor_name") or "A colleague"),
+                poster_name=str(context.get("poster_name") or "A colleague"),
+                case_number=str(context.get("case_number") or ""),
+                matter_label=str(context.get("matter_label") or ""),
+                description=str(context.get("description") or ""),
+                amount_gbp=str(context.get("amount_gbp") or ""),
+                reference=str(context.get("reference") or ""),
+            )
+        elif kind == AlertKind.invoice_approved:
+            subject, body, body_html = invoice_approved_staff(
+                firm_name=firm,
+                staff_name=str(context.get("staff_name") or "Colleague"),
+                decider_name=str(context.get("decider_name") or "A colleague"),
+                case_number=str(context.get("case_number") or ""),
+                matter_label=str(context.get("matter_label") or ""),
+                invoice_number=str(context.get("invoice_number") or ""),
+                amount_gbp=str(context.get("amount_gbp") or ""),
+            )
+        elif kind == AlertKind.invoice_rejected:
+            subject, body, body_html = invoice_rejected_staff(
+                firm_name=firm,
+                staff_name=str(context.get("staff_name") or "Colleague"),
+                decider_name=str(context.get("decider_name") or "A colleague"),
+                case_number=str(context.get("case_number") or ""),
+                matter_label=str(context.get("matter_label") or ""),
+                invoice_number=str(context.get("invoice_number") or ""),
+                amount_gbp=str(context.get("amount_gbp") or ""),
+                comment=str(context.get("comment") or ""),
+            )
+        else:
+            log.warning("alert_dispatch: unknown kind %s", kind)
+            return False
 
     transport = try_send_firm_email(
         db,

@@ -14,7 +14,6 @@ from app.deps import get_current_user, require_case_access
 from app.alert_dispatch import AlertKind, dispatch_alert, firm_alerts_configured, portal_public_url
 from app.portal_notifications import ALERTS_NOT_CONFIGURED_MSG, contact_wants_notification
 from app.portal_case import require_case_portal_enabled
-from app.file_storage import sanitize_folder_path
 from app.models import Case, CaseContact, Contact, ContactPortalAccess, ContactPortalGrant, User
 from app.portal_service import (
     allocate_unique_access_code,
@@ -25,6 +24,7 @@ from app.portal_service import (
     generate_access_code,
     hash_access_code,
     portal_access_is_active,
+    require_shareable_portal_folder,
     staff_matter_portal_access_code,
     staff_portal_access_code,
     store_portal_access_code,
@@ -431,7 +431,7 @@ def create_contact_portal_grant(
     assert contact is not None
     require_case_access(payload.case_id, user, db)
     require_case_portal_enabled(db, payload.case_id)
-    folder = sanitize_folder_path(payload.folder_path)
+    folder = require_shareable_portal_folder(payload.folder_path)
 
     cc = db.execute(
         select(CaseContact).where(
@@ -519,7 +519,7 @@ def update_contact_portal_grant(
     require_case_access(grant.case_id, user, db)
     data = payload.model_dump(exclude_unset=True)
     if "folder_path" in data and data["folder_path"] is not None:
-        data["folder_path"] = sanitize_folder_path(data["folder_path"])
+        data["folder_path"] = require_shareable_portal_folder(data["folder_path"])
     if "label" in data and data["label"] is not None:
         data["label"] = data["label"].strip() or None
     for key, value in data.items():

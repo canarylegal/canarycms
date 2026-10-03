@@ -21,6 +21,7 @@ from app.file_storage import (
     ensure_files_root,
     firm_default_signature_file_paths,
     firm_letterhead_file_paths,
+    firm_portal_background_file_paths,
     firm_portal_logo_file_paths,
     firm_quote_letterhead_file_paths,
     path_is_under_files_root,
@@ -70,6 +71,9 @@ _ALLOWED_LETTERHEAD_MIME = frozenset(
 _ALLOWED_PORTAL_LOGO_SUFFIX = frozenset({".png", ".jpg", ".jpeg", ".webp"})
 _ALLOWED_PORTAL_LOGO_MIME = frozenset({"image/png", "image/jpeg", "image/webp"})
 _PORTAL_LOGO_MAX_BYTES = 2 * 1024 * 1024
+_ALLOWED_PORTAL_BG_SUFFIX = frozenset({".png", ".jpg", ".jpeg", ".webp"})
+_ALLOWED_PORTAL_BG_MIME = frozenset({"image/png", "image/jpeg", "image/webp"})
+_PORTAL_BG_MAX_BYTES = 5 * 1024 * 1024
 
 
 def _settings_row(db: Session) -> FirmSettings:
@@ -86,6 +90,7 @@ def _to_out(db: Session, row: FirmSettings) -> FirmSettingsOut:
     name: str | None = None
     quote_name: str | None = None
     portal_logo_name: str | None = None
+    portal_bg_name: str | None = None
     default_sig_name: str | None = None
     if row.letterhead_file_id:
         f = db.get(DbFile, row.letterhead_file_id)
@@ -99,6 +104,10 @@ def _to_out(db: Session, row: FirmSettings) -> FirmSettingsOut:
         pf = db.get(DbFile, row.portal_logo_file_id)
         if pf:
             portal_logo_name = pf.original_filename
+    if row.portal_background_file_id:
+        pbf = db.get(DbFile, row.portal_background_file_id)
+        if pbf:
+            portal_bg_name = pbf.original_filename
     if row.default_signature_file_id:
         sf = db.get(DbFile, row.default_signature_file_id)
         if sf:
@@ -118,7 +127,12 @@ def _to_out(db: Session, row: FirmSettings) -> FirmSettingsOut:
         quote_letterhead_original_filename=quote_name,
         portal_logo_configured=bool(row.portal_logo_file_id),
         portal_logo_original_filename=portal_logo_name,
+        portal_logo_enabled=bool(row.portal_logo_enabled),
         portal_background_color=row.portal_background_color,
+        portal_background_configured=bool(row.portal_background_file_id),
+        portal_background_original_filename=portal_bg_name,
+        portal_font_color=row.portal_font_color,
+        portal_background_on_signed_in=bool(row.portal_background_on_signed_in),
         default_signature_configured=bool(row.default_signature_file_id),
         default_signature_original_filename=default_sig_name,
         default_signature_scale=int(row.default_signature_scale or 7),
@@ -224,6 +238,40 @@ def _delete_portal_logo_file(db: Session, settings: FirmSettings) -> None:
                 pass
 
 
+def _validate_portal_background_upload(filename: str, content_type: str | None) -> None:
+    suf = Path(filename or "").suffix.lower()
+    if suf not in _ALLOWED_PORTAL_BG_SUFFIX:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Portal background must be PNG, JPEG, or WebP.",
+        )
+    mime = (content_type or "").split(";", 1)[0].strip().lower()
+    if mime and mime not in _ALLOWED_PORTAL_BG_MIME:
+        guess = mimetypes.guess_type(filename)[0]
+        if guess not in _ALLOWED_PORTAL_BG_MIME:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Portal background must be PNG, JPEG, or WebP.",
+            )
+
+
+def _delete_portal_background_file(db: Session, settings: FirmSettings) -> None:
+    fid = settings.portal_background_file_id
+    if not fid:
+        return
+    f = db.get(DbFile, fid)
+    settings.portal_background_file_id = None
+    if f:
+        abs_path = (FILES_ROOT / f.storage_path).resolve()
+        db.delete(f)
+        db.flush()
+        if path_is_under_files_root(abs_path) and abs_path.is_file():
+            try:
+                abs_path.unlink()
+            except OSError:
+                pass
+
+
 def _delete_default_signature_file(db: Session, settings: FirmSettings) -> None:
     fid = settings.default_signature_file_id
     if not fid:
@@ -282,6 +330,13 @@ def patch_firm_settings(
 
         try:
             data["portal_background_color"] = normalize_portal_background_color(data.get("portal_background_color"))
+        except ValueError as e:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
+    if "portal_font_color" in data:
+        from app.portal_background import normalize_portal_font_color
+
+        try:
+            data["portal_font_color"] = normalize_portal_font_color(data.get("portal_font_color"))
         except ValueError as e:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
     for k, v in data.items():
@@ -560,6 +615,100 @@ def delete_portal_logo(admin: User = Depends(require_firm_admin), db: Session = 
         db,
         actor_user_id=admin.id,
         action="firm_settings.portal_logo_delete",
+        entity_type="firm_settings",
+        entity_id="1",
+        meta={},
+    )
+    db.commit()
+    db.refresh(row)
+    return _to_out(db, row)
+
+
+@router.post("/portal-background", response_model=FirmSettingsOut)
+async def upload_portal_background(
+    upload: UploadFile = File(...),
+    admin: User = Depends(require_firm_admin),
+    db: Session = Depends(get_db),
+) -> FirmSettingsOut:
+    original = upload.filename or "portal-background.bin"
+    _validate_portal_background_upload(original, upload.content_type)
+
+    row = _settings_row(db)
+    ensure_files_root()
+    _delete_portal_background_file(db, row)
+
+    file_id = uuid.uuid4()
+    paths = firm_portal_background_file_paths(file_id=file_id, original_filename=original)
+
+    size = 0
+    with paths.abs_path.open("wb") as fh:
+        while True:
+            chunk = await upload.read(1024 * 1024)
+            if not chunk:
+                break
+            size += len(chunk)
+            if size > _PORTAL_BG_MAX_BYTES:
+                fh.close()
+                if paths.abs_path.is_file():
+                    paths.abs_path.unlink()
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Portal background must be 5 MB or smaller.",
+                )
+            fh.write(chunk)
+
+    mime = upload.content_type or (mimetypes.guess_type(original)[0] or "image/jpeg")
+    mime = mime.split(";", 1)[0].strip().lower()
+    if mime not in _ALLOWED_PORTAL_BG_MIME:
+        mime = "image/jpeg"
+
+    now = datetime.utcnow()
+    frow = DbFile(
+        id=file_id,
+        case_id=None,
+        owner_id=admin.id,
+        category=FileCategory.firm_portal_background,
+        storage_path=paths.rel_path,
+        folder_path="",
+        parent_file_id=None,
+        is_pinned=False,
+        original_filename=Path(original).name,
+        mime_type=mime,
+        size_bytes=size,
+        version=1,
+        checksum=None,
+        created_at=now,
+        updated_at=now,
+    )
+    row.portal_background_file_id = file_id
+    row.updated_at = now
+    db.add(frow)
+    db.add(row)
+    log_event(
+        db,
+        actor_user_id=admin.id,
+        action="firm_settings.portal_background_upload",
+        entity_type="firm_settings",
+        entity_id="1",
+        meta={"file_id": str(file_id)},
+    )
+    db.commit()
+    db.refresh(row)
+    return _to_out(db, row)
+
+
+@router.delete("/portal-background", response_model=FirmSettingsOut)
+def delete_portal_background(
+    admin: User = Depends(require_firm_admin), db: Session = Depends(get_db)
+) -> FirmSettingsOut:
+    row = _settings_row(db)
+    _delete_portal_background_file(db, row)
+    row.updated_at = datetime.utcnow()
+    db.add(row)
+    log_event(
+        db,
+        actor_user_id=admin.id,
+        action="firm_settings.portal_background_delete",
         entity_type="firm_settings",
         entity_id="1",
         meta={},

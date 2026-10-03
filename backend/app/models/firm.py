@@ -86,8 +86,17 @@ class FirmSettings(Base):
     portal_logo_file_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("file.id", ondelete="SET NULL"), nullable=True
     )
+    # When false, hide the firm logo on the client portal (file is kept).
+    portal_logo_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     # Client portal page background only (#RRGGBB). Null = product default chrome.
     portal_background_color: Mapped[str | None] = mapped_column(String(7), nullable=True)
+    portal_background_file_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("file.id", ondelete="SET NULL"), nullable=True
+    )
+    # Client portal chrome text on the page background (#RRGGBB). Null = light product ink.
+    portal_font_color: Mapped[str | None] = mapped_column(String(7), nullable=True)
+    # When false, custom portal canvas (colour/image/font) applies to the login screen only.
+    portal_background_on_signed_in: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     default_signature_file_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("file.id", ondelete="SET NULL"), nullable=True
     )

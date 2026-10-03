@@ -5974,7 +5974,11 @@ html.dark .emlPreviewBodyWrap {
   align-items: flex-start;
   justify-content: center;
   padding: 32px 16px 24px;
-  background: var(--portal-bg, var(--page-gradient));
+  background-color: var(--portal-bg, var(--page-gradient));
+  background-image: var(--portal-bg-image, none);
+  background-size: cover;
+  background-position: center center;
+  background-repeat: no-repeat;
   background-attachment: fixed;
 }
 
@@ -6043,14 +6047,14 @@ html.dark .emlPreviewBodyWrap {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  color: rgba(255, 255, 255, 0.72);
+  color: color-mix(in srgb, var(--portal-brand-ink, #ffffff) 72%, transparent);
   font-size: 0.82rem;
   text-decoration: none;
   transition: color 0.15s ease;
 }
 
 .portalPoweredByLink:hover {
-  color: rgba(255, 255, 255, 0.95);
+  color: color-mix(in srgb, var(--portal-brand-ink, #ffffff) 95%, transparent);
 }
 
 .portalPoweredByMark {

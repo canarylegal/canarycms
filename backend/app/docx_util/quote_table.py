@@ -684,7 +684,9 @@ def write_quote_template_docx(path: Path, *, slots: int = QUOTE_MERGE_SLOT_COUNT
     doc.add_paragraph("Dear [CONTACT_LETTER_DEAR]")
     doc.add_paragraph("")
     doc.add_paragraph(
-        "Thank you for instructing us. Set out below is our estimate of costs based on a property value of "
+        # No space before the merge code: compose inserts a leading NBSP with the amount so
+        # "of £…" does not wrap with the currency orphaned on the next line.
+        "Thank you for instructing us. Set out below is our estimate of costs based on a property value of"
         "[QUOTE_PROPERTY_VALUE]."
     )
     doc.add_paragraph("")

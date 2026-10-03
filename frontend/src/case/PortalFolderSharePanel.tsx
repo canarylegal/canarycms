@@ -20,12 +20,19 @@ export function PortalFolderSharePanel({ token, caseId, folderPath, onChanged }:
   const [notice, setNotice] = useState<string | null>(null)
 
   const folderLabel = decodeFolderPathForDisplay(folderPath) || 'Home'
+  const isMatterRoot = !(folderPath || '').trim()
 
   useEffect(() => {
     let cancelled = false
     void (async () => {
       setBusy(true)
       setErr(null)
+      if (isMatterRoot) {
+        setRows([])
+        setErr('The matter root cannot be shared via the portal. Share a specific folder instead.')
+        setBusy(false)
+        return
+      }
       try {
         const q = new URLSearchParams({ folder_path: folderPath })
         const data = await apiFetch<CasePortalFolderShareContactOut[]>(
@@ -42,7 +49,7 @@ export function PortalFolderSharePanel({ token, caseId, folderPath, onChanged }:
     return () => {
       cancelled = true
     }
-  }, [caseId, folderPath, token])
+  }, [caseId, folderPath, token, isMatterRoot])
 
   async function reloadRows() {
     const q = new URLSearchParams({ folder_path: folderPath })
@@ -50,6 +57,10 @@ export function PortalFolderSharePanel({ token, caseId, folderPath, onChanged }:
   }
 
   async function toggleContact(row: CasePortalFolderShareContactOut, grant: boolean) {
+    if (isMatterRoot) {
+      setErr('The matter root cannot be shared via the portal. Share a specific folder instead.')
+      return
+    }
     if (grant) {
       let sendEmail = false
       if (await askConfirm({

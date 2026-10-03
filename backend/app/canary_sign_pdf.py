@@ -800,8 +800,17 @@ def strip_acroform_fields(pdf_bytes: bytes) -> bytes:
         return out.getvalue()
 
 
-def fill_and_flatten_acroform(pdf_bytes: bytes, responses: dict[str, Any] | None) -> bytes:
-    """Write AcroForm values, generate appearances, and flatten widgets into page content."""
+def fill_acroform(
+    pdf_bytes: bytes,
+    responses: dict[str, Any] | None,
+    *,
+    flatten: bool = False,
+) -> bytes:
+    """Write AcroForm values and generate appearances.
+
+    When ``flatten`` is True, widgets are burned into page content (Canary Sign).
+    When False, fields stay editable (e.g. Law Society protocol forms after compose prefill).
+    """
     responses = responses or {}
     try:
         pdf = pikepdf.open(io.BytesIO(pdf_bytes))
@@ -859,11 +868,22 @@ def fill_and_flatten_acroform(pdf_bytes: bytes, responses: dict[str, Any] | None
                 except Exception:
                     pass
 
-        try:
-            pdf.flatten_annotations("all")
-        except Exception:
-            log.exception("flatten_annotations failed")
+        if flatten:
+            try:
+                pdf.flatten_annotations("all")
+            except Exception:
+                log.exception("flatten_annotations failed")
+        else:
+            try:
+                pdf.Root.AcroForm["/NeedAppearances"] = True
+            except Exception:
+                pass
 
         out = io.BytesIO()
         pdf.save(out)
         return out.getvalue()
+
+
+def fill_and_flatten_acroform(pdf_bytes: bytes, responses: dict[str, Any] | None) -> bytes:
+    """Write AcroForm values, generate appearances, and flatten widgets into page content."""
+    return fill_acroform(pdf_bytes, responses, flatten=True)

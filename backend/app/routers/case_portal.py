@@ -27,6 +27,7 @@ from app.portal_service import (
     grant_is_client_visible,
     matter_portal_access_is_active,
     portal_access_is_active,
+    require_shareable_portal_folder,
     resolve_matter_contact_email,
 )
 from app.matter_contact_constants import is_client_matter_contact_type, is_exchange_matter_contact_type
@@ -209,8 +210,9 @@ def list_case_portal_folder_share_contacts(
     db: Session = Depends(get_db),
 ) -> list[CasePortalFolderShareContactOut]:
     _require_portal(case_id, user, db)
-    folder = sanitize_folder_path(folder_path)
     matter_scope = grant_scope.strip().lower() == "matter"
+    # Matter-scope listing (quotes/forms) does not need a folder path; folder share must be non-root.
+    folder = "" if matter_scope else require_shareable_portal_folder(folder_path)
     case_contacts = (
         db.execute(select(CaseContact).where(CaseContact.case_id == case_id).order_by(CaseContact.name.asc()))
         .scalars()

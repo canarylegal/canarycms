@@ -27,7 +27,12 @@ class PortalConfigOut(BaseModel):
     firm_name: str
     portal_title: str
     portal_logo_url: str | None = None
+    portal_logo_enabled: bool = True
     portal_background_color: str | None = None
+    portal_background_url: str | None = None
+    portal_font_color: str | None = None
+    # When false, custom canvas is login-screen only; signed-in uses product default chrome.
+    portal_background_on_signed_in: bool = True
     powered_by_label: str = "Powered by Canary Legal Software"
     powered_by_url: str = "https://canarylegalsoftware.co.uk"
 
@@ -374,7 +379,7 @@ class ContactPortalGrantOut(BaseModel):
 
 class ContactPortalGrantCreateIn(BaseModel):
     case_id: uuid.UUID
-    folder_path: str = ""
+    folder_path: str = Field(min_length=1, description="Matter subfolder path; matter root cannot be shared.")
     label: str | None = Field(default=None, max_length=300)
     can_download: bool = True
     can_upload: bool = True

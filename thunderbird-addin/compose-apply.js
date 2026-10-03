@@ -127,6 +127,21 @@
     return { body: prependToComposeHtml(plainTextToHtml(merge), existingHtml) }
   }
 
+  /** True when the non-signature body looks like a prior Canary apply (re-apply should replace, not stack). */
+  function looksLikePriorCanaryBody(text) {
+    const s = String(text || '')
+    if (/\[CONTACT_LETTER_DEAR\]|\[FEE_EARNER\]|\[CASE_REF\]|\[DATE\]/.test(s)) return true
+    if (/Our ref:\s*/i.test(s) && /Kind regards|Yours sincerely/i.test(s)) return true
+    return false
+  }
+
+  function signatureOnlyHtml(existingHtml) {
+    const existing = String(existingHtml || '')
+    const sigStart = existing.search(/<div[^>]*class="[^"]*moz-signature/i)
+    if (sigStart >= 0) return existing.slice(sigStart)
+    return ''
+  }
+
   async function applyBodyWithSignaturePreserve(ext, tabId, bundle, composeDetails, headerDetails) {
     const merge = mergeBodyText(bundle)
     if (!merge) return
@@ -140,6 +155,25 @@
 
     if (!hasExisting) {
       await ext.compose.setComposeDetails(tabId, Object.assign({}, headerDetails, mergeOnly))
+      return
+    }
+
+    // Re-applying (or applying after a failed merge left tokens) must replace the prior Canary
+    // block — prepending stacks raw codes above an already-merged body.
+    if (looksLikePriorCanaryBody(savedExisting)) {
+      if (isPlainText) {
+        await ext.compose.setComposeDetails(tabId, Object.assign({}, headerDetails, mergeOnly))
+        return
+      }
+      const sig = signatureOnlyHtml(savedExisting)
+      if (sig) {
+        await ext.compose.setComposeDetails(
+          tabId,
+          Object.assign({}, headerDetails, { body: plainTextToHtml(merge) + '<div><br></div>' + sig }),
+        )
+      } else {
+        await ext.compose.setComposeDetails(tabId, Object.assign({}, headerDetails, mergeOnly))
+      }
       return
     }
 
@@ -203,28 +237,51 @@
     }
   }
 
+  async function listComposeAttachmentNames(ext, tabId) {
+    const names = new Set()
+    if (!ext.compose || typeof ext.compose.listAttachments !== 'function') return names
+    try {
+      const rows = await ext.compose.listAttachments(tabId)
+      ;(rows || []).forEach(function (row) {
+        const n = row && (row.name || row.filename)
+        if (n) names.add(String(n))
+      })
+    } catch (_) {
+      /* optional API */
+    }
+    return names
+  }
+
   async function applyAttachmentsOnly(ext, tabId, bundle) {
     if (!ext.compose || tabId == null) {
       throw new Error('Compose API not available.')
     }
     const atts = (bundle && bundle.attachments) || []
     const sh = shared()
+    const already = await listComposeAttachmentNames(ext, tabId)
     let added = 0
+    let skipped = 0
     for (let i = 0; i < atts.length; i++) {
       const a = atts[i]
       if (!a || !a.content_base64) continue
+      const name = a.filename || 'attachment'
+      if (already.has(name)) {
+        skipped += 1
+        continue
+      }
       try {
         const blob = sh.base64ToBlob(a.content_base64, a.mime_type || 'application/octet-stream')
-        const file = new File([blob], a.filename || 'attachment', {
+        const file = new File([blob], name, {
           type: a.mime_type || 'application/octet-stream',
         })
-        await ext.compose.addAttachment(tabId, { file: file, name: a.filename || 'attachment' })
+        await ext.compose.addAttachment(tabId, { file: file, name: name })
+        already.add(name)
         added += 1
       } catch (_) {
         /* best-effort per attachment */
       }
     }
-    if (!added && atts.length) {
+    if (!added && !skipped && atts.length) {
       throw new Error('Could not add attachments to the message.')
     }
   }

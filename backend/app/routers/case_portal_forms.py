@@ -15,6 +15,7 @@ from app.models import PortalFormSubmission, User
 from app.portal_case import require_case_portal_enabled
 from app.portal_form_service import (
     list_templates_for_case,
+    resend_form_submission,
     send_form_to_contact,
     submission_out,
     template_out,
@@ -115,3 +116,25 @@ def void_form_submission(
     db.commit()
     db.refresh(row)
     return PortalFormSubmissionOut.model_validate(submission_out(db, row))
+
+
+@router.post("/submissions/{submission_id}/resend", response_model=PortalFormSubmissionOut)
+def resend_form(
+    case_id: uuid.UUID,
+    submission_id: uuid.UUID,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> PortalFormSubmissionOut:
+    _require_portal(case_id, user, db)
+    row = db.get(PortalFormSubmission, submission_id)
+    if row is None or row.case_id != case_id:
+        from fastapi import HTTPException
+
+        raise HTTPException(status_code=404, detail="Submission not found")
+    row, email_sent, skip_reason = resend_form_submission(db, submission=row, actor=user)
+    db.commit()
+    db.refresh(row)
+    out = submission_out(db, row)
+    out["email_sent"] = email_sent
+    out["email_skip_reason"] = skip_reason
+    return PortalFormSubmissionOut.model_validate(out)

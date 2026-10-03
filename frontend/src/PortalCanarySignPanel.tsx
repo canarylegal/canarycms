@@ -7,6 +7,7 @@ import {
   formatUkDate,
   renderTypedSignaturePng,
   SIGNATURE_STYLES,
+  type CanarySignFormWidget,
 } from './CanarySignPdfDocument'
 import type { CanarySignFieldOut, PortalCanarySignOut } from './types'
 
@@ -394,6 +395,33 @@ export function PortalCanarySignPanel({
       }
     })
 
+  const formEditable = Boolean(
+    signing.has_fillable_form &&
+      signing.form_locked &&
+      signing.can_edit_form &&
+      signing.form_lock_held_by_me &&
+      !signing.form_completed &&
+      !previewMode &&
+      !busy,
+  )
+  const showFormWidgets = Boolean(signing.has_fillable_form && signing.form_locked)
+  const formWidgets: CanarySignFormWidget[] = showFormWidgets
+    ? (signing.form_fields || []).map((f) => ({
+        name: f.name,
+        label: f.label || f.name,
+        field_type: f.field_type,
+        page: f.page,
+        x_pct: f.x_pct,
+        y_pct: f.y_pct,
+        w_pct: f.w_pct,
+        h_pct: f.h_pct,
+        options: f.options || [],
+        multiline: Boolean(f.multiline),
+        value: formDrafts[f.name] ?? (f.field_type === 'checkbox' ? false : ''),
+        editable: formEditable,
+      }))
+    : []
+
   return (
     <div className="portalCanarySignPanel" style={{ marginTop: 16, cursor: busy ? 'wait' : undefined }} aria-busy={busy}>
       <div className="row" style={{ gap: 8, flexWrap: 'wrap', marginBottom: 12, alignItems: 'center' }}>
@@ -423,10 +451,9 @@ export function PortalCanarySignPanel({
           <h3 style={{ marginTop: 0, fontSize: 16 }}>Fillable form</h3>
           {!signing.form_locked ? (
             <div>
-              <p style={{ marginTop: 0, fontSize: 14 }}>
-                This PDF has {(signing.form_fields || []).length} fillable field
-                {(signing.form_fields || []).length === 1 ? '' : 's'}. The first recipient to start editing locks the
-                form for everyone else.
+              <p style={{ marginTop: 0, fontSize: 14, marginBottom: 8 }}>
+                This document has fillable fields shown on the pages below. The first recipient to start editing locks
+                the form for everyone else.
               </p>
               {signing.can_claim_form_lock && !previewMode ? (
                 !lockConfirmOpen ? (
@@ -436,8 +463,8 @@ export function PortalCanarySignPanel({
                 ) : (
                   <div className="stack" style={{ gap: 8 }}>
                     <div className="notice">
-                      Confirm: you will lock this form so only you can edit the fillable fields. Other recipients will
-                      review your answers after you complete your part.
+                      Confirm: you will lock this form so only you can edit the fillable fields on the document. Other
+                      recipients will review your answers after you complete your part.
                     </div>
                     <div className="row" style={{ gap: 8 }}>
                       <button type="button" className="btn primary" disabled={busy} onClick={() => void claimFormLock()}>
@@ -454,77 +481,16 @@ export function PortalCanarySignPanel({
               )}
             </div>
           ) : (
-            <div>
-              <div className="muted" style={{ marginBottom: 10, fontSize: 13 }}>
+            <div className="row" style={{ gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+              <div className="muted" style={{ fontSize: 13, flex: 1, minWidth: 200 }}>
                 {signing.form_completed
-                  ? `Form completed by ${signing.form_locked_by_name || 'a recipient'} (read-only).`
+                  ? `Form completed by ${signing.form_locked_by_name || 'a recipient'} (read-only on the document).`
                   : signing.form_lock_held_by_me
-                    ? 'You hold the form lock — fill the fields below, then complete your signature.'
-                    : `Locked by ${signing.form_locked_by_name || 'another recipient'} — you can review answers when available.`}
-              </div>
-              <div className="stack" style={{ gap: 10 }}>
-                {(signing.form_fields || []).map((f) => {
-                  const editable = Boolean(signing.can_edit_form && signing.form_lock_held_by_me && !previewMode)
-                  const value = formDrafts[f.name]
-                  return (
-                    <div key={f.name}>
-                      {f.field_type === 'checkbox' ? (
-                        <label className="row" style={{ gap: 8, alignItems: 'center' }}>
-                          <input
-                            type="checkbox"
-                            checked={Boolean(value)}
-                            disabled={!editable || busy}
-                            onChange={(e) => setFormDrafts((d) => ({ ...d, [f.name]: e.target.checked }))}
-                          />
-                          <span>{f.label || f.name}</span>
-                        </label>
-                      ) : f.field_type === 'choice' || f.field_type === 'radio' ? (
-                        <label className="field">
-                          <span>{f.label || f.name}</span>
-                          <select
-                            value={String(value ?? '')}
-                            disabled={!editable || busy}
-                            onChange={(e) => setFormDrafts((d) => ({ ...d, [f.name]: e.target.value }))}
-                          >
-                            <option value="">Select…</option>
-                            {(f.options || []).map((opt) => (
-                              <option key={opt} value={opt}>
-                                {opt}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                      ) : (
-                        <label className="field">
-                          <span>{f.label || f.name}</span>
-                          {f.multiline ? (
-                            <textarea
-                              rows={3}
-                              value={String(value ?? '')}
-                              disabled={!editable || busy}
-                              onChange={(e) => setFormDrafts((d) => ({ ...d, [f.name]: e.target.value }))}
-                            />
-                          ) : (
-                            <input
-                              value={String(value ?? '')}
-                              disabled={!editable || busy}
-                              onChange={(e) => setFormDrafts((d) => ({ ...d, [f.name]: e.target.value }))}
-                            />
-                          )}
-                        </label>
-                      )}
-                    </div>
-                  )
-                })}
+                    ? 'You hold the form lock — fill the fields on the document below, then complete your signature.'
+                    : `Locked by ${signing.form_locked_by_name || 'another recipient'} — answers appear on the document when available.`}
               </div>
               {signing.form_lock_held_by_me && !signing.form_completed && !previewMode ? (
-                <button
-                  type="button"
-                  className="btn"
-                  style={{ marginTop: 12 }}
-                  disabled={busy}
-                  onClick={() => void saveFormDrafts()}
-                >
+                <button type="button" className="btn" disabled={busy} onClick={() => void saveFormDrafts()}>
                   Save form answers
                 </button>
               ) : null}
@@ -537,6 +503,11 @@ export function PortalCanarySignPanel({
         pdfUrl={pdfUrl}
         authToken={portalToken}
         overlays={overlays}
+        formWidgets={formWidgets}
+        onFormWidgetChange={(name, value) => {
+          if (busy) return
+          setFormDrafts((d) => ({ ...d, [name]: value }))
+        }}
         onOverlayClick={(id) => {
           const f = myFields.find((x) => x.id === id)
           if (f && isLockedField(f.field_type)) {

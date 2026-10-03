@@ -46,6 +46,15 @@ class CanarySignSendIn(BaseModel):
 class CanarySignVoidIn(BaseModel):
     reason: str | None = Field(default=None, max_length=500)
 
+class CanarySignRemindIn(BaseModel):
+    """Optional recipient filter for remind/resend.
+
+    When omitted or empty, all outstanding (pending/viewed) recipients are reminded.
+    Signed / declined recipients are never eligible.
+    """
+
+    recipient_ids: list[uuid.UUID] | None = None
+
 class CanarySignFieldOut(BaseModel):
     id: uuid.UUID
     recipient_id: uuid.UUID

@@ -136,13 +136,14 @@ export async function composeMatterEmail({
     json: composePayload,
   })
   try {
+    // Short TTL: Thunderbird claims this on compose open; long-lived leftovers wrongly bind later Writes.
     await apiFetch(`/mail-plugin/pending-send`, {
       token,
       method: 'PUT',
       json: {
         case_id: caseId,
         source_file_id: attachmentFileIds[0] ?? null,
-        ttl_seconds: 86400,
+        ttl_seconds: 900,
       },
     })
   } catch {

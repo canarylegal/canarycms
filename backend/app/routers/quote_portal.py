@@ -16,6 +16,7 @@ from app.quote_portal_service import (
     delivery_out_meta,
     get_delivery_for_contact,
     latest_delivery_for_file,
+    resend_quote_delivery,
     respond_to_quote_delivery,
     send_quote_via_portal,
 )
@@ -107,3 +108,26 @@ def post_send_quote_via_portal(
         email_skip_reason=skip_reason,
         portal_pdf_generated=portal_pdf_generated,
     )
+
+
+@router.post("/resend", response_model=QuotePortalDeliveryOut)
+def post_resend_quote_via_portal(
+    case_id: uuid.UUID,
+    file_id: uuid.UUID,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> QuotePortalDeliveryOut:
+    """Resend the latest pending portal quote delivery for this file."""
+    require_case_access(case_id, user, db)
+    row = db.get(File, file_id)
+    if row is None or row.case_id != case_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+    delivery = latest_delivery_for_file(db, file_id)
+    if delivery is None or delivery.case_id != case_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Quote delivery not found")
+    delivery, email_sent, skip_reason = resend_quote_delivery(
+        db,
+        delivery=delivery,
+        actor_user_id=user.id,
+    )
+    return _delivery_out(db, delivery, email_sent=email_sent, email_skip_reason=skip_reason)

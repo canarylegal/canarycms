@@ -7,6 +7,8 @@ import { SingleSelectDropdown } from '../SingleSelectDropdown'
 import { CaseFileSelectDropdown } from './CaseFileSelectDropdown'
 import { DocMimeIcon } from './DocCells'
 import type {
+  CanarySignRecipientOut,
+  CanarySignSigningRequestOut,
   CasePortalActivityOut,
   CasePortalNotificationSettingsOut,
   CasePortalPreviewContactOut,
@@ -14,6 +16,7 @@ import type {
   CasePortalStaffUserOut,
   FileSummary,
   PortalFormSubmissionOut,
+  QuotePortalDeliveryOut,
   UserSummary,
 } from '../types'
 
@@ -85,7 +88,14 @@ export function CasePortalPanel({ token, caseId, onFilesChanged }: Props) {
   const [previewContactOpen, setPreviewContactOpen] = useState(false)
   const [quoteFileId, setQuoteFileId] = useState('')
   const [formSubmissions, setFormSubmissions] = useState<PortalFormSubmissionOut[]>([])
-  const [formVoidBusyId, setFormVoidBusyId] = useState<string | null>(null)
+  const [formActionBusyId, setFormActionBusyId] = useState<string | null>(null)
+  const [canaryRequests, setCanaryRequests] = useState<CanarySignSigningRequestOut[]>([])
+  const [quoteResendBusyId, setQuoteResendBusyId] = useState<string | null>(null)
+  const [signActionBusyId, setSignActionBusyId] = useState<string | null>(null)
+  const [remindPicker, setRemindPicker] = useState<{
+    request: CanarySignSigningRequestOut
+    selected: Set<string>
+  } | null>(null)
 
   const previewContactOptions = useMemo(
     () =>
@@ -154,6 +164,15 @@ export function CasePortalPanel({ token, caseId, onFilesChanged }: Props) {
     }
   }, [caseId, token])
 
+  const loadCanaryRequests = useCallback(async () => {
+    try {
+      const rows = await apiFetch<CanarySignSigningRequestOut[]>(`/cases/${caseId}/canary-sign/requests`, { token })
+      setCanaryRequests(Array.isArray(rows) ? rows : [])
+    } catch {
+      setCanaryRequests([])
+    }
+  }, [caseId, token])
+
   const load = useCallback(async () => {
     setErr(null)
     const [activityRows, settings, previewRows, users] = await Promise.all([
@@ -166,13 +185,13 @@ export function CasePortalPanel({ token, caseId, onFilesChanged }: Props) {
     setSelectedStaff(settings.staff_users ?? [])
     setStaffUsers(Array.isArray(users) ? users : [])
     setPreviewContacts(previewRows)
-    await loadFormSubmissions()
+    await Promise.all([loadFormSubmissions(), loadCanaryRequests()])
     setPreviewContactId((current) => {
       if (current && previewRows.some((row) => row.contact_id === current)) return current
       return previewRows[0]?.contact_id ?? ''
     })
     await loadFiles()
-  }, [caseId, token, loadFiles, loadFormSubmissions])
+  }, [caseId, token, loadFiles, loadFormSubmissions, loadCanaryRequests])
 
   async function voidFormSubmission(submissionId: string) {
     const ok = await askConfirm({
@@ -182,8 +201,9 @@ export function CasePortalPanel({ token, caseId, onFilesChanged }: Props) {
       confirmLabel: 'Void form',
     })
     if (!ok) return
-    setFormVoidBusyId(submissionId)
+    setFormActionBusyId(submissionId)
     setErr(null)
+    setNotice(null)
     try {
       await apiFetch<PortalFormSubmissionOut>(`/cases/${caseId}/portal/forms/submissions/${submissionId}/void`, {
         token,
@@ -194,7 +214,128 @@ export function CasePortalPanel({ token, caseId, onFilesChanged }: Props) {
     } catch (e: unknown) {
       setErr((e as { message?: string }).message ?? 'Could not void form')
     } finally {
-      setFormVoidBusyId(null)
+      setFormActionBusyId(null)
+    }
+  }
+
+  async function resendFormSubmission(submissionId: string) {
+    const ok = await askConfirm({
+      title: 'Resend form?',
+      message: 'The client will receive another e-mail with a link to complete this form.',
+      confirmLabel: 'Resend',
+    })
+    if (!ok) return
+    setFormActionBusyId(submissionId)
+    setErr(null)
+    setNotice(null)
+    try {
+      const out = await apiFetch<PortalFormSubmissionOut>(
+        `/cases/${caseId}/portal/forms/submissions/${submissionId}/resend`,
+        { token, method: 'POST' },
+      )
+      if (out.email_sent === false) {
+        setNotice(out.email_skip_reason || 'Form is still available, but the notification e-mail was not sent.')
+      } else {
+        setNotice('Form resent.')
+      }
+      await loadFormSubmissions()
+    } catch (e: unknown) {
+      setErr((e as { message?: string }).message ?? 'Could not resend form')
+    } finally {
+      setFormActionBusyId(null)
+    }
+  }
+
+  async function resendQuote(fileId: string) {
+    const ok = await askConfirm({
+      title: 'Resend quote?',
+      message: 'The client will receive another e-mail with a link to this quote.',
+      confirmLabel: 'Resend',
+    })
+    if (!ok) return
+    setQuoteResendBusyId(fileId)
+    setErr(null)
+    setNotice(null)
+    try {
+      const out = await apiFetch<QuotePortalDeliveryOut>(
+        `/cases/${caseId}/files/${fileId}/quote-portal/resend`,
+        { token, method: 'POST' },
+      )
+      if (out.email_sent === false) {
+        setNotice(out.email_skip_reason || 'Quote is still available, but the notification e-mail was not sent.')
+      } else {
+        setNotice('Quote resent.')
+      }
+      await loadFiles()
+    } catch (e: unknown) {
+      setErr((e as { message?: string }).message ?? 'Could not resend quote')
+    } finally {
+      setQuoteResendBusyId(null)
+    }
+  }
+
+  function outstandingSignRecipients(req: CanarySignSigningRequestOut): CanarySignRecipientOut[] {
+    return (req.recipients || []).filter((r) => r.status === 'pending' || r.status === 'viewed')
+  }
+
+  function openRemindPicker(req: CanarySignSigningRequestOut) {
+    const outstanding = outstandingSignRecipients(req)
+    setRemindPicker({
+      request: req,
+      selected: new Set(outstanding.map((r) => r.id)),
+    })
+  }
+
+  async function confirmRemind() {
+    if (!remindPicker) return
+    const ids = Array.from(remindPicker.selected)
+    if (ids.length === 0) {
+      setErr('Select at least one recipient to remind.')
+      return
+    }
+    setSignActionBusyId(remindPicker.request.id)
+    setErr(null)
+    setNotice(null)
+    try {
+      await apiFetch(`/cases/${caseId}/canary-sign/requests/${remindPicker.request.id}/remind`, {
+        token,
+        method: 'POST',
+        json: { recipient_ids: ids },
+      })
+      setNotice(ids.length === 1 ? 'Reminder sent.' : `Reminders sent to ${ids.length} recipients.`)
+      setRemindPicker(null)
+      await loadCanaryRequests()
+    } catch (e: unknown) {
+      setErr((e as { message?: string }).message ?? 'Could not send reminder')
+    } finally {
+      setSignActionBusyId(null)
+    }
+  }
+
+  async function voidCanarySign(req: CanarySignSigningRequestOut) {
+    const ok = await askConfirm({
+      title: 'Void signing request?',
+      message: 'Recipients will no longer be able to sign this document.',
+      danger: true,
+      confirmLabel: 'Void',
+    })
+    if (!ok) return
+    setSignActionBusyId(req.id)
+    setErr(null)
+    setNotice(null)
+    try {
+      await apiFetch(`/cases/${caseId}/canary-sign/requests/${req.id}/void`, {
+        token,
+        method: 'POST',
+        json: { reason: null },
+      })
+      setNotice('Signing request voided.')
+      await loadCanaryRequests()
+      onFilesChanged?.()
+    } catch (e: unknown) {
+      setErr((e as { message?: string }).message ?? 'Could not void signing request')
+    } finally {
+      setSignActionBusyId(null)
     }
   }
 
@@ -203,6 +344,23 @@ export function CasePortalPanel({ token, caseId, onFilesChanged }: Props) {
     if (status === 'completed') return 'Completed'
     if (status === 'voided') return 'Voided'
     if (status === 'superseded') return 'Superseded'
+    return status
+  }
+
+  function canaryStatusLabel(status: string): string {
+    if (status === 'pending') return 'Awaiting signatures'
+    if (status === 'completed') return 'Completed'
+    if (status === 'declined') return 'Declined'
+    if (status === 'voided') return 'Voided'
+    if (status === 'expired') return 'Expired'
+    return status
+  }
+
+  function recipientStatusLabel(status: string): string {
+    if (status === 'pending') return 'Outstanding'
+    if (status === 'viewed') return 'Viewed'
+    if (status === 'signed') return 'Signed'
+    if (status === 'declined') return 'Declined'
     return status
   }
 
@@ -450,6 +608,16 @@ export function CasePortalPanel({ token, caseId, onFilesChanged }: Props) {
                         Not sent yet
                       </span>
                     )}
+                    {f.quote_portal_delivery?.status === 'pending' ? (
+                      <button
+                        type="button"
+                        className="btn"
+                        disabled={quoteResendBusyId === f.id || filesBusy}
+                        onClick={() => void resendQuote(f.id)}
+                      >
+                        {quoteResendBusyId === f.id ? 'Resending…' : 'Resend'}
+                      </button>
+                    ) : null}
                   </div>
                 ))}
               </div>
@@ -466,21 +634,21 @@ export function CasePortalPanel({ token, caseId, onFilesChanged }: Props) {
           </button>
         </div>
         <p className="muted" style={{ margin: 0 }}>
-          Send forms from Documents → New → Portal form. Submissions appear in document history with their status; you
-          can void pending forms here.
+          Send forms from Documents → New → Portal form. Submissions appear here with status; you can resend or void
+          pending forms.
         </p>
         {formSubmissions.length === 0 ? (
           <div className="muted">No portal forms sent on this matter yet.</div>
         ) : (
           <div className="table">
-            <div className="tr th" style={{ gridTemplateColumns: '1fr 140px 120px 100px' }}>
+            <div className="tr th" style={{ gridTemplateColumns: '1fr 140px 120px 160px' }}>
               <div className="thCell">Form</div>
               <div className="thCell">Contact</div>
               <div className="thCell">Status</div>
               <div className="thCell">Actions</div>
             </div>
             {formSubmissions.map((row) => (
-              <div key={row.id} className="tr" style={{ gridTemplateColumns: '1fr 140px 120px 100px' }}>
+              <div key={row.id} className="tr" style={{ gridTemplateColumns: '1fr 140px 120px 160px' }}>
                 <div className="td">
                   <div>{row.template_name}</div>
                   <div className="muted" style={{ fontSize: 12 }}>{formatWhen(row.sent_at)}</div>
@@ -489,14 +657,24 @@ export function CasePortalPanel({ token, caseId, onFilesChanged }: Props) {
                 <div className="td muted">{formStatusLabel(row.status)}</div>
                 <div className="td">
                   {row.status === 'pending' ? (
-                    <button
-                      type="button"
-                      className="btn"
-                      disabled={formVoidBusyId === row.id}
-                      onClick={() => void voidFormSubmission(row.id)}
-                    >
-                      {formVoidBusyId === row.id ? 'Voiding…' : 'Void'}
-                    </button>
+                    <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
+                      <button
+                        type="button"
+                        className="btn"
+                        disabled={formActionBusyId === row.id}
+                        onClick={() => void resendFormSubmission(row.id)}
+                      >
+                        {formActionBusyId === row.id ? '…' : 'Resend'}
+                      </button>
+                      <button
+                        type="button"
+                        className="btn"
+                        disabled={formActionBusyId === row.id}
+                        onClick={() => void voidFormSubmission(row.id)}
+                      >
+                        Void
+                      </button>
+                    </div>
                   ) : row.snapshot_filename ? (
                     <span className="muted" style={{ fontSize: 12 }}>{row.snapshot_filename}</span>
                   ) : (
@@ -505,6 +683,85 @@ export function CasePortalPanel({ token, caseId, onFilesChanged }: Props) {
                 </div>
               </div>
             ))}
+          </div>
+        )}
+      </section>
+
+      <section className="stack" style={{ gap: 8 }}>
+        <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+          <h4 style={{ margin: 0 }}>Canary Sign</h4>
+          <button type="button" className="btn" disabled={busy} onClick={() => void loadCanaryRequests()}>
+            Refresh
+          </button>
+        </div>
+        <p className="muted" style={{ margin: 0 }}>
+          Documents sent for signature from the matter file list. Remind outstanding recipients or void a pending
+          request.
+        </p>
+        {canaryRequests.length === 0 ? (
+          <div className="muted">No Canary Sign requests on this matter yet.</div>
+        ) : (
+          <div className="table">
+            <div className="tr th" style={{ gridTemplateColumns: '1.2fr 1fr 120px 160px' }}>
+              <div className="thCell">Document</div>
+              <div className="thCell">Recipients</div>
+              <div className="thCell">Status</div>
+              <div className="thCell">Actions</div>
+            </div>
+            {canaryRequests.map((req) => {
+              const outstanding = outstandingSignRecipients(req)
+              return (
+                <div key={req.id} className="tr" style={{ gridTemplateColumns: '1.2fr 1fr 120px 160px' }}>
+                  <div className="td">
+                    <div>{req.subject || req.source_filename || 'Document'}</div>
+                    <div className="muted" style={{ fontSize: 12 }}>
+                      {req.created_at ? formatWhen(req.created_at) : ''}
+                    </div>
+                  </div>
+                  <div className="td" style={{ fontSize: 13 }}>
+                    {(req.recipients || []).length === 0 ? (
+                      <span className="muted">—</span>
+                    ) : (
+                      <div className="stack" style={{ gap: 2 }}>
+                        {(req.recipients || []).map((r) => (
+                          <div key={r.id}>
+                            {r.name}{' '}
+                            <span className="muted">({recipientStatusLabel(r.status)})</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <div className="td muted">{canaryStatusLabel(req.status)}</div>
+                  <div className="td">
+                    {req.status === 'pending' ? (
+                      <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
+                        {outstanding.length > 0 ? (
+                          <button
+                            type="button"
+                            className="btn"
+                            disabled={signActionBusyId === req.id}
+                            onClick={() => openRemindPicker(req)}
+                          >
+                            Resend
+                          </button>
+                        ) : null}
+                        <button
+                          type="button"
+                          className="btn"
+                          disabled={signActionBusyId === req.id}
+                          onClick={() => void voidCanarySign(req)}
+                        >
+                          Void
+                        </button>
+                      </div>
+                    ) : (
+                      <span className="muted">—</span>
+                    )}
+                  </div>
+                </div>
+              )
+            })}
           </div>
         )}
       </section>
@@ -577,6 +834,68 @@ export function CasePortalPanel({ token, caseId, onFilesChanged }: Props) {
           onFilesChanged?.()
         }}
       />
+    ) : null}
+
+    {remindPicker ? (
+      <div className="modalOverlay" role="dialog" aria-modal="true" aria-labelledby="canary-remind-title">
+        <div className="card modal" style={{ maxWidth: 440, padding: 20 }}>
+          <h3 id="canary-remind-title" style={{ marginTop: 0 }}>
+            Resend signing reminder
+          </h3>
+          <p className="muted" style={{ marginTop: 0 }}>
+            Choose who should receive another e-mail. Recipients who have already signed cannot be selected.
+          </p>
+          <div className="stack" style={{ gap: 8, marginBottom: 16 }}>
+            {(remindPicker.request.recipients || []).map((r) => {
+              const outstanding = r.status === 'pending' || r.status === 'viewed'
+              const checked = remindPicker.selected.has(r.id)
+              return (
+                <label
+                  key={r.id}
+                  className="row"
+                  style={{
+                    gap: 8,
+                    alignItems: 'center',
+                    opacity: outstanding ? 1 : 0.55,
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    disabled={!outstanding}
+                    onChange={(e) => {
+                      setRemindPicker((prev) => {
+                        if (!prev) return prev
+                        const next = new Set(prev.selected)
+                        if (e.target.checked) next.add(r.id)
+                        else next.delete(r.id)
+                        return { ...prev, selected: next }
+                      })
+                    }}
+                  />
+                  <span>
+                    {r.name}{' '}
+                    <span className="muted">({recipientStatusLabel(r.status)})</span>
+                  </span>
+                </label>
+              )
+            })}
+          </div>
+          <div className="row" style={{ gap: 8, justifyContent: 'flex-end' }}>
+            <button type="button" className="btn" disabled={signActionBusyId === remindPicker.request.id} onClick={() => setRemindPicker(null)}>
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="btn primary"
+              disabled={signActionBusyId === remindPicker.request.id || remindPicker.selected.size === 0}
+              onClick={() => void confirmRemind()}
+            >
+              {signActionBusyId === remindPicker.request.id ? 'Sending…' : 'Send reminder'}
+            </button>
+          </div>
+        </div>
+      </div>
     ) : null}
     </>
   )

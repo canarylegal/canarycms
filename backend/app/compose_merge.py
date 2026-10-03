@@ -97,9 +97,13 @@ def _read_firm_letterhead_file_bytes(db: Session, file_id: uuid.UUID | None) -> 
 
 def finalize_digital_letterhead_docx(src_bytes: bytes, lh_bytes: bytes | None) -> bytes:
     """Apply en-GB proofing, then restore letterhead layout metadata proofing may override."""
+    from app.docx_util.letterhead import pin_empty_body_paragraph_spacing
+
     src_bytes = ensure_docx_proofing_language_en_gb_bytes(src_bytes)
     if lh_bytes is not None:
         src_bytes = reapply_letterhead_layout_package_bytes(src_bytes, lh_bytes)
+    # Keep blank-line spacers from inheriting paragraph-after spacing (composed vs precedent match).
+    src_bytes = pin_empty_body_paragraph_spacing(src_bytes)
     return src_bytes
 
 
@@ -225,6 +229,112 @@ def _load_blank_letter_bytes(db: Session) -> bytes | None:
         return None
 
 
+def build_case_compose_merge_fields(
+    db: Session,
+    case_id: uuid.UUID,
+    body: ComposeOfficeDocumentIn,
+    *,
+    force_merge_all_clients: bool = False,
+) -> tuple[dict[str, str], str]:
+    """Build merge-field map for a matter compose, plus the fee earner's email (for PDF forms).
+
+    Returns ``(fields, fee_earner_email)``.
+    """
+    firm_row = db.execute(select(FirmSettings).where(FirmSettings.id == 1)).scalar_one_or_none()
+    case_row = db.get(CaseModel, case_id)
+    contact = None
+    if body.case_contact_id:
+        contact = db.get(CaseContact, body.case_contact_id)
+    elif body.global_contact_id:
+        contact = db.get(GlobalContact, body.global_contact_id)
+
+    client_ccs: list[CaseContact] = []
+    cc_rows: list[CaseContact] = []
+    if case_row:
+        cc_rows = (
+            db.execute(
+                select(CaseContact)
+                .where(CaseContact.case_id == case_id)
+                .order_by(CaseContact.created_at.asc())
+            )
+            .scalars()
+            .all()
+        )
+        client_ccs = [
+            c for c in cc_rows if normalize_matter_contact_type_slug(c.matter_contact_type) == CLIENT_SLUG
+        ]
+    oc = client_ccs[:4]
+
+    lawyer_rows = [
+        c for c in cc_rows if normalize_matter_contact_type_slug(c.matter_contact_type) == LAWYERS_SLUG
+    ]
+    lawyer_rows = sorted(lawyer_rows, key=lambda c: c.created_at)[:4]
+    lawyer_slot_list: list[tuple[CaseContact, list[CaseContact]] | None] = []
+    for lr in lawyer_rows:
+        raw_ids = lr.lawyer_client_ids or []
+        loaded: list[CaseContact] = []
+        for sid in raw_ids[:4]:
+            try:
+                uid = uuid.UUID(str(sid))
+            except (ValueError, TypeError):
+                continue
+            row_cc = db.get(CaseContact, uid)
+            if row_cc and row_cc.case_id == case_id and row_cc.id != lr.id:
+                loaded.append(row_cc)
+        lawyer_slot_list.append((lr, loaded))
+    while len(lawyer_slot_list) < 4:
+        lawyer_slot_list.append(None)
+
+    fee_earner_name = ""
+    fee_earner_job_title = ""
+    fee_earner_initials = ""
+    fee_earner_email = ""
+    supervisor_name = ""
+    supervisor_job_title = ""
+    supervisor_initials = ""
+    if case_row and case_row.fee_earner_user_id:
+        fe_user = db.get(User, case_row.fee_earner_user_id)
+        if fe_user:
+            fee_earner_name = fe_user.display_name or fe_user.email or ""
+            fee_earner_job_title = (fe_user.job_title or "").strip()
+            fee_earner_initials = (fe_user.initials or "").strip()
+            fee_earner_email = (fe_user.email or "").strip()
+            if fe_user.supervisor_user_id:
+                sup_user = db.get(User, fe_user.supervisor_user_id)
+                if sup_user:
+                    supervisor_name = sup_user.display_name or sup_user.email or ""
+                    supervisor_job_title = (sup_user.job_title or "").strip()
+                    supervisor_initials = (sup_user.initials or "").strip()
+
+    merge_all = bool(force_merge_all_clients or body.precedent_merge_all_clients)
+    selected_slot: int | None = None
+    if not merge_all and contact is not None and body.case_contact_id is not None:
+        cc_row = contact
+        if isinstance(cc_row, CaseContact) and normalize_matter_contact_type_slug(cc_row.matter_contact_type) == CLIENT_SLUG:
+            idx0 = next((i for i, c in enumerate(client_ccs) if c.id == cc_row.id), None)
+            if idx0 is not None and idx0 < 4:
+                selected_slot = idx0 + 1
+
+    fields = build_merge_fields(
+        case_row,
+        fee_earner_name=fee_earner_name,
+        fee_earner_job_title=fee_earner_job_title,
+        fee_earner_initials=fee_earner_initials,
+        supervisor_name=supervisor_name,
+        supervisor_job_title=supervisor_job_title,
+        supervisor_initials=supervisor_initials,
+        merge_all_clients=merge_all,
+        ordered_client_contacts=oc,
+        selected_contact=None if merge_all else contact,
+        selected_client_slot=None if merge_all else selected_slot,
+        lawyer_slots=lawyer_slot_list,
+        compose_selected_contact=contact,
+        firm=firm_row,
+    )
+    fields.update(property_merge_fields(db, case_id))
+    return fields, fee_earner_email
+
+
 def merge_compose_docx_bytes(
     db: Session,
     case_id: uuid.UUID,
@@ -343,12 +453,21 @@ def merge_compose_docx_bytes(
         fee_earner_name = ""
         fee_earner_job_title = ""
         fee_earner_initials = ""
+        supervisor_name = ""
+        supervisor_job_title = ""
+        supervisor_initials = ""
         if case_row and case_row.fee_earner_user_id:
             fe_user = db.get(User, case_row.fee_earner_user_id)
             if fe_user:
                 fee_earner_name = fe_user.display_name or fe_user.email or ""
                 fee_earner_job_title = (fe_user.job_title or "").strip()
                 fee_earner_initials = (fe_user.initials or "").strip()
+                if fe_user.supervisor_user_id:
+                    sup_user = db.get(User, fe_user.supervisor_user_id)
+                    if sup_user:
+                        supervisor_name = sup_user.display_name or sup_user.email or ""
+                        supervisor_job_title = (sup_user.job_title or "").strip()
+                        supervisor_initials = (sup_user.initials or "").strip()
 
         merge_all = body.precedent_merge_all_clients
         selected_slot: int | None = None
@@ -359,11 +478,15 @@ def merge_compose_docx_bytes(
                 if idx0 is not None and idx0 < 4:
                     selected_slot = idx0 + 1
 
+        # E-mail compose must always substitute matter/fee-earner fields even when no
+        # recipient contact is selected — otherwise Thunderbird/Outlook get literal
+        # ``[FEE_EARNER]`` / ``[CASE_REF]`` tokens. Contact-only codes stay empty.
         should_merge = (
             merge_all
             or body.case_contact_id is not None
             or body.global_contact_id is not None
             or prec.reference in SYSTEM_DOCUMENT_TEMPLATE_REFERENCES
+            or prec.kind == PrecedentKind.email
         )
         if should_merge:
             statement_date = date.today()
@@ -372,6 +495,9 @@ def merge_compose_docx_bytes(
                 fee_earner_name=fee_earner_name,
                 fee_earner_job_title=fee_earner_job_title,
                 fee_earner_initials=fee_earner_initials,
+                supervisor_name=supervisor_name,
+                supervisor_job_title=supervisor_job_title,
+                supervisor_initials=supervisor_initials,
                 merge_date=statement_date if prec.reference == COMPLETION_STATEMENT_PRECEDENT_REFERENCE else None,
                 merge_all_clients=merge_all,
                 ordered_client_contacts=oc,

@@ -33,9 +33,11 @@ from app.file_eml_service import (
     _infer_source_mail_is_outbound,
 )
 from app.file_storage import (
+    FILES_ROOT,
     case_file_paths,
     commit_keeping_stored_file,
     ensure_files_root,
+    path_is_under_files_root,
     sanitize_folder_path,
     stream_upload_to_path,
     unlink_stored_file,
@@ -252,24 +254,109 @@ def upload_case_file(
     }
 
 
+def _is_pdf_bytes(raw: bytes) -> bool:
+    return raw.startswith(b"%PDF")
+
+
+def _compose_pdf_from_precedent(
+    db: Session,
+    *,
+    case_id: uuid.UUID,
+    body: ComposeOfficeDocumentIn,
+) -> tuple[bytes, str, str]:
+    """Copy a PDF document precedent onto the matter; prefill Law Society TA protocol forms."""
+    from app.compose_merge import build_case_compose_merge_fields
+    from app.models import Precedent
+    from app.ta_protocol_pdf_merge import TA_PROTOCOL_REFERENCES, prefill_ta_protocol_pdf
+
+    if body.precedent_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="A PDF document precedent is required.",
+        )
+    prec = db.get(Precedent, body.precedent_id)
+    if prec is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Precedent not found")
+    pfile = db.get(DbFile, prec.file_id)
+    if pfile is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Precedent file missing")
+    prec_abs = (FILES_ROOT / pfile.storage_path).resolve()
+    if not path_is_under_files_root(prec_abs) or not prec_abs.is_file():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Precedent file missing on disk")
+    raw = prec_abs.read_bytes()
+    if not _is_pdf_bytes(raw):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This precedent is not a PDF file.",
+        )
+
+    ref = (getattr(prec, "reference", None) or "").strip().upper()
+    if ref in TA_PROTOCOL_REFERENCES:
+        try:
+            fields, fee_earner_email = build_case_compose_merge_fields(
+                db,
+                case_id,
+                body,
+                force_merge_all_clients=True,
+            )
+            raw = prefill_ta_protocol_pdf(
+                raw,
+                reference=ref,
+                fields=fields,
+                fee_earner_email=fee_earner_email,
+            )
+        except Exception:
+            log.exception("PDF protocol prefill failed precedent_id=%s ref=%s", prec.id, ref)
+
+    mime = (pfile.mime_type or "").strip() or "application/pdf"
+    # Prefer the client-supplied name when it already has a .pdf extension; otherwise use precedent name.
+    requested = (body.original_filename or "").strip()
+    if requested.lower().endswith(".pdf"):
+        orig = requested
+    else:
+        stem = Path(requested).stem if requested else (prec.name or Path(pfile.original_filename).stem or "Document")
+        orig = f"{stem}.pdf"
+    return raw, mime, orig
+
+
 def compose_office_document(
     case_id: uuid.UUID,
     body: ComposeOfficeDocumentIn,
     user: User,
     db: Session,
 ) -> dict:
-    """Create a new .docx from a precedent template or from the reserved blank letter / empty document path.
+    """Create a new matter file from a precedent (Word merge, or PDF copy) or a blank letter/document.
 
     Letter compose should send ``compose_office_role: \"letter\"`` when ``precedent_id`` is null so the server
     can substitute the ``BLANK_LETTER`` global template.
+    PDF document precedents are copied onto the matter as ``.pdf`` (Canary does not merge into PDF).
     """
     require_case_access(case_id, user, db)
     ensure_files_root()
-    orig = body.original_filename.strip()
-    if not orig.lower().endswith(".docx"):
-        orig = f"{Path(orig).stem or 'Document'}.docx"
 
-    src_bytes, mime = merge_compose_docx_bytes(db, case_id, body, require_precedent_kind=None)
+    pdf_compose = False
+    if body.precedent_id is not None:
+        from app.models import Precedent
+
+        prec = db.get(Precedent, body.precedent_id)
+        if prec is not None:
+            pfile = db.get(DbFile, prec.file_id)
+            if pfile is not None:
+                prec_abs = (FILES_ROOT / pfile.storage_path).resolve()
+                if path_is_under_files_root(prec_abs) and prec_abs.is_file():
+                    head = prec_abs.read_bytes()[:8]
+                    mime_l = (pfile.mime_type or "").lower()
+                    name_l = (pfile.original_filename or "").lower()
+                    if _is_pdf_bytes(head) or mime_l == "application/pdf" or name_l.endswith(".pdf"):
+                        pdf_compose = True
+
+    if pdf_compose:
+        src_bytes, mime, orig = _compose_pdf_from_precedent(db, case_id=case_id, body=body)
+    else:
+        orig = body.original_filename.strip()
+        if not orig.lower().endswith(".docx"):
+            orig = f"{Path(orig).stem or 'Document'}.docx"
+        src_bytes, mime = merge_compose_docx_bytes(db, case_id, body, require_precedent_kind=None)
 
     file_id = uuid.uuid4()
     folder = _prepare_upload_folder(db, case_id, body.folder or "")
@@ -293,7 +380,8 @@ def compose_office_document(
         size_bytes=size,
         version=1,
         checksum=None,
-        oo_compose_pending=True,
+        # PDFs are produced ready for the file list; Word still uses the compose publish flow.
+        oo_compose_pending=not pdf_compose,
         created_at=now,
         updated_at=now,
     )

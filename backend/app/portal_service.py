@@ -28,6 +28,10 @@ PORTAL_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 PORTAL_CODE_GROUPS = (4, 4, 4)
 PORTAL_MAX_FAILED_ATTEMPTS = 5
 PORTAL_LOCKOUT_MINUTES = 15
+# Matter root (empty folder_path) must never be shared — quotes/letters land there.
+PORTAL_GRANT_ROOT_FORBIDDEN_DETAIL = (
+    "The matter root cannot be shared via the portal. Share a specific folder instead."
+)
 
 
 def utcnow() -> datetime:
@@ -107,12 +111,26 @@ def staff_portal_access_code(row: ContactPortalAccess) -> str | None:
         return None
 
 
+def require_shareable_portal_folder(folder_path: str) -> str:
+    """Sanitize and reject matter-root portal grant paths (empty after sanitize)."""
+    folder = sanitize_folder_path(folder_path)
+    if not folder:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=PORTAL_GRANT_ROOT_FORBIDDEN_DETAIL,
+        )
+    return folder
+
+
 def file_folder_in_grant(*, file_folder: str, grant_folder: str) -> bool:
     gf = sanitize_folder_path(grant_folder)
+    if not gf:
+        # Matter root grants are forbidden; never treat empty grant path as a match.
+        return False
     ff = sanitize_folder_path(file_folder or "")
     if gf == ff:
         return True
-    if gf and ff.startswith(gf + "/"):
+    if ff.startswith(gf + "/"):
         return True
     return False
 
@@ -132,7 +150,8 @@ def grant_folder_still_exists(db: Session, *, case_id: uuid.UUID, folder_path: s
     """True when the shared folder (or a subfolder under it) still exists on the matter."""
     gf = sanitize_folder_path(folder_path)
     if not gf:
-        return True
+        # Root is not a shareable folder — treat as missing so leftover grants are invisible.
+        return False
     like = f"{gf}/%"
     row = db.execute(
         select(File.id)
@@ -191,9 +210,18 @@ def rename_portal_grants_for_folder(
     for grant in grants:
         gf = sanitize_folder_path(grant.folder_path)
         if gf == old_p:
+            if not new_p:
+                # Never allow a grant to collapse onto matter root.
+                db.delete(grant)
+                updated += 1
+                continue
             grant.folder_path = new_p
             updated += 1
         elif gf.startswith(old_p + "/"):
+            if not new_p:
+                db.delete(grant)
+                updated += 1
+                continue
             grant.folder_path = new_p + gf[len(old_p) :]
             updated += 1
         else:
@@ -203,6 +231,25 @@ def rename_portal_grants_for_folder(
         if not label or label == old_leaf or label == old_p:
             grant.label = new_leaf
     return updated
+
+
+def purge_matter_root_portal_grants(db: Session) -> int:
+    """Delete any portal grants scoped to matter root (empty folder_path)."""
+    rows = (
+        db.execute(
+            select(ContactPortalGrant).where(
+                or_(
+                    ContactPortalGrant.folder_path.is_(None),
+                    ContactPortalGrant.folder_path == "",
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    for grant in rows:
+        db.delete(grant)
+    return len(rows)
 
 
 def portal_access_is_active(row: ContactPortalAccess, *, now: datetime | None = None) -> bool:
@@ -428,9 +475,12 @@ def ensure_upload_folder_allowed(*, grant: ContactPortalGrant, folder: str) -> s
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Upload is not allowed for this area")
     target = _portal_folder_path(folder)
     grant_root = _portal_folder_path(grant.folder_path)
-    if grant_root and target != grant_root and not target.startswith(grant_root + "/"):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Upload folder is outside this area")
-    if not grant_root and target:
+    if not grant_root:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=PORTAL_GRANT_ROOT_FORBIDDEN_DETAIL,
+        )
+    if target != grant_root and not target.startswith(grant_root + "/"):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Upload folder is outside this area")
     return target
 

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type CSSProperties, type ChangeEvent, type MouseEvent } from 'react'
 import * as pdfjsLib from 'pdfjs-dist'
 import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import { applyAuthHeaders } from './api'
@@ -20,6 +20,22 @@ export type CanarySignOverlayField = {
   textStyle?: 'plain' | 'script'
   previewText?: string | null
   previewImageB64?: string | null
+}
+
+/** Interactive AcroForm widgets positioned on the PDF (portal fill-in-place). */
+export type CanarySignFormWidget = {
+  name: string
+  label: string
+  field_type: 'text' | 'checkbox' | 'choice' | 'radio' | string
+  page: number
+  x_pct: number
+  y_pct: number
+  w_pct: number
+  h_pct: number
+  options?: string[]
+  multiline?: boolean
+  value: string | boolean
+  editable: boolean
 }
 
 export type SignatureStyle = {
@@ -62,6 +78,9 @@ type Props = {
   pdfUrl: string
   authToken: string
   overlays?: CanarySignOverlayField[]
+  /** AcroForm fields drawn on the page (keeps the PDF layout; no separate HTML form list). */
+  formWidgets?: CanarySignFormWidget[]
+  onFormWidgetChange?: (name: string, value: string | boolean) => void
   placing?: boolean
   resizable?: boolean
   onPageClick?: (info: { page: number; x_pct: number; y_pct: number }) => void
@@ -113,6 +132,8 @@ export function CanarySignPdfDocument({
   pdfUrl,
   authToken,
   overlays = [],
+  formWidgets = [],
+  onFormWidgetChange,
   placing = false,
   resizable = false,
   onPageClick,
@@ -415,6 +436,123 @@ export function CanarySignPdfDocument({
               userSelect: 'none',
             }}
           />
+          {formWidgets
+            .filter((w) => w.page === p.page)
+            .map((w) => {
+              const commonStyle: CSSProperties = {
+                position: 'absolute',
+                left: `${w.x_pct}%`,
+                top: `${w.y_pct}%`,
+                width: `${w.w_pct}%`,
+                height: `${w.h_pct}%`,
+                zIndex: 3,
+                boxSizing: 'border-box',
+                margin: 0,
+                font: 'inherit',
+                fontSize: 'clamp(9px, 1.6vw, 12px)',
+                lineHeight: 1.2,
+              }
+              if (w.field_type === 'checkbox') {
+                return (
+                  <label
+                    key={w.name}
+                    className="canarySignFormWidget canarySignFormWidget--checkbox"
+                    title={w.label || w.name}
+                    style={{
+                      ...commonStyle,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      background: w.editable ? 'rgba(255,255,255,0.55)' : 'transparent',
+                      border: w.editable ? '1px solid rgba(37, 99, 235, 0.45)' : '1px solid transparent',
+                      borderRadius: 2,
+                      cursor: w.editable ? 'pointer' : 'default',
+                    }}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={Boolean(w.value)}
+                      disabled={!w.editable}
+                      aria-label={w.label || w.name}
+                      onChange={(e) => onFormWidgetChange?.(w.name, e.target.checked)}
+                      style={{ width: '70%', height: '70%', margin: 0, cursor: w.editable ? 'pointer' : 'default' }}
+                    />
+                  </label>
+                )
+              }
+              if (w.field_type === 'choice' || w.field_type === 'radio') {
+                return (
+                  <select
+                    key={w.name}
+                    className="canarySignFormWidget"
+                    title={w.label || w.name}
+                    aria-label={w.label || w.name}
+                    value={String(w.value ?? '')}
+                    disabled={!w.editable}
+                    onClick={(e) => e.stopPropagation()}
+                    onChange={(e) => onFormWidgetChange?.(w.name, e.target.value)}
+                    style={{
+                      ...commonStyle,
+                      background: w.editable ? 'rgba(255,255,255,0.92)' : 'rgba(255,255,255,0.72)',
+                      border: '1px solid rgba(37, 99, 235, 0.45)',
+                      borderRadius: 2,
+                      padding: '0 2px',
+                    }}
+                  >
+                    <option value="">Select…</option>
+                    {(w.options || []).map((opt) => (
+                      <option key={opt} value={opt}>
+                        {opt}
+                      </option>
+                    ))}
+                  </select>
+                )
+              }
+              const textStyle: CSSProperties = {
+                ...commonStyle,
+                background: w.editable ? 'rgba(255,255,255,0.92)' : 'rgba(255,255,255,0.72)',
+                border: '1px solid rgba(37, 99, 235, 0.45)',
+                borderRadius: 2,
+                padding: '1px 3px',
+                resize: 'none',
+                overflow: 'auto',
+                color: '#0f172a',
+              }
+              const onTextClick = (e: MouseEvent) => e.stopPropagation()
+              const onTextChange = (e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
+                onFormWidgetChange?.(w.name, e.target.value)
+              if (w.multiline || w.h_pct >= 4.5) {
+                return (
+                  <textarea
+                    key={w.name}
+                    className="canarySignFormWidget"
+                    title={w.label || w.name}
+                    aria-label={w.label || w.name}
+                    value={String(w.value ?? '')}
+                    disabled={!w.editable}
+                    rows={2}
+                    onClick={onTextClick}
+                    onChange={onTextChange}
+                    style={textStyle}
+                  />
+                )
+              }
+              return (
+                <input
+                  key={w.name}
+                  type="text"
+                  className="canarySignFormWidget"
+                  title={w.label || w.name}
+                  aria-label={w.label || w.name}
+                  value={String(w.value ?? '')}
+                  disabled={!w.editable}
+                  onClick={onTextClick}
+                  onChange={onTextChange}
+                  style={textStyle}
+                />
+              )
+            })}
           {overlays
             .filter((o) => o.page === p.page)
             .map((o) => {
@@ -433,6 +571,7 @@ export function CanarySignPdfDocument({
                     top: `${o.y_pct}%`,
                     width: `${o.w_pct}%`,
                     height: `${o.h_pct}%`,
+                    zIndex: 4,
                     borderColor: border,
                     background: hasContent ? 'rgba(255,255,255,0.96)' : fill,
                     boxShadow: o.selected ? `0 0 0 2px ${border}` : undefined,

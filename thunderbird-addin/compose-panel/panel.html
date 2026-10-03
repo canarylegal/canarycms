@@ -69,11 +69,25 @@
         </div>
       </div>
 
-      <div class="row-actions">
+      <div class="row-actions" id="main-actions">
         <button type="button" class="primary" id="btn-apply">Apply to message</button>
         <button type="button" class="ghost" id="btn-setup">Sign in…</button>
       </div>
       <div id="out" role="status"></div>
+    </div>
+
+    <!-- Inline attach picker (no separate window — avoids Thunderbird double-popup races). -->
+    <div id="attach-picker-view" class="attach-picker-view" hidden>
+      <header class="attach-picker-view-head">
+        <h2>Attach from Canary</h2>
+        <button type="button" class="ghost" id="btn-attach-cancel">Cancel</button>
+      </header>
+      <p id="attach-matter-line" class="muted attach-matter-line"></p>
+      <div id="attach-picker-root" class="attach-picker-root" role="listbox" aria-label="Case files"></div>
+      <footer class="attach-picker-view-foot">
+        <p id="attach-selection-line" class="muted">Click files to select (up to 25).</p>
+        <button type="button" class="primary" id="btn-attach-confirm" disabled>Attach to message</button>
+      </footer>
     </div>
     <script src="../canary-shared.js"></script>
     <script src="../compose-store.js"></script>

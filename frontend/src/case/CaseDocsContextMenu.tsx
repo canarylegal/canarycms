@@ -536,6 +536,7 @@ export function CaseDocsContextMenu({
                                   await apiFetch(`/cases/${caseId}/canary-sign/requests/${f.canary_signing.id}/remind`, {
                                     token,
                                     method: 'POST',
+                                    json: {},
                                   })
                                   pushNotification('Signing reminders sent.')
                                 } catch (e: any) {

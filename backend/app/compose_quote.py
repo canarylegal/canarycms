@@ -17,6 +17,7 @@ from app.docx_util import (
     format_gbp_pence,
     inject_merge_code_images,
     merge_precedent_codes,
+    property_merge_fields,
     strip_empty_quote_table_rows,
     validate_docx_package_bytes,
     write_quote_template_docx_bytes,
@@ -62,7 +63,10 @@ def _quote_line_merge_fields(
     """Indexed merge codes: label, main amount, VAT amount per row; column and grand totals."""
     fields: dict[str, str] = {}
     if property_value_pence is not None:
-        fields["[QUOTE_PROPERTY_VALUE]"] = format_gbp_pence(property_value_pence)
+        # Leading NBSP keeps "of £…" together when letterhead margins wrap the line
+        # (avoids orphaning the amount on its own line).
+        amount = format_gbp_pence(property_value_pence)
+        fields["[QUOTE_PROPERTY_VALUE]"] = f"\u00a0{amount}" if amount else ""
     else:
         fields["[QUOTE_PROPERTY_VALUE]"] = ""
 
@@ -262,12 +266,19 @@ def _build_merge_fields_for_quote(
         lawyer_slot_list.append(None)
 
     fee_earner_name = fee_earner_job_title = fee_earner_initials = ""
+    supervisor_name = supervisor_job_title = supervisor_initials = ""
     if case_row.fee_earner_user_id:
         fe_user = db.get(User, case_row.fee_earner_user_id)
         if fe_user:
             fee_earner_name = fe_user.display_name or fe_user.email or ""
             fee_earner_job_title = (fe_user.job_title or "").strip()
             fee_earner_initials = (fe_user.initials or "").strip()
+            if fe_user.supervisor_user_id:
+                sup_user = db.get(User, fe_user.supervisor_user_id)
+                if sup_user:
+                    supervisor_name = sup_user.display_name or sup_user.email or ""
+                    supervisor_job_title = (sup_user.job_title or "").strip()
+                    supervisor_initials = (sup_user.initials or "").strip()
 
     merge_all = body.precedent_merge_all_clients
     selected_slot: int | None = None
@@ -284,6 +295,9 @@ def _build_merge_fields_for_quote(
         fee_earner_name=fee_earner_name,
         fee_earner_job_title=fee_earner_job_title,
         fee_earner_initials=fee_earner_initials,
+        supervisor_name=supervisor_name,
+        supervisor_job_title=supervisor_job_title,
+        supervisor_initials=supervisor_initials,
         merge_all_clients=merge_all,
         ordered_client_contacts=oc,
         selected_contact=None if merge_all else contact,
@@ -292,6 +306,7 @@ def _build_merge_fields_for_quote(
         compose_selected_contact=contact,
         firm=firm_row,
     )
+    fields.update(property_merge_fields(db, case_id))
     return case_row, fields, firm_row
 
 
@@ -326,5 +341,14 @@ def merge_compose_quote_docx_bytes(
     docx_bytes = strip_empty_quote_table_rows(docx_bytes)
     docx_bytes = apply_quote_table_presentation(docx_bytes, computed)
     docx_bytes, qlh_bytes = apply_quote_digital_letterhead_from_settings(db, firm_row=firm_row, src_bytes=docx_bytes)
+    # Digital quote letterheads often prepend a body masthead (address / date / matter bar)
+    # that still contains merge codes — fill those after the overlay.
+    if qlh_bytes is not None:
+        docx_bytes = merge_precedent_codes(
+            docx_bytes,
+            fields,
+            ordered_clients=[],
+            merge_all_clients=body.precedent_merge_all_clients,
+        )
     docx_bytes = finalize_digital_letterhead_docx(docx_bytes, qlh_bytes)
     return docx_bytes, mime

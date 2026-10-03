@@ -131,16 +131,24 @@ router = APIRouter(prefix="/portal", tags=["portal"])
 
 @router.get("/config", response_model=PortalConfigOut)
 def portal_config(db: Session = Depends(get_db)) -> PortalConfigOut:
-    from app.portal_background import portal_background_color
+    from app.portal_background import portal_background_color, portal_font_color
 
     firm = db.get(FirmSettings, 1)
     name = firm_display_name(firm)
-    logo_url = "/portal/logo" if firm and firm.portal_logo_file_id else None
+    logo_enabled = bool(firm.portal_logo_enabled) if firm else True
+    logo_url = (
+        "/portal/logo" if firm and firm.portal_logo_file_id and logo_enabled else None
+    )
+    bg_url = "/portal/background" if firm and firm.portal_background_file_id else None
     return PortalConfigOut(
         firm_name=name,
         portal_title=portal_title(firm),
         portal_logo_url=logo_url,
+        portal_logo_enabled=logo_enabled,
         portal_background_color=portal_background_color(firm),
+        portal_background_url=bg_url,
+        portal_font_color=portal_font_color(firm),
+        portal_background_on_signed_in=bool(firm.portal_background_on_signed_in) if firm else True,
         powered_by_label=POWERED_BY_LABEL,
         powered_by_url=CANARY_LEGAL_SOFTWARE_URL,
     )
@@ -158,6 +166,21 @@ def portal_logo(db: Session = Depends(get_db)) -> FileResponse:
     if not abs_path.is_file() or not path_is_under_files_root(abs_path):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Portal logo not found")
     media = (frow.mime_type or mimetypes.guess_type(frow.original_filename)[0] or "image/png").split(";", 1)[0]
+    return FileResponse(abs_path, media_type=media, filename=frow.original_filename)
+
+
+@router.get("/background")
+def portal_background(db: Session = Depends(get_db)) -> FileResponse:
+    firm = db.get(FirmSettings, 1)
+    if firm is None or not firm.portal_background_file_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Portal background not configured")
+    frow = db.get(File, firm.portal_background_file_id)
+    if frow is None or frow.category != FileCategory.firm_portal_background:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Portal background not configured")
+    abs_path = (FILES_ROOT / frow.storage_path).resolve()
+    if not abs_path.is_file() or not path_is_under_files_root(abs_path):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Portal background not found")
+    media = (frow.mime_type or mimetypes.guess_type(frow.original_filename)[0] or "image/jpeg").split(";", 1)[0]
     return FileResponse(abs_path, media_type=media, filename=frow.original_filename)
 
 

@@ -8,9 +8,8 @@ import { SendDocusignModal } from '../SendDocusignModal'
 import { SendCanarySignModal } from '../SendCanarySignModal'
 import { TaskCreateModal } from '../TaskCreateModal'
 import { QuoteWizard } from '../QuoteWizard'
-import { QuoteSendPrompt } from '../QuoteSendPrompt'
 import type { QuoteAwaitingSaveContext } from '../quoteAwaitingSave'
-import { QUOTE_EMAIL_PRECEDENT_REFERENCE, type PrecedentPickerState } from '../quoteEmailPrecedent'
+import { type PrecedentPickerState } from '../quoteEmailPrecedent'
 import { TextPromptModal } from '../TextPromptModal'
 import type {
   CaseContactOut,
@@ -93,10 +92,7 @@ export type CaseDetailOverlayModalsProps = {
   closeQuoteWizard: () => void
   quoteWasCreatedRef: { current: boolean }
   setQuoteAwaitingSave: (v: QuoteAwaitingSaveContext | null) => void
-
   quoteAwaitingSave: QuoteAwaitingSaveContext | null
-  quoteSendOpen: boolean
-  setQuoteSendOpen: (v: boolean) => void
   setCaseDocPanel: (v: 'documents') => void
   setPrecedentPicker: (v: PrecedentPickerState | null) => void
 
@@ -120,6 +116,7 @@ export type CaseDetailOverlayModalsProps = {
 
   contactPickModal: {
     precedentId: string | null
+    precedentName: string | null
     composeKind: 'letter' | 'email'
     attachmentFileIds?: string[]
   } | null
@@ -146,6 +143,7 @@ export type CaseDetailOverlayModalsProps = {
   setContactPickModal: (
     v: {
       precedentId: string | null
+      precedentName: string | null
       composeKind: 'letter' | 'email'
       attachmentFileIds?: string[]
     } | null,
@@ -343,37 +341,6 @@ export function CaseDetailOverlayModals(props: CaseDetailOverlayModalsProps) {
             props.quoteWasCreatedRef.current = true
           }}
           onAwaitingQuoteSave={props.setQuoteAwaitingSave}
-        />
-      ) : null}
-
-      {props.quoteAwaitingSave ? (
-        <QuoteSendPrompt
-          token={token}
-          caseId={props.quoteAwaitingSave.caseId}
-          fileId={props.quoteAwaitingSave.fileId}
-          preferredContactId={props.quoteAwaitingSave.preferredContactId}
-          portalEnabled={props.quoteAwaitingSave.portalEnabled}
-          open={props.quoteSendOpen}
-          onClose={() => {
-            props.setQuoteSendOpen(false)
-            props.setQuoteAwaitingSave(null)
-          }}
-          onSendLetter={(_caseId) => {
-            props.setCaseDocPanel('documents')
-            props.setPrecedentPicker({ kind: 'letter' })
-          }}
-          onSendEmail={(_caseId) => {
-            props.setCaseDocPanel('documents')
-            props.setPrecedentPicker({
-              kind: 'email',
-              preferPrecedentReference: QUOTE_EMAIL_PRECEDENT_REFERENCE,
-              attachmentFileId: props.quoteAwaitingSave?.fileId,
-            })
-          }}
-          onSent={() => {
-            props.quoteWasCreatedRef.current = true
-            onRefresh()
-          }}
         />
       ) : null}
 

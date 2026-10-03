@@ -1,13 +1,15 @@
-/** Client-portal background colour helpers (hex wheel + text). */
+/** Client-portal background / font colour helpers (hex wheel + text). */
 
 export const DEFAULT_PORTAL_BACKGROUND = '#1E293B'
-export const PORTAL_BRAND_INK = '#F8FAFC'
+export const DEFAULT_PORTAL_FONT_COLOR = '#F8FAFC'
+/** @deprecated Prefer DEFAULT_PORTAL_FONT_COLOR */
+export const PORTAL_BRAND_INK = DEFAULT_PORTAL_FONT_COLOR
 
 const HEX6 = /^#([0-9A-Fa-f]{6})$/
 const HEX3 = /^#([0-9A-Fa-f]{3})$/
 
 /** Canonical `#RRGGBB` or `null` for product default / empty. */
-export function normalizePortalBackgroundColor(raw: string | null | undefined): string | null {
+export function normalizePortalHexColor(raw: string | null | undefined): string | null {
   if (raw == null) return null
   let s = raw.trim()
   if (!s) return null
@@ -22,13 +24,21 @@ export function normalizePortalBackgroundColor(raw: string | null | undefined): 
   return null
 }
 
+export function normalizePortalBackgroundColor(raw: string | null | undefined): string | null {
+  return normalizePortalHexColor(raw)
+}
+
+export function normalizePortalFontColor(raw: string | null | undefined): string | null {
+  return normalizePortalHexColor(raw)
+}
+
 function srgbChannel(c: number): number {
   const x = c / 255
   return x <= 0.04045 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4
 }
 
 export function relativeLuminance(hex: string): number {
-  const h = normalizePortalBackgroundColor(hex) ?? DEFAULT_PORTAL_BACKGROUND
+  const h = normalizePortalHexColor(hex) ?? DEFAULT_PORTAL_BACKGROUND
   const r = parseInt(h.slice(1, 3), 16)
   const g = parseInt(h.slice(3, 5), 16)
   const b = parseInt(h.slice(5, 7), 16)
@@ -43,9 +53,14 @@ export function contrastRatio(a: string, b: string): number {
   return (lighter + 0.05) / (darker + 0.05)
 }
 
-/** Light brand title ink must stay readable on the portal canvas. */
-export function portalBackgroundContrastOk(bg: string, minRatio = 4.5): boolean {
-  const n = normalizePortalBackgroundColor(bg)
+/** Brand title ink must stay readable on the portal canvas. */
+export function portalBackgroundContrastOk(
+  bg: string,
+  ink: string = DEFAULT_PORTAL_FONT_COLOR,
+  minRatio = 4.5,
+): boolean {
+  const n = normalizePortalHexColor(bg)
+  const i = normalizePortalHexColor(ink) ?? DEFAULT_PORTAL_FONT_COLOR
   if (!n) return true
-  return contrastRatio(n, PORTAL_BRAND_INK) >= minRatio
+  return contrastRatio(n, i) >= minRatio
 }

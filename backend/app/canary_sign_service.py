@@ -684,19 +684,55 @@ def void_signing_request(
     return req
 
 
-def remind_signing_request(db: Session, *, req: CanarySignRequest, actor: User) -> None:
+def remind_signing_request(
+    db: Session,
+    *,
+    req: CanarySignRequest,
+    actor: User,
+    recipient_ids: list[uuid.UUID] | None = None,
+) -> None:
     mark_expired_if_needed(db, req)
     if req.status != CanarySignStatus.pending:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only pending requests can be reminded")
     all_recipients = _recipients_for_request(db, req.id)
-    recipients = [
+    outstanding = [
         r
         for r in all_recipients
         if r.status in (CanarySignRecipientStatus.pending, CanarySignRecipientStatus.viewed)
     ]
     if req.order_mode == CanarySignOrderMode.sequential:
         eligible_order = _next_sequential_order(all_recipients)
-        recipients = [r for r in recipients if r.routing_order == eligible_order]
+        outstanding = [r for r in outstanding if r.routing_order == eligible_order]
+
+    if recipient_ids:
+        wanted = {rid for rid in recipient_ids}
+        unknown = wanted - {r.id for r in all_recipients}
+        if unknown:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="One or more recipients are not on this signing request.",
+            )
+        blocked = [
+            r
+            for r in all_recipients
+            if r.id in wanted
+            and r.status
+            not in (CanarySignRecipientStatus.pending, CanarySignRecipientStatus.viewed)
+        ]
+        if blocked:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Cannot remind recipients who have already signed or are no longer outstanding.",
+            )
+        recipients = [r for r in outstanding if r.id in wanted]
+    else:
+        recipients = outstanding
+
+    if not recipients:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No outstanding recipients to remind.",
+        )
     _notify_recipients(db, req, recipients, kind=AlertKind.canary_sign_reminded)
     _add_audit(
         db,
@@ -710,7 +746,10 @@ def remind_signing_request(db: Session, *, req: CanarySignRequest, actor: User) 
         action="canary_sign.request.reminded",
         entity_type="canary_sign_request",
         entity_id=str(req.id),
-        meta={"case_id": str(req.case_id)},
+        meta={
+            "case_id": str(req.case_id),
+            "recipient_ids": [str(r.id) for r in recipients],
+        },
     )
     db.commit()
 

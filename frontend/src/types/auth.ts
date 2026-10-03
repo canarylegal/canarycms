@@ -128,6 +128,8 @@ export type Verify2FASessionResponse = TokenResponse & {
 export type AdminUserPublic = UserPublic & {
   permission_category_id?: string | null
   charge_rate_pence_per_hour?: number | null
+  /** Supervising partner for [SUPERVISOR*] merge codes (Admin → Users). */
+  supervisor_user_id?: string | null
 }
 
 export type WebAuthnCredentialOut = {

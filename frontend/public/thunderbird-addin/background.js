@@ -76,17 +76,33 @@
       return true
     }
     if (message && message.type === 'canary-open-attach-picker') {
-      void (async function () {
+      // Single-flight across duplicate listeners / double clicks (do not clear until open settles).
+      if (globalThis.__canaryOpenAttachPickerPromise) {
+        void globalThis.__canaryOpenAttachPickerPromise.then(function (r) {
+          sendResponse(r || { ok: true, deduped: true })
+        })
+        return true
+      }
+      globalThis.__canaryOpenAttachPickerPromise = (async function () {
         try {
           const open = globalThis.canaryOpenAttachPickerWindow
-          const r = open
+          return open
             ? await open(message.caseId, message.composeTabId, message.selectedIds || [])
             : { ok: false, detail: 'canaryOpenAttachPickerWindow missing' }
-          sendResponse(r)
         } catch (e) {
-          sendResponse({ ok: false, detail: (e && e.message) || String(e) })
+          return { ok: false, detail: (e && e.message) || String(e) }
+        } finally {
+          const held = globalThis.__canaryOpenAttachPickerPromise
+          setTimeout(function () {
+            if (globalThis.__canaryOpenAttachPickerPromise === held) {
+              globalThis.__canaryOpenAttachPickerPromise = null
+            }
+          }, 1500)
         }
       })()
+      void globalThis.__canaryOpenAttachPickerPromise.then(function (r) {
+        sendResponse(r)
+      })
       return true
     }
     if (message && message.type === 'canary-open-compose-panel') {
@@ -112,12 +128,19 @@
     }
     if (message && message.type === 'canary-apply-compose-attachments') {
       void (async function () {
+        const tabId = message.composeTabId
+        const caseId = message.caseId
+        const lockKey = String(tabId) + ':' + String(caseId)
+        if (globalThis.__canaryAttachInflight && globalThis.__canaryAttachInflight[lockKey]) {
+          sendResponse({ ok: false, detail: 'Attach already in progress.' })
+          return
+        }
+        if (!globalThis.__canaryAttachInflight) globalThis.__canaryAttachInflight = {}
+        globalThis.__canaryAttachInflight[lockKey] = true
         try {
           const cs = globalThis.canaryComposeStore
           const sh = globalThis.canaryShared
           const applyAtt = globalThis.canaryApplyComposeAttachments
-          const tabId = message.composeTabId
-          const caseId = message.caseId
           if (!cs || !sh || !applyAtt || tabId == null || !caseId) {
             sendResponse({ ok: false, detail: 'Attach apply not available.' })
             return
@@ -160,6 +183,8 @@
           sendResponse({ ok: true })
         } catch (e) {
           sendResponse({ ok: false, detail: (e && e.message) || String(e) })
+        } finally {
+          if (globalThis.__canaryAttachInflight) delete globalThis.__canaryAttachInflight[lockKey]
         }
       })()
       return true
@@ -168,6 +193,7 @@
       void (async function () {
         try {
           const tabId = message.composeTabId
+          const focusOnly = message.focusOnly !== false
           const focusWindow = globalThis.canaryFocusComposePanelWindow
           const openWindow = globalThis.canaryOpenComposePanelWindow
           let r
@@ -177,6 +203,11 @@
               sendResponse(r)
               return
             }
+          }
+          if (focusOnly) {
+            // Do not create a new panel when returning from attach/close flows.
+            sendResponse({ ok: true, focused: false, skippedOpen: true })
+            return
           }
           if (typeof openWindow === 'function') {
             r = await openWindow(tabId, { focusOnly: true })
@@ -188,13 +219,7 @@
             sendResponse(r)
             return
           }
-          const fromToolbar = globalThis.canaryOpenComposePanelFromToolbar
-          if (typeof fromToolbar === 'function') {
-            r = await fromToolbar(ext, { id: tabId })
-          } else {
-            r = { ok: false, detail: 'Compose panel opener missing' }
-          }
-          sendResponse(r)
+          sendResponse({ ok: false, detail: 'Compose panel opener missing' })
         } catch (e) {
           sendResponse({ ok: false, detail: (e && e.message) || String(e) })
         }

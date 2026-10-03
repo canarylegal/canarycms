@@ -15,8 +15,10 @@ export function normalizeFolderPathForPortal(folderPath: string): string {
 export function folderMatchesPortalGrant(targetFolder: string, grantFolder: string): boolean {
   const target = normalizeFolderPathForPortal(targetFolder)
   const grant = normalizeFolderPathForPortal(grantFolder)
+  // Matter root must never be treated as a portal-shared grant path.
+  if (!grant) return false
   if (target === grant) return true
-  if (grant && target.startsWith(`${grant}/`)) return true
+  if (target.startsWith(`${grant}/`)) return true
   return false
 }
 

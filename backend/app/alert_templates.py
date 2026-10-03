@@ -2,6 +2,28 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
+from contextvars import ContextVar
+from typing import Iterator
+
+# Professional navy accent (legal-firm friendly; replaces earlier teal).
+_EMAIL_ACCENT = "#162E49"
+_EMAIL_ACCENT_SOFT = "#EEF2F8"
+_EMAIL_MUTED = "#64748B"
+_EMAIL_INK = "#0F172A"
+
+_logo_url_ctx: ContextVar[str | None] = ContextVar("alert_email_logo_url", default=None)
+
+
+@contextmanager
+def email_branding(*, logo_url: str | None) -> Iterator[None]:
+    """Attach firm portal logo URL for HTML shells built inside the block."""
+    token = _logo_url_ctx.set((logo_url or "").strip() or None)
+    try:
+        yield
+    finally:
+        _logo_url_ctx.reset(token)
+
 
 def _firm_line(firm_name: str) -> str:
     name = (firm_name or "").strip()
@@ -9,19 +31,15 @@ def _firm_line(firm_name: str) -> str:
 
 
 def _html_email(*, firm_name: str, paragraphs: list[str], bullets: list[str] | None = None) -> str:
-    parts = [
-        '<!DOCTYPE html><html><body style="font-family:system-ui,sans-serif;line-height:1.5;color:#1a1a2e;">',
-    ]
+    inner_parts: list[str] = []
     for p in paragraphs:
-        parts.append(f"<p>{_escape_html(p)}</p>")
+        inner_parts.append(f"<p>{_escape_html(p)}</p>")
     if bullets:
-        parts.append("<ul>")
+        inner_parts.append("<ul>")
         for b in bullets:
-            parts.append(f"<li>{_escape_html(b)}</li>")
-        parts.append("</ul>")
-    parts.append(f'<p style="color:#666;margin-top:1.5em;">— {_escape_html(_firm_line(firm_name))}</p>')
-    parts.append("</body></html>")
-    return "".join(parts)
+            inner_parts.append(f"<li>{_escape_html(b)}</li>")
+        inner_parts.append("</ul>")
+    return _html_email_shell(firm_name=firm_name, inner_html="".join(inner_parts))
 
 
 def _escape_html(s: str) -> str:
@@ -38,17 +56,17 @@ def _html_cta_button(url: str, label: str) -> str:
     safe_label = _escape_html(label)
     return (
         '<p style="margin:1.25em 0 0.75em;">'
-        f'<a href="{safe_url}" style="display:inline-block;padding:12px 22px;background-color:#0891b2;'
-        'color:#ffffff;text-decoration:none;font-weight:600;border-radius:8px;font-size:15px;">'
+        f'<a href="{safe_url}" style="display:inline-block;padding:12px 22px;background-color:{_EMAIL_ACCENT};'
+        'color:#ffffff;text-decoration:none;font-weight:600;border-radius:6px;font-size:15px;">'
         f"{safe_label}</a></p>"
     )
 
 
 def _html_fallback_link(url: str) -> str:
     return (
-        '<p style="font-size:13px;color:#64748b;margin:0;">'
+        f'<p style="font-size:13px;color:{_EMAIL_MUTED};margin:0;">'
         "If the button does not work, open this link:<br>"
-        f'<a href="{_escape_html(url)}" style="color:#0891b2;">{_escape_html(url)}</a>'
+        f'<a href="{_escape_html(url)}" style="color:{_EMAIL_ACCENT};">{_escape_html(url)}</a>'
         "</p>"
     )
 
@@ -57,7 +75,7 @@ def _html_highlight_code(label: str, code: str) -> str:
     return (
         f'<p style="margin:1em 0 0.5em;font-size:14px;color:#334155;">{_escape_html(label)}</p>'
         '<p style="margin:0 0 1em;font-family:ui-monospace,monospace;font-size:22px;font-weight:700;'
-        f'letter-spacing:0.08em;color:#0f172a;background:#f1f5f9;padding:12px 16px;border-radius:8px;'
+        f'letter-spacing:0.08em;color:{_EMAIL_INK};background:{_EMAIL_ACCENT_SOFT};padding:12px 16px;border-radius:6px;'
         f'display:inline-block;">{_escape_html(code)}</p>'
     )
 
@@ -72,17 +90,45 @@ def _html_info_block(*, title: str, lines: list[str]) -> str:
         f'<p style="margin:0 0 6px;color:#334155;">{_escape_html(line)}</p>' for line in lines
     )
     return (
-        f'<p style="margin:0 0 8px;font-weight:600;color:#0f172a;">{_escape_html(title)}</p>'
+        f'<p style="margin:0 0 8px;font-weight:600;color:{_EMAIL_INK};">{_escape_html(title)}</p>'
         f"{body}"
     )
 
 
 def _html_email_shell(*, inner_html: str, firm_name: str) -> str:
+    firm = _firm_line(firm_name)
+    logo_url = _logo_url_ctx.get()
+    footer_logo = ""
+    if logo_url:
+        footer_logo = (
+            '<div style="margin:0 0 12px;">'
+            f'<img src="{_escape_html(logo_url)}" alt="{_escape_html(firm)}" '
+            'width="160" style="max-width:160px;height:auto;display:block;border:0;" />'
+            "</div>"
+        )
     return (
-        '<!DOCTYPE html><html><body style="font-family:system-ui,-apple-system,\'Segoe UI\',sans-serif;'
-        'line-height:1.5;color:#0f172a;max-width:560px;">'
-        f"{inner_html}"
-        f'<p style="color:#666;margin-top:1.5em;">— {_escape_html(_firm_line(firm_name))}</p>'
+        "<!DOCTYPE html><html><body "
+        'style="margin:0;padding:0;background:#F4F6F8;'
+        f'color:{_EMAIL_INK};">'
+        '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
+        'style="background:#F4F6F8;padding:24px 12px;">'
+        '<tr><td align="center">'
+        '<table role="presentation" width="560" cellpadding="0" cellspacing="0" '
+        'style="max-width:560px;width:100%;background:#ffffff;border:1px solid #E2E8F0;'
+        'border-radius:8px;overflow:hidden;">'
+        f'<tr><td style="height:4px;background:{_EMAIL_ACCENT};font-size:0;line-height:0;">&nbsp;</td></tr>'
+        '<tr><td style="padding:28px 28px 8px;font-family:system-ui,-apple-system,\'Segoe UI\',sans-serif;">'
+        f'<p style="margin:0 0 18px;font-size:12px;letter-spacing:0.06em;text-transform:uppercase;'
+        f'color:{_EMAIL_ACCENT};font-weight:700;">{_escape_html(firm)}</p>'
+        f'<div style="font-size:15px;line-height:1.55;color:{_EMAIL_INK};">{inner_html}</div>'
+        "</td></tr>"
+        f'<tr><td style="padding:16px 28px 24px;border-top:1px solid {_EMAIL_ACCENT_SOFT};'
+        "font-family:system-ui,-apple-system,'Segoe UI',sans-serif;\">"
+        f"{footer_logo}"
+        f'<p style="margin:0;font-size:13px;color:{_EMAIL_MUTED};">— {_escape_html(firm)}</p>'
+        "</td></tr>"
+        "</table>"
+        "</td></tr></table>"
         "</body></html>"
     )
 

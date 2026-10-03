@@ -25,7 +25,7 @@ def test_quote_link_for_delivery_uses_short_path(monkeypatch):
 def _assert_portal_html_has_cta(html: str, url: str, label: str) -> None:
     assert f'href="{url}"' in html
     assert label in html
-    assert "#0891b2" in html
+    assert "#162E49" in html
     assert "If the button does not work" in html
 
 
@@ -42,7 +42,25 @@ def test_portal_quote_sent_html_uses_cta_button():
     assert subject.startswith("Quote — ")
     assert "View your quote:" in body
     _assert_portal_html_has_cta(html, portal_url, "View your quote")
+    assert "background:#F4F6F8" in html
     assert len(portal_url) < 120
+
+
+def test_portal_quote_sent_html_includes_footer_logo_when_branded():
+    from app.alert_templates import email_branding
+
+    portal_url = "https://example.test/portal/q/demo"
+    logo = "https://example.test/api/portal/logo"
+    with email_branding(logo_url=logo):
+        _, _, html = portal_quote_sent(
+            firm_name="Rhodes & Walker",
+            contact_name="Alex Brown",
+            quote_filename="Quote.docx",
+            matter_label="Sale of 1 High Street",
+            portal_url=portal_url,
+        )
+    assert f'src="{logo}"' in html
+    assert "Rhodes &amp; Walker" in html or "Rhodes & Walker" in html
 
 
 def test_portal_client_emails_use_styled_cta():

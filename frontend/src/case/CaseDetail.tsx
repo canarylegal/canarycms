@@ -105,7 +105,7 @@ export function CaseDetail({
 }) {
   void _notes
   void _tasks
-  const { askConfirm } = useDialogs()
+  const { askConfirm, alert: showAlert } = useDialogs()
   const { push: pushNotification } = useNotifications()
   const caseId = caseDetail?.id
   const portalEnabled = Boolean(caseDetail?.portal_enabled)
@@ -169,6 +169,15 @@ export function CaseDetail({
   }, [])
 
   const [actionErr, setActionErr] = useState<string | null>(null)
+
+  // Surface action failures as modal dialogs (not inline banners that shift the case layout).
+  useEffect(() => {
+    if (!actionErr) return
+    const msg = actionErr
+    setActionErr(null)
+    void showAlert(msg, 'Error')
+  }, [actionErr, showAlert])
+
   const [textPrompt, setTextPrompt] = useState<
     | null
     | {
@@ -241,7 +250,6 @@ export function CaseDetail({
   const [quoteWizardOpen, setQuoteWizardOpen] = useState(false)
   const [formSendOpen, setFormSendOpen] = useState(false)
   const [quoteAwaitingSave, setQuoteAwaitingSave] = useState<QuoteAwaitingSaveContext | null>(null)
-  const [quoteSendOpen, setQuoteSendOpen] = useState(false)
   const quoteWasCreatedRef = useRef(false)
   const closeQuoteWizard = useCallback(() => {
     setQuoteWizardOpen(false)
@@ -252,7 +260,7 @@ export function CaseDetail({
   }, [onRefresh])
 
   const onQuotePublished = useCallback(() => {
-    setQuoteSendOpen(true)
+    setQuoteAwaitingSave(null)
   }, [])
 
   const onQuoteDiscarded = useCallback(() => {
@@ -391,7 +399,12 @@ export function CaseDetail({
     filteredPrecedentChoices,
   } = useCasePrecedentPicker({ token, caseDetail, matterHeadTypes })
   const [contactPickModal, setContactPickModal] = useState<
-    null | { precedentId: string | null; composeKind: 'letter' | 'email'; attachmentFileIds?: string[] }
+    null | {
+      precedentId: string | null
+      precedentName: string | null
+      composeKind: 'letter' | 'email'
+      attachmentFileIds?: string[]
+    }
   >(null)
   const [pickMatterCcId, setPickMatterCcId] = useState<string>('none') // 'none' | 'all_clients' | case contact id
   const [pickSelectedContact, setPickSelectedContact] = useState<ContactOut | null>(null)
@@ -467,6 +480,8 @@ export function CaseDetail({
 
   const openPortalSharePanel = useCallback((folderPath: string) => {
     if (!portalEnabled) return
+    // Matter root cannot be shared via the portal — only named folders.
+    if (!(folderPath || '').trim()) return
     setPortalShareFolderPath(folderPath)
     setCaseDocPanel('portal-share')
     setDocMenu(null)
@@ -927,20 +942,32 @@ export function CaseDetail({
     const pid = precedentChosenId
     const attachmentFileIds = precedentPicker.attachmentFileId ? [precedentPicker.attachmentFileId] : []
     if (precedentPicker.kind === 'document') {
+      const chosen = pid ? filteredPrecedentChoices.find((p) => p.id === pid) : null
+      const stem = (chosen?.name || 'Document').replace(/[/\\]/g, '_').slice(0, 120)
+      const srcName = (chosen?.original_filename || '').toLowerCase()
+      const srcMime = (chosen?.mime_type || '').toLowerCase()
+      const isPdf = srcName.endsWith('.pdf') || srcMime === 'application/pdf' || srcMime.endsWith('/pdf')
+      const filename = isPdf ? `${stem}.pdf` : `${stem}.docx`
       setPrecedentPicker(null)
-      void composeOfficeFile(`Document — ${new Date().toISOString().slice(0, 10)}.docx`, pid, undefined, undefined, undefined, 'document')
+      void composeOfficeFile(filename, pid, undefined, undefined, undefined, 'document')
       return
     }
     if (precedentPicker.kind === 'letter') {
+      const precedentName = pid
+        ? filteredPrecedentChoices.find((p) => p.id === pid)?.name?.trim() || null
+        : null
       setPrecedentPicker(null)
       resetContactPickForm()
-      setContactPickModal({ precedentId: pid, composeKind: 'letter' })
+      setContactPickModal({ precedentId: pid, precedentName, composeKind: 'letter' })
       return
     }
     if (precedentPicker.kind === 'email') {
+      const precedentName = pid
+        ? filteredPrecedentChoices.find((p) => p.id === pid)?.name?.trim() || null
+        : null
       setPrecedentPicker(null)
       resetContactPickForm()
-      setContactPickModal({ precedentId: pid, composeKind: 'email', attachmentFileIds })
+      setContactPickModal({ precedentId: pid, precedentName, composeKind: 'email', attachmentFileIds })
       return
     }
   }
@@ -995,7 +1022,9 @@ export function CaseDetail({
         return
       }
 
-      const fn = `Letter — ${label.replace(/[/\\]/g, '_').slice(0, 120)}.docx`
+      const safeContact = label.replace(/[/\\]/g, '_').slice(0, 120)
+      const precedentStem = (contactPickModal.precedentName || 'Letter').replace(/[/\\]/g, '_').slice(0, 120)
+      const fn = `${precedentStem} — ${safeContact}.docx`
       await composeOfficeFile(
         fn,
         contactPickModal.precedentId,
@@ -1018,7 +1047,6 @@ export function CaseDetail({
   return (
     <div className="caseShell">
       {error ? <div className="error">{error}</div> : null}
-      {caseDocPanel !== 'edit-details' && actionErr ? <div className="error">{actionErr}</div> : null}
       <div
         className="caseGrid"
         onDragOver={(e) => {
@@ -1268,8 +1296,6 @@ export function CaseDetail({
           quoteWasCreatedRef={quoteWasCreatedRef}
           setQuoteAwaitingSave={setQuoteAwaitingSave}
           quoteAwaitingSave={quoteAwaitingSave}
-          quoteSendOpen={quoteSendOpen}
-          setQuoteSendOpen={setQuoteSendOpen}
           setCaseDocPanel={setCaseDocPanel}
           setPrecedentPicker={setPrecedentPicker}
           formSendOpen={formSendOpen}

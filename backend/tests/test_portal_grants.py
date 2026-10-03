@@ -23,8 +23,12 @@ from app.models import (
 )
 from app.portal_service import (
     ensure_upload_folder_allowed,
+    file_folder_in_grant,
+    grant_folder_still_exists,
     grant_is_active,
+    purge_matter_root_portal_grants,
     rename_portal_grants_for_folder,
+    require_shareable_portal_folder,
     revoke_portal_grants_for_deleted_folder,
 )
 
@@ -169,6 +173,46 @@ def test_revoke_portal_grants_empty_prefix_is_noop() -> None:
     case, contact, user = _seed(db)
     _add_grant(db, case=case, contact=contact, user=user, folder_path="shared")
     assert revoke_portal_grants_for_deleted_folder(db, case_id=case.id, folder_path="") == 0
+
+
+def test_require_shareable_portal_folder_rejects_root() -> None:
+    with pytest.raises(HTTPException) as ei:
+        require_shareable_portal_folder("")
+    assert ei.value.status_code == 400
+    assert "matter root" in str(ei.value.detail).lower()
+    assert require_shareable_portal_folder("Shared/Docs") == "Shared/Docs"
+
+
+def test_file_folder_in_grant_never_matches_empty_grant() -> None:
+    assert file_folder_in_grant(file_folder="", grant_folder="") is False
+    assert file_folder_in_grant(file_folder="docs", grant_folder="") is False
+    assert file_folder_in_grant(file_folder="docs", grant_folder="docs") is True
+
+
+def test_grant_folder_still_exists_false_for_root() -> None:
+    db = _session()
+    case, _contact, _user = _seed(db)
+    assert grant_folder_still_exists(db, case_id=case.id, folder_path="") is False
+
+
+def test_purge_matter_root_portal_grants() -> None:
+    db = _session()
+    case, contact, user = _seed(db)
+    _add_grant(db, case=case, contact=contact, user=user, folder_path="")
+    keep = _add_grant(db, case=case, contact=contact, user=user, folder_path="shared")
+    removed = purge_matter_root_portal_grants(db)
+    db.commit()
+    assert removed == 1
+    remaining = db.execute(select(ContactPortalGrant)).scalars().all()
+    assert len(remaining) == 1
+    assert remaining[0].id == keep.id
+
+
+def test_ensure_upload_folder_allowed_rejects_root_grant() -> None:
+    grant = SimpleNamespace(folder_path="", can_upload=True)
+    with pytest.raises(HTTPException) as ei:
+        ensure_upload_folder_allowed(grant=grant, folder="")  # type: ignore[arg-type]
+    assert ei.value.status_code == 403
 
 
 def test_rename_portal_grants_for_folder_updates_paths_and_label() -> None:

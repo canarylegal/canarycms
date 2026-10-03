@@ -195,6 +195,14 @@ def firm_portal_logo_file_paths(*, file_id: uuid.UUID, original_filename: str) -
     return StoredFilePaths(abs_path=abs_path, rel_path=str(rel), folder_path="")
 
 
+def firm_portal_background_file_paths(*, file_id: uuid.UUID, original_filename: str) -> StoredFilePaths:
+    safe_name = Path(original_filename).name
+    rel = Path("firm") / "portal-background" / f"{file_id}__{safe_name}"
+    abs_path = assert_under_files_root(FILES_ROOT / rel)
+    abs_path.parent.mkdir(parents=True, exist_ok=True)
+    return StoredFilePaths(abs_path=abs_path, rel_path=str(rel), folder_path="")
+
+
 def firm_default_signature_file_paths(*, file_id: uuid.UUID, original_filename: str) -> StoredFilePaths:
     safe_name = Path(original_filename).name
     rel = Path("firm") / "default-signature" / f"{file_id}__{safe_name}"

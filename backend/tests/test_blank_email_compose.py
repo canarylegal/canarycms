@@ -24,6 +24,31 @@ def test_blank_email_compose_resolves_to_blank_email_precedent(db) -> None:
     assert resolved.precedent_id == blank_email.id
 
 
+def test_blank_email_merges_without_contact(db) -> None:
+    """Matter-level codes must resolve even when no recipient contact is selected."""
+    case = db.execute(select(Case).limit(1)).scalar_one_or_none()
+    blank_email = db.execute(
+        select(Precedent).where(Precedent.reference == BLANK_EMAIL_PRECEDENT_REFERENCE)
+    ).scalar_one_or_none()
+    if case is None or blank_email is None:
+        pytest.skip("seed data required")
+
+    body = ComposeOfficeDocumentIn(
+        original_filename="Email draft.docx",
+        folder="",
+        precedent_id=blank_email.id,
+        case_contact_id=None,
+        global_contact_id=None,
+        precedent_merge_all_clients=False,
+    )
+    out, _mime = merge_compose_docx_bytes(db, case.id, body, require_precedent_kind=blank_email.kind)
+    text = extract_plain_text_from_docx_bytes(out)
+    assert "[CASE_REF]" not in text
+    assert "[FEE_EARNER]" not in text
+    assert "[DATE]" not in text
+    assert case.case_number in text
+
+
 def test_blank_email_compose_body_is_not_letter_layout(db) -> None:
     case = db.execute(select(Case).limit(1)).scalar_one_or_none()
     blank_email = db.execute(

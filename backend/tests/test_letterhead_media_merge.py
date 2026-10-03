@@ -156,3 +156,104 @@ def test_letterhead_merge_tightens_footer_paragraph_spacing() -> None:
         footer_xml = z.read(footer_name).decode()
     assert 'after="0"' in footer_xml
     assert 'line="240"' in footer_xml
+
+
+def _letterhead_with_loose_doc_defaults() -> bytes:
+    """Letterhead whose styles.xml uses Word's common loose body spacing defaults."""
+    import re
+
+    doc = Document()
+    doc.add_paragraph("")
+    buf = io.BytesIO()
+    doc.save(buf)
+    raw = buf.getvalue()
+    with zipfile.ZipFile(io.BytesIO(raw), "r") as zin:
+        parts = {name: zin.read(name) for name in zin.namelist()}
+    styles = parts["word/styles.xml"].decode("utf-8")
+    loose = (
+        "<w:docDefaults><w:rPrDefault><w:rPr>"
+        '<w:lang w:val="en-GB"/>'
+        "</w:rPr></w:rPrDefault><w:pPrDefault><w:pPr>"
+        '<w:spacing w:after="200" w:line="276" w:lineRule="auto"/>'
+        "</w:pPr></w:pPrDefault></w:docDefaults>"
+    )
+    if "<w:docDefaults>" in styles:
+        styles = re.sub(r"<w:docDefaults>.*?</w:docDefaults>", loose, styles, count=1, flags=re.S)
+    else:
+        styles = re.sub(r"(<w:styles\b[^>]*>)", r"\1" + loose, styles, count=1)
+    parts["word/styles.xml"] = styles.encode("utf-8")
+    out = io.BytesIO()
+    with zipfile.ZipFile(out, "w") as zout:
+        for name, data in parts.items():
+            zout.writestr(name, data)
+    return out.getvalue()
+
+
+def test_pin_empty_body_paragraph_spacing_content_keeps_docdefaults_after() -> None:
+    from app.docx_util.letterhead import pin_empty_body_paragraph_spacing
+    from docx.oxml.ns import qn
+
+    doc = Document()
+    p = doc.add_paragraph("Hello")
+    p_pr = p._p.get_or_add_pPr()
+    # Mimic Burrows/sale body precedents: empty <w:spacing/> with no after/before.
+    p_pr.append(p._p.makeelement(qn("w:spacing"), {}))
+    empty = doc.add_paragraph("")
+    empty._p.get_or_add_pPr().append(empty._p.makeelement(qn("w:spacing"), {}))
+    buf = io.BytesIO()
+    doc.save(buf)
+    pinned = pin_empty_body_paragraph_spacing(buf.getvalue())
+    out = Document(io.BytesIO(pinned))
+    content_sp = out.paragraphs[0]._p.find(qn("w:pPr")).find(qn("w:spacing"))
+    empty_sp = out.paragraphs[1]._p.find(qn("w:pPr")).find(qn("w:spacing"))
+    assert content_sp is not None
+    # Content gets explicit docDefaults after (Dear→body gap); blank spacers stay after=0.
+    assert content_sp.get(qn("w:after")) == "200"
+    assert content_sp.get(qn("w:before")) == "0"
+    assert empty_sp is not None
+    assert empty_sp.get(qn("w:after")) == "0"
+    assert empty_sp.get(qn("w:before")) == "0"
+
+
+def test_letterhead_merge_keeps_precedent_paragraph_spacing() -> None:
+    """Letterhead fonts apply, but body paragraph spacing stays with the letter precedent."""
+    import re
+
+    # Precedent with explicit loose body spacing (matches BLANK_LETTER / Word defaults).
+    prec_doc = Document()
+    prec_doc.add_paragraph("Letter body")
+    buf = io.BytesIO()
+    prec_doc.save(buf)
+    prec_raw = buf.getvalue()
+    with zipfile.ZipFile(io.BytesIO(prec_raw), "r") as zin:
+        parts = {name: zin.read(name) for name in zin.namelist()}
+    styles = parts["word/styles.xml"].decode("utf-8")
+    prec_defaults = (
+        "<w:docDefaults><w:rPrDefault><w:rPr>"
+        '<w:lang w:val="en-US"/>'
+        "</w:rPr></w:rPrDefault><w:pPrDefault><w:pPr>"
+        '<w:spacing w:after="200" w:line="276" w:lineRule="auto"/>'
+        "</w:pPr></w:pPrDefault></w:docDefaults>"
+    )
+    if "<w:docDefaults>" in styles:
+        styles = re.sub(r"<w:docDefaults>.*?</w:docDefaults>", prec_defaults, styles, count=1, flags=re.S)
+    else:
+        styles = re.sub(r"(<w:styles\b[^>]*>)", r"\1" + prec_defaults, styles, count=1)
+    parts["word/styles.xml"] = styles.encode("utf-8")
+    out = io.BytesIO()
+    with zipfile.ZipFile(out, "w") as zout:
+        for name, data in parts.items():
+            zout.writestr(name, data)
+    prec_bytes = out.getvalue()
+
+    merged = apply_digital_letterhead_headers_footers(prec_bytes, _letterhead_with_loose_doc_defaults())
+    with zipfile.ZipFile(io.BytesIO(merged)) as z:
+        merged_styles = z.read("word/styles.xml").decode("utf-8")
+    match = re.search(r"<w:docDefaults>.*?</w:docDefaults>", merged_styles, flags=re.S)
+    assert match is not None
+    defaults = match.group(0)
+    # Precedent paragraph spacing preserved.
+    assert 'after="200"' in defaults
+    assert 'line="276"' in defaults
+    # Letterhead run language applied (en-GB from helper), not the precedent's en-US alone.
+    assert 'w:val="en-GB"' in defaults or 'val="en-GB"' in defaults

@@ -38,7 +38,7 @@ def prepare_quote_letterhead(src: Path, dest: Path, *, slots: int = 25) -> None:
     doc.add_paragraph("Dear [CONTACT_LETTER_DEAR]")
     doc.add_paragraph("")
     doc.add_paragraph(
-        "Thank you for instructing us. Set out below is our estimate of costs based on a property value of "
+        "Thank you for instructing us. Set out below is our estimate of costs based on a property value of"
         "[QUOTE_PROPERTY_VALUE]."
     )
     doc.add_paragraph("")

@@ -26,8 +26,16 @@ export type FirmSettingsOut = {
   quote_letterhead_original_filename?: string | null
   portal_logo_configured?: boolean
   portal_logo_original_filename?: string | null
+  /** When false, hide the firm logo on the client portal (upload is kept). */
+  portal_logo_enabled?: boolean
   /** `#RRGGBB` solid portal page background; null = product default. */
   portal_background_color?: string | null
+  portal_background_configured?: boolean
+  portal_background_original_filename?: string | null
+  /** `#RRGGBB` chrome text on the portal canvas; null = product default. */
+  portal_font_color?: string | null
+  /** When false, custom portal canvas applies to the login screen only. */
+  portal_background_on_signed_in?: boolean
   default_signature_configured?: boolean
   default_signature_original_filename?: string | null
   default_signature_scale?: number

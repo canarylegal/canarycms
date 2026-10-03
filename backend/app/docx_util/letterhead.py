@@ -41,12 +41,48 @@ _LETTER_SCAFFOLD_PREFIX_TEXT_RE = (
     re.compile(r"^\s*Re:\s*\[MATTER_DESCRIPTION\]\s*$", re.I),
     re.compile(r"^\s*\[SOLICITOR_OUR_CLIENT_LINE\]\s*$", re.I),
     re.compile(r"^\s*\[SOLICITOR_YOUR_CLIENT_LINE\]\s*$", re.I),
+    # Body precedents sometimes still include a full letter shell — strip it so BLANK_LETTER owns spacing.
+    re.compile(
+        r"^\s*\[(?:CONTACT_ORG_AND_ADDRESS_BLOCK|ORG_AND_ADDRESS_BLOCK|PRIMARY_CLIENT_NAME|"
+        r"CONTACT_ORG_LINES|ORG_LINES|CONTACT_ADDRESS_BLOCK|ADDRESS_BLOCK)\]\s*$",
+        re.I,
+    ),
+    re.compile(
+        r"^\s*\[TITLE\](?:\s*\[(?:FIRST_INITIAL|MIDDLE_INITIAL|LAST_NAME|TITLE_\d|"
+        r"FIRST_INITIAL_\d|MIDDLE_INITIAL_\d|LAST_NAME_\d)\])*"
+        r"(?:\s*\[(?:ORG_AND_ADDRESS_BLOCK|CONTACT_ORG_AND_ADDRESS_BLOCK)\])?\s*$",
+        re.I,
+    ),
+    re.compile(r"^\s*\[DATE\]\s*$", re.I),
+    re.compile(r"^\s*Your\s+Ref\s*:", re.I),
+    re.compile(r"^\s*Our\s+Ref\s*:", re.I),
+    re.compile(r"^\s*Dear\b", re.I),
+    re.compile(r"^\s*\[(?:CONTACT_LETTER_DEAR|PRIMARY_CLIENT_LETTER_DEAR|CLIENT_\d_LETTER_DEAR)\]\s*$", re.I),
+)
+
+_LETTER_SCAFFOLD_RE_LINE_RE = re.compile(r"^\s*Re\s*:", re.I)
+_BLANK_LETTER_SIGN_OFF_RE = re.compile(
+    r"^\s*(?:Yours\s+sincerely,?|\[CONTACT_LETTER_SIGN_OFF\]|\[FEE_EARNER\]|\[FIRM_TRADING_NAME\])\s*$",
+    re.I,
 )
 
 
 def precedent_is_standalone_letter(src_bytes: bytes) -> bool:
     """True when a letter precedent already includes its own shell (date, refs, etc.)."""
-    return b"[DATE]" in src_bytes and PRECEDENT_BODY_MARKER.encode() not in src_bytes
+    # Prefer uncompressed document.xml — raw ZIP bytes often hide tokens inside deflate streams.
+    try:
+        import zipfile
+        import io
+
+        with zipfile.ZipFile(io.BytesIO(src_bytes)) as zf:
+            try:
+                xml = zf.read("word/document.xml")
+            except KeyError:
+                xml = b""
+        haystack = xml or src_bytes
+    except Exception:
+        haystack = src_bytes
+    return b"[DATE]" in haystack and PRECEDENT_BODY_MARKER.encode() not in haystack
 
 
 def _strip_letter_scaffold_prefix_from_body_elements(
@@ -68,6 +104,77 @@ def _strip_letter_scaffold_prefix_from_body_elements(
             continue
         break
     return elements
+
+
+def _body_elements_start_with_re_line(elements: list[Any], *, p_tag: str, t_tag: str) -> bool:
+    for el in elements:
+        if el.tag != p_tag:
+            continue
+        text = "".join((t.text or "") for t in el.iter(t_tag)).strip()
+        if not text:
+            continue
+        return bool(_LETTER_SCAFFOLD_RE_LINE_RE.match(text))
+    return False
+
+
+def _body_elements_include_sign_off(elements: list[Any], *, p_tag: str, t_tag: str) -> bool:
+    for el in elements:
+        if el.tag != p_tag:
+            continue
+        text = "".join((t.text or "") for t in el.iter(t_tag)).strip()
+        if _BLANK_LETTER_SIGN_OFF_RE.match(text) and "sincerely" in text.lower():
+            return True
+    return False
+
+
+def _remove_blank_letter_scaffold_subject_lines(base_body: Any, *, p_tag: str, t_tag: str) -> None:
+    """Drop BLANK_LETTER ``Re:`` / solicitor lines when the spliced body already supplies a subject."""
+    to_remove: list[Any] = []
+    for el in list(base_body):
+        if el.tag != p_tag:
+            continue
+        text = "".join((t.text or "") for t in el.iter(t_tag)).strip()
+        if any(
+            pat.match(text)
+            for pat in (
+                re.compile(r"^\s*Re:\s*\[MATTER_DESCRIPTION\]\s*$", re.I),
+                re.compile(r"^\s*\[SOLICITOR_OUR_CLIENT_LINE\]\s*$", re.I),
+                re.compile(r"^\s*\[SOLICITOR_YOUR_CLIENT_LINE\]\s*$", re.I),
+            )
+        ):
+            to_remove.append(el)
+    for el in to_remove:
+        parent = el.getparent()
+        if parent is not None:
+            parent.remove(el)
+
+
+def _remove_blank_letter_trailing_sign_off(base_body: Any, *, p_tag: str, t_tag: str) -> None:
+    """Drop BLANK_LETTER signature block when the spliced body already includes one."""
+    children = list(base_body)
+    # Walk from end (before sectPr) removing contiguous sign-off / empty paras.
+    from docx.oxml.ns import qn
+
+    sect_pr_tag = qn("w:sectPr")
+    i = len(children) - 1
+    while i >= 0 and children[i].tag == sect_pr_tag:
+        i -= 1
+    removed_any = False
+    while i >= 0:
+        el = children[i]
+        if el.tag != p_tag:
+            break
+        text = "".join((t.text or "") for t in el.iter(t_tag)).strip()
+        if not text or _BLANK_LETTER_SIGN_OFF_RE.match(text):
+            parent = el.getparent()
+            if parent is not None:
+                parent.remove(el)
+            removed_any = True
+            i -= 1
+            continue
+        break
+    # Only empty trailing cleanup is fine; if we never saw a sign-off token, put nothing back.
+    del removed_any
 
 
 def splice_precedent_into_blank_letter(blank_letter_bytes: bytes, precedent_bytes: bytes) -> bytes:
@@ -126,6 +233,11 @@ def splice_precedent_into_blank_letter(blank_letter_bytes: bytes, precedent_byte
         out_empty = io.BytesIO()
         base.save(out_empty)
         return out_empty.getvalue()
+
+    if _body_elements_start_with_re_line(src_elements, p_tag=p_tag, t_tag=t_tag):
+        _remove_blank_letter_scaffold_subject_lines(base_body, p_tag=p_tag, t_tag=t_tag)
+    if _body_elements_include_sign_off(src_elements, p_tag=p_tag, t_tag=t_tag):
+        _remove_blank_letter_trailing_sign_off(base_body, p_tag=p_tag, t_tag=t_tag)
 
     marker_para = None
     for el in base_body:
@@ -465,12 +577,18 @@ def _merge_letterhead_layout_settings(prec_parts: dict[str, bytes], lh_parts: di
     prec_parts[prec_settings_path] = ET.tostring(prec_root, encoding="utf-8", xml_declaration=True)
 
 
-def _merge_letterhead_style_doc_defaults(prec_parts: dict[str, bytes], lh_parts: dict[str, bytes]) -> None:
-    """Copy letterhead ``w:docDefaults`` so header/footer empty ``w:spacing`` resolves like the template.
+_RPR_DEFAULT_RE = re.compile(r"<(?:(?:w):)?rPrDefault\b.*?</(?:(?:w):)?rPrDefault>", re.IGNORECASE | re.DOTALL)
+_PPR_DEFAULT_RE = re.compile(r"<(?:(?:w):)?pPrDefault\b.*?</(?:(?:w):)?pPrDefault>", re.IGNORECASE | re.DOTALL)
 
-    Letter precedents often ship with an empty ``w:pPrDefault`` while firm letterheads include the
-  ``pBdr`` / ``spacing`` / ``ind`` scaffold Word expects. Without copying it, footer lines in
-    composed letters pick up taller default paragraph gaps.
+
+def _merge_letterhead_style_doc_defaults(prec_parts: dict[str, bytes], lh_parts: dict[str, bytes]) -> None:
+    """Merge letterhead run defaults (fonts / language) onto the precedent without changing body spacing.
+
+    Headers/footers are normalised separately. Body paragraph spacing must stay as in the letter
+    precedent (typically Word's ``after=200`` / ``line=276``) so composed letters match what authors
+    see when editing BLANK_LETTER. Overwriting that with single-spacing made generated letters too
+    tight; copying the letterhead's paragraph defaults wholesale previously made them too loose when
+    the scaffold had extra empty paras.
     """
     lh_styles = lh_parts.get("word/styles.xml")
     prec_path = "word/styles.xml"
@@ -481,14 +599,29 @@ def _merge_letterhead_style_doc_defaults(prec_parts: dict[str, bytes], lh_parts:
         prec_text = prec_parts[prec_path].decode("utf-8")
     except UnicodeDecodeError:
         return
-    match = _DOC_DEFAULTS_BLOCK_RE.search(lh_text)
-    if not match:
+    lh_match = _DOC_DEFAULTS_BLOCK_RE.search(lh_text)
+    if not lh_match:
         return
-    lh_doc_defaults = match.group(0)
-    if _DOC_DEFAULTS_BLOCK_RE.search(prec_text):
-        prec_text = _DOC_DEFAULTS_BLOCK_RE.sub(lh_doc_defaults, prec_text, count=1)
+    lh_doc_defaults = lh_match.group(0)
+    lh_rpr = _RPR_DEFAULT_RE.search(lh_doc_defaults)
+    if not lh_rpr:
+        return
+
+    prec_match = _DOC_DEFAULTS_BLOCK_RE.search(prec_text)
+    prec_ppr = _PPR_DEFAULT_RE.search(prec_match.group(0)) if prec_match else None
+    if prec_ppr is None:
+        # Precedent has no paragraph defaults — fall back to letterhead (same as pre-fix behaviour).
+        prec_ppr = _PPR_DEFAULT_RE.search(lh_doc_defaults)
+
+    combined = "<w:docDefaults>" + lh_rpr.group(0)
+    if prec_ppr is not None:
+        combined += prec_ppr.group(0)
+    combined += "</w:docDefaults>"
+
+    if prec_match:
+        prec_text = _DOC_DEFAULTS_BLOCK_RE.sub(combined, prec_text, count=1)
     else:
-        prec_text = _STYLES_OPEN_RE.sub(lambda m: m.group(0) + lh_doc_defaults, prec_text, count=1)
+        prec_text = _STYLES_OPEN_RE.sub(lambda m: m.group(0) + combined, prec_text, count=1)
     prec_parts[prec_path] = prec_text.encode("utf-8")
 
 
@@ -543,6 +676,78 @@ def _normalize_hf_paragraph_spacing(hf_xml: bytes, *, part_path: str = "") -> by
     if not changed:
         return hf_xml
     return ET.tostring(root, encoding="utf-8", xml_declaration=True)
+
+
+def _paragraph_visible_text(p_el: Any) -> str:
+    """Visible text in a paragraph (``w:t`` only), ignoring drawings."""
+    from docx.oxml.ns import qn
+
+    parts: list[str] = []
+    for node in p_el.iter(qn("w:t")):
+        if node.text:
+            parts.append(node.text)
+    return "".join(parts)
+
+
+def _doc_defaults_spacing_after(doc: Any) -> str:
+    """``w:spacing/@w:after`` from ``docDefaults``, else Word-normal ``200``."""
+    from docx.oxml.ns import qn
+
+    try:
+        styles = doc.styles.element
+    except Exception:
+        return "200"
+    after = None
+    for node in styles.iter(qn("w:docDefaults")):
+        for sp in node.iter(qn("w:spacing")):
+            after = sp.get(qn("w:after")) or after
+    return after or "200"
+
+
+def pin_empty_body_paragraph_spacing(doc_bytes: bytes) -> bytes:
+    """Normalise bare ``<w:spacing/>`` so composed letters match editing the body precedent.
+
+    Empty spacer paragraphs must not pick up ``docDefaults`` ``after`` (that becomes
+    “blank line + paragraph spacing”). Content paragraphs with bare spacing get an explicit
+    ``after`` from ``docDefaults`` so OnlyOffice keeps the Dear→body gap (bare ``<w:spacing/>``
+    alone is treated as after=0 by some renderers after letterhead merge).
+    """
+    import io
+
+    from docx import Document
+    from docx.oxml.ns import qn
+
+    doc = Document(io.BytesIO(doc_bytes))
+    default_after = _doc_defaults_spacing_after(doc)
+    p_tag = qn("w:p")
+    ppr_tag = qn("w:pPr")
+    sp_tag = qn("w:spacing")
+    changed = False
+    for p_el in doc.element.body.iter(p_tag):
+        xml = p_el.xml if hasattr(p_el, "xml") else ""
+        if "a:blip" in xml or "v:imagedata" in xml or "imagedata" in xml.lower():
+            continue
+        p_pr = p_el.find(ppr_tag)
+        if p_pr is None:
+            continue
+        spacing = p_pr.find(sp_tag)
+        if spacing is None:
+            continue
+        # Only rewrite spacers that never set before/after (empty ``<w:spacing/>`` or line-only).
+        if spacing.get(qn("w:after")) is not None or spacing.get(qn("w:before")) is not None:
+            continue
+        is_content = bool(_paragraph_visible_text(p_el).strip())
+        spacing.set(qn("w:before"), "0")
+        spacing.set(qn("w:after"), default_after if is_content else "0")
+        if spacing.get(qn("w:line")) is None:
+            spacing.set(qn("w:line"), "276")
+            spacing.set(qn("w:lineRule"), "auto")
+        changed = True
+    if not changed:
+        return doc_bytes
+    out = io.BytesIO()
+    doc.save(out)
+    return out.getvalue()
 
 
 def reapply_letterhead_layout_package_bytes(doc_bytes: bytes, letterhead_bytes: bytes) -> bytes:

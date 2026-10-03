@@ -359,6 +359,80 @@ def void_submission(db: Session, *, submission: PortalFormSubmission, actor: Use
     return submission
 
 
+def resend_form_submission(
+    db: Session,
+    *,
+    submission: PortalFormSubmission,
+    actor: User,
+) -> tuple[PortalFormSubmission, bool, str | None]:
+    """Re-send the portal form notification for a pending submission (refreshes link TTL)."""
+    if submission.status != PortalFormSubmissionStatus.pending:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only pending forms can be resent.",
+        )
+    case = db.get(Case, submission.case_id)
+    if case is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Case not found")
+    require_case_portal_enabled(db, submission.case_id)
+    template = db.get(PortalFormTemplate, submission.template_id)
+    if template is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Form template not found")
+    contact = db.get(Contact, submission.contact_id)
+    if contact is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Contact not found")
+    email = resolve_matter_contact_email(db, case_id=submission.case_id, contact_id=submission.contact_id)
+
+    _access, newly_provisioned, access_code = ensure_contact_portal_access_for_delivery(
+        db,
+        contact_id=submission.contact_id,
+        actor_user_id=actor.id,
+    )
+
+    # Refresh sent_at so the e-mail exchange link does not expire from the original send.
+    submission.sent_at = utcnow()
+    db.add(submission)
+    db.flush()
+
+    form_url = form_link_for_submission(submission.id)
+    email_sent = dispatch_alert(
+        db,
+        AlertKind.portal_form_sent,
+        to_email=email,
+        context={
+            "contact_name": contact_display_name(contact),
+            "form_name": template.name,
+            "matter_label": client_matter_description(case),
+            "portal_url": form_url,
+            **({"access_code": access_code} if newly_provisioned and access_code else {}),
+        },
+        actor_user_id=actor.id,
+    )
+    skip_reason = _form_email_skip_reason(db, email_sent=email_sent)
+    log_portal_activity(
+        db,
+        case_id=submission.case_id,
+        contact_id=submission.contact_id,
+        grant_id=submission.grant_id,
+        action="portal.form.resent",
+        summary=f"{template.name} resent to {contact_display_name(contact)} via portal",
+    )
+    log_event(
+        db,
+        actor_user_id=actor.id,
+        action="portal.form.resent",
+        entity_type="portal_form_submission",
+        entity_id=str(submission.id),
+        meta={
+            "case_id": str(submission.case_id),
+            "template_id": str(submission.template_id),
+            "contact_id": str(submission.contact_id),
+            "email_sent": email_sent,
+        },
+    )
+    return submission, email_sent, skip_reason
+
+
 def list_pending_for_contact(db: Session, contact_id: uuid.UUID) -> list[PortalFormSubmission]:
     return (
         db.execute(

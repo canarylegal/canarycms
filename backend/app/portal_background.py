@@ -1,4 +1,4 @@
-"""Portal background colour (#RRGGBB) helpers."""
+"""Portal background / font colour (#RRGGBB) helpers."""
 
 from __future__ import annotations
 
@@ -9,9 +9,10 @@ _HEX3 = re.compile(r"^#([0-9A-Fa-f]{3})$")
 
 # Default portal canvas when firm has not set a custom colour (matches local-modern chrome).
 DEFAULT_PORTAL_BACKGROUND = "#1e293b"
+DEFAULT_PORTAL_FONT_COLOR = "#F8FAFC"
 
 
-def normalize_portal_background_color(raw: str | None) -> str | None:
+def normalize_portal_hex_color(raw: str | None, *, field_label: str = "Portal colour") -> str | None:
     """Return canonical ``#RRGGBB`` or ``None`` for default / empty.
 
     Accepts ``#RGB`` or ``#RRGGBB`` (optional leading/trailing space). Empty clears to default.
@@ -30,7 +31,15 @@ def normalize_portal_background_color(raw: str | None) -> str | None:
     if m3:
         a, b, c = m3.group(1)
         return f"#{a}{a}{b}{b}{c}{c}".upper()
-    raise ValueError("Portal background colour must be a hex value such as #1E293B.")
+    raise ValueError(f"{field_label} must be a hex value such as #1E293B.")
+
+
+def normalize_portal_background_color(raw: str | None) -> str | None:
+    return normalize_portal_hex_color(raw, field_label="Portal background colour")
+
+
+def normalize_portal_font_color(raw: str | None) -> str | None:
+    return normalize_portal_hex_color(raw, field_label="Portal font colour")
 
 
 def portal_background_color(firm) -> str | None:
@@ -46,13 +55,26 @@ def portal_background_color(firm) -> str | None:
         return None
 
 
+def portal_font_color(firm) -> str | None:
+    """Configured chrome font colour, or ``None`` when the product default should apply."""
+    if firm is None:
+        return None
+    raw = getattr(firm, "portal_font_color", None)
+    if not raw:
+        return None
+    try:
+        return normalize_portal_font_color(raw)
+    except ValueError:
+        return None
+
+
 def _srgb_channel(c: float) -> float:
     c = c / 255.0
     return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
 
 
 def relative_luminance(hex_color: str) -> float:
-    h = normalize_portal_background_color(hex_color)
+    h = normalize_portal_hex_color(hex_color, field_label="Colour")
     if h is None:
         h = DEFAULT_PORTAL_BACKGROUND
     r = int(h[1:3], 16)
@@ -68,9 +90,15 @@ def contrast_ratio(hex_a: str, hex_b: str) -> float:
     return (lighter + 0.05) / (darker + 0.05)
 
 
-def portal_bg_contrast_ok(bg_hex: str, *, against: str = "#F8FAFC", min_ratio: float = 4.5) -> bool:
-    """True when brand title / subtitle light ink remains readable on ``bg_hex``."""
+def portal_bg_contrast_ok(
+    bg_hex: str,
+    *,
+    against: str | None = None,
+    min_ratio: float = 4.5,
+) -> bool:
+    """True when brand title / subtitle ink remains readable on ``bg_hex``."""
+    ink = against or DEFAULT_PORTAL_FONT_COLOR
     try:
-        return contrast_ratio(bg_hex, against) >= min_ratio
+        return contrast_ratio(bg_hex, ink) >= min_ratio
     except ValueError:
         return False

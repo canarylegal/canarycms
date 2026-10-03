@@ -218,6 +218,7 @@ class AdminUserCreate(BaseModel):
     role: UserRole = UserRole.user
     is_active: bool = True
     permission_category_id: uuid.UUID
+    supervisor_user_id: uuid.UUID | None = None
 
     @field_validator("initials", mode="after")
     @classmethod
@@ -233,6 +234,7 @@ class AdminUserUpdate(BaseModel):
     is_active: bool | None = None
     permission_category_id: uuid.UUID | None = None
     charge_rate_pence_per_hour: int | None = Field(default=None, ge=0)
+    supervisor_user_id: uuid.UUID | None = None
 
     @field_validator("initials", mode="after")
     @classmethod
@@ -244,6 +246,7 @@ class AdminUserUpdate(BaseModel):
 class AdminUserPublic(UserPublic):
     permission_category_id: uuid.UUID | None = None
     charge_rate_pence_per_hour: int | None = None
+    supervisor_user_id: uuid.UUID | None = None
 
 class UserPermissionCategoryOut(BaseModel):
     id: uuid.UUID

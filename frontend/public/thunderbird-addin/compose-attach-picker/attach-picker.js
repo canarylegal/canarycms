@@ -193,18 +193,42 @@
     })
   }
 
+  let attachInFlight = false
+
   async function confirmAttach() {
     const ext = sh().getGecko()
-    if (!ext || composeTabId == null) return
-    await cs().setTabState(ext, composeTabId, { attachmentFileIds: selectedIds.slice() })
-    await returnToComposePanel(ext)
+    if (!ext || composeTabId == null || attachInFlight) return
+    const btn = $('btn-attach')
+    if (btn) btn.disabled = true
+    attachInFlight = true
+    showErr('')
+    try {
+      await cs().setTabState(ext, composeTabId, { attachmentFileIds: selectedIds.slice() })
+      // Attach files only — do not apply the e-mail precedent body (avoids rewriting the draft).
+      const r = await sendRuntimeMessage(ext, {
+        type: 'canary-apply-compose-attachments',
+        composeTabId: composeTabId,
+        caseId: caseId,
+      })
+      if (!r || !r.ok) {
+        throw new Error((r && r.detail) || 'Could not attach files to the message.')
+      }
+      // Close picker only — do not reopen/create another Canary compose panel.
+      await sh().closeExtensionWindow(ext)
+    } catch (e) {
+      showErr((e && e.message) || String(e))
+      attachInFlight = false
+      if (btn) btn.disabled = selectedIds.length === 0
+    }
   }
 
   async function returnToComposePanel(ext) {
+    // Focus an existing panel if open; never spawn a new one from the attach picker.
     if (composeTabId != null) {
       await sendRuntimeMessage(ext, {
         type: 'canary-return-to-compose-panel',
         composeTabId: composeTabId,
+        focusOnly: true,
       })
     }
     await sh().closeExtensionWindow(ext)

@@ -369,6 +369,94 @@ def send_quote_via_portal(
     return delivery, email_sent, skip_reason, portal_pdf_generated
 
 
+def resend_quote_delivery(
+    db: Session,
+    *,
+    delivery: QuotePortalDelivery,
+    actor_user_id: uuid.UUID,
+) -> tuple[QuotePortalDelivery, bool, str | None]:
+    """Re-send the portal quote notification for a pending delivery (refreshes link TTL)."""
+    if delivery.status != QuotePortalDeliveryStatus.pending:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only pending quotes can be resent.",
+        )
+    case = db.get(Case, delivery.case_id)
+    if case is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Case not found")
+    require_case_portal_enabled(db, delivery.case_id)
+
+    contact = db.get(Contact, delivery.contact_id)
+    if contact is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Contact not found")
+    email = resolve_matter_contact_email(db, case_id=delivery.case_id, contact_id=delivery.contact_id)
+
+    _access, newly_provisioned, access_code = ensure_contact_portal_access_for_delivery(
+        db,
+        contact_id=delivery.contact_id,
+        actor_user_id=actor_user_id,
+    )
+
+    client_row = client_quote_file_row(db, delivery)
+    source = db.get(File, delivery.file_id)
+    client_filename = (
+        client_row.original_filename
+        if client_row is not None
+        else (source.original_filename if source else "Quote")
+    )
+
+    # Refresh sent_at so the e-mail exchange link does not expire from the original send.
+    delivery.sent_at = utcnow()
+    db.add(delivery)
+    db.flush()
+
+    quote_url = quote_link_for_delivery(delivery.id)
+    log_portal_activity(
+        db,
+        case_id=delivery.case_id,
+        contact_id=delivery.contact_id,
+        grant_id=delivery.grant_id,
+        action="portal.quote.resent",
+        summary=f"Quote resent to {contact_display_name(contact)} via portal ({client_filename})",
+    )
+
+    email_sent = False
+    skip_reason: str | None = "Contact has no e-mail address; notification was not sent."
+    if email:
+        email_sent = dispatch_alert(
+            db,
+            AlertKind.portal_quote_sent,
+            to_email=email,
+            context={
+                "contact_name": contact_display_name(contact),
+                "quote_filename": client_filename,
+                "matter_label": client_matter_description(case),
+                "portal_url": quote_url,
+                **({"access_code": access_code} if newly_provisioned and access_code else {}),
+            },
+            actor_user_id=actor_user_id,
+        )
+        skip_reason = None if email_sent else ALERTS_NOT_CONFIGURED_MSG
+
+    log_event(
+        db,
+        actor_user_id=actor_user_id,
+        action="quote.portal.resend",
+        entity_type="quote_portal_delivery",
+        entity_id=str(delivery.id),
+        meta={
+            "case_id": str(delivery.case_id),
+            "file_id": str(delivery.file_id),
+            "contact_id": str(delivery.contact_id),
+            "email_sent": email_sent,
+        },
+    )
+    if not email_sent:
+        db.commit()
+    db.refresh(delivery)
+    return delivery, email_sent, skip_reason
+
+
 def _notify_staff_quote_response(
     db: Session,
     *,

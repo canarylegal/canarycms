@@ -23,6 +23,9 @@
     })
   }
 
+  /** @type {Record<string, Promise<{ok:boolean, windowId?: number|null, focused?: boolean, reloaded?: boolean}>>} */
+  var popupOpenInflight = {}
+
   function openExtensionPopupWindow(url, trackRef, sizeOpts, windowOpts) {
     const ext = getGecko()
     if (!ext || !ext.windows || !ext.runtime.getURL) {
@@ -31,48 +34,63 @@
     const w = (sizeOpts && sizeOpts.width) || 480
     const h = (sizeOpts && sizeOpts.height) || 640
     const focusOnly = windowOpts && windowOpts.focusOnly
-    const trackedId = trackRef && trackRef.id != null ? trackRef.id : null
-    if (trackedId != null) {
-      return ext.windows
-        .get(trackedId)
-        .then(function (existing) {
-          if (existing && existing.id != null) {
-            if (focusOnly) {
-              return ext.windows
-                .update(trackedId, { focused: true, drawAttention: true })
-                .catch(function () {
-                  return ext.windows.update(trackedId, { focused: true })
-                })
-                .then(function () {
-                  return { ok: true, focused: true, windowId: trackedId, reloaded: false }
-                })
-            }
-            return navigateExtensionWindowToUrl(ext, trackedId, url)
-              .catch(function () {
-                return false
-              })
-              .then(function () {
+    const lockKey = String((trackRef && trackRef.lockKey) || url)
+    if (popupOpenInflight[lockKey]) {
+      return popupOpenInflight[lockKey]
+    }
+
+    const run = (function () {
+      const trackedId = trackRef && trackRef.id != null ? trackRef.id : null
+      if (trackedId != null) {
+        return ext.windows
+          .get(trackedId)
+          .then(function (existing) {
+            if (existing && existing.id != null) {
+              if (focusOnly) {
                 return ext.windows
                   .update(trackedId, { focused: true, drawAttention: true })
                   .catch(function () {
                     return ext.windows.update(trackedId, { focused: true })
                   })
-              })
-              .then(function () {
-                return { ok: true, focused: true, windowId: trackedId, reloaded: true }
-              })
-          }
-          if (trackRef) trackRef.id = null
-          return createNew()
-        })
-        .catch(function () {
-          if (trackRef) trackRef.id = null
-          return createNew()
-        })
-    }
-    return createNew()
+                  .then(function () {
+                    return { ok: true, focused: true, windowId: trackedId, reloaded: false }
+                  })
+              }
+              return navigateExtensionWindowToUrl(ext, trackedId, url)
+                .catch(function () {
+                  return false
+                })
+                .then(function () {
+                  return ext.windows
+                    .update(trackedId, { focused: true, drawAttention: true })
+                    .catch(function () {
+                      return ext.windows.update(trackedId, { focused: true })
+                    })
+                })
+                .then(function () {
+                  return { ok: true, focused: true, windowId: trackedId, reloaded: true }
+                })
+            }
+            if (trackRef) trackRef.id = null
+            return createNew()
+          })
+          .catch(function () {
+            if (trackRef) trackRef.id = null
+            return createNew()
+          })
+      }
+      return createNew()
+    })()
+
+    popupOpenInflight[lockKey] = run.finally(function () {
+      delete popupOpenInflight[lockKey]
+    })
+    return popupOpenInflight[lockKey]
 
     function createNew() {
+      if (focusOnly) {
+        return Promise.resolve({ ok: false, detail: 'No existing window to focus.' })
+      }
       const withTitle = {
         type: 'popup',
         url: url,
@@ -187,7 +205,10 @@
           encodeURIComponent(String(tabId)) +
           '&autoWindow=1'
         const url = ext.runtime.getURL('compose-panel/panel.html?' + q)
-        const track = { id: composePanelWindowByTab[key] != null ? composePanelWindowByTab[key] : null }
+        const track = {
+          id: composePanelWindowByTab[key] != null ? composePanelWindowByTab[key] : null,
+          lockKey: 'compose-panel:' + key,
+        }
         const r = await openExtensionPopupWindow(url, track, undefined, { focusOnly: focusOnly })
         composePanelWindowByTab[key] = track.id
         return r
@@ -199,36 +220,68 @@
   }
 
   var attachPickerWindowId = null
+  /** @type {Promise<{ok:boolean, detail?: string, windowId?: number|null, focused?: boolean, reloaded?: boolean, deduped?: boolean}>|null} */
+  var attachPickerOpenPromise = null
+
+  function focusWindow(ext, windowId) {
+    return ext.windows
+      .update(windowId, { focused: true, drawAttention: true })
+      .catch(function () {
+        return ext.windows.update(windowId, { focused: true })
+      })
+      .then(function () {
+        return { ok: true, focused: true, windowId: windowId, reloaded: false }
+      })
+  }
+
+  /** Find an already-open attach picker (survives lost track ids / dual open races). */
+  async function findExistingAttachPickerWindow(ext) {
+    if (!ext.windows || typeof ext.windows.getAll !== 'function') return null
+    if (!ext.tabs || typeof ext.tabs.query !== 'function') return null
+    let wins = []
+    try {
+      wins = await ext.windows.getAll({ populate: true, windowTypes: ['popup'] })
+    } catch (_) {
+      try {
+        wins = await ext.windows.getAll()
+      } catch (_) {
+        return null
+      }
+    }
+    const marker = 'compose-attach-picker/'
+    for (let i = 0; i < (wins || []).length; i++) {
+      const win = wins[i]
+      if (!win || win.id == null) continue
+      const tabs = win.tabs || []
+      for (let t = 0; t < tabs.length; t++) {
+        const url = tabs[t] && tabs[t].url ? String(tabs[t].url) : ''
+        if (url.indexOf(marker) >= 0) return win.id
+      }
+      // Some TB builds omit tabs on getAll — probe via tabs.query.
+    }
+    try {
+      const allTabs = await ext.tabs.query({})
+      for (let i = 0; i < (allTabs || []).length; i++) {
+        const tab = allTabs[i]
+        const url = tab && tab.url ? String(tab.url) : ''
+        if (url.indexOf(marker) >= 0 && tab.windowId != null) return tab.windowId
+      }
+    } catch (_) {
+      /* optional */
+    }
+    return null
+  }
 
   /**
-   * @param {string} caseId
-   * @param {number} composeTabId
-   * @param {string[]} selectedIds
+   * Deprecated: attach picker is inline in the compose panel (1.5.19+).
+   * Stub kept so old runtime messages do not open a second window.
    */
-  globalThis.canaryOpenAttachPickerWindow = function (caseId, composeTabId, selectedIds) {
-    const ext = getGecko()
-    if (!ext || !caseId || composeTabId == null) {
-      return Promise.resolve({ ok: false, detail: 'Matter and compose tab required.' })
-    }
-    return (async function () {
-      try {
-        const ids = (selectedIds || []).map(String).join(',')
-        const q =
-          'caseId=' +
-          encodeURIComponent(String(caseId)) +
-          '&composeTabId=' +
-          encodeURIComponent(String(composeTabId)) +
-          '&selected=' +
-          encodeURIComponent(ids)
-        const url = ext.runtime.getURL('compose-attach-picker/attach-picker.html?' + q)
-        const track = { id: attachPickerWindowId }
-        const r = await openExtensionPopupWindow(url, track, { width: 520, height: 520 })
-        attachPickerWindowId = track.id
-        return r
-      } catch (e) {
-        return { ok: false, detail: (e && e.message) || String(e) }
-      }
-    })()
+  globalThis.canaryOpenAttachPickerWindow = function () {
+    return Promise.resolve({
+      ok: false,
+      detail: 'Use Attach from file in the Canary compose panel.',
+      deprecated: true,
+    })
   }
 
   globalThis.canaryOpenCompanionWindow = function () {

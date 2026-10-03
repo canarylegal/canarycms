@@ -14,9 +14,8 @@ import { FeeScalesPanel } from './FeeScalesPanel'
 import { QuoteSourcesPanel } from './QuoteSourcesPanel'
 import { QuoteConvertModal } from './QuoteConvertModal'
 import { QuoteWizard } from './QuoteWizard'
-import { QuoteSendPrompt } from './QuoteSendPrompt'
 import { useQuoteAwaitingSave, type QuoteAwaitingSaveContext } from './quoteAwaitingSave'
-import { QUOTE_EMAIL_PRECEDENT_REFERENCE, type PendingCaseCompose } from './quoteEmailPrecedent'
+import { type PendingCaseCompose } from './quoteEmailPrecedent'
 import { TaskCreateModal } from './TaskCreateModal'
 import { TasksTable } from './TasksTable'
 import { closeMatterBlockMessage } from './case/closeMatterCheck'
@@ -221,7 +220,6 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
   const [newMatterFromQuotes, setNewMatterFromQuotes] = useState(false)
   const [quoteWizardPendingCaseId, setQuoteWizardPendingCaseId] = useState<string | null>(null)
   const [quoteAwaitingSave, setQuoteAwaitingSave] = useState<QuoteAwaitingSaveContext | null>(null)
-  const [quoteSendOpen, setQuoteSendOpen] = useState(false)
   const [pendingComposeKind, setPendingComposeKind] = useState<PendingCaseCompose | null>(null)
 
   const selectedCaseIdRef = useRef(selectedCaseId)
@@ -504,7 +502,7 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
   }, [])
 
   const onQuotePublished = useCallback(() => {
-    setQuoteSendOpen(true)
+    setQuoteAwaitingSave(null)
   }, [])
 
   const onQuoteDiscarded = useCallback(() => {
@@ -1238,32 +1236,6 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
             pendingNewCaseId={quoteWizardPendingCaseId}
             onClearPendingNewCase={() => setQuoteWizardPendingCaseId(null)}
             onAwaitingQuoteSave={setQuoteAwaitingSave}
-          />
-        ) : null}
-        {quoteAwaitingSave && token ? (
-          <QuoteSendPrompt
-            token={token}
-            caseId={quoteAwaitingSave.caseId}
-            fileId={quoteAwaitingSave.fileId}
-            preferredContactId={quoteAwaitingSave.preferredContactId}
-            portalEnabled={quoteAwaitingSave.portalEnabled}
-            open={quoteSendOpen}
-            onClose={() => {
-              setQuoteSendOpen(false)
-              setQuoteAwaitingSave(null)
-            }}
-            onSendLetter={(caseId) => {
-              openCaseView(caseId)
-              setPendingComposeKind({ kind: 'letter' })
-            }}
-            onSendEmail={(caseId) => {
-              openCaseView(caseId)
-              setPendingComposeKind({
-                kind: 'email',
-                preferPrecedentReference: QUOTE_EMAIL_PRECEDENT_REFERENCE,
-                attachmentFileId: quoteAwaitingSave.fileId,
-              })
-            }}
           />
         ) : null}
         {quoteConvertCase && token ? (

@@ -30,6 +30,14 @@ describe('folderMatchesPortalGrant', () => {
     expect(folderMatchesPortalGrant('Other', 'Shared')).toBe(false)
     expect(folderMatchesPortalGrant('SharedX', 'Shared')).toBe(false)
   })
+
+  it('never matches matter-root grants', () => {
+    expect(folderMatchesPortalGrant('', '')).toBe(false)
+    expect(folderMatchesPortalGrant('Shared', '')).toBe(false)
+    expect(isPortalSharedFolder('', [grant({ contact_id: '1', contact_name: 'Ada', folder_path: '' })])).toBe(
+      false,
+    )
+  })
 })
 
 describe('portalContactsForFolder', () => {

@@ -4,7 +4,9 @@ import type { ApiError } from './api'
 import type { FirmSettingsOut } from './types'
 import {
   DEFAULT_PORTAL_BACKGROUND,
+  DEFAULT_PORTAL_FONT_COLOR,
   normalizePortalBackgroundColor,
+  normalizePortalFontColor,
   portalBackgroundContrastOk,
 } from './portal/portalBackground'
 
@@ -13,6 +15,8 @@ export function AdminFirmDetails({ token }: { token: string }) {
   const [busy, setBusy] = useState(false)
   const [logoBusy, setLogoBusy] = useState(false)
   const [logoFileKey, setLogoFileKey] = useState(0)
+  const [bgBusy, setBgBusy] = useState(false)
+  const [bgFileKey, setBgFileKey] = useState(0)
   const [err, setErr] = useState<string | null>(null)
   const [saved, setSaved] = useState(false)
 
@@ -29,14 +33,20 @@ export function AdminFirmDetails({ token }: { token: string }) {
   const [clientBankLast4, setClientBankLast4] = useState('')
   /** Draft hex text (may be partial while typing). Empty = product default. */
   const [portalBgHex, setPortalBgHex] = useState('')
+  const [portalFontHex, setPortalFontHex] = useState('')
+  const [portalBgOnSignedIn, setPortalBgOnSignedIn] = useState(true)
+  const [portalLogoEnabled, setPortalLogoEnabled] = useState(true)
 
   const portalBgNormalized = useMemo(() => normalizePortalBackgroundColor(portalBgHex), [portalBgHex])
   const portalBgPreview = portalBgNormalized ?? DEFAULT_PORTAL_BACKGROUND
+  const portalFontNormalized = useMemo(() => normalizePortalFontColor(portalFontHex), [portalFontHex])
+  const portalFontPreview = portalFontNormalized ?? DEFAULT_PORTAL_FONT_COLOR
   const portalBgContrastOk = useMemo(
-    () => portalBackgroundContrastOk(portalBgPreview),
-    [portalBgPreview],
+    () => portalBackgroundContrastOk(portalBgPreview, portalFontPreview),
+    [portalBgPreview, portalFontPreview],
   )
   const portalBgHexInvalid = Boolean(portalBgHex.trim()) && portalBgNormalized == null
+  const portalFontHexInvalid = Boolean(portalFontHex.trim()) && portalFontNormalized == null
 
   async function load() {
     setErr(null)
@@ -56,6 +66,9 @@ export function AdminFirmDetails({ token }: { token: string }) {
       setClientBankAccountNumber(data.client_bank_account_number ?? '')
       setClientBankLast4(data.client_bank_account_number_last4 ?? '')
       setPortalBgHex((data.portal_background_color || '').trim())
+      setPortalFontHex((data.portal_font_color || '').trim())
+      setPortalBgOnSignedIn(data.portal_background_on_signed_in !== false)
+      setPortalLogoEnabled(data.portal_logo_enabled !== false)
     } catch (e) {
       setErr((e as ApiError).message ?? 'Failed to load firm details')
     }
@@ -72,6 +85,11 @@ export function AdminFirmDetails({ token }: { token: string }) {
     try {
       if (portalBgHexInvalid) {
         setErr('Enter a valid hex colour such as #1E293B, or clear the field for the default.')
+        setBusy(false)
+        return
+      }
+      if (portalFontHexInvalid) {
+        setErr('Enter a valid font hex colour such as #F8FAFC, or clear the field for the default.')
         setBusy(false)
         return
       }
@@ -92,10 +110,16 @@ export function AdminFirmDetails({ token }: { token: string }) {
           client_bank_account_number_last4: clientBankLast4.trim() || null,
           // Empty string clears to product default on the server.
           portal_background_color: portalBgNormalized ?? '',
+          portal_font_color: portalFontNormalized ?? '',
+          portal_background_on_signed_in: portalBgOnSignedIn,
+          portal_logo_enabled: portalLogoEnabled,
         },
       })
       setRow(data)
       setPortalBgHex((data.portal_background_color || '').trim())
+      setPortalFontHex((data.portal_font_color || '').trim())
+      setPortalBgOnSignedIn(data.portal_background_on_signed_in !== false)
+      setPortalLogoEnabled(data.portal_logo_enabled !== false)
       setSaved(true)
     } catch (e) {
       setErr((e as ApiError).message ?? 'Save failed')
@@ -140,6 +164,45 @@ export function AdminFirmDetails({ token }: { token: string }) {
       setErr((e as ApiError).message ?? 'Could not remove portal logo')
     } finally {
       setLogoBusy(false)
+    }
+  }
+
+  async function uploadPortalBackground(file: File) {
+    setBgBusy(true)
+    setErr(null)
+    setSaved(false)
+    try {
+      const fd = new FormData()
+      fd.append('upload', file)
+      const data = await apiFetch<FirmSettingsOut>('/admin/firm-settings/portal-background', {
+        token,
+        method: 'POST',
+        body: fd,
+      })
+      setRow(data)
+      setBgFileKey((k) => k + 1)
+    } catch (e) {
+      setErr((e as ApiError).message ?? 'Portal background upload failed')
+    } finally {
+      setBgBusy(false)
+    }
+  }
+
+  async function removePortalBackground() {
+    setBgBusy(true)
+    setErr(null)
+    setSaved(false)
+    try {
+      const data = await apiFetch<FirmSettingsOut>('/admin/firm-settings/portal-background', {
+        token,
+        method: 'DELETE',
+      })
+      setRow(data)
+      setBgFileKey((k) => k + 1)
+    } catch (e) {
+      setErr((e as ApiError).message ?? 'Could not remove portal background')
+    } finally {
+      setBgBusy(false)
     }
   }
 
@@ -223,6 +286,105 @@ export function AdminFirmDetails({ token }: { token: string }) {
                 />
               </label>
             )}
+            <label className="row" style={{ gap: 8, alignItems: 'flex-start' }}>
+              <input
+                type="checkbox"
+                checked={portalLogoEnabled}
+                disabled={busy || !row.portal_logo_configured}
+                onChange={(e) => setPortalLogoEnabled(e.target.checked)}
+                style={{ marginTop: 3 }}
+              />
+              <span>
+                <span style={{ fontWeight: 600 }}>Show firm logo on the client portal</span>
+                <div className="muted" style={{ fontSize: 13, marginTop: 2 }}>
+                  Untick to hide the logo on login and signed-in views. The uploaded file is kept so you can turn it
+                  back on later.
+                  {!row.portal_logo_configured ? ' Upload a logo first.' : ''}
+                </div>
+              </span>
+            </label>
+
+            <div style={{ fontWeight: 600, marginTop: 4 }}>Portal background image</div>
+            <div className="muted" style={{ fontSize: 13, marginBottom: 4 }}>
+              Optional full-bleed image (PNG, JPEG, or WebP, max 5 MB). Used only when no solid background colour is
+              set — a chosen colour always wins over the image.
+            </div>
+            {row.portal_background_configured ? (
+              <div className="stack" style={{ gap: 8 }}>
+                <img
+                  key={bgFileKey}
+                  src={`${apiUrl('/portal/background')}?v=${bgFileKey}`}
+                  alt="Current portal background preview"
+                  style={{
+                    width: '100%',
+                    maxHeight: 140,
+                    objectFit: 'cover',
+                    borderRadius: 10,
+                    border: '1px solid rgba(15,23,42,0.12)',
+                  }}
+                />
+                <div className="muted" style={{ fontSize: 13 }}>
+                  {row.portal_background_original_filename ?? 'Background uploaded'}
+                </div>
+                <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
+                  <label className="btn" style={{ cursor: bgBusy ? 'wait' : 'pointer' }}>
+                    Replace background
+                    <input
+                      type="file"
+                      accept="image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp"
+                      hidden
+                      disabled={bgBusy || busy}
+                      onChange={(e) => {
+                        const f = e.target.files?.[0]
+                        e.target.value = ''
+                        if (f) void uploadPortalBackground(f)
+                      }}
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    className="btn"
+                    disabled={bgBusy || busy}
+                    onClick={() => void removePortalBackground()}
+                  >
+                    Remove background
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <label className="btn" style={{ cursor: bgBusy ? 'wait' : 'pointer', alignSelf: 'flex-start' }}>
+                Upload portal background
+                <input
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp"
+                  hidden
+                  disabled={bgBusy || busy}
+                  onChange={(e) => {
+                    const f = e.target.files?.[0]
+                    e.target.value = ''
+                    if (f) void uploadPortalBackground(f)
+                  }}
+                />
+              </label>
+            )}
+            <label className="row" style={{ gap: 8, alignItems: 'flex-start' }}>
+              <input
+                type="checkbox"
+                checked={portalBgOnSignedIn}
+                disabled={busy || !row.portal_background_configured}
+                onChange={(e) => setPortalBgOnSignedIn(e.target.checked)}
+                style={{ marginTop: 3 }}
+              />
+              <span>
+                <span style={{ fontWeight: 600 }}>Also show this background after login</span>
+                <div className="muted" style={{ fontSize: 13, marginTop: 2 }}>
+                  When ticked, the login background image (and any colour / font settings) also apply on the signed-in
+                  portal. When unticked, only the login screen uses them — after sign-in the portal uses Canary’s
+                  default chrome.
+                  {!row.portal_background_configured ? ' Upload a background image first.' : ''}
+                </div>
+              </span>
+            </label>
 
             <div style={{ fontWeight: 600, marginTop: 4 }}>Portal background colour</div>
             <div className="muted" style={{ fontSize: 13 }}>
@@ -272,10 +434,59 @@ export function AdminFirmDetails({ token }: { token: string }) {
                 Enter a valid hex colour such as #1E293B or #ABC.
               </div>
             ) : null}
-            {!portalBgHexInvalid && !portalBgContrastOk ? (
+
+            <div style={{ fontWeight: 600, marginTop: 4 }}>Portal font colour</div>
+            <div className="muted" style={{ fontSize: 13 }}>
+              Colour for the portal title, subtitle, sign-out control, and powered-by text on the page background
+              (content inside the white card stays dark for readability). Leave empty for the default light ink.
+            </div>
+            <div className="row" style={{ gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+              <label className="field" style={{ margin: 0 }}>
+                <span className="muted" style={{ fontSize: 12 }}>
+                  Colour
+                </span>
+                <input
+                  type="color"
+                  value={portalFontPreview.toLowerCase()}
+                  disabled={busy}
+                  aria-label="Portal font colour picker"
+                  onChange={(e) => setPortalFontHex(e.target.value.toUpperCase())}
+                  style={{ width: 48, height: 36, padding: 0, border: '1px solid rgba(15,23,42,0.2)', cursor: 'pointer' }}
+                />
+              </label>
+              <label className="field" style={{ margin: 0, minWidth: 140 }}>
+                <span className="muted" style={{ fontSize: 12 }}>
+                  Hex
+                </span>
+                <input
+                  value={portalFontHex}
+                  onChange={(e) => setPortalFontHex(e.target.value)}
+                  disabled={busy}
+                  placeholder={DEFAULT_PORTAL_FONT_COLOR}
+                  spellCheck={false}
+                  autoComplete="off"
+                  aria-invalid={portalFontHexInvalid}
+                />
+              </label>
+              <button
+                type="button"
+                className="btn"
+                disabled={busy || !portalFontHex.trim()}
+                onClick={() => setPortalFontHex('')}
+                style={{ alignSelf: 'flex-end' }}
+              >
+                Use default
+              </button>
+            </div>
+            {portalFontHexInvalid ? (
+              <div className="error" style={{ fontSize: 13 }}>
+                Enter a valid hex colour such as #F8FAFC or #ABC.
+              </div>
+            ) : null}
+            {!portalBgHexInvalid && !portalFontHexInvalid && !portalBgContrastOk ? (
               <div className="muted" style={{ fontSize: 13, color: '#b45309' }}>
-                This colour may make the portal title hard to read (light text on the page background). Prefer a darker
-                shade, or check the preview below.
+                This font colour may be hard to read on the chosen background. Prefer higher contrast, or check the
+                preview below.
               </div>
             ) : null}
             <div
@@ -283,14 +494,27 @@ export function AdminFirmDetails({ token }: { token: string }) {
               style={{
                 borderRadius: 12,
                 padding: '20px 16px',
-                background: portalBgPreview,
+                backgroundColor: portalBgPreview,
+                backgroundImage: row.portal_background_configured
+                  ? `url("${apiUrl('/portal/background')}?v=${bgFileKey}")`
+                  : undefined,
+                backgroundSize: 'cover',
+                backgroundPosition: 'center',
                 border: '1px solid rgba(15,23,42,0.12)',
               }}
             >
-              <div style={{ textAlign: 'center', color: '#f8fafc', fontWeight: 700, fontSize: 18 }}>
+              <div style={{ textAlign: 'center', color: portalFontPreview, fontWeight: 700, fontSize: 18 }}>
                 {(tradingName.trim() || 'Firm name') + ' Portal'}
               </div>
-              <div style={{ textAlign: 'center', color: 'rgba(226,232,240,0.78)', fontSize: 13, marginTop: 4 }}>
+              <div
+                style={{
+                  textAlign: 'center',
+                  color: portalFontPreview,
+                  opacity: 0.78,
+                  fontSize: 13,
+                  marginTop: 4,
+                }}
+              >
                 Signed in as Client Name
               </div>
               <div

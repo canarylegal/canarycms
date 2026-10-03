@@ -31,7 +31,11 @@ const DEFAULT_PORTAL_CONFIG: PortalBrandingConfig = {
   firm_name: '',
   portal_title: 'Client Portal',
   portal_logo_url: null,
+  portal_logo_enabled: true,
   portal_background_color: null,
+  portal_background_url: null,
+  portal_font_color: null,
+  portal_background_on_signed_in: true,
   powered_by_label: 'Powered by Canary Legal Software',
   powered_by_url: 'https://canarylegalsoftware.co.uk',
 }
@@ -302,7 +306,11 @@ export default function PortalPage() {
         firm_name: cfg.firm_name?.trim() ?? '',
         portal_title: cfg.portal_title?.trim() || DEFAULT_PORTAL_CONFIG.portal_title,
         portal_logo_url: cfg.portal_logo_url ?? null,
+        portal_logo_enabled: cfg.portal_logo_enabled !== false,
         portal_background_color: cfg.portal_background_color ?? null,
+        portal_background_url: cfg.portal_background_url ?? null,
+        portal_font_color: cfg.portal_font_color ?? null,
+        portal_background_on_signed_in: cfg.portal_background_on_signed_in !== false,
         powered_by_label: cfg.powered_by_label?.trim() || DEFAULT_PORTAL_CONFIG.powered_by_label,
         powered_by_url: cfg.powered_by_url?.trim() || DEFAULT_PORTAL_CONFIG.powered_by_url,
       })
@@ -1044,8 +1052,11 @@ export default function PortalPage() {
   }
 
   if (previewExchangeBusy || quoteExchangeBusy || formExchangeBusy || canaryExchangeBusy) {
+    // Match destination chrome: avoid flashing login branding when signed-in canvas is off.
+    const exchangeUsesCustomCanvas =
+      !sessionToken || portalConfig.portal_background_on_signed_in !== false
     return (
-      <PortalLayout config={portalConfig} wide={false}>
+      <PortalLayout config={portalConfig} wide={false} useCustomCanvas={exchangeUsesCustomCanvas}>
         <div className="muted" style={{ marginTop: 12 }}>
           {canaryExchangeBusy
             ? 'Opening signature…'
@@ -1403,6 +1414,8 @@ export default function PortalPage() {
   return (
     <PortalLayout
       config={portalConfig}
+      // When false, signed-in view keeps Canary default chrome (login still uses custom colours).
+      useCustomCanvas={portalConfig.portal_background_on_signed_in !== false}
       subtitle={contactName ? `Signed in as ${contactName}` : null}
       headerActions={
         <button type="button" className="btn portalSignOutBtn" onClick={signOut}>

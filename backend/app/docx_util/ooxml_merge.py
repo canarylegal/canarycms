@@ -519,13 +519,21 @@ def _replace_mergefields_in_paragraph_element(p_el: Any, field_map: Mapping[str,
     changed = False
     fld_simple_tag = qn("w:fldSimple")
     instr_attr = qn("w:instr")
+    t_tag = qn("w:t")
     for fld in list(p_el.findall(fld_simple_tag)):
         name = _mergefield_name_from_instr(fld.get(instr_attr) or "")
         if not name:
             continue
         code = _canary_code_for_mergefield(name, field_map)
-        new_r = _make_plain_text_run_element(p_el, code)
         idx = list(p_el).index(fld)
+        # Word often leaves MERGEFIELD result text flush against the preceding sentence.
+        if idx > 0 and code and not code[:1].isspace():
+            before = "".join(
+                (t.text or "") for child in list(p_el)[:idx] for t in child.iter(t_tag)
+            )
+            if before and before[-1] in ".!?;:)" and not before.endswith((" ", "\t")):
+                code = f" {code}"
+        new_r = _make_plain_text_run_element(p_el, code)
         p_el.remove(fld)
         p_el.insert(idx, new_r)
         changed = True
@@ -880,14 +888,35 @@ def _coalesce_split_merge_tokens_in_docx(doc_bytes: bytes) -> bytes:
     changed = False
 
     def _run_plain_text(r_el: Any) -> str:
-        return "".join(t.text or "" for t in r_el.iter(t_tag))
+        # Preserve soft line breaks — names + [ORG_AND_ADDRESS_BLOCK] share one paragraph.
+        parts: list[str] = []
+        for child in r_el:
+            tag = child.tag
+            if tag == t_tag:
+                if child.text:
+                    parts.append(child.text)
+            elif tag in (qn("w:br"), qn("w:cr")):
+                parts.append("\n")
+            elif tag == qn("w:tab"):
+                parts.append("\t")
+        return "".join(parts)
+
+    def _append_text_with_breaks(r_el: Any, p_el: Any, text: str) -> None:
+        br_tag = qn("w:br")
+        lines = text.split("\n")
+        for i, part in enumerate(lines):
+            if i > 0:
+                r_el.append(p_el.makeelement(br_tag, {}))
+            if not part:
+                continue
+            attrs = {qn("xml:space"): "preserve"} if part.strip() != part else {}
+            t = p_el.makeelement(t_tag, attrs)
+            t.text = part
+            r_el.append(t)
 
     def _make_plain_text_run(p_el: Any, text: str) -> Any:
         r = p_el.makeelement(r_tag, {})
-        attrs = {qn("xml:space"): "preserve"} if text.strip() != text else {}
-        t = p_el.makeelement(t_tag, attrs)
-        t.text = text
-        r.append(t)
+        _append_text_with_breaks(r, p_el, text)
         return r
 
     def _clone_run_with_text(p_el: Any, template_el: Any, text: str) -> Any:
@@ -896,10 +925,7 @@ def _coalesce_split_merge_tokens_in_docx(doc_bytes: bytes) -> bytes:
         r = deepcopy(template_el)
         for child in list(r):
             r.remove(child)
-        attrs = {qn("xml:space"): "preserve"} if text.strip() != text else {}
-        t = p_el.makeelement(t_tag, attrs)
-        t.text = text
-        r.append(t)
+        _append_text_with_breaks(r, p_el, text)
         return r
 
     def _run_infos(p_el: Any) -> list[dict[str, Any]]:
