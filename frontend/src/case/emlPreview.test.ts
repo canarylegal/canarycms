@@ -33,6 +33,37 @@ describe('parseEmlForPreview multipart', () => {
     expect(parsed.bodyText).not.toContain(wavB64.slice(0, 40))
   })
 
+  it('renders HTML from multipart/alternative with ----=_Part_ boundaries', () => {
+    const boundary = '----=_Part_737278_1561730413.1790758446657'
+    const raw = [
+      'From: "Ewan Sturman" <bni.notifications@bniconnectglobal.com>',
+      'To: colin@mcwilliamslegal.co.uk',
+      'Subject: October events',
+      'Date: Wed, 30 Sep 2026 08:54:29 +0000',
+      `Content-Type: multipart/alternative; boundary="${boundary}"`,
+      '',
+      `--${boundary}`,
+      'Content-Type: text/plain; charset=utf-8',
+      'Content-Transfer-Encoding: 7bit',
+      '',
+      'Hi Everyone',
+      '',
+      `--${boundary}`,
+      'Content-Type: text/html; charset=utf-8',
+      'Content-Transfer-Encoding: 7bit',
+      '',
+      "<div style='font-family:Arial'><p>Hi Everyone</p><p>Leadership Training</p></div>",
+      `--${boundary}--`,
+      '',
+    ].join('\r\n')
+    const parsed = parseEmlForPreview(raw)
+    expect(parsed.bodyHtml).toBeTruthy()
+    expect(parsed.bodyHtml).toContain('Leadership Training')
+    expect(parsed.bodyText).toContain('Hi Everyone')
+    expect(parsed.bodyText).not.toContain('Content-Type: text/html')
+    expect(parsed.bodyText).not.toContain(`--${boundary}`)
+  })
+
   it('shows a friendly message for attachment-only multipart mail', () => {
     const wavB64 = ('AAgA'.repeat(100))
     const raw = [
