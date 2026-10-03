@@ -63,7 +63,8 @@ export type CaseDetailOverlayModalsProps = {
   setEmlPreviewFile: (v: FileSummary | null) => void
   setEmlPreviewData: (v: EmlPreviewData | null) => void
   setEmlPreviewErr: (v: string | null) => void
-  openCaseFile: (f: FileSummary) => void
+  /** Hand off .eml to the OS mail app (often downloads on Linux). */
+  openEmlWithMailApp: (f: FileSummary) => void | Promise<void>
 
   taskCreateOpen: boolean
   taskCreatePreset: { standardTaskId?: string; title?: string } | null
@@ -230,8 +231,7 @@ export function CaseDetailOverlayModals(props: CaseDetailOverlayModalsProps) {
           onClose={() => clearEmlPreview(props)}
           onOpenExternal={() => {
             const f = props.emlPreviewFile
-            clearEmlPreview(props)
-            if (f) void props.openCaseFile(f)
+            if (f) void props.openEmlWithMailApp(f)
           }}
         />
       ) : null}

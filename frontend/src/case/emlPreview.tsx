@@ -184,7 +184,29 @@ function decodeMimeHeaderValue(value: string): string {
   })
 }
 
-type Collected = { plain: string[]; htmlRaw: string[] }
+type Collected = { plain: string[]; htmlRaw: string[]; attachments: string[] }
+
+function filenameFromPartHeaders(headers: Record<string, string>): string | null {
+  const disp = headers['content-disposition'] || ''
+  const fromDisp = /filename\*?=(?:UTF-8''|")?([^";\n]+)"?/i.exec(disp)
+  if (fromDisp) {
+    try {
+      return decodeURIComponent(fromDisp[1].trim().replace(/^"|"$/g, ''))
+    } catch {
+      return fromDisp[1].trim().replace(/^"|"$/g, '')
+    }
+  }
+  const ct = headers['content-type'] || ''
+  const fromCt = /name\*?=(?:UTF-8''|")?([^";\n]+)"?/i.exec(ct)
+  if (fromCt) {
+    try {
+      return decodeURIComponent(fromCt[1].trim().replace(/^"|"$/g, ''))
+    } catch {
+      return fromCt[1].trim().replace(/^"|"$/g, '')
+    }
+  }
+  return null
+}
 
 /** Max raw .eml size for preview parse (avoids freezing the tab on huge MIME trees). */
 export const MAX_EML_PREVIEW_CHARS = 2_000_000
@@ -200,7 +222,9 @@ function splitMultipartSegmentsLinear(norm: string, boundaryRaw: string): string
   const b = boundaryRaw.replace(/^["']|["']$/g, '').trim()
   if (!b) return []
   const marker = `\n--${b}`
-  const rawParts = norm.split(marker)
+  // RFC 2046 allows the first boundary at the start of the body (no leading preamble/newline).
+  const padded = norm.startsWith('--') ? `\n${norm}` : norm
+  const rawParts = padded.split(marker)
   const out: string[] = []
   for (let i = 1; i < rawParts.length; i++) {
     let p = rawParts[i]
@@ -236,7 +260,15 @@ function collectParts(headers: Record<string, string>, body: string, depth: numb
     return
   }
 
-  if (!isBodyTextPart(ct, headers)) return
+  if (!isBodyTextPart(ct, headers)) {
+    const name = filenameFromPartHeaders(headers)
+    if (name) into.attachments.push(name)
+    else if (ct && !ct.includes('text/')) {
+      const short = ct.split(';')[0].trim()
+      if (short) into.attachments.push(short)
+    }
+    return
+  }
 
   const decoded = decodeBodyPayload(headers, body)
   if (ct.includes('text/html')) {
@@ -266,12 +298,33 @@ function isBodyTextPart(contentType: string, headers: Record<string, string>): b
   return ct.includes('text/html') || ct.includes('text/plain')
 }
 
+/** Raw multipart / base64 attachment dumps look "printable" but are not a message body. */
+function looksLikeRawMime(s: string): boolean {
+  const sample = s.slice(0, 12_000)
+  if (/^--[A-Za-z0-9'()+_,\-./:=?]{4,}/m.test(sample)) return true
+  if (/Content-Transfer-Encoding:\s*base64/i.test(sample)) return true
+  if (/Content-Disposition:\s*attachment/i.test(sample)) return true
+  if (/Content-Type:\s*multipart\//i.test(sample)) return true
+  // Several long base64 lines in a row (typical WAV/PDF attachment payload).
+  let b64Lines = 0
+  for (const line of sample.split('\n')) {
+    if (/^[A-Za-z0-9+/]{60,}={0,2}\s*$/.test(line)) {
+      b64Lines++
+      if (b64Lines >= 3) return true
+    } else if (line.trim()) {
+      b64Lines = 0
+    }
+  }
+  return false
+}
+
 /** Reject decoded binary blobs mis-labelled or mistaken for plain text (e.g. inline PNG signatures). */
 function isLikelyReadableText(s: string): boolean {
   const t = s.trim()
   if (!t) return false
   if (t.startsWith('\x89PNG') || t.startsWith('PNG\r') || t.includes('IHDR')) return false
   if (t.startsWith('\xff\xd8\xff') || t.startsWith('GIF8')) return false
+  if (looksLikeRawMime(t)) return false
   const sample = t.slice(0, 12_000)
   let bad = 0
   for (let i = 0; i < sample.length; i++) {
@@ -435,7 +488,7 @@ export function parseEmlForPreview(raw: string): EmlPreviewData {
   const cc = headerDisplay(topHeaders, 'cc')
   const date = headerDisplay(topHeaders, 'date')
 
-  const into: Collected = { plain: [], htmlRaw: [] }
+  const into: Collected = { plain: [], htmlRaw: [], attachments: [] }
   collectParts(topHeaders, body, 0, into)
 
   let bodyHtml: string | undefined
@@ -452,28 +505,37 @@ export function parseEmlForPreview(raw: string): EmlPreviewData {
     bodyText = bestPlain
   }
 
-  if (!bodyHtml && !bodyText) {
+  const topCt = (topHeaders['content-type'] || '').toLowerCase()
+  const topIsMultipart = topCt.includes('multipart/')
+
+  // Single-part messages only — never decode a multipart tree as one blob (dumps base64 attachments).
+  if (!bodyHtml && !bodyText && !topIsMultipart) {
     const dec = decodeBodyPayload(topHeaders, body)
-    const ct = (topHeaders['content-type'] || '').toLowerCase()
-    if (ct.includes('text/html') && isLikelyHtml(dec)) {
+    if (topCt.includes('text/html') && isLikelyHtml(dec)) {
       bodyHtml = dec.trim()
       bodyText = htmlToPlainText(bodyHtml)
-    } else if (ct.includes('text/plain') && isLikelyReadableText(dec)) {
+    } else if (topCt.includes('text/plain') && isLikelyReadableText(dec)) {
       bodyText = dec.trim()
+    } else if (!topCt || topCt.includes('text/')) {
+      const trimmed = dec.trim()
+      if (isLikelyReadableText(trimmed)) bodyText = trimmed
+      else if (isLikelyHtml(trimmed)) {
+        bodyHtml = trimmed
+        bodyText = htmlToPlainText(trimmed)
+      }
     }
   }
 
   if (!bodyHtml && !bodyText) {
-    const dec = decodeBodyPayload(topHeaders, body).trim()
-    if (isLikelyReadableText(dec)) bodyText = dec
-    else if (isLikelyHtml(dec)) {
-      bodyHtml = dec
-      bodyText = htmlToPlainText(dec)
-    }
-  }
-
-  if (!bodyHtml && !bodyText) {
-    bodyText = '(No readable message body in preview. Use Open or Download for the full e-mail.)'
+    const att = [...new Set(into.attachments)].filter(Boolean)
+    bodyText =
+      '(No readable message body in preview.' +
+      (att.length
+        ? ` This e-mail is mostly attachment${att.length === 1 ? '' : 's'}: ${att.slice(0, 6).join(', ')}${
+            att.length > 6 ? '…' : ''
+          }.`
+        : '') +
+      ' Use Download for the full .eml file.)'
   }
 
   if (truncated) {
@@ -636,8 +698,14 @@ export function EmlPreviewModal({ file, data, loading, error, onClose, onOpenExt
               Load remote content
             </button>
           ) : null}
-          <button type="button" className="btn primary" onClick={onOpenExternal} disabled={loading}>
-            Open
+          <button
+            type="button"
+            className="btn primary"
+            onClick={onOpenExternal}
+            disabled={loading}
+            title="Download the .eml so your mail app can open it"
+          >
+            Open with mail app
           </button>
           <button type="button" className="btn" onClick={onClose}>
             Close

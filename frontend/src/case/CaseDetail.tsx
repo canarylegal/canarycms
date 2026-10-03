@@ -877,6 +877,7 @@ export function CaseDetail({
     composeEmailMailto,
     previewEmlFile,
     openCaseFile,
+    openEmlWithMailApp,
     downloadCaseFiles,
     downloadCaseExportZip,
     downloadCaseFolderZip,
@@ -1276,7 +1277,7 @@ export function CaseDetail({
           setEmlPreviewFile={setEmlPreviewFile}
           setEmlPreviewData={setEmlPreviewData}
           setEmlPreviewErr={setEmlPreviewErr}
-          openCaseFile={openCaseFile}
+          openEmlWithMailApp={openEmlWithMailApp}
           taskCreateOpen={taskCreateOpen}
           taskCreatePreset={taskCreatePreset}
           setTaskCreateOpen={setTaskCreateOpen}

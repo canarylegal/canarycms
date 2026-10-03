@@ -1,5 +1,60 @@
 import { describe, expect, it } from 'vitest'
-import { sanitizeEmlHtml, wrapEmailHtmlDocument } from './emlPreview'
+import { parseEmlForPreview, sanitizeEmlHtml, wrapEmailHtmlDocument } from './emlPreview'
+
+describe('parseEmlForPreview multipart', () => {
+  it('does not dump base64 attachment payloads as the body', () => {
+    const wavB64 = 'UklGRqb0AwBXQVZFZm10IBIAAAABAAEAQB8AAIA+AAACABAAAABkYXRh' + 'AAgA'.repeat(80)
+    const raw = [
+      'From: noreply@3cx.net',
+      'To: colin@example.com',
+      'Subject: New Voicemail',
+      'Date: Thu, 01 Oct 2026 09:52:38 +0000',
+      'MIME-Version: 1.0',
+      'Content-Type: multipart/mixed; boundary="aa953bdd2aed"',
+      '',
+      'Business communications. AI-powered. Your way.',
+      '--aa953bdd2aed',
+      'Content-Type: text/plain; charset=utf-8',
+      '',
+      'You have a new voicemail.',
+      '--aa953bdd2aed',
+      'Content-Disposition: attachment; filename="vmail.wav"',
+      'Content-Transfer-Encoding: base64',
+      'Content-Type: application/octet-stream; name="vmail.wav"',
+      '',
+      wavB64,
+      '--aa953bdd2aed--',
+      '',
+    ].join('\r\n')
+    const parsed = parseEmlForPreview(raw)
+    expect(parsed.subject).toBe('New Voicemail')
+    expect(parsed.bodyText).toContain('You have a new voicemail.')
+    expect(parsed.bodyText).not.toContain('Content-Transfer-Encoding')
+    expect(parsed.bodyText).not.toContain(wavB64.slice(0, 40))
+  })
+
+  it('shows a friendly message for attachment-only multipart mail', () => {
+    const wavB64 = ('AAgA'.repeat(100))
+    const raw = [
+      'From: noreply@3cx.net',
+      'Subject: New Voicemail',
+      'Content-Type: multipart/mixed; boundary="onlyatt"',
+      '',
+      '--onlyatt',
+      'Content-Disposition: attachment; filename="vmail.wav"',
+      'Content-Transfer-Encoding: base64',
+      'Content-Type: application/octet-stream; name="vmail.wav"',
+      '',
+      wavB64,
+      '--onlyatt--',
+      '',
+    ].join('\r\n')
+    const parsed = parseEmlForPreview(raw)
+    expect(parsed.bodyText).toMatch(/No readable message body/i)
+    expect(parsed.bodyText).toContain('vmail.wav')
+    expect(parsed.bodyText).not.toContain('Content-Transfer-Encoding')
+  })
+})
 
 describe('eml HTML sanitization', () => {
   it('strips remote images and CSS urls when remote content is disallowed', () => {

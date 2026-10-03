@@ -317,6 +317,25 @@ export function useCaseDocFileHandlers({
     ],
   )
 
+  const openEmlWithMailApp = useCallback(
+    async (f: FileSummary) => {
+      if (!caseId) return
+      setBusy(true)
+      setActionErr(null)
+      try {
+        await openEmlViaDesktopToken(caseId, f.id, token)
+        pushNotification(
+          'Downloaded the .eml file. Open it with your mail app if the browser did not hand it off automatically.',
+        )
+      } catch (e: unknown) {
+        setActionErr(formatFileOpError(e, 'Could not open e-mail with mail app'))
+      } finally {
+        setBusy(false)
+      }
+    },
+    [caseId, setBusy, setActionErr, token, pushNotification],
+  )
+
   const openCaseFile = useCallback(
     async (f: FileSummary) => {
       if (!caseId) return
@@ -360,17 +379,9 @@ export function useCaseDocFileHandlers({
           return
         }
 
-        /* Desktop / default: hand off to the OS mail app via a one-shot download (no about:blank tab —
-         * attachment responses do not navigate the tab, which left a stray blank page). */
-        setBusy(true)
-        setActionErr(null)
-        try {
-          await openEmlViaDesktopToken(caseId, file.id, token)
-        } catch (e: unknown) {
-          setActionErr(formatFileOpError(e, 'Could not open e-mail'))
-        } finally {
-          setBusy(false)
-        }
+        /* Desktop / default: show in-app preview. OS mail-app handoff often just downloads the .eml
+         * (especially on Linux); use "Open with mail app" in the preview modal for that path. */
+        await previewEmlFile(file)
         return
       }
 
@@ -455,6 +466,7 @@ export function useCaseDocFileHandlers({
     composeEmailMailto,
     previewEmlFile,
     openCaseFile,
+    openEmlWithMailApp,
     downloadCaseFiles,
     downloadCaseExportZip,
     downloadCaseFolderZip,
