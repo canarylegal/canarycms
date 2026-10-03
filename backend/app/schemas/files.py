@@ -38,6 +38,21 @@ class OutlookPluginPendingSendOut(BaseModel):
     source_file_id: uuid.UUID | None = None
     expires_at: datetime | None = None
 
+class OutlookPluginPendingEmlOpenPutIn(BaseModel):
+    """Queue a filed .eml for Thunderbird to open via the Canary add-on."""
+
+    case_id: uuid.UUID
+    file_id: uuid.UUID
+    ttl_seconds: int | None = 120
+
+class OutlookPluginPendingEmlOpenOut(BaseModel):
+    active: bool
+    case_id: uuid.UUID | None = None
+    file_id: uuid.UUID | None = None
+    filename: str | None = None
+    open_token: str | None = None
+    expires_at: datetime | None = None
+
 class OutlookPluginPendingComposeHandoffPutIn(BaseModel):
     """Queue a compose handoff for the signed-in user's Outlook add-in to claim and open."""
 

@@ -878,6 +878,7 @@ export function CaseDetail({
     previewEmlFile,
     openCaseFile,
     openEmlWithMailApp,
+    downloadEmlFile,
     downloadCaseFiles,
     downloadCaseExportZip,
     downloadCaseFolderZip,
@@ -1278,6 +1279,7 @@ export function CaseDetail({
           setEmlPreviewData={setEmlPreviewData}
           setEmlPreviewErr={setEmlPreviewErr}
           openEmlWithMailApp={openEmlWithMailApp}
+          downloadEmlFile={downloadEmlFile}
           taskCreateOpen={taskCreateOpen}
           taskCreatePreset={taskCreatePreset}
           setTaskCreateOpen={setTaskCreateOpen}

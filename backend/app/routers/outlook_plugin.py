@@ -17,6 +17,7 @@ from app.graph_outlook_categories import ensure_master_category_for_mailbox, mer
 from app.models import Case as CaseRow
 from app.models import File as DbFile
 from app.models import User
+from app.file_eml_service import _row_is_eml_like
 from app.schemas import (
     MailPluginMessageContextOut,
     OutlookPluginEnsureMasterCategoryIn,
@@ -28,12 +29,14 @@ from app.schemas import (
     OutlookPluginLinkedCaseResolveOut,
     OutlookPluginPendingComposeHandoffOut,
     OutlookPluginPendingComposeHandoffPutIn,
+    OutlookPluginPendingEmlOpenOut,
+    OutlookPluginPendingEmlOpenPutIn,
     OutlookPluginPendingSendOut,
     OutlookPluginPendingSendPutIn,
     OutlookPluginSendCaptureLogIn,
     OutlookPluginSendCaptureLogOut,
 )
-from app.security import decode_compose_handoff_token
+from app.security import create_eml_open_token, decode_compose_handoff_token
 
 router = APIRouter(prefix="/outlook-plugin", tags=["outlook-plugin"])
 log = logging.getLogger(__name__)
@@ -67,6 +70,14 @@ def _clear_expired_compose_handoff(db: Session, user_row: User) -> None:
     if exp is not None and exp < _utcnow():
         user_row.outlook_pending_compose_handoff_token = None
         user_row.outlook_pending_compose_handoff_expires_at = None
+
+
+def _clear_expired_eml_open(db: Session, user_row: User) -> None:
+    exp = _as_utc_aware(user_row.outlook_pending_eml_open_expires_at)
+    if exp is not None and exp < _utcnow():
+        user_row.outlook_pending_eml_open_case_id = None
+        user_row.outlook_pending_eml_open_file_id = None
+        user_row.outlook_pending_eml_open_expires_at = None
 
 
 def _pending_compose_handoff_out(row: User) -> OutlookPluginPendingComposeHandoffOut:
@@ -297,6 +308,92 @@ def outlook_plugin_delete_pending_send(
     row.outlook_pending_send_expires_at = None
     row.updated_at = _utcnow()
     db.commit()
+
+
+@router.put("/pending-eml-open", response_model=OutlookPluginPendingEmlOpenOut)
+def outlook_plugin_put_pending_eml_open(
+    payload: OutlookPluginPendingEmlOpenPutIn,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> OutlookPluginPendingEmlOpenOut:
+    """Queue a filed .eml for Thunderbird (Canary add-on) to open."""
+    require_case_access(payload.case_id, user, db)
+    frow = db.get(DbFile, payload.file_id)
+    if not frow or frow.case_id != payload.case_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+    if not _row_is_eml_like(frow):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only e-mail messages (.eml / RFC822) can be opened in Thunderbird.",
+        )
+    ttl = payload.ttl_seconds if payload.ttl_seconds is not None else 120
+    ttl = max(_PENDING_TTL_MIN, min(600, int(ttl)))
+    row = db.get(User, user.id)
+    if not row:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found.")
+    row.outlook_pending_eml_open_case_id = payload.case_id
+    row.outlook_pending_eml_open_file_id = payload.file_id
+    row.outlook_pending_eml_open_expires_at = _utcnow() + timedelta(seconds=ttl)
+    row.updated_at = _utcnow()
+    db.commit()
+    db.refresh(row)
+    return OutlookPluginPendingEmlOpenOut(
+        active=True,
+        case_id=row.outlook_pending_eml_open_case_id,
+        file_id=row.outlook_pending_eml_open_file_id,
+        filename=frow.original_filename,
+        expires_at=row.outlook_pending_eml_open_expires_at,
+    )
+
+
+@router.post("/pending-eml-open/claim", response_model=OutlookPluginPendingEmlOpenOut)
+def outlook_plugin_claim_pending_eml_open(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> OutlookPluginPendingEmlOpenOut:
+    """Atomically return and clear a queued .eml open (Thunderbird add-on poll)."""
+    row = db.get(User, user.id)
+    if not row:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found.")
+    _clear_expired_eml_open(db, row)
+    cid = row.outlook_pending_eml_open_case_id
+    fid = row.outlook_pending_eml_open_file_id
+    exp = row.outlook_pending_eml_open_expires_at
+    if not cid or not fid or not exp:
+        db.commit()
+        return OutlookPluginPendingEmlOpenOut(active=False)
+    try:
+        require_case_access(cid, user, db)
+    except HTTPException:
+        row.outlook_pending_eml_open_case_id = None
+        row.outlook_pending_eml_open_file_id = None
+        row.outlook_pending_eml_open_expires_at = None
+        row.updated_at = _utcnow()
+        db.commit()
+        return OutlookPluginPendingEmlOpenOut(active=False)
+    frow = db.get(DbFile, fid)
+    if not frow or frow.case_id != cid or not _row_is_eml_like(frow):
+        row.outlook_pending_eml_open_case_id = None
+        row.outlook_pending_eml_open_file_id = None
+        row.outlook_pending_eml_open_expires_at = None
+        row.updated_at = _utcnow()
+        db.commit()
+        return OutlookPluginPendingEmlOpenOut(active=False)
+    open_token = create_eml_open_token(user_id=str(user.id), case_id=str(cid), file_id=str(fid))
+    filename = frow.original_filename
+    row.outlook_pending_eml_open_case_id = None
+    row.outlook_pending_eml_open_file_id = None
+    row.outlook_pending_eml_open_expires_at = None
+    row.updated_at = _utcnow()
+    db.commit()
+    return OutlookPluginPendingEmlOpenOut(
+        active=True,
+        case_id=cid,
+        file_id=fid,
+        filename=filename,
+        open_token=open_token,
+        expires_at=exp,
+    )
 
 
 @router.put("/pending-compose-handoff", response_model=OutlookPluginPendingComposeHandoffOut)

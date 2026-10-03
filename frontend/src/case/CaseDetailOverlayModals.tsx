@@ -63,8 +63,9 @@ export type CaseDetailOverlayModalsProps = {
   setEmlPreviewFile: (v: FileSummary | null) => void
   setEmlPreviewData: (v: EmlPreviewData | null) => void
   setEmlPreviewErr: (v: string | null) => void
-  /** Hand off .eml to the OS mail app (often downloads on Linux). */
+  /** Open filed .eml in Thunderbird via the Canary add-on. */
   openEmlWithMailApp: (f: FileSummary) => void | Promise<void>
+  downloadEmlFile: (f: FileSummary) => void | Promise<void>
 
   taskCreateOpen: boolean
   taskCreatePreset: { standardTaskId?: string; title?: string } | null
@@ -232,6 +233,10 @@ export function CaseDetailOverlayModals(props: CaseDetailOverlayModalsProps) {
           onOpenExternal={() => {
             const f = props.emlPreviewFile
             if (f) void props.openEmlWithMailApp(f)
+          }}
+          onDownload={() => {
+            const f = props.emlPreviewFile
+            if (f) void props.downloadEmlFile(f)
           }}
         />
       ) : null}

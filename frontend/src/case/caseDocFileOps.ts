@@ -191,11 +191,48 @@ export async function openCaseFileBlobInTab(
   openBlobInNewTab(typed)
 }
 
+/** Ask the Canary Thunderbird content-script bridge to open an .eml (messageDisplay.open). */
+export function tryOpenEmlInThunderbirdBridge(openUrl: string, filename: string): Promise<boolean> {
+  if (typeof window === 'undefined') return Promise.resolve(false)
+  return new Promise((resolve) => {
+    const requestId =
+      typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+        ? crypto.randomUUID()
+        : `tb-${Date.now()}-${Math.random().toString(36).slice(2)}`
+    let settled = false
+    const finish = (ok: boolean) => {
+      if (settled) return
+      settled = true
+      window.removeEventListener('message', onMsg)
+      resolve(ok)
+    }
+    const onMsg = (ev: MessageEvent) => {
+      if (ev.source !== window) return
+      const d = ev.data as { type?: string; requestId?: string; ok?: boolean } | null
+      if (!d || d.type !== 'canary-tb-open-eml-result' || d.requestId !== requestId) return
+      finish(!!d.ok)
+    }
+    window.addEventListener('message', onMsg)
+    window.postMessage(
+      { type: 'canary-tb-open-eml', requestId, url: openUrl, filename: filename || 'message.eml' },
+      '*',
+    )
+    window.setTimeout(() => finish(false), 2500)
+  })
+}
+
+/**
+ * Open a filed .eml in Thunderbird:
+ * 1) Queue for the Canary add-on poller (works from Chrome/Brave while TB is running)
+ * 2) Instant content-script bridge when Canary is open inside Thunderbird
+ * Browsers cannot launch a mail app directly — use downloadEmlViaToken for a file save.
+ */
 export async function openEmlViaDesktopToken(
   caseId: string,
   fileId: string,
   token: string,
-): Promise<void> {
+  opts?: { filename?: string | null },
+): Promise<'thunderbird' | 'queued'> {
   try {
     await apiFetch(`/mail-plugin/pending-send`, {
       token,
@@ -205,6 +242,13 @@ export async function openEmlViaDesktopToken(
   } catch {
     /* Best-effort: Thunderbird reply prefill uses this when relatedMessageId is unavailable. */
   }
+
+  await apiFetch(`/mail-plugin/pending-eml-open`, {
+    token,
+    method: 'PUT',
+    json: { case_id: caseId, file_id: fileId, ttl_seconds: 120 },
+  })
+
   const data = await apiFetch<{ token: string }>(`/cases/${caseId}/files/${fileId}/eml-open-token`, {
     method: 'POST',
     token,
@@ -212,9 +256,35 @@ export async function openEmlViaDesktopToken(
   const url = browserAbsoluteApiUrl(
     apiUrl(`/cases/${caseId}/files/${fileId}/eml-open?token=${encodeURIComponent(data.token)}`),
   )
+  let filename = (opts?.filename || 'message.eml').trim() || 'message.eml'
+  if (!/\.eml$/i.test(filename)) filename = `${filename.replace(/\.[^.]+$/, '') || 'message'}.eml`
+
+  if (await tryOpenEmlInThunderbirdBridge(url, filename)) {
+    return 'thunderbird'
+  }
+  return 'queued'
+}
+
+/** Force-download the .eml (browser save dialog). */
+export async function downloadEmlViaToken(
+  caseId: string,
+  fileId: string,
+  token: string,
+  opts?: { filename?: string | null },
+): Promise<void> {
+  const data = await apiFetch<{ token: string }>(`/cases/${caseId}/files/${fileId}/eml-open-token`, {
+    method: 'POST',
+    token,
+  })
+  const url = browserAbsoluteApiUrl(
+    apiUrl(`/cases/${caseId}/files/${fileId}/eml-open?token=${encodeURIComponent(data.token)}`),
+  )
+  let filename = (opts?.filename || 'message.eml').trim() || 'message.eml'
+  if (!/\.eml$/i.test(filename)) filename = `${filename.replace(/\.[^.]+$/, '') || 'message'}.eml`
   const a = document.createElement('a')
   a.href = url
   a.rel = 'noopener'
+  a.download = filename
   document.body.appendChild(a)
   a.click()
   a.remove()

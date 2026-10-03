@@ -564,9 +564,18 @@ type EmlPreviewModalProps = {
   error: string | null
   onClose: () => void
   onOpenExternal: () => void
+  onDownload?: () => void
 }
 
-export function EmlPreviewModal({ file, data, loading, error, onClose, onOpenExternal }: EmlPreviewModalProps) {
+export function EmlPreviewModal({
+  file,
+  data,
+  loading,
+  error,
+  onClose,
+  onOpenExternal,
+  onDownload,
+}: EmlPreviewModalProps) {
   const [sidePx, setSidePx] = useState(() => computeEmlPreviewSidePx())
   const [allowRemoteContent, setAllowRemoteContent] = useState(false)
 
@@ -703,10 +712,15 @@ export function EmlPreviewModal({ file, data, loading, error, onClose, onOpenExt
             className="btn primary"
             onClick={onOpenExternal}
             disabled={loading}
-            title="Download the .eml so your mail app can open it"
+            title="Open in Thunderbird (Canary add-on must be installed and signed in)"
           >
-            Open with mail app
+            Open in Thunderbird
           </button>
+          {onDownload ? (
+            <button type="button" className="btn" onClick={onDownload} disabled={loading} title="Save the .eml file">
+              Download .eml
+            </button>
+          ) : null}
           <button type="button" className="btn" onClick={onClose}>
             Close
           </button>

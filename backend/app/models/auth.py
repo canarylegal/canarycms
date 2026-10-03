@@ -109,6 +109,15 @@ class User(Base):
     )
     outlook_pending_send_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
+    # Canary web → Thunderbird: open a filed .eml in a message window (add-on poll/claim).
+    outlook_pending_eml_open_case_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("case.id", ondelete="SET NULL"), nullable=True
+    )
+    outlook_pending_eml_open_file_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("file.id", ondelete="SET NULL"), nullable=True
+    )
+    outlook_pending_eml_open_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
     # Canary web → Outlook add-in: open compose with merge + attachments (Phase 3 handoff).
     outlook_pending_compose_handoff_token: Mapped[str | None] = mapped_column(Text, nullable=True)
     outlook_pending_compose_handoff_expires_at: Mapped[datetime | None] = mapped_column(

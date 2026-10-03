@@ -21,6 +21,8 @@ from app.schemas import (
     OutlookPluginLinkedCaseResolveOut,
     OutlookPluginPendingComposeHandoffOut,
     OutlookPluginPendingComposeHandoffPutIn,
+    OutlookPluginPendingEmlOpenOut,
+    OutlookPluginPendingEmlOpenPutIn,
     OutlookPluginPendingSendOut,
     OutlookPluginPendingSendPutIn,
 )
@@ -72,6 +74,23 @@ def mail_plugin_delete_pending_send(
     db: Session = Depends(get_db),
 ) -> None:
     return outlook_plugin_router.outlook_plugin_delete_pending_send(user, db)
+
+
+@router.put("/pending-eml-open", response_model=OutlookPluginPendingEmlOpenOut)
+def mail_plugin_put_pending_eml_open(
+    payload: OutlookPluginPendingEmlOpenPutIn,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> OutlookPluginPendingEmlOpenOut:
+    return outlook_plugin_router.outlook_plugin_put_pending_eml_open(payload, user, db)
+
+
+@router.post("/pending-eml-open/claim", response_model=OutlookPluginPendingEmlOpenOut)
+def mail_plugin_claim_pending_eml_open(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> OutlookPluginPendingEmlOpenOut:
+    return outlook_plugin_router.outlook_plugin_claim_pending_eml_open(user, db)
 
 
 @router.put("/pending-compose-handoff", response_model=OutlookPluginPendingComposeHandoffOut)

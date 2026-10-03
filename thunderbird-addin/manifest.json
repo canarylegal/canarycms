@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "name": "Canary — file to matter",
-  "version": "1.5.22",
+  "version": "1.5.24",
   "description": "File mail to a matter; compose from a matter with merge and attachments; apply the Canary message tag.",
   "author": "Canary",
   "applications": {
@@ -24,9 +24,18 @@
       "compose-auto-open.js",
       "compose-compose-action.js",
       "filing-menu.js",
+      "pending-eml-open.js",
       "background.js"
     ]
   },
+  "content_scripts": [
+    {
+      "matches": ["http://*/*", "https://*/*"],
+      "js": ["web-bridge.js"],
+      "run_at": "document_idle",
+      "all_frames": false
+    }
+  ],
   "icons": {
     "16": "icons/icon16.png",
     "32": "icons/icon32.png",

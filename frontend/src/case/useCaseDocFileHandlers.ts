@@ -18,6 +18,7 @@ import {
   loadEmlPreviewData,
   notifyPortalFilesAdded,
   openCaseFileBlobInTab,
+  downloadEmlViaToken,
   openEmlViaDesktopToken,
   tryOpenEmlInOutlookWeb,
   uploadFilesToCaseFolder,
@@ -323,17 +324,39 @@ export function useCaseDocFileHandlers({
       setBusy(true)
       setActionErr(null)
       try {
-        await openEmlViaDesktopToken(caseId, f.id, token)
-        pushNotification(
-          'Downloaded the .eml file. Open it with your mail app if the browser did not hand it off automatically.',
-        )
+        const how = await openEmlViaDesktopToken(caseId, f.id, token, {
+          filename: f.original_filename,
+        })
+        if (how === 'thunderbird') {
+          pushNotification('Opened in Thunderbird.')
+        } else {
+          pushNotification(
+            'Sent to Thunderbird. Keep Thunderbird running with the Canary add-on — the message should open in a moment.',
+          )
+        }
       } catch (e: unknown) {
-        setActionErr(formatFileOpError(e, 'Could not open e-mail with mail app'))
+        setActionErr(formatFileOpError(e, 'Could not open e-mail in Thunderbird'))
       } finally {
         setBusy(false)
       }
     },
     [caseId, setBusy, setActionErr, token, pushNotification],
+  )
+
+  const downloadEmlFile = useCallback(
+    async (f: FileSummary) => {
+      if (!caseId) return
+      setBusy(true)
+      setActionErr(null)
+      try {
+        await downloadEmlViaToken(caseId, f.id, token, { filename: f.original_filename })
+      } catch (e: unknown) {
+        setActionErr(formatFileOpError(e, 'Could not download e-mail'))
+      } finally {
+        setBusy(false)
+      }
+    },
+    [caseId, setBusy, setActionErr, token],
   )
 
   const openCaseFile = useCallback(
@@ -467,6 +490,7 @@ export function useCaseDocFileHandlers({
     previewEmlFile,
     openCaseFile,
     openEmlWithMailApp,
+    downloadEmlFile,
     downloadCaseFiles,
     downloadCaseExportZip,
     downloadCaseFolderZip,

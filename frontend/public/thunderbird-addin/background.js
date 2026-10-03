@@ -240,6 +240,36 @@
       })()
       return true
     }
+    if (message && message.type === 'canary-open-eml-url') {
+      void (async function () {
+        try {
+          const url = message.url
+          if (!url || typeof url !== 'string' || !/\/files\/[^/]+\/eml-open\?/i.test(url)) {
+            sendResponse({ ok: false, detail: 'Unsupported open URL.' })
+            return
+          }
+          if (!ext.messageDisplay || typeof ext.messageDisplay.open !== 'function') {
+            sendResponse({ ok: false, detail: 'Thunderbird cannot open message files in this build.' })
+            return
+          }
+          const res = await fetch(url)
+          if (!res.ok) {
+            sendResponse({ ok: false, detail: 'Could not download the e-mail (' + res.status + ').' })
+            return
+          }
+          const buf = await res.arrayBuffer()
+          let name = typeof message.filename === 'string' && message.filename.trim() ? message.filename.trim() : 'message.eml'
+          if (!/\.eml$/i.test(name)) name = name.replace(/\.[^.]+$/, '') + '.eml'
+          const file = new File([buf], name, { type: 'message/rfc822' })
+          await ext.messageDisplay.open({ file: file, where: 'window' })
+          sendResponse({ ok: true })
+        } catch (e) {
+          sendResponse({ ok: false, detail: (e && e.message) || String(e) })
+        }
+      })()
+      return true
+    }
     return false
   })
 })()
+
