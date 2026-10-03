@@ -85,6 +85,22 @@ def mail_plugin_put_pending_eml_open(
     return outlook_plugin_router.outlook_plugin_put_pending_eml_open(payload, user, db)
 
 
+@router.delete("/pending-eml-open", status_code=status.HTTP_204_NO_CONTENT)
+def mail_plugin_delete_pending_eml_open(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> None:
+    return outlook_plugin_router.outlook_plugin_delete_pending_eml_open(user, db)
+
+
+@router.get("/pending-eml-open", response_model=OutlookPluginPendingEmlOpenOut)
+def mail_plugin_get_pending_eml_open(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> OutlookPluginPendingEmlOpenOut:
+    return outlook_plugin_router.outlook_plugin_get_pending_eml_open(user, db)
+
+
 @router.post("/pending-eml-open/claim", response_model=OutlookPluginPendingEmlOpenOut)
 def mail_plugin_claim_pending_eml_open(
     user: User = Depends(get_current_user),

@@ -5,10 +5,18 @@
  * Opens via messenger.messageDisplay.open({ file }) — no browser download.
  */
 ;(function () {
-  const POLL_MS = 2000
+  if (globalThis.__canaryPendingEmlInit) return
+  globalThis.__canaryPendingEmlInit = true
+
+  const POLL_MS = 1500
+  const DEDUPE_MS = 30000
   let timer = null
   let inFlight = false
   let lastAuthWarnAt = 0
+  /** @type {Map<string, number>} */
+  const recentOpens = new Map()
+  /** Serialize all messageDisplay.open calls (bridge + poller). */
+  let openChain = Promise.resolve()
 
   function getGecko() {
     return globalThis.messenger || globalThis.browser
@@ -29,15 +37,64 @@
     }
   }
 
+  function markOpened(fileId) {
+    const key = String(fileId || '').toLowerCase()
+    if (!key) return true
+    const now = Date.now()
+    const prev = recentOpens.get(key)
+    if (prev != null && now - prev < DEDUPE_MS) return false
+    recentOpens.set(key, now)
+    if (recentOpens.size > 40) {
+      for (const [k, t] of recentOpens) {
+        if (now - t > DEDUPE_MS) recentOpens.delete(k)
+      }
+    }
+    return true
+  }
+
+  async function openEmlFile(ext, file) {
+    if (!ext.messageDisplay || typeof ext.messageDisplay.open !== 'function') {
+      console.warn('Canary: messageDisplay.open unavailable')
+      notify('Canary', 'This Thunderbird build cannot open message files.')
+      return false
+    }
+    // One call only — prefer window (common solicitor preference). No tab fallback
+    // that could surface as a second view of the same message.
+    try {
+      await ext.messageDisplay.open({ file: file, location: 'window' })
+      return true
+    } catch (e1) {
+      try {
+        // Last resort: omit location (uses Thunderbird's open-message pref).
+        await ext.messageDisplay.open({ file: file })
+        return true
+      } catch (e2) {
+        console.warn('Canary: messageDisplay.open failed', e2 || e1)
+        notify('Canary', 'Thunderbird refused to open the e-mail. Try Download .eml from Canary.')
+        return false
+      }
+    }
+  }
+
+  function openEmlFileSerialized(ext, file) {
+    const run = openChain.then(function () {
+      return openEmlFile(ext, file)
+    })
+    openChain = run.then(
+      function () {},
+      function () {},
+    )
+    return run
+  }
+
   async function openClaimedEml(ext, claim, origin) {
     const sh = globalThis.canaryShared
     if (!sh || !claim || !claim.active || !claim.open_token || !claim.case_id || !claim.file_id) {
       return false
     }
-    if (!ext.messageDisplay || typeof ext.messageDisplay.open !== 'function') {
-      console.warn('Canary: messageDisplay.open unavailable')
-      notify('Canary', 'This Thunderbird build cannot open message files.')
-      return false
+    if (!markOpened(claim.file_id)) {
+      console.info('Canary: skip duplicate eml-open for', claim.file_id)
+      return true
     }
     const url =
       sh.apiRoot(origin) +
@@ -57,24 +114,9 @@
     let name = (claim.filename && String(claim.filename).trim()) || 'message.eml'
     if (!/\.eml$/i.test(name)) name = name.replace(/\.[^.]+$/, '') + '.eml'
     const file = new File([buf], name, { type: 'message/rfc822' })
-    // Thunderbird API uses `location`, not `where`.
-    try {
-      await ext.messageDisplay.open({ file: file, location: 'window' })
-    } catch (e1) {
-      try {
-        await ext.messageDisplay.open({ file: file, location: 'tab' })
-      } catch (e2) {
-        try {
-          await ext.messageDisplay.open({ file: file })
-        } catch (e3) {
-          console.warn('Canary: messageDisplay.open failed', e3 || e2 || e1)
-          notify('Canary', 'Thunderbird refused to open the e-mail. Try Download .eml from Canary.')
-          return false
-        }
-      }
-    }
-    notify('Canary', 'Opened e-mail in Thunderbird.')
-    return true
+    const ok = await openEmlFileSerialized(ext, file)
+    if (ok) notify('Canary', 'Opened e-mail in Thunderbird.')
+    return ok
   }
 
   async function pollOnce() {
@@ -128,7 +170,6 @@
     if (ext.runtime && ext.runtime.onStartup) {
       ext.runtime.onStartup.addListener(start)
     }
-    // Force a poll when the user opens the Canary popup / panel messaging wakes the background.
     if (ext.runtime && ext.runtime.onMessage) {
       ext.runtime.onMessage.addListener(function (message) {
         if (message && message.type === 'canary-poll-pending-eml-open') {
@@ -139,4 +180,6 @@
   }
 
   globalThis.canaryPollPendingEmlOpen = pollOnce
+  globalThis.canaryMarkEmlOpened = markOpened
+  globalThis.canaryOpenEmlFile = openEmlFileSerialized
 })()

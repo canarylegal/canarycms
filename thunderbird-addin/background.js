@@ -248,6 +248,19 @@
             sendResponse({ ok: false, detail: 'Unsupported open URL.' })
             return
           }
+          // Dedupe against the pending-eml-open poller (same file_id within a short window).
+          try {
+            const m = /\/files\/([^/]+)\/eml-open\?/i.exec(url)
+            const fid = m && m[1]
+            if (fid && typeof globalThis.canaryMarkEmlOpened === 'function') {
+              if (!globalThis.canaryMarkEmlOpened(fid)) {
+                sendResponse({ ok: true, deduped: true })
+                return
+              }
+            }
+          } catch (_) {
+            /* ignore */
+          }
           if (!ext.messageDisplay || typeof ext.messageDisplay.open !== 'function') {
             sendResponse({ ok: false, detail: 'Thunderbird cannot open message files in this build.' })
             return
@@ -261,12 +274,14 @@
           let name = typeof message.filename === 'string' && message.filename.trim() ? message.filename.trim() : 'message.eml'
           if (!/\.eml$/i.test(name)) name = name.replace(/\.[^.]+$/, '') + '.eml'
           const file = new File([buf], name, { type: 'message/rfc822' })
-          try {
+          let opened = false
+          if (typeof globalThis.canaryOpenEmlFile === 'function') {
+            opened = !!(await globalThis.canaryOpenEmlFile(ext, file))
+          } else if (ext.messageDisplay && typeof ext.messageDisplay.open === 'function') {
             await ext.messageDisplay.open({ file: file, location: 'window' })
-          } catch (_) {
-            await ext.messageDisplay.open({ file: file, location: 'tab' })
+            opened = true
           }
-          sendResponse({ ok: true })
+          sendResponse({ ok: opened })
         } catch (e) {
           sendResponse({ ok: false, detail: (e && e.message) || String(e) })
         }
@@ -275,5 +290,27 @@
     }
     return false
   })
+
+  // Protocol handler opens open-handoff.html — poll then close that tab so it doesn't linger.
+  if (ext.tabs && typeof ext.tabs.onUpdated === 'object' && ext.tabs.onUpdated.addListener) {
+    const closing = Object.create(null)
+    ext.tabs.onUpdated.addListener(function (tabId, changeInfo, tab) {
+      const u = String((tab && tab.url) || changeInfo.url || '')
+      if (!/open-handoff\.html/i.test(u)) return
+      if (closing[tabId]) return
+      closing[tabId] = true
+      if (typeof globalThis.canaryPollPendingEmlOpen === 'function') {
+        void globalThis.canaryPollPendingEmlOpen()
+      }
+      setTimeout(function () {
+        try {
+          void ext.tabs.remove(tabId)
+        } catch (_) {
+          /* ignore */
+        }
+        delete closing[tabId]
+      }, 500)
+    })
+  }
 })()
 

@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "name": "Canary — file to matter",
-  "version": "1.5.25",
+  "version": "1.5.28",
   "description": "File mail to a matter; compose from a matter with merge and attachments; apply the Canary message tag.",
   "author": "Canary",
   "applications": {
@@ -11,7 +11,15 @@
       "update_url": "https://canarylegalsoftware.co.uk/thunderbird/updates.json"
     }
   },
+  "protocol_handlers": [
+    {
+      "protocol": "ext+canary",
+      "name": "Canary — open filed e-mail",
+      "uriTemplate": "/open-handoff.html#%s"
+    }
+  ],
   "background": {
+    "persistent": true,
     "scripts": [
       "tag-apply.js",
       "canary-windows.js",
@@ -69,6 +77,7 @@
   "permissions": [
     "storage",
     "menus",
+    "tabs",
     "accountsRead",
     "messagesRead",
     "messagesUpdate",

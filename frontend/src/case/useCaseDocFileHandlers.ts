@@ -318,9 +318,12 @@ export function useCaseDocFileHandlers({
     ],
   )
 
+  const openEmlInFlightRef = useRef<string | null>(null)
   const openEmlWithMailApp = useCallback(
     async (f: FileSummary) => {
       if (!caseId) return
+      if (openEmlInFlightRef.current === f.id) return
+      openEmlInFlightRef.current = f.id
       setBusy(true)
       setActionErr(null)
       try {
@@ -329,14 +332,17 @@ export function useCaseDocFileHandlers({
         })
         if (how === 'thunderbird') {
           pushNotification('Opened in Thunderbird.')
-        } else {
+        } else if (how === 'launching') {
           pushNotification(
-            'Sent to Thunderbird. Sign in via the Canary button in Thunderbird (same Canary site), then wait a couple of seconds — or click the Canary toolbar button to wake the add-on.',
+            'Thunderbird looks closed — confirm “Open Link” if prompted, then sign in via the Canary toolbar button if asked.',
           )
+        } else {
+          pushNotification('Sent to Thunderbird.')
         }
       } catch (e: unknown) {
         setActionErr(formatFileOpError(e, 'Could not open e-mail in Thunderbird'))
       } finally {
+        if (openEmlInFlightRef.current === f.id) openEmlInFlightRef.current = null
         setBusy(false)
       }
     },

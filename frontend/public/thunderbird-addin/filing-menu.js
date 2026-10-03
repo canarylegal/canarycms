@@ -6,8 +6,16 @@
   globalThis.__canaryFilingMenuInit = true
 
   const CONTEXT_FILING_KEY = 'canary_context_filing_message_id'
-  const MENU_ID = 'canary-file-to-matter'
-  const LEGACY_MENU_IDS = ['canary-file-to-matter', 'canary-file-to-matter-v2', 'canary-file-to-matter-v3']
+  const MENU_ID = 'canary-file-to-matter-v6'
+  const LEGACY_MENU_IDS = [
+    'canary-file-to-matter',
+    'canary-file-to-matter-v2',
+    'canary-file-to-matter-v3',
+    'canary-file-to-matter-v4',
+    'canary-file-to-matter-v5',
+    'canary-file-to-matter-v6',
+  ]
+  const MENU_TITLE = 'File to Canary matter…'
 
   function getGecko() {
     return globalThis.messenger || globalThis.browser
@@ -71,51 +79,80 @@
         /* ignore */
       }
     }
-    if (typeof ext.menus.remove !== 'function') return
-    for (let i = 0; i < LEGACY_MENU_IDS.length; i++) {
-      try {
-        await ext.menus.remove(LEGACY_MENU_IDS[i])
-      } catch (_) {
-        /* ignore */
+    if (typeof ext.menus.remove === 'function') {
+      for (let i = 0; i < LEGACY_MENU_IDS.length; i++) {
+        try {
+          await ext.menus.remove(LEGACY_MENU_IDS[i])
+        } catch (_) {
+          /* ignore */
+        }
       }
     }
   }
 
-  async function registerContextMenus(ext) {
+  async function ensureSingleMenu(ext) {
     if (!ext.menus || typeof ext.menus.create !== 'function') return
     await wipeMenus(ext)
-    // Promise-only create (no callback) — avoids TB dual callback/promise edge cases.
+    // Let Thunderbird finish removing ghosts before recreating (reload race).
+    await new Promise(function (r) {
+      setTimeout(r, 50)
+    })
     try {
       await ext.menus.create({
         id: MENU_ID,
-        title: 'File to Canary matter…',
+        title: MENU_TITLE,
         contexts: ['message_list'],
       })
-    } catch (e) {
-      // Item already present — refresh in place rather than creating a second entry.
-      if (typeof ext.menus.update === 'function') {
-        try {
+    } catch (_) {
+      try {
+        if (typeof ext.menus.update === 'function') {
           await ext.menus.update(MENU_ID, {
-            title: 'File to Canary matter…',
+            title: MENU_TITLE,
             contexts: ['message_list'],
           })
-        } catch (e2) {
-          console.warn('Canary: menus.update failed', e2 || e)
         }
-      } else {
-        console.warn('Canary: menus.create failed', e)
+      } catch (e2) {
+        console.warn('Canary: menus.create/update failed', e2)
       }
     }
-    if (!globalThis.__canaryFilingMenuClickBound) {
-      globalThis.__canaryFilingMenuClickBound = true
-      ext.menus.onClicked.addListener(onFilingMenuClicked)
-    }
+    globalThis.__canaryFilingMenuRegistered = true
+  }
+
+  function bindClick(ext) {
+    if (globalThis.__canaryFilingMenuClickBound) return
+    globalThis.__canaryFilingMenuClickBound = true
+    ext.menus.onClicked.addListener(onFilingMenuClicked)
+  }
+
+  function bindShownDedupe(ext) {
+    if (globalThis.__canaryFilingMenuShownBound) return
+    if (!ext.menus.onShown || typeof ext.menus.onShown.addListener !== 'function') return
+    globalThis.__canaryFilingMenuShownBound = true
+    ext.menus.onShown.addListener(function (info) {
+      const ids = (info && info.menuIds) || []
+      const ours = []
+      for (let i = 0; i < ids.length; i++) {
+        const id = String(ids[i] || '')
+        if (id.indexOf('canary-file-to-matter') === 0) ours.push(id)
+      }
+      if (ours.length <= 1) return
+      // Ghost duplicates from extension reloads — wipe and recreate one item, then refresh.
+      void (async function () {
+        try {
+          await ensureSingleMenu(ext)
+          if (typeof ext.menus.refresh === 'function') await ext.menus.refresh()
+        } catch (e) {
+          console.warn('Canary: menu dedupe failed', e)
+        }
+      })()
+    })
   }
 
   const ext = getGecko()
-  if (ext) {
-    // Single registration path only (do NOT also register on onInstalled — that races and doubles).
-    void registerContextMenus(ext).catch(function (e) {
+  if (ext && ext.menus) {
+    bindClick(ext)
+    bindShownDedupe(ext)
+    void ensureSingleMenu(ext).catch(function (e) {
       console.warn('Canary: menu register failed', e)
     })
   }

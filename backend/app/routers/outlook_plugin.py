@@ -346,13 +346,58 @@ def outlook_plugin_put_pending_eml_open(
     )
 
 
+@router.delete("/pending-eml-open", status_code=status.HTTP_204_NO_CONTENT)
+def outlook_plugin_delete_pending_eml_open(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> None:
+    """Clear a queued .eml open (web UI opened via Thunderbird bridge — avoid poller double-open)."""
+    row = db.get(User, user.id)
+    if not row:
+        return
+    row.outlook_pending_eml_open_case_id = None
+    row.outlook_pending_eml_open_file_id = None
+    row.outlook_pending_eml_open_expires_at = None
+    row.updated_at = _utcnow()
+    db.commit()
+
+
+@router.get("/pending-eml-open", response_model=OutlookPluginPendingEmlOpenOut)
+def outlook_plugin_get_pending_eml_open(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> OutlookPluginPendingEmlOpenOut:
+    """Peek whether a queued .eml open is still waiting (does not claim)."""
+    row = db.get(User, user.id)
+    if not row:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found.")
+    _clear_expired_eml_open(db, row)
+    cid = row.outlook_pending_eml_open_case_id
+    fid = row.outlook_pending_eml_open_file_id
+    exp = row.outlook_pending_eml_open_expires_at
+    if not cid or not fid or not exp:
+        db.commit()
+        return OutlookPluginPendingEmlOpenOut(active=False)
+    frow = db.get(DbFile, fid)
+    filename = frow.original_filename if frow else None
+    db.commit()
+    return OutlookPluginPendingEmlOpenOut(
+        active=True,
+        case_id=cid,
+        file_id=fid,
+        filename=filename,
+        expires_at=exp,
+    )
+
+
 @router.post("/pending-eml-open/claim", response_model=OutlookPluginPendingEmlOpenOut)
 def outlook_plugin_claim_pending_eml_open(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> OutlookPluginPendingEmlOpenOut:
     """Atomically return and clear a queued .eml open (Thunderbird add-on poll)."""
-    row = db.get(User, user.id)
+    # Row lock so two Thunderbird profiles cannot both claim the same pending open.
+    row = db.execute(select(User).where(User.id == user.id).with_for_update()).scalar_one_or_none()
     if not row:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found.")
     _clear_expired_eml_open(db, row)

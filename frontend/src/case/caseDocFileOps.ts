@@ -191,6 +191,29 @@ export async function openCaseFileBlobInTab(
   openBlobInNewTab(typed)
 }
 
+/** True when the Canary Thunderbird content-script bridge is present in this page. */
+export function pingThunderbirdBridge(timeoutMs = 400): Promise<boolean> {
+  if (typeof window === 'undefined') return Promise.resolve(false)
+  return new Promise((resolve) => {
+    let settled = false
+    const finish = (ok: boolean) => {
+      if (settled) return
+      settled = true
+      window.removeEventListener('message', onMsg)
+      resolve(ok)
+    }
+    const onMsg = (ev: MessageEvent) => {
+      if (ev.source !== window) return
+      const d = ev.data as { type?: string } | null
+      if (!d || d.type !== 'canary-tb-bridge-ready') return
+      finish(true)
+    }
+    window.addEventListener('message', onMsg)
+    window.postMessage({ type: 'canary-tb-bridge-ping' }, '*')
+    window.setTimeout(() => finish(false), timeoutMs)
+  })
+}
+
 /** Ask the Canary Thunderbird content-script bridge to open an .eml (messageDisplay.open). */
 export function tryOpenEmlInThunderbirdBridge(openUrl: string, filename: string): Promise<boolean> {
   if (typeof window === 'undefined') return Promise.resolve(false)
@@ -221,18 +244,66 @@ export function tryOpenEmlInThunderbirdBridge(openUrl: string, filename: string)
   })
 }
 
+/** Ask the OS / Thunderbird to handle ext+canary (launches TB when closed). Shows a system confirm dialog. */
+export function wakeThunderbirdViaProtocol(): void {
+  if (typeof document === 'undefined') return
+  try {
+    const a = document.createElement('a')
+    a.href = 'ext+canary:pending-eml-open'
+    a.rel = 'noopener'
+    a.style.display = 'none'
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+  } catch {
+    /* Browsers may block unknown schemes until Thunderbird registers the handler. */
+  }
+}
+
+async function sleepMs(ms: number): Promise<void> {
+  await new Promise((r) => window.setTimeout(r, ms))
+}
+
+/** Wait until the add-on claimer clears the queue (Thunderbird was already running). */
+async function waitForPendingEmlClaimed(
+  token: string,
+  fileId: string,
+  timeoutMs = 2800,
+): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    try {
+      const st = await apiFetch<{ active: boolean; file_id?: string | null }>(
+        `/mail-plugin/pending-eml-open`,
+        { token },
+      )
+      if (!st.active) return true
+      if (st.file_id && String(st.file_id) !== String(fileId)) return true
+    } catch {
+      /* keep waiting */
+    }
+    await sleepMs(350)
+  }
+  try {
+    const st = await apiFetch<{ active: boolean }>(`/mail-plugin/pending-eml-open`, { token })
+    return !st.active
+  } catch {
+    return false
+  }
+}
+
 /**
  * Open a filed .eml in Thunderbird:
- * 1) Queue for the Canary add-on poller (works from Chrome/Brave while TB is running)
- * 2) Instant content-script bridge when Canary is open inside Thunderbird
- * Browsers cannot launch a mail app directly — use downloadEmlViaToken for a file save.
+ * 1) Instant bridge when Canary is open inside Thunderbird (no queue — avoids poller double-open)
+ * 2) Otherwise queue for the add-on poller
+ * 3) If still queued after a short wait, fire ext+canary once (TB likely closed — OS may confirm)
  */
 export async function openEmlViaDesktopToken(
   caseId: string,
   fileId: string,
   token: string,
   opts?: { filename?: string | null },
-): Promise<'thunderbird' | 'queued'> {
+): Promise<'thunderbird' | 'queued' | 'launching'> {
   try {
     await apiFetch(`/mail-plugin/pending-send`, {
       token,
@@ -242,12 +313,6 @@ export async function openEmlViaDesktopToken(
   } catch {
     /* Best-effort: Thunderbird reply prefill uses this when relatedMessageId is unavailable. */
   }
-
-  await apiFetch(`/mail-plugin/pending-eml-open`, {
-    token,
-    method: 'PUT',
-    json: { case_id: caseId, file_id: fileId, ttl_seconds: 120 },
-  })
 
   const data = await apiFetch<{ token: string }>(`/cases/${caseId}/files/${fileId}/eml-open-token`, {
     method: 'POST',
@@ -259,10 +324,27 @@ export async function openEmlViaDesktopToken(
   let filename = (opts?.filename || 'message.eml').trim() || 'message.eml'
   if (!/\.eml$/i.test(filename)) filename = `${filename.replace(/\.[^.]+$/, '') || 'message'}.eml`
 
-  if (await tryOpenEmlInThunderbirdBridge(url, filename)) {
+  // Bridge first, and do NOT queue while bridging — that race was opening the message twice.
+  if (await pingThunderbirdBridge(350)) {
+    if (await tryOpenEmlInThunderbirdBridge(url, filename)) {
+      return 'thunderbird'
+    }
+  }
+
+  await apiFetch(`/mail-plugin/pending-eml-open`, {
+    token,
+    method: 'PUT',
+    json: { case_id: caseId, file_id: fileId, ttl_seconds: 120 },
+  })
+
+  // Thunderbird already running + signed in → poller claims; skip the OS protocol prompt.
+  if (await waitForPendingEmlClaimed(token, fileId, 4000)) {
     return 'thunderbird'
   }
-  return 'queued'
+
+  // Still queued → TB is probably closed; protocol handler can start it (one system confirm).
+  wakeThunderbirdViaProtocol()
+  return 'launching'
 }
 
 /** Force-download the .eml (browser save dialog). */
