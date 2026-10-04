@@ -1091,19 +1091,43 @@
         return
       }
       if (originInput && !originInput.value) originInput.value = origin
-      const sh = globalThis.canaryShared
-      if (!sh || typeof sh.runPluginConnect !== 'function') {
-        loginShowErr('Connect helper not loaded.')
+      if (!ext.runtime || typeof ext.runtime.sendMessage !== 'function') {
+        loginShowErr('Thunderbird messaging unavailable.')
         return
       }
       const connectBtn = $('btn-connect')
       if (connectBtn) connectBtn.disabled = true
       try {
-        out($('out'), 'Sign in and authorise in your browser. Waiting…', false)
-        await sh.runPluginConnect(ext, origin, 'thunderbird')
+        out(
+          $('out'),
+          'Sign in and authorise in your browser. You can close this panel — connection continues in the background.',
+          false,
+        )
+        const res = await new Promise(function (resolve, reject) {
+          try {
+            ext.runtime.sendMessage(
+              { type: 'canary-plugin-connect', origin: origin, client: 'thunderbird' },
+              function (response) {
+                const err = ext.runtime.lastError
+                if (err) {
+                  reject(new Error(err.message || String(err)))
+                  return
+                }
+                resolve(response || { ok: false, detail: 'No response from Canary background.' })
+              },
+            )
+          } catch (e) {
+            reject(e)
+          }
+        })
+        if (!res || !res.ok) {
+          throw new Error((res && res.detail) || 'Could not connect to Canary.')
+        }
         settingsOpen = false
         await refreshAuthAndCases(ext, origin, { preferFilingOnSuccess: true })
       } catch (e) {
+        // Popup may have closed during browser auth; JWT may still land in storage.
+        // Next open will pick it up via refreshAuthAndCases.
         loginShowErr(e && e.message ? String(e.message) : 'Could not connect to Canary.')
       } finally {
         if (connectBtn) connectBtn.disabled = false

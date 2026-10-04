@@ -8,14 +8,19 @@
   if (globalThis.__canaryPendingEmlInit) return
   globalThis.__canaryPendingEmlInit = true
 
-  const POLL_MS = 1500
-  const DEDUPE_MS = 30000
+  const POLL_MS = 1200
+  /** Bridge vs poller race only — must not block a later intentional re-open. */
+  const RACE_MS = 2500
+  const OPEN_TIMEOUT_MS = 4500
   let timer = null
-  let inFlight = false
+  /** Claim lock only (never held across messageDisplay.open). */
+  let claimInFlight = false
   let lastAuthWarnAt = 0
   /** @type {Map<string, number>} */
   const recentOpens = new Map()
-  /** Serialize all messageDisplay.open calls (bridge + poller). */
+  /** @type {Set<string>} */
+  const openingNow = new Set()
+  /** Serialize messageDisplay.open; always advance even if an open hangs. */
   let openChain = Promise.resolve()
 
   function getGecko() {
@@ -37,19 +42,60 @@
     }
   }
 
-  function markOpened(fileId) {
+  function sleep(ms) {
+    return new Promise(function (resolve) {
+      setTimeout(resolve, ms)
+    })
+  }
+
+  function withTimeout(promise, ms, label) {
+    let timer = null
+    return Promise.race([
+      Promise.resolve(promise).finally(function () {
+        if (timer != null) clearTimeout(timer)
+      }),
+      new Promise(function (_, reject) {
+        timer = setTimeout(function () {
+          reject(new Error(label || 'timeout'))
+        }, ms)
+      }),
+    ])
+  }
+
+  /** Reserve a short race window / in-progress slot. Returns false if skip. */
+  function beginOpen(fileId) {
     const key = String(fileId || '').toLowerCase()
     if (!key) return true
+    if (openingNow.has(key)) return false
     const now = Date.now()
     const prev = recentOpens.get(key)
-    if (prev != null && now - prev < DEDUPE_MS) return false
-    recentOpens.set(key, now)
+    if (prev != null && now - prev < RACE_MS) return false
+    openingNow.add(key)
     if (recentOpens.size > 40) {
       for (const [k, t] of recentOpens) {
-        if (now - t > DEDUPE_MS) recentOpens.delete(k)
+        if (now - t > RACE_MS) recentOpens.delete(k)
       }
     }
     return true
+  }
+
+  function endOpen(fileId, ok) {
+    const key = String(fileId || '').toLowerCase()
+    if (!key) return
+    openingNow.delete(key)
+    if (ok) recentOpens.set(key, Date.now())
+  }
+
+  /** Legacy helpers used by background.js bridge. */
+  function markOpened(fileId) {
+    return beginOpen(fileId)
+  }
+
+  function clearOpened(fileId) {
+    const key = String(fileId || '').toLowerCase()
+    if (!key) return
+    openingNow.delete(key)
+    recentOpens.delete(key)
   }
 
   async function openEmlFile(ext, file) {
@@ -58,42 +104,88 @@
       notify('Canary', 'This Thunderbird build cannot open message files.')
       return false
     }
-    // One call only — prefer window (common solicitor preference). No tab fallback
-    // that could surface as a second view of the same message.
-    try {
-      await ext.messageDisplay.open({ file: file, location: 'window' })
-      return true
-    } catch (e1) {
+    // Thunderbird sometimes hangs on open (esp. after a message window is already up).
+    // Timeout each attempt so the open chain and poller never wedge permanently.
+    let lastErr = null
+    const strategies = [
+      function (f) {
+        return { file: f, location: 'window' }
+      },
+      function (f) {
+        return { file: f, location: 'tab' }
+      },
+      function (f) {
+        return { file: f }
+      },
+    ]
+    for (let attempt = 0; attempt < 3; attempt++) {
+      if (attempt > 0) await sleep(250 * attempt)
+      let bytes
       try {
-        // Last resort: omit location (uses Thunderbird's open-message pref).
-        await ext.messageDisplay.open({ file: file })
-        return true
-      } catch (e2) {
-        console.warn('Canary: messageDisplay.open failed', e2 || e1)
-        notify('Canary', 'Thunderbird refused to open the e-mail. Try Download .eml from Canary.')
-        return false
+        bytes = await file.arrayBuffer()
+      } catch (e) {
+        lastErr = e
+        continue
+      }
+      const fresh = new File([bytes], file.name, { type: file.type || 'message/rfc822' })
+      for (let s = 0; s < strategies.length; s++) {
+        try {
+          await withTimeout(
+            ext.messageDisplay.open(strategies[s](fresh)),
+            OPEN_TIMEOUT_MS,
+            'messageDisplay.open timeout',
+          )
+          return true
+        } catch (e) {
+          lastErr = e
+        }
       }
     }
+    console.warn('Canary: messageDisplay.open failed', lastErr)
+    notify('Canary', 'Thunderbird refused to open the e-mail. Try Download .eml from Canary.')
+    return false
   }
 
   function openEmlFileSerialized(ext, file) {
     const run = openChain.then(function () {
       return openEmlFile(ext, file)
     })
+    // Always advance the chain — even on hang/timeout/reject — so later opens are not blocked.
     openChain = run.then(
-      function () {},
-      function () {},
+      function () {
+        return sleep(80)
+      },
+      function () {
+        return sleep(80)
+      },
     )
     return run
   }
 
-  async function openClaimedEml(ext, claim, origin) {
+  async function requeuePendingEml(sh, auth, claim) {
+    if (!auth || !auth.jwt || !auth.origin || !claim || !claim.case_id || !claim.file_id) return
+    try {
+      await fetch(sh.apiRoot(auth.origin) + '/mail-plugin/pending-eml-open', {
+        method: 'PUT',
+        headers: sh.jsonAuthHeaders(auth.jwt),
+        body: JSON.stringify({
+          case_id: String(claim.case_id),
+          file_id: String(claim.file_id),
+          ttl_seconds: 120,
+        }),
+      })
+    } catch (e) {
+      console.warn('Canary: could not re-queue failed eml-open', e)
+    }
+  }
+
+  async function openClaimedEml(ext, claim, origin, auth) {
     const sh = globalThis.canaryShared
     if (!sh || !claim || !claim.active || !claim.open_token || !claim.case_id || !claim.file_id) {
       return false
     }
-    if (!markOpened(claim.file_id)) {
-      console.info('Canary: skip duplicate eml-open for', claim.file_id)
+    if (!beginOpen(claim.file_id)) {
+      console.info('Canary: skip race-duplicate eml-open for', claim.file_id)
       return true
     }
     const url =
@@ -104,10 +196,20 @@
       encodeURIComponent(String(claim.file_id)) +
       '/eml-open?token=' +
       encodeURIComponent(String(claim.open_token))
-    const res = await fetch(url)
+    let res
+    try {
+      res = await fetch(url)
+    } catch (e) {
+      endOpen(claim.file_id, false)
+      console.warn('Canary: pending eml-open fetch error', e)
+      await requeuePendingEml(sh, auth, claim)
+      return false
+    }
     if (!res.ok) {
+      endOpen(claim.file_id, false)
       console.warn('Canary: pending eml-open fetch failed', res.status)
       notify('Canary', 'Could not download the e-mail to open (' + res.status + ').')
+      await requeuePendingEml(sh, auth, claim)
       return false
     }
     const buf = await res.arrayBuffer()
@@ -115,18 +217,22 @@
     if (!/\.eml$/i.test(name)) name = name.replace(/\.[^.]+$/, '') + '.eml'
     const file = new File([buf], name, { type: 'message/rfc822' })
     const ok = await openEmlFileSerialized(ext, file)
-    if (ok) notify('Canary', 'Opened e-mail in Thunderbird.')
-    return ok
+    endOpen(claim.file_id, ok)
+    if (ok) return true
+    await requeuePendingEml(sh, auth, claim)
+    return false
   }
 
   async function pollOnce() {
-    if (inFlight) return
+    if (claimInFlight) return
     const ext = getGecko()
     const sh = globalThis.canaryShared
     if (!ext || !sh) return
-    inFlight = true
+    claimInFlight = true
+    let claim = null
+    let auth = null
     try {
-      const auth = await sh.getStoredAuth(ext)
+      auth = await sh.getStoredAuth(ext)
       if (!auth || !auth.jwt || !auth.origin) {
         const now = Date.now()
         if (now - lastAuthWarnAt > 60000) {
@@ -147,12 +253,20 @@
         return
       }
       if (!res.ok || !body || !body.active) return
+      claim = body
       console.info('Canary: claimed pending eml-open', body.file_id)
-      await openClaimedEml(ext, body, auth.origin)
     } catch (e) {
       console.warn('Canary: pending eml-open poll failed', e)
     } finally {
-      inFlight = false
+      // Release before open so a hung messageDisplay.open cannot block all future claims.
+      claimInFlight = false
+    }
+    if (claim && auth) {
+      try {
+        await openClaimedEml(ext, claim, auth.origin, auth)
+      } catch (e) {
+        console.warn('Canary: openClaimedEml failed', e)
+      }
     }
   }
 
@@ -181,5 +295,7 @@
 
   globalThis.canaryPollPendingEmlOpen = pollOnce
   globalThis.canaryMarkEmlOpened = markOpened
+  globalThis.canaryClearEmlOpened = clearOpened
+  globalThis.canaryEndEmlOpen = endOpen
   globalThis.canaryOpenEmlFile = openEmlFileSerialized
 })()

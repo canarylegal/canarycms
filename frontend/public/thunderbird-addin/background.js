@@ -240,33 +240,76 @@
       })()
       return true
     }
+    if (message && message.type === 'canary-plugin-connect') {
+      // Must run in the background script: the toolbar popup is destroyed when the user
+      // switches to the browser to authorize, which previously aborted the token wait.
+      void (async function () {
+        try {
+          const sh = globalThis.canaryShared
+          if (!sh || typeof sh.runPluginConnect !== 'function') {
+            sendResponse({ ok: false, detail: 'Connect helper not loaded in background.' })
+            return
+          }
+          if (globalThis.__canaryPluginConnectPromise) {
+            sendResponse({
+              ok: false,
+              detail:
+                'A Canary sign-in is already in progress. Finish authorizing in your browser, then reopen Canary.',
+            })
+            return
+          }
+          const origin = message.origin
+          const client = message.client || 'thunderbird'
+          globalThis.__canaryPluginConnectPromise = sh.runPluginConnect(ext, origin, client)
+          try {
+            await globalThis.__canaryPluginConnectPromise
+            sendResponse({ ok: true })
+          } finally {
+            globalThis.__canaryPluginConnectPromise = null
+          }
+        } catch (e) {
+          globalThis.__canaryPluginConnectPromise = null
+          sendResponse({ ok: false, detail: (e && e.message) || String(e) })
+        }
+      })()
+      return true
+    }
     if (message && message.type === 'canary-open-eml-url') {
       void (async function () {
+        let claimedFileId = null
+        let reserved = false
         try {
           const url = message.url
           if (!url || typeof url !== 'string' || !/\/files\/[^/]+\/eml-open\?/i.test(url)) {
             sendResponse({ ok: false, detail: 'Unsupported open URL.' })
             return
           }
-          // Dedupe against the pending-eml-open poller (same file_id within a short window).
+          // Short race guard vs poller only (same file_id within ~2.5s).
           try {
             const m = /\/files\/([^/]+)\/eml-open\?/i.exec(url)
-            const fid = m && m[1]
-            if (fid && typeof globalThis.canaryMarkEmlOpened === 'function') {
-              if (!globalThis.canaryMarkEmlOpened(fid)) {
+            claimedFileId = m && m[1]
+            if (claimedFileId && typeof globalThis.canaryMarkEmlOpened === 'function') {
+              if (!globalThis.canaryMarkEmlOpened(claimedFileId)) {
                 sendResponse({ ok: true, deduped: true })
                 return
               }
+              reserved = true
             }
           } catch (_) {
             /* ignore */
           }
           if (!ext.messageDisplay || typeof ext.messageDisplay.open !== 'function') {
+            if (reserved && claimedFileId && typeof globalThis.canaryClearEmlOpened === 'function') {
+              globalThis.canaryClearEmlOpened(claimedFileId)
+            }
             sendResponse({ ok: false, detail: 'Thunderbird cannot open message files in this build.' })
             return
           }
           const res = await fetch(url)
           if (!res.ok) {
+            if (reserved && claimedFileId && typeof globalThis.canaryClearEmlOpened === 'function') {
+              globalThis.canaryClearEmlOpened(claimedFileId)
+            }
             sendResponse({ ok: false, detail: 'Could not download the e-mail (' + res.status + ').' })
             return
           }
@@ -281,8 +324,18 @@
             await ext.messageDisplay.open({ file: file, location: 'window' })
             opened = true
           }
+          if (claimedFileId && typeof globalThis.canaryEndEmlOpen === 'function') {
+            globalThis.canaryEndEmlOpen(claimedFileId, opened)
+          } else if (!opened && reserved && claimedFileId && typeof globalThis.canaryClearEmlOpened === 'function') {
+            globalThis.canaryClearEmlOpened(claimedFileId)
+          }
           sendResponse({ ok: opened })
         } catch (e) {
+          if (claimedFileId && typeof globalThis.canaryEndEmlOpen === 'function') {
+            globalThis.canaryEndEmlOpen(claimedFileId, false)
+          } else if (reserved && claimedFileId && typeof globalThis.canaryClearEmlOpened === 'function') {
+            globalThis.canaryClearEmlOpened(claimedFileId)
+          }
           sendResponse({ ok: false, detail: (e && e.message) || String(e) })
         }
       })()
