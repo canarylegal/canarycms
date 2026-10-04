@@ -52,7 +52,7 @@ CASE_NUMBER = os.getenv("CASE_NUMBER", "000002").strip().zfill(6)
 CONTACT_EMAIL = "sam.thomas@example.com"
 CONTACT_NAME = "Sam Thomas"
 SHARED_FOLDER = "Shared with client"
-STAFF_EMAIL = os.getenv("PORTAL_SMOKE_STAFF_EMAIL", "colin@mcwilliamslegal.co.uk").strip().lower()
+STAFF_EMAIL = os.getenv("PORTAL_SMOKE_STAFF_EMAIL", "portal.smoke@example.com").strip().lower()
 
 
 def _utcnow() -> datetime:

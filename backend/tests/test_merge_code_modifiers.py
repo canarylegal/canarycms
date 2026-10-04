@@ -168,11 +168,11 @@ def test_coalesce_split_title_token_preserves_following_placeholders() -> None:
             "[TITLE]": "Mr",
             "[FIRST_INITIAL]": "C",
             "[MIDDLE_INITIAL]": "",
-            "[LAST_NAME]": "McWilliams",
+            "[LAST_NAME]": "Smith",
         },
     )
     out = Document(io.BytesIO(merged))
-    assert out.paragraphs[0].text == "Mr C McWilliams"
+    assert out.paragraphs[0].text == "Mr C Smith"
 
 
 def test_merge_precedent_codes_plain_code_unstyled() -> None:

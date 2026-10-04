@@ -18,7 +18,7 @@ data/
 .canary-compose-up-*.json
 
 # Firm-specific scripts and deployment configs (local only; not for GitHub)
-backend/scripts/seed_mcwilliams_portal_forms.py
+backend/scripts/seed_*_portal_forms.py
 backend/scripts/run_*_precedents_deploy.sh
 backend/scripts/deploy_*_precedents.py
 backend/scripts/prepare_*_precedents.py

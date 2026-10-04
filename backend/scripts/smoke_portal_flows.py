@@ -188,7 +188,8 @@ class Api:
 
 
 def mint_staff_token(db) -> tuple[User, str]:
-    user = db.execute(select(User).where(User.email == "colin@mcwilliamslegal.co.uk")).scalar_one_or_none()
+    staff_email = os.getenv("PORTAL_SMOKE_STAFF_EMAIL", "portal.smoke@example.com").strip().lower()
+    user = db.execute(select(User).where(User.email == staff_email)).scalar_one_or_none()
     if user is None:
         user = db.execute(select(User).where(User.role == UserRole.admin, User.is_active.is_(True))).scalars().first()
     if user is None:

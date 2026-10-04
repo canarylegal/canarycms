@@ -196,7 +196,7 @@ def test_pin_empty_body_paragraph_spacing_content_keeps_docdefaults_after() -> N
     doc = Document()
     p = doc.add_paragraph("Hello")
     p_pr = p._p.get_or_add_pPr()
-    # Mimic Burrows/sale body precedents: empty <w:spacing/> with no after/before.
+    # Mimic sale-style body precedents: empty <w:spacing/> with no after/before.
     p_pr.append(p._p.makeelement(qn("w:spacing"), {}))
     empty = doc.add_paragraph("")
     empty._p.get_or_add_pPr().append(empty._p.makeelement(qn("w:spacing"), {}))

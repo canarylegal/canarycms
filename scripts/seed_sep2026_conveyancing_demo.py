@@ -40,7 +40,7 @@ from app.reconciliation_service import (
 from app.schemas import CaseInvoiceCreate, CaseInvoiceLineCreate, LedgerPostCreate
 
 REF = "DEMO-SEP26"
-FE_ID = uuid.UUID("b3172e5c-d989-4d30-8622-2a21a27d0388")  # colin@mcwilliamslegal.co.uk
+FE_ID = uuid.UUID("b3172e5c-d989-4d30-8622-2a21a27d0388")  # demo fee earner (local DB)
 TZ = ZoneInfo("Europe/London")
 PERIOD_END = date(2026, 9, 30)
 

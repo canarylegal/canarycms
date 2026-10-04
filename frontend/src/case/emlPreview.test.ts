@@ -37,7 +37,7 @@ describe('parseEmlForPreview multipart', () => {
     const boundary = '----=_Part_737278_1561730413.1790758446657'
     const raw = [
       'From: "Ewan Sturman" <bni.notifications@bniconnectglobal.com>',
-      'To: colin@mcwilliamslegal.co.uk',
+      'To: staff@example.com',
       'Subject: October events',
       'Date: Wed, 30 Sep 2026 08:54:29 +0000',
       `Content-Type: multipart/alternative; boundary="${boundary}"`,
