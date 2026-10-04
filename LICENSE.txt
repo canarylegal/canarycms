@@ -1,184 +1,141 @@
-CANARY CMS COMMERCIAL SOURCE LICENCE
-Version 2.0
+CANARY CMS DEVELOPMENT SOURCE LICENCE
+For unreleased development branches, including main
 Copyright © 2026 Colin James McWilliams. All rights reserved.
 
-1. Introduction
-Canary CMS is source-available legal case-management software.
-The source code is made publicly available so that prospective and licensed users, their professional advisers and technology providers can inspect, audit, evaluate and, where permitted by this Licence, modify the Software.
-Canary CMS is not open-source software as that term is ordinarily understood. Public availability of the source code does not grant an unrestricted right to use, distribute, host, sell or exploit the Software.
-Commercial Production Use requires a valid commercial licence from the Licensor.
+1. Purpose
+This Licence applies to unreleased development versions of Canary CMS, including the repository's main branch where this Licence is included.
+Development versions are published to support transparency, technical review, security assessment, development, contribution and evaluation.
+They are not licensed or supported for production deployment.
+Stable releases of Canary CMS are distributed separately and are subject to the licence accompanying the relevant release.
 
 2. Definitions
-In this Licence:
 “Licensor” means Colin James McWilliams trading as or through Canary Legal Software, and any successor owner of the copyright in the Software.
-“Software” means Canary CMS version 2.0 and subsequent releases expressly distributed under this Licence, including its source code, object code, application code, documentation and other materials supplied with it, but excluding Third-Party Components.
-“Licensee” means the individual or legal entity exercising rights under this Licence.
-“Commercial Agreement” means a current written agreement, subscription, order, proposal or other commercial arrangement accepted by the Licensor which authorises Production Use of the Software.
-“Production Use” means use of the Software in connection with the actual operations of a business, organisation or professional practice, including use involving live matters, live clients, live customer or business data, operational staff, or delivery of services to third parties.
-Production Use includes internal business use whether or not the Software is exposed to the public internet.
-“Evaluation Use” means use solely for inspection, audit, demonstration, development, testing, proof-of-concept, security assessment or evaluation and not for Production Use.
-“Licensed Deployment” means a Production Use deployment authorised by a current Commercial Agreement.
-“Authorised Contractor” means a contractor, consultant, hosting provider, managed service provider or other technology supplier appointed by the Licensee to act solely on behalf of the Licensee in relation to a Licensed Deployment.
-“Affiliate” means an entity which controls, is controlled by, or is under common control with the Licensee.
-“Modification” means any adaptation, amendment, extension, integration, patch or derivative work based upon or incorporating the Software.
-“Third-Party Components” means software, libraries, applications, services or other materials incorporated into, distributed with, or used by Canary CMS which are owned or licensed by third parties under separate terms.
+“Software” means the Canary CMS source code, documentation and associated materials distributed under this Development Source Licence, excluding Third-Party Components.
+“Production Use” means any use in connection with the actual operations of a business, organisation or professional practice, including use involving:
+a. live client or customer matters;
+b. live business or client data;
+c. operational staff using the Software as part of their work;
+d. delivery of professional or commercial services;
+e. a live client portal or other externally accessible production service; or
+f. any environment relied upon for continuing business operations.
+“Development Use” means inspection, audit, local development, testing, demonstration, proof-of-concept, security assessment or evaluation which does not amount to Production Use.
+“Third-Party Components” means software, libraries, services or other materials owned or licensed by third parties and incorporated into, distributed with or used by the Software.
 
-3. Evaluation Rights
-Subject to the terms of this Licence, the Licensor grants the Licensee a non-exclusive, non-transferable, revocable right to:
+3. Permission Granted
+Subject to this Licence, the Licensor grants you a non-exclusive, non-transferable, revocable right to:
 a. view and inspect the source code;
 b. clone or download the Software;
 c. compile and build the Software;
-d. run the Software in non-production development, test, demonstration or evaluation environments;
-e. conduct internal technical, security and compatibility testing against environments which the Licensee owns or is authorised to test;
-f. make Modifications solely for Evaluation Use; and
-g. permit employees and Authorised Contractors to exercise those rights on the Licensee's behalf.
-No fee is payable to the Licensor solely for Evaluation Use.
-Evaluation rights do not authorise Production Use.
+d. run the Software in development, testing and evaluation environments;
+e. modify the Software for Development Use;
+f. create private development branches and forks;
+g. test integrations and deployment methods;
+h. conduct security testing against environments which you own, control or have permission to test; and
+i. allow your employees, developers, professional advisers and contractors to exercise these rights on your behalf.
+No fee is payable solely for Development Use.
 
-4. Commercial Production Use
-Production Use of Canary CMS requires a current Commercial Agreement with the Licensor.
-Subject to the Licensee maintaining a valid Commercial Agreement and complying with this Licence, the Licensor grants the Licensee a non-exclusive, non-transferable right to operate the Software within the scope of its Licensed Deployment or Licensed Deployments.
-The applicable Commercial Agreement may specify matters including:
-a. the organisation authorised to use the Software;
-b. applicable firm-size, deployment or usage bands;
-c. subscription or licence fees;
-d. the number or type of authorised deployments;
-e. support and maintenance arrangements;
-f. implementation services;
-g. upgrade entitlement; and
-h. any additional commercial terms.
-Unless expressly agreed otherwise, a licence authorising Production Use by one organisation does not authorise Production Use by another organisation.
+4. No Production Use
+You must not use a development version governed by this Licence for Production Use.
+In particular, you must not deploy main or another development branch as the operational case-management system of a law firm or other business.
+The fact that development source code can technically be compiled and run does not amount to permission to use it in production.
+Production use requires a stable Canary CMS release and an applicable commercial licence from Canary Legal Software.
 
-5. Self-Hosting and Customer-Controlled Infrastructure
-A Licensed Deployment may be operated on infrastructure:
-a. owned or controlled by the Licensee;
-b. supplied or operated by an Authorised Contractor;
-c. supplied or operated by the Licensor; or
-d. supplied under another deployment arrangement approved by the Licensor.
-The identity of the person or entity operating the infrastructure does not determine whether a commercial software licence is required.
-In particular, self-hosting, customer ownership of the server, or appointment of an external IT provider does not remove the requirement for a valid Commercial Agreement for Production Use.
+5. No Commercial Service or Resale
+Without the Licensor's prior written permission, you must not:
+a. provide the Software as a hosted or managed service;
+b. provide access to the Software to customers or unrelated third parties;
+c. sell, rent, lease or sublicense the Software;
+d. distribute the Software commercially;
+e. offer the Software as a white-label, reseller or bureau product;
+f. bundle the Software into a commercial service supplied to third parties;
+g. redistribute a modified version; or
+h. copy or adapt the Software, in whole or substantial part, for the purpose of offering a competing case-management software product to third parties.
+Nothing in paragraph (h) prevents genuinely independent development which does not copy or derive from protected expression contained in Canary CMS.
 
-6. Authorised IT Providers and Contractors
-The Licensee may appoint one or more Authorised Contractors to install, host, configure, administer, secure, monitor, back up, maintain, support or modify a Licensed Deployment on its behalf.
-An Authorised Contractor may access and use the Software only:
-a. for the benefit of the Licensee;
-b. in connection with the Licensee's Licensed Deployment; and
-c. to the extent reasonably necessary to provide services to the Licensee.
-An Authorised Contractor does not acquire any independent right to deploy, license, resell, distribute or provide Canary CMS to another customer merely because it has been authorised to manage a Licensed Deployment.
-The Licensee is responsible for ensuring that its Authorised Contractors comply with the applicable restrictions of this Licence.
+6. Demonstrations and Proofs of Concept
+The Software may be used for internal demonstrations, technical evaluation and proofs of concept.
+Synthetic, anonymised or non-production data should be used wherever reasonably practicable.
+A proof-of-concept must not become a continuing operational business system.
+If evaluation progresses to intended live use, an appropriately licensed stable release must be used.
 
-7. Internal Modifications
-The Licensee and its Authorised Contractors may make Modifications to a Licensed Deployment for the Licensee's own internal requirements.
-The Licensee may keep such Modifications private.
-The Licensor does not claim ownership merely by reason of this Licence over original code independently written by the Licensee or its contractors.
-However:
-a. ownership of a Modification does not confer ownership of the underlying Canary CMS Software;
-b. the Software incorporated into or required by a Modification remains subject to this Licence;
-c. a Modification may not be distributed, sublicensed, sold or provided to third parties except with the Licensor's written permission; and
-d. the ability to modify Canary CMS does not create any right to operate the underlying Software without a valid commercial licence where Production Use is involved.
-Nothing in this Licence determines ownership as between the Licensee and an Authorised Contractor of code created by that contractor. That is a matter for their own agreement.
+7. Modifications
+You may make Modifications solely for Development Use.
+You may keep private development modifications and internal test branches.
+This Licence does not grant any right to distribute, commercialise or deploy those Modifications in production.
+Where you wish to use a Modification in a production Canary deployment, that use must be authorised under the commercial licence applicable to the relevant stable release.
 
-8. Prohibited Uses
-Except with the Licensor's prior written permission, the Licensee must not:
-a. use the Software for Production Use without a valid Commercial Agreement;
-b. sell, sublicense, lease, rent or commercially distribute the Software;
-c. offer Canary CMS itself as a hosted, managed, SaaS, bureau or similar service to unrelated third parties;
-d. provide Canary CMS as a white-label or reseller product;
-e. make the Software or a substantial part of it available as part of another commercial software product;
-f. redistribute Modifications incorporating substantial portions of Canary CMS;
-g. remove or materially obscure copyright, licensing or attribution notices;
-h. represent itself as the owner of Canary CMS;
-i. use a licence granted for one customer or organisation to provide Production Use to another customer or organisation; or
-j. copy or adapt the Software, in whole or substantial part, for the purpose of offering a competing case-management software product to third parties.
-Nothing in paragraph (j) prevents independent development of software which does not copy or derive from protected expression contained in Canary CMS.
+8. Contributions
+Nothing in this Licence obliges you to submit Modifications or improvements to Canary Legal Software.
+If you voluntarily submit code, patches or other contributions to the Canary CMS project, separate contribution terms may apply.
+Submission of a contribution does not alter the licensing status of the underlying Software.
 
-9. Hosting, Managed Services and Resellers
-A technology provider may operate Canary CMS for a licensed customer as an Authorised Contractor under section 6.
-However, a provider wishing to market, bundle, resell, license or provide Canary CMS across its own customer base must enter into a separate partner, reseller, hosting or commercial agreement with the Licensor.
-Nothing in this Licence gives an IT provider an independent right to deploy Canary CMS for multiple customers merely because it manages infrastructure for those customers.
-
-10. Updates and New Releases
-Entitlement to updates, upgrades, security fixes and future releases is determined by the applicable Commercial Agreement.
-The Licensor may release future versions of Canary CMS under different licence terms.
-The licence applying to a particular release is the licence expressly distributed with that release.
-No provision of this Licence obliges the Licensor to make future versions, updates, security fixes or source code available under identical terms.
-
-11. Expiry or Termination of Commercial Rights
-Where a Commercial Agreement expires or terminates, the Licensee's right to Production Use is governed by that Commercial Agreement.
-Unless the Commercial Agreement provides otherwise, expiry or termination of commercial rights does not authorise indefinite continued Production Use.
-The Licensor may permit a reasonable transition, export or migration period so that the Licensee can retrieve its data and move to another system.
-Nothing in this Licence requires the Licensor to implement a technical mechanism which automatically disables access to the Licensee's own data upon expiry.
-Following termination, copies of the Software may be retained solely where reasonably required for legal, archival, evidential, backup or data-migration purposes, but may not be used for continuing Production Use unless separately authorised.
-
-12. No Vendor Lock-In Representation
-Canary CMS is designed so that customers may control their own infrastructure and data.
-Source availability, customer-controlled infrastructure and the ability to appoint independent IT providers are intended to reduce technical dependency on the Licensor.
-Those features do not waive the Licensor's copyright or the requirement to hold a valid licence for Production Use.
-
-13. Third-Party Components
+9. Third-Party Components
 Third-Party Components are not licensed under this Licence.
 They remain subject to their respective licences, notices and terms.
-The Licensee is responsible for complying with the applicable terms governing Third-Party Components used in its deployment.
-Where there is any conflict between this Licence and a third-party licence in relation to a Third-Party Component, the third-party licence governs that component.
+You are responsible for complying with those terms.
 
-14. Intellectual Property
+10. Intellectual Property
 The Software is licensed, not sold.
-Except for rights expressly granted under this Licence and any applicable Commercial Agreement, all intellectual property rights in Canary CMS remain with the Licensor and its licensors.
-No implied licences are granted.
+Except for the limited rights expressly granted by this Licence, all intellectual property rights in Canary CMS remain with the Licensor and its licensors.
+No implied licence is granted.
 
-15. Trade Marks and Branding
-This Licence does not grant any right to use the names, marks, branding or logos of Canary, Canary CMS or Canary Legal Software except as reasonably necessary to identify the Software truthfully.
-No person may represent that a modified or independently operated version is officially supported, certified or supplied by Canary Legal Software unless authorised in writing.
+11. Trade Marks
+This Licence grants no right to use Canary, Canary CMS, Canary Legal Software or associated branding except as reasonably necessary to identify the Software accurately.
+Modified or independently built development versions must not be represented as approved, certified, supported or production-ready versions of Canary CMS.
 
-16. Security Testing
-The Licensee may conduct security testing against copies or deployments which it owns, controls or has express authority to test.
-Nothing in this Licence authorises testing, probing or interfering with infrastructure, deployments or systems belonging to third parties without permission.
-Security vulnerabilities discovered in Canary CMS should be reported privately to the Licensor where reasonably practicable before public disclosure, particularly where immediate disclosure could expose existing users to material risk.
+12. Security Research
+Good-faith security review of the Software and testing against systems which you are authorised to test are permitted.
+This Licence does not authorise attacks, probing, interference or access involving systems belonging to others.
+Where a security issue could place existing users at material risk, responsible private disclosure to Canary Legal Software before public disclosure is encouraged.
 
-17. Support and Maintenance
-Publication of source code does not by itself create any obligation on the Licensor to provide support, maintenance, hosting, implementation, training, updates or professional services.
-Any such obligations arise only under a separate Commercial Agreement or written agreement.
+13. No Support or Production Assurance
+Development versions may be incomplete, unstable, insecure, incompatible with previous or future versions, or subject to breaking changes without notice.
+The Licensor gives no assurance that:
+a. a development version is suitable for live use;
+b. database migrations will remain backwards-compatible;
+c. APIs or functionality will remain unchanged;
+d. defects or security vulnerabilities will be corrected;
+e. development data can be migrated safely to a stable release; or
+f. any particular commit will continue to be available.
+No support, maintenance, uptime, compatibility or service commitment is provided for development versions unless separately agreed in writing.
 
-18. Disclaimer of Warranty
-Except to the extent expressly stated in a Commercial Agreement, the Software and source code are provided on an “as is” and “as available” basis.
-To the maximum extent permitted by law, the Licensor excludes all warranties, representations and conditions not expressly set out in writing, including implied warranties of satisfactory quality, fitness for a particular purpose and non-infringement.
-The Licensee is responsible for assessing whether Canary CMS is suitable for its own legal, regulatory, operational, security and technical requirements.
+14. No Right to Future Releases
+Access to development source code does not create any right to obtain future releases or to receive future versions under the same terms.
+The Licensor may change the licensing terms applicable to future versions or branches.
+Stable releases are governed by the licence distributed with the relevant release.
 
-19. Limitation of Liability
-Where Production Use is governed by a Commercial Agreement, liability arising from that Production Use shall be subject to the liability provisions of that Commercial Agreement.
-For Evaluation Use and other use for which no fee is paid to the Licensor, and to the maximum extent permitted by law, the Licensor shall not be liable for:
+15. Disclaimer
+THE SOFTWARE IS DEVELOPMENT SOFTWARE AND IS PROVIDED “AS IS” AND “AS AVAILABLE”.
+TO THE MAXIMUM EXTENT PERMITTED BY LAW, THE LICENSOR EXCLUDES ALL WARRANTIES, REPRESENTATIONS AND CONDITIONS, WHETHER EXPRESS, IMPLIED OR STATUTORY, INCLUDING WARRANTIES OF SATISFACTORY QUALITY, FITNESS FOR A PARTICULAR PURPOSE, SECURITY, RELIABILITY, COMPATIBILITY AND NON-INFRINGEMENT.
+YOU USE DEVELOPMENT VERSIONS ENTIRELY AT YOUR OWN RISK.
+
+16. Limitation of Liability
+To the maximum extent permitted by law, the Licensor shall not be liable for:
 a. loss of profit, revenue, business, contracts or anticipated savings;
-b. loss or corruption of data;
+b. loss, corruption or disclosure of data;
 c. business interruption;
-d. indirect or consequential loss; or
-e. any loss arising from reliance on an unreleased, modified or unsupported version of the Software.
-Nothing in this Licence limits or excludes liability which cannot lawfully be limited or excluded.
+d. loss arising from use of the Software in a production environment;
+e. indirect or consequential loss; or
+f. loss arising from reliance on incomplete, unstable or unsupported functionality.
+Nothing in this Licence excludes or limits liability which cannot lawfully be excluded or limited.
 
-20. Suspension and Termination for Breach
-The rights granted by this Licence terminate automatically if the Licensee materially breaches this Licence and fails to remedy a remediable breach within 14 days after receiving written notice requiring it to do so.
-A deliberate unlicensed Production Use, unauthorised commercial redistribution, or unauthorised provision of Canary CMS to third parties may be treated as an irremediable breach where appropriate.
-Termination does not affect accrued rights, remedies or liabilities.
+17. Termination
+The rights granted by this Licence terminate automatically if you materially breach its terms.
+On termination you must cease any use which was authorised only by this Licence.
+Termination does not require deletion of material which must reasonably be retained for legal or evidential purposes, but such retained material may not be used for Production Use or commercial exploitation.
 
-21. Order of Precedence
-Where the Licensee has entered into a Commercial Agreement with the Licensor and there is a conflict between that Commercial Agreement and this Licence, the Commercial Agreement prevails to the extent of the conflict.
-Nothing in a Commercial Agreement shall be interpreted as granting rights to third parties unless expressly stated.
-
-22. Assignment
-The Licensee may not assign or transfer rights under this Licence independently of the applicable Commercial Agreement without the Licensor's written consent.
-The Licensor may assign its rights in connection with a transfer of ownership of Canary CMS or the relevant business or intellectual property.
-
-23. Severability
-If any provision of this Licence is found to be invalid, unlawful or unenforceable, that provision shall be treated as modified to the minimum extent necessary to make it valid and enforceable, or severed if modification is not possible.
+18. Severability
+If any provision of this Licence is found invalid, unlawful or unenforceable, it shall be modified to the minimum extent necessary to make it enforceable or, if that is not possible, severed.
 The remaining provisions shall continue in effect.
 
-24. No Waiver
-Failure or delay by the Licensor in exercising a right or remedy does not waive that right or remedy.
+19. No Waiver
+Failure or delay by the Licensor in enforcing any provision does not waive that provision or any other right.
 
-25. Governing Law and Jurisdiction
+20. Governing Law and Jurisdiction
 This Licence and any non-contractual obligations arising out of or in connection with it are governed by the law of England and Wales.
-The courts of England and Wales shall have exclusive jurisdiction to determine any dispute arising out of or in connection with this Licence.
+The courts of England and Wales shall have exclusive jurisdiction in relation to any dispute arising out of or in connection with this Licence.
 
-26. Contact
-Questions concerning licensing, commercial deployment, hosting, managed services, partner arrangements or permissions should be directed to:
+21. Contact
+For stable releases, commercial licences, production deployments, partner arrangements or other permissions, contact:
 Canary Legal Software
 Email: colin@canarylegalsoftware.co.uk

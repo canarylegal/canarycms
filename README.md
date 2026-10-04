@@ -65,11 +65,9 @@ docker compose --profile prod exec backend alembic upgrade head
 
 ## Licence
 
-From **v2.0.0**, Canary CMS is distributed under the **Canary CMS Commercial Source Licence Version 2.0** (see [LICENSE.txt](LICENSE.txt)).
+The **`main`** branch (and other unreleased development lines that include this file) is under the **Canary CMS Development Source Licence** — see [LICENSE.txt](LICENSE.txt). That covers inspection, development, testing, and evaluation only. **Production Use is not permitted** from development branches.
 
-The source is publicly available for inspection, audit, and evaluation. **Production Use** (live matters, clients, or business operations) requires a current commercial agreement with the Licensor. Self-hosting does not remove that requirement.
-
-Earlier tagged releases remain under the licence file shipped with that tag.
+**Stable tagged releases** (for example `v2.0.0`) ship with their own licence file. From v2.0.0 that is the Canary CMS Commercial Source Licence Version 2.0: evaluation remains available; Production Use requires a commercial agreement. Older tags keep the licence distributed with that tag.
 
 Contact: [colin@canarylegalsoftware.co.uk](mailto:colin@canarylegalsoftware.co.uk).
 

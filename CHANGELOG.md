@@ -4,6 +4,9 @@ All notable releases of Canary CMS are documented here. Prefer a tagged release 
 
 ## [Unreleased]
 
+### Changed
+- ``main`` carries the Canary CMS Development Source Licence (no Production Use). Stable tags such as ``v2.0.0`` keep the Commercial Source Licence Version 2.0 shipped with that release.
+
 ## [2.0.0] — 2026-10-04
 
 Current `.dev` line cut as the first **2.x** release. Prefer this tag over floating `main` when deploying.
