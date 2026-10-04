@@ -2,18 +2,24 @@
 
 Case-management software for law firms — matters, documents, contacts, tasks, calendars, client and office accounts, quotes, and a client portal. Designed to run on infrastructure you control (self-hosted or via a hosting partner).
 
+> **Warning — `main` is unstable and unsupported for production**
+>
+> The default branch (`main`) is a **development** line. It may change without notice, break migrations or APIs, and is **not** licensed or supported for Production Use (see [LICENSE.txt](LICENSE.txt)).
+>
+> **Only official GitHub Releases (version tags such as `v2.0.0`) are supported** for live deployments. Pin to a release tag — do not run floating `main` in production. See [Releases](https://github.com/canarylegal/canarycms/releases) and [CHANGELOG.md](CHANGELOG.md).
+
 **Website:** [canarylegalsoftware.co.uk](https://canarylegalsoftware.co.uk)
 
 **Desktop (Linux):** optional Electron shell — source and `.deb` downloads at [canarylegal/canary-desktop](https://github.com/canarylegal/canary-desktop) ([Releases](https://github.com/canarylegal/canary-desktop/releases)).
 
 ## Quick start
 
-Requires Docker and Docker Compose on a Linux host.
+Requires Docker and Docker Compose on a Linux host. Use a **release tag**, not `main`.
 
 ```bash
 git clone https://github.com/canarylegal/canarycms.git
 cd canarycms
-git checkout v1.0.0   # prefer a release tag — see GitHub Releases / CHANGELOG.md
+git checkout v2.0.0   # pin to a release — see GitHub Releases / CHANGELOG.md
 cp .env.example .env
 ```
 
