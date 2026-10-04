@@ -53,14 +53,14 @@ def test_portal_quote_sent_html_includes_footer_logo_when_branded():
     logo = "https://example.test/api/portal/logo"
     with email_branding(logo_url=logo):
         _, _, html = portal_quote_sent(
-            firm_name="Rhodes & Walker",
+            firm_name="Example Firm LLP",
             contact_name="Alex Brown",
             quote_filename="Quote.docx",
             matter_label="Sale of 1 High Street",
             portal_url=portal_url,
         )
     assert f'src="{logo}"' in html
-    assert "Rhodes &amp; Walker" in html or "Rhodes & Walker" in html
+    assert "Example Firm LLP" in html
 
 
 def test_portal_client_emails_use_styled_cta():

@@ -15,7 +15,7 @@ Current `.dev` line cut as the first **2.x** release. Prefer this tag over float
 - Replaces the previous Internal Use Source-Available Licence with the **Canary CMS Commercial Source Licence Version 2.0** for this release and later tags that ship under it. Evaluation / inspection remains available; Production Use requires a commercial agreement. See `LICENSE.txt`. Older tags keep the licence file distributed with that tag.
 
 ### Highlights
-- Rhodes & Walker demo polish: portal branding (centred login on custom canvas), letterheads / precedents, completion statement sample, Canary Sign and Thunderbird open-from-Canary reliability.
+- Demo polish: portal branding (centred login on custom canvas), letterheads / precedents, Canary Sign and Thunderbird open-from-Canary reliability.
 - Thunderbird add-on **1.5.33**: OS-level `canary-eml:` wake for closed Thunderbird (Firefox does not hand off `ext+…`), clearer sign-in prompts, handoff auth status.
 - Staff support / bug ticket modal e-mailing Canary support.
 - Matter list remains firm-wide by design; lock / allow-list rules apply on open (documented in code). Search still filters restricted matters.

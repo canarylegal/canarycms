@@ -38,7 +38,7 @@ def test_ta6_mapping_includes_sellers_property_and_solicitors() -> None:
         "[LAST_NAME_2]": "Babbage",
         "[PROPERTY_ADDRESS_BLOCK]": "1 Binary Lane\nCambridge\nCB1 1AA",
         "[PROPERTY_ADDRESS]": "1 Binary Lane, Cambridge, CB1 1AA",
-        "[FIRM_TRADING_NAME]": "Rhodes & Walker",
+        "[FIRM_TRADING_NAME]": "Example Firm LLP",
         "[FIRM_ADDRESS_BLOCK]": "10 Legal Street\nLondon\nEC1A 1BB",
         "[FIRM_POSTCODE]": "EC1A 1BB",
         "[FEE_EARNER]": "Sam Solicitor",
@@ -48,7 +48,7 @@ def test_ta6_mapping_includes_sellers_property_and_solicitors() -> None:
     assert values["Full name of the sellers 1"] == "Ada Lovelace and Mr Charles Babbage"
     assert values["Address"] == "1 Binary Lane\nCambridge"
     assert values["Postcode 1"] == "CB1 1AA"
-    assert values["Name of the seller's solicitor's firm"] == "Rhodes & Walker"
+    assert values["Name of the seller's solicitor's firm"] == "Example Firm LLP"
     assert values["Seller's solicitor address"] == "10 Legal Street\nLondon"
     assert values["Seller's solicitor address postcode 1"] == "EC1A 1BB"
     assert values["Seller's solicitor contact name"] == "Sam Solicitor"
@@ -62,7 +62,7 @@ def test_ta7_and_ta10_mapping() -> None:
         "[PRIMARY_CLIENT_NAME]": "Ada Lovelace",
         "[PROPERTY_ADDRESS_BLOCK]": "1 Binary Lane\nCambridge\nCB1 1AA",
         "[PROPERTY_ADDRESS]": "1 Binary Lane, Cambridge, CB1 1AA",
-        "[FIRM_TRADING_NAME]": "Rhodes & Walker",
+        "[FIRM_TRADING_NAME]": "Example Firm LLP",
         "[FIRM_ADDRESS_BLOCK]": "10 Legal Street\nLondon\nEC1A 1BB",
         "[FIRM_POSTCODE]": "EC1A 1BB",
         "[CASE_REF]": "000001",
@@ -73,7 +73,7 @@ def test_ta7_and_ta10_mapping() -> None:
 
     ta10 = acroform_values_for_ta_reference("TA10", fields, fee_earner_email="sam@example.com")
     assert ta10["sellerFullName"] == "Ada Lovelace"
-    assert ta10["firmName"] == "Rhodes & Walker"
+    assert ta10["firmName"] == "Example Firm LLP"
     assert ta10["matterReference"] == "000001"
     assert ta10["mailFirmorPA"] == "sam@example.com"
 

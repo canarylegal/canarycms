@@ -46,7 +46,7 @@ def test_compose_quote_applies_digital_letterhead_when_configured(db) -> None:
     )
     out, _mime = merge_compose_quote_docx_bytes(db, case.id, body)
     assert _has_header_media(out), "quote compose should copy letterhead header media when digital mode is on"
-    # Rhodes & Walker–style quote letterheads prepend a body masthead with merge codes;
+    # Demo quote letterheads may prepend a body masthead with merge codes;
     # those must be filled after the letterhead overlay (not left as literal [CASE_REF] etc.).
     text = out.decode("latin-1", errors="ignore")
     assert "[ORG_AND_ADDRESS_BLOCK]" not in text
