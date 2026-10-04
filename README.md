@@ -1,5 +1,7 @@
 # Canary CMS
 
+**Canary Classic 1.0** (`classic` branch / tag `v1.0.0`). For the current 2.x line, use tag `v2.0.0` or newer.
+
 Case-management software for law firms — matters, documents, contacts, tasks, calendars, client and office accounts, quotes, and a client portal. Designed to run on infrastructure you control (self-hosted or via a hosting partner).
 
 **Website:** [canarylegalsoftware.co.uk](https://canarylegalsoftware.co.uk)
