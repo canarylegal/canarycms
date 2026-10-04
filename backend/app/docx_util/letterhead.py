@@ -58,11 +58,21 @@ _LETTER_SCAFFOLD_PREFIX_TEXT_RE = (
     re.compile(r"^\s*Our\s+Ref\s*:", re.I),
     re.compile(r"^\s*Dear\b", re.I),
     re.compile(r"^\s*\[(?:CONTACT_LETTER_DEAR|PRIMARY_CLIENT_LETTER_DEAR|CLIENT_\d_LETTER_DEAR)\]\s*$", re.I),
+    # Hard-coded dates left from sterilised Word mail-merge shells.
+    re.compile(
+        r"^\s*\d{1,2}\s+(?:January|February|March|April|May|June|July|August|September|"
+        r"October|November|December)\s+20\d{2}\s*$",
+        re.I,
+    ),
+    # Leftover Word MERGEFIELD address/date lines.
+    re.compile(r"^\s*MERGEFIELD\b", re.I),
+    re.compile(r"^\s*\[?\s*MERGEFIELD\b", re.I),
 )
 
 _LETTER_SCAFFOLD_RE_LINE_RE = re.compile(r"^\s*Re\s*:", re.I)
 _BLANK_LETTER_SIGN_OFF_RE = re.compile(
-    r"^\s*(?:Yours\s+sincerely,?|\[CONTACT_LETTER_SIGN_OFF\]|\[FEE_EARNER\]|\[FIRM_TRADING_NAME\])\s*$",
+    r"^\s*(?:Yours\s+(?:sincerely|faithfully),?|\[CONTACT_LETTER_SIGN_OFF\]|"
+    r"\[FEE_EARNER_SIGNATURE\]|\[FEE_EARNER\]|\[FEE_EARNER_JOB_TITLE\]|\[FIRM_TRADING_NAME\])\s*$",
     re.I,
 )
 
@@ -122,7 +132,10 @@ def _body_elements_include_sign_off(elements: list[Any], *, p_tag: str, t_tag: s
         if el.tag != p_tag:
             continue
         text = "".join((t.text or "") for t in el.iter(t_tag)).strip()
-        if _BLANK_LETTER_SIGN_OFF_RE.match(text) and "sincerely" in text.lower():
+        low = text.lower()
+        if _BLANK_LETTER_SIGN_OFF_RE.match(text) and (
+            "sincerely" in low or "faithfully" in low or "letter_sign_off" in low
+        ):
             return True
     return False
 
@@ -175,6 +188,67 @@ def _remove_blank_letter_trailing_sign_off(base_body: Any, *, p_tag: str, t_tag:
         break
     # Only empty trailing cleanup is fine; if we never saw a sign-off token, put nothing back.
     del removed_any
+
+
+def _paragraph_element_plain_text(el: Any, *, t_tag: str) -> str:
+    return "".join((t.text or "") for t in el.iter(t_tag)).strip()
+
+
+def _is_sign_off_opening_text(text: str) -> bool:
+    return bool(re.match(r"^\s*Yours\s+(?:sincerely|faithfully)\s*,?\s*$", text or "", re.I))
+
+
+def _collapse_letter_spacer_paragraphs(body: Any, *, p_tag: str, t_tag: str) -> None:
+    """Remove empty paragraphs that only exist as double-spacing between content.
+
+    Sterilised Word letters often insert a blank para between every block. Combined with
+    BLANK_LETTER ``after=200`` defaults that parks a bus between lines. Keep at most one
+    blank immediately after ``Yours sincerely/faithfully`` so the signature still has air.
+    """
+    from docx.oxml.ns import qn
+
+    sect_pr_tag = qn("w:sectPr")
+    children = [el for el in list(body) if el.tag != sect_pr_tag]
+    to_remove: list[Any] = []
+    i = 0
+    while i < len(children):
+        el = children[i]
+        if el.tag != p_tag:
+            i += 1
+            continue
+        text = _paragraph_element_plain_text(el, t_tag=t_tag)
+        if text:
+            i += 1
+            continue
+        # Empty paragraph — decide whether to keep one after a Yours… line.
+        prev_text = ""
+        for j in range(i - 1, -1, -1):
+            if children[j].tag != p_tag:
+                continue
+            prev_text = _paragraph_element_plain_text(children[j], t_tag=t_tag)
+            if prev_text:
+                break
+        keep = _is_sign_off_opening_text(prev_text)
+        # Collapse a run of empties to a single kept blank (or none).
+        run_end = i
+        while run_end + 1 < len(children):
+            nxt = children[run_end + 1]
+            if nxt.tag != p_tag:
+                break
+            if _paragraph_element_plain_text(nxt, t_tag=t_tag):
+                break
+            run_end += 1
+        if keep:
+            for k in range(i + 1, run_end + 1):
+                to_remove.append(children[k])
+        else:
+            for k in range(i, run_end + 1):
+                to_remove.append(children[k])
+        i = run_end + 1
+    for el in to_remove:
+        parent = el.getparent()
+        if parent is not None:
+            parent.remove(el)
 
 
 def splice_precedent_into_blank_letter(blank_letter_bytes: bytes, precedent_bytes: bytes) -> bytes:
@@ -263,6 +337,8 @@ def splice_precedent_into_blank_letter(blank_letter_bytes: bytes, precedent_byte
         else:
             for new_el in src_elements:
                 base_body.append(new_el)
+
+    _collapse_letter_spacer_paragraphs(base_body, p_tag=p_tag, t_tag=t_tag)
 
     out = io.BytesIO()
     base.save(out)

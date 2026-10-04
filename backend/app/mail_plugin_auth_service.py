@@ -17,7 +17,9 @@ from app.canary_public_url import canary_public_url
 from app.models import MailPluginAuthCode, User
 from app.password_reset_service import login_access_token
 
-PLUGIN_AUTH_TTL = timedelta(seconds=60)
+# Long enough for browser sign-in + 2FA; the add-in polls in the background script so the
+# toolbar popup can close without abandoning the exchange.
+PLUGIN_AUTH_TTL = timedelta(minutes=5)
 _THUNDERBIRD_REDIRECT_RE = re.compile(
     r"^moz-extension://[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/auth-callback\.html$",
     re.IGNORECASE,

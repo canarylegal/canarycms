@@ -298,6 +298,10 @@ def list_cases(
     limit: int | None = Query(default=None, ge=1, le=100),
     status: CaseStatus | None = Query(default=None),
 ) -> list[CaseOut]:
+    # Intended: the matters list is firm-wide for any signed-in staff user.
+    # CaseLockMode / allow-list / deny rules apply when opening a matter
+    # (GET /cases/{id} and child routes via require_case_access), not when
+    # listing. Do not filter this path with get_case_if_accessible.
     q_trim = (q or "").strip()
     if q_trim:
         reject_search_nul(q_trim)

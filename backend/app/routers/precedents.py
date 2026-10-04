@@ -234,6 +234,22 @@ def _parse_precedent_scope_form(
     return head_u, sub_u, cat_u
 
 
+def _sibling_sub_type_ids(db: Session, sub: MatterSubType) -> list[uuid.UUID]:
+    """Sub-types that should share a precedent library.
+
+    Residential and Commercial often use the same labels (Purchase / Sale / General).
+    Remortgage and Refinance are treated as aliases so one pack covers both.
+    """
+    name = (sub.name or "").strip().lower()
+    aliases = {
+        "remortgage": {"remortgage", "refinance"},
+        "refinance": {"remortgage", "refinance"},
+    }
+    names = aliases.get(name, {name})
+    rows = db.execute(select(MatterSubType)).scalars().all()
+    return [s.id for s in rows if (s.name or "").strip().lower() in names]
+
+
 @router.get("", response_model=list[PrecedentOut])
 def list_precedents(
     kind: PrecedentKind | None = None,
@@ -261,21 +277,26 @@ def list_precedents(
         sub = db.get(MatterSubType, matter_sub_type_id)
         if sub is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Matter sub-type not found")
-        head_id = sub.head_type_id
+        sibling_ids = _sibling_sub_type_ids(db, sub)
         scope_global = and_(
             Precedent.matter_head_type_id.is_(None),
             Precedent.matter_sub_type_id.is_(None),
             Precedent.category_id.is_(None),
         )
+        # Head-wide packs for this head, or for a sibling head that owns a same-named sub-type.
+        sibling_head_ids = {
+            s.head_type_id
+            for s in db.execute(select(MatterSubType).where(MatterSubType.id.in_(sibling_ids))).scalars()
+        }
         scope_head = and_(
-            Precedent.matter_head_type_id == head_id,
+            Precedent.matter_head_type_id.in_(sibling_head_ids),
             Precedent.matter_sub_type_id.is_(None),
             Precedent.category_id.is_(None),
         )
-        scope_sub = and_(Precedent.matter_sub_type_id == matter_sub_type_id, Precedent.category_id.is_(None))
+        scope_sub = and_(Precedent.matter_sub_type_id.in_(sibling_ids), Precedent.category_id.is_(None))
         scope_cat = and_(
             Precedent.category_id.isnot(None),
-            PrecedentCategory.matter_sub_type_id == matter_sub_type_id,
+            PrecedentCategory.matter_sub_type_id.in_(sibling_ids),
         )
         q = (
             select(Precedent)

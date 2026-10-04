@@ -4,14 +4,23 @@ All notable releases of Canary CMS are documented here. Prefer a tagged release 
 
 ## [Unreleased]
 
-### Security
-- Ledger post / approve / edit / reject write audit events in the same DB transaction as the financial mutation (commit once), so a mid-request failure cannot leave money without an audit row.
+## [2.0.0] — 2026-10-04
 
-### Changed
-- Split monolithic ``schemas.py`` (~3.1k lines) and ``models.py`` (~1.9k lines) into domain packages under ``app/schemas/`` and ``app/models/``; existing ``from app.schemas import …`` / ``from app.models import …`` imports are unchanged.
-- Split frontend ``types.ts`` (~1.8k lines) into ``src/types/`` domain modules with a barrel re-export; existing ``from '../types'`` imports are unchanged.
-- Frontend CI runs ``npm run lint:ci`` (zero eslint errors; React Compiler / ``any`` debt capped as warnings) — *script and ratchet land in this change set; workflow wiring needs a ``workflow``-scoped push*.
-- Thin Playwright browser smoke (staff login + portal sign-in) via ``make test-e2e`` / ``browser-e2e`` workflow (*workflow file pending ``workflow``-scoped push*).
+Current `.dev` line cut as the first **2.x** release. Prefer this tag over floating `main` when deploying.
+
+### Licence
+- Replaces the previous Internal Use Source-Available Licence with the **Canary CMS Commercial Source Licence Version 2.0** for this release and later tags that ship under it. Evaluation / inspection remains available; Production Use requires a commercial agreement. See `LICENSE.txt`. Older tags keep the licence file distributed with that tag.
+
+### Highlights
+- Rhodes & Walker demo polish: portal branding (centred login on custom canvas), letterheads / precedents, completion statement sample, Canary Sign and Thunderbird open-from-Canary reliability.
+- Thunderbird add-on **1.5.33**: OS-level `canary-eml:` wake for closed Thunderbird (Firefox does not hand off `ext+…`), clearer sign-in prompts, handoff auth status.
+- Staff support / bug ticket modal e-mailing Canary support.
+- Matter list remains firm-wide by design; lock / allow-list rules apply on open (documented in code). Search still filters restricted matters.
+- Portal login card vertically centred on the sign-in screen.
+
+### Operator notes
+- Pin deployments to ``v2.0.0`` (or newer) rather than floating ``main``.
+- Confirm commercial licensing before Production Use under the v2.0 licence.
 
 ## [1.1.0] — 2026-09-16
 

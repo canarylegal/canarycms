@@ -30,6 +30,21 @@
   }
 
   ext.runtime.onMessage.addListener(function (message, _sender, sendResponse) {
+    if (message && message.type === 'canary-handoff-auth-status') {
+      void (async function () {
+        try {
+          const sh = globalThis.canaryShared
+          const auth = sh && typeof sh.getStoredAuth === 'function' ? await sh.getStoredAuth(ext) : null
+          sendResponse({
+            signedIn: !!(auth && auth.jwt && auth.origin),
+            origin: (auth && auth.origin) || '',
+          })
+        } catch (_) {
+          sendResponse({ signedIn: false, origin: '' })
+        }
+      })()
+      return true
+    }
     if (message && message.type === 'canary-apply-filed-tag') {
       handleApplyFiledTag(message, sendResponse)
       return true

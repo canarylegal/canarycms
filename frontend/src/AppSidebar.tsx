@@ -3,6 +3,8 @@ import { createPortal } from 'react-dom'
 import { CanaryMark } from './AppBrand'
 import { PrimaryNavButton } from './NavIcon'
 import { useNotifications } from './NotificationsProvider'
+import { SupportTicketModal, type SupportTicketKind } from './SupportTicketModal'
+import { useDialogs } from './DialogProvider'
 
 const SIDEBAR_EXPANDED_KEY = 'canary-sidebar-expanded'
 
@@ -98,7 +100,13 @@ export function AppSidebar({
   const [panelPos, setPanelPos] = useState<{ top: number; left: number } | null>(null)
   const notifyWrapRef = useRef<HTMLDivElement>(null)
   const brandBtnRef = useRef<HTMLButtonElement>(null)
+  const supportWrapRef = useRef<HTMLDivElement>(null)
+  const supportBtnRef = useRef<HTMLButtonElement>(null)
+  const [supportMenuOpen, setSupportMenuOpen] = useState(false)
+  const [supportMenuPos, setSupportMenuPos] = useState<{ top: number; left: number } | null>(null)
+  const [ticketKind, setTicketKind] = useState<SupportTicketKind | null>(null)
   const { notifications, unreadCount, markAllRead, clearAll } = useNotifications()
+  const { alert } = useDialogs()
 
   // Keep preference in sync across remounts / other tabs.
   useEffect(() => {
@@ -173,7 +181,61 @@ export function AppSidebar({
     })
   }, [])
 
+  useLayoutEffect(() => {
+    if (!supportMenuOpen) {
+      setSupportMenuPos(null)
+      return
+    }
+    function place() {
+      const btn = supportBtnRef.current
+      if (!btn) return
+      const r = btn.getBoundingClientRect()
+      const width = 220
+      let left = r.right + 8
+      if (left + width > window.innerWidth - 8) {
+        left = Math.max(8, r.left)
+      }
+      const menuH = 96
+      let top = r.bottom - menuH
+      if (top < 8) top = 8
+      setSupportMenuPos({ top, left })
+    }
+    place()
+    window.addEventListener('resize', place)
+    window.addEventListener('scroll', place, true)
+    return () => {
+      window.removeEventListener('resize', place)
+      window.removeEventListener('scroll', place, true)
+    }
+  }, [supportMenuOpen, expanded])
+
+  useEffect(() => {
+    if (!supportMenuOpen) return
+    function onDocMouseDown(e: MouseEvent) {
+      const wrap = supportWrapRef.current
+      const panel = document.getElementById('app-sidebar-support-menu')
+      const t = e.target
+      if (!(t instanceof Node)) return
+      if (wrap?.contains(t) || panel?.contains(t)) return
+      setSupportMenuOpen(false)
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') setSupportMenuOpen(false)
+    }
+    document.addEventListener('mousedown', onDocMouseDown)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDocMouseDown)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [supportMenuOpen])
+
   const badgeLabel = unreadCount > 9 ? '9+' : String(unreadCount)
+
+  function openTicket(kind: SupportTicketKind) {
+    setSupportMenuOpen(false)
+    setTicketKind(kind)
+  }
 
   return (
     <aside
@@ -341,6 +403,50 @@ export function AppSidebar({
         ) : null}
       </nav>
       <div className="appSidebarFooter">
+        <div className="appSidebarSupportWrap" ref={supportWrapRef}>
+          <button
+            type="button"
+            ref={supportBtnRef}
+            className="appSidebarSignOut appSidebarSupport"
+            onClick={() => setSupportMenuOpen((o) => !o)}
+            aria-label="Support"
+            aria-haspopup="menu"
+            aria-expanded={supportMenuOpen}
+            title={expanded ? undefined : 'Support'}
+          >
+            <svg className="appSidebarSignOutIcon" width={16} height={16} viewBox="0 0 24 24" fill="none" aria-hidden>
+              <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2" />
+              <path
+                d="M9.5 9.5a2.5 2.5 0 114 2c-.7.5-1.5 1-1.5 2v.5"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+              <circle cx="12" cy="17" r="1" fill="currentColor" />
+            </svg>
+            <span className="appSidebarSignOutLabel">Support</span>
+          </button>
+          {supportMenuOpen && supportMenuPos
+            ? createPortal(
+                <div
+                  id="app-sidebar-support-menu"
+                  className="appSidebarSupportMenu"
+                  role="menu"
+                  aria-label="Support options"
+                  style={{ top: supportMenuPos.top, left: supportMenuPos.left }}
+                >
+                  <button type="button" role="menuitem" className="appSidebarSupportMenuItem" onClick={() => openTicket('support')}>
+                    Submit support ticket
+                  </button>
+                  <button type="button" role="menuitem" className="appSidebarSupportMenuItem" onClick={() => openTicket('bug')}>
+                    Report bug
+                  </button>
+                </div>,
+                document.body,
+              )
+            : null}
+        </div>
         <button
           type="button"
           className="appSidebarSignOut"
@@ -377,6 +483,14 @@ export function AppSidebar({
           <span className="appSidebarToggleLabel">{expanded ? 'Collapse' : 'Expand'}</span>
         </button>
       </div>
+      <SupportTicketModal
+        open={ticketKind != null}
+        kind={ticketKind ?? 'support'}
+        onClose={() => setTicketKind(null)}
+        onSubmitted={() => {
+          void alert('Thanks — your message has been sent to Canary support.', 'Sent')
+        }}
+      />
     </aside>
   )
 }

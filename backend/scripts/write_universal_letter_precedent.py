@@ -40,23 +40,22 @@ def main() -> None:
     p.add_run().add_break(WD_BREAK.LINE)
     p.add_run("[ORG_AND_ADDRESS_BLOCK]")
 
+    # No blank spacer paragraphs between shell lines — docDefaults ``after=200`` already
+    # gives breathing room. One blank after ``Yours…`` leaves room for the signature image.
     for line in (
-        "",
         "[DATE]",
-        "",
         "Your Ref: [CONTACT_REF]",
         "Our Ref: [FEE_EARNER_INITIALS]/[CASE_REF]",
-        "",
         "[PRIMARY_CLIENT_LETTER_DEAR]",
         "Re: [MATTER_DESCRIPTION]",
         "[SOLICITOR_OUR_CLIENT_LINE]",
         "[SOLICITOR_YOUR_CLIENT_LINE]",
-        "",
         "[PRECEDENT_BODY]",
-        "",
         "Yours sincerely,",
         "",
+        "[FEE_EARNER_SIGNATURE]",
         "[FEE_EARNER]",
+        "[FEE_EARNER_JOB_TITLE]",
         "[FIRM_TRADING_NAME]",
     ):
         doc.add_paragraph(line)

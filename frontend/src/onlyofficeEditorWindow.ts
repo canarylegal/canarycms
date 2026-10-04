@@ -1,7 +1,16 @@
 /** Stable ``window.open`` names so a second open focuses the existing OnlyOffice window. */
 
-export const ONLYOFFICE_EDITOR_WINDOW_FEATURES =
-  'popup=yes,width=1280,height=900,left=40,top=32,resizable=yes,scrollbars=yes'
+/** Nearly fill the available screen; browsers may still clamp popup size. */
+export function onlyofficeEditorWindowFeatures(): string {
+  const availW = window.screen?.availWidth ?? 1600
+  const availH = window.screen?.availHeight ?? 1000
+  // Leave a slim margin so the window does not look stuck to the OS chrome edge.
+  const width = Math.max(1100, Math.min(availW - 24, Math.round(availW * 0.96)))
+  const height = Math.max(720, Math.min(availH - 48, Math.round(availH * 0.94)))
+  const left = Math.max(0, Math.round((availW - width) / 2))
+  const top = Math.max(0, Math.round((availH - height) / 2))
+  return `popup=yes,width=${width},height=${height},left=${left},top=${top},resizable=yes,scrollbars=yes`
+}
 
 export function onlyofficeCaseEditorWindowTarget(caseId: string, fileId: string): string {
   return `canary-oo-case-${caseId}-${fileId}`
@@ -15,7 +24,7 @@ export function openOnlyOfficeCaseEditor(caseId: string, fileId: string): Window
   return window.open(
     `/editor/${caseId}/${fileId}`,
     onlyofficeCaseEditorWindowTarget(caseId, fileId),
-    ONLYOFFICE_EDITOR_WINDOW_FEATURES,
+    onlyofficeEditorWindowFeatures(),
   )
 }
 
@@ -23,7 +32,7 @@ export function openOnlyOfficePrecedentEditor(precedentId: string): Window | nul
   return window.open(
     `/editor/precedent/${precedentId}`,
     onlyofficePrecedentEditorWindowTarget(precedentId),
-    ONLYOFFICE_EDITOR_WINDOW_FEATURES,
+    onlyofficeEditorWindowFeatures(),
   )
 }
 
@@ -36,7 +45,7 @@ export function openOnlyOfficeFirmLetterheadEditor(kind: 'letterhead' | 'quote_l
   return window.open(
     path,
     onlyofficeFirmLetterheadEditorWindowTarget(kind),
-    ONLYOFFICE_EDITOR_WINDOW_FEATURES,
+    onlyofficeEditorWindowFeatures(),
   )
 }
 
@@ -48,6 +57,6 @@ export function openOnlyOfficeFeeScaleEditor(feeScaleId: string): Window | null 
   return window.open(
     `/editor/fee-scale/${feeScaleId}`,
     onlyofficeFeeScaleEditorWindowTarget(feeScaleId),
-    ONLYOFFICE_EDITOR_WINDOW_FEATURES,
+    onlyofficeEditorWindowFeatures(),
   )
 }

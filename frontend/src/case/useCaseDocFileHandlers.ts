@@ -330,14 +330,15 @@ export function useCaseDocFileHandlers({
         const how = await openEmlViaDesktopToken(caseId, f.id, token, {
           filename: f.original_filename,
         })
-        if (how === 'thunderbird') {
-          pushNotification('Opened in Thunderbird.')
+        // Success is silent — the message window is the feedback.
+        if (how === 'needs_addon') {
+          pushNotification(
+            'Thunderbird did not pick up the e-mail. Confirm “Open Link” / canary-eml if prompted, or open Thunderbird and sign in via the Canary toolbar, then try again.',
+          )
         } else if (how === 'launching') {
           pushNotification(
-            'Thunderbird looks closed — confirm “Open Link” if prompted, then sign in via the Canary toolbar button if asked.',
+            'Starting Thunderbird — confirm “Open Link” if your browser prompts for canary-eml.',
           )
-        } else {
-          pushNotification('Sent to Thunderbird.')
         }
       } catch (e: unknown) {
         setActionErr(formatFileOpError(e, 'Could not open e-mail in Thunderbird'))

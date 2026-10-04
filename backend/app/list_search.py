@@ -121,6 +121,9 @@ def search_cases(
     rows = list(db.execute(stmt).scalars().all())
     out: list[Case] = []
     for case in rows:
+        # Search currently hides lock-restricted matters; GET /cases (no q) does not.
+        # List visibility is firm-wide by design — keep this filter only if search
+        # is meant to differ from the main list.
         if get_case_if_accessible(case.id, user, db) is None:
             continue
         out.append(case)

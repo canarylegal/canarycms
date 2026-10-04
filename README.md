@@ -65,26 +65,13 @@ docker compose --profile prod exec backend alembic upgrade head
 
 ## Licence
 
-This project is source-available and free for internal self-hosted use by individuals and organisations.
+From **v2.0.0**, Canary CMS is distributed under the **Canary CMS Commercial Source Licence Version 2.0** (see [LICENSE.txt](LICENSE.txt)).
 
-If you want to offer this software as a hosted service, managed service, reseller product, or other commercial external offering, you must obtain a separate commercial licence.
+The source is publicly available for inspection, audit, and evaluation. **Production Use** (live matters, clients, or business operations) requires a current commercial agreement with the Licensor. Self-hosting does not remove that requirement.
 
-See [LICENSE.txt](LICENSE.txt) for details or contact [colin@canarylegalsoftware.co.uk](mailto:colin@canarylegalsoftware.co.uk).
+Earlier tagged releases remain under the licence file shipped with that tag.
 
-### What you can do for free
-
-- Self-host internally
-- Use inside your company
-- Modify for internal needs
-- Run unlimited internal instances
-
-### When you need a commercial licence
-
-- Hosting for customers
-- Managed service provision
-- White-label resale
-- Commercial redistribution
-- Paid support centred on this software
+Contact: [colin@canarylegalsoftware.co.uk](mailto:colin@canarylegalsoftware.co.uk).
 
 ## Contact
 

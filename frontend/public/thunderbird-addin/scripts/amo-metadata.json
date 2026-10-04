@@ -1,0 +1,12 @@
+{
+  "summary": {
+    "en-GB": "File mail to a Canary matter; compose with merge codes and attachments; tag incoming mail."
+  },
+  "categories": ["other"],
+  "version": {
+    "license": "all-rights-reserved",
+    "release_notes": {
+      "en-GB": "See the Canary CMS repository for release notes."
+    }
+  }
+}

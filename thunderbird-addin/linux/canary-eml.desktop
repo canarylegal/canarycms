@@ -1,0 +1,14 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Canary — open filed e-mail
+Comment=Launch Thunderbird to open a filed e-mail from the Canary web app
+# ext+canary is handled inside Thunderbird by the add-on. Firefox will not pass
+# ext+… URLs to the OS, so the web app wakes via canary-eml: instead.
+Exec=thunderbird ext+canary:pending-eml-open
+TryExec=thunderbird
+Icon=thunderbird
+Terminal=false
+NoDisplay=true
+MimeType=x-scheme-handler/canary-eml;
+Categories=Network;Email;

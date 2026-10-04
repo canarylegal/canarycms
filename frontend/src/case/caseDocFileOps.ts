@@ -240,35 +240,53 @@ export function tryOpenEmlInThunderbirdBridge(openUrl: string, filename: string)
       { type: 'canary-tb-open-eml', requestId, url: openUrl, filename: filename || 'message.eml' },
       '*',
     )
-    window.setTimeout(() => finish(false), 2500)
+    // Retries inside the add-on can take several seconds when Thunderbird is busy.
+    window.setTimeout(() => finish(false), 8000)
   })
 }
 
-/** Ask the OS / Thunderbird to handle ext+canary (launches TB when closed). Shows a system confirm dialog. */
-export function wakeThunderbirdViaProtocol(): void {
+function clickProtocolHref(href: string): void {
   if (typeof document === 'undefined') return
   try {
     const a = document.createElement('a')
-    a.href = 'ext+canary:pending-eml-open'
+    a.href = href
     a.rel = 'noopener'
     a.style.display = 'none'
     document.body.appendChild(a)
     a.click()
     a.remove()
   } catch {
-    /* Browsers may block unknown schemes until Thunderbird registers the handler. */
+    /* Browsers may block unknown schemes until a handler is registered. */
   }
+}
+
+/**
+ * Ask the OS / Thunderbird to wake and poll the pending-eml queue.
+ *
+ * Prefer canary-eml: — that is an OS-level handler (Linux .desktop). Firefox treats
+ * ext+… as its own extension scheme and will NOT launch Thunderbird when TB is closed.
+ * Still fire ext+canary as a secondary nudge for environments where TB already owns it.
+ */
+export function wakeThunderbirdViaProtocol(): void {
+  clickProtocolHref('canary-eml:pending-eml-open')
+  window.setTimeout(() => {
+    clickProtocolHref('ext+canary:pending-eml-open')
+  }, 250)
 }
 
 async function sleepMs(ms: number): Promise<void> {
   await new Promise((r) => window.setTimeout(r, ms))
 }
 
-/** Wait until the add-on claimer clears the queue (Thunderbird was already running). */
+/**
+ * Wait until the add-on has claimed the queue and the open likely stuck.
+ * Claim clears the queue before messageDisplay.open finishes; failed opens re-queue,
+ * so we only treat "inactive" as success after it stays clear briefly.
+ */
 async function waitForPendingEmlClaimed(
   token: string,
   fileId: string,
-  timeoutMs = 2800,
+  timeoutMs = 9000,
 ): Promise<boolean> {
   const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {
@@ -277,8 +295,19 @@ async function waitForPendingEmlClaimed(
         `/mail-plugin/pending-eml-open`,
         { token },
       )
-      if (!st.active) return true
-      if (st.file_id && String(st.file_id) !== String(fileId)) return true
+      const oursGone =
+        !st.active || (!!st.file_id && String(st.file_id) !== String(fileId))
+      if (oursGone) {
+        await sleepMs(1200)
+        const st2 = await apiFetch<{ active: boolean; file_id?: string | null }>(
+          `/mail-plugin/pending-eml-open`,
+          { token },
+        )
+        const stillGone =
+          !st2.active || (!!st2.file_id && String(st2.file_id) !== String(fileId))
+        if (stillGone) return true
+        // Re-queued after a failed open — keep waiting for the next claim cycle.
+      }
     } catch {
       /* keep waiting */
     }
@@ -296,14 +325,15 @@ async function waitForPendingEmlClaimed(
  * Open a filed .eml in Thunderbird:
  * 1) Instant bridge when Canary is open inside Thunderbird (no queue — avoids poller double-open)
  * 2) Otherwise queue for the add-on poller
- * 3) If still queued after a short wait, fire ext+canary once (TB likely closed — OS may confirm)
+ * 3) After a brief wait, fire ext+canary (starts TB if closed; also nudges an open TB to poll)
+ * 4) Keep waiting after the wake — closed TB should still pick the queue up once it starts
  */
 export async function openEmlViaDesktopToken(
   caseId: string,
   fileId: string,
   token: string,
   opts?: { filename?: string | null },
-): Promise<'thunderbird' | 'queued' | 'launching'> {
+): Promise<'thunderbird' | 'queued' | 'launching' | 'needs_addon'> {
   try {
     await apiFetch(`/mail-plugin/pending-send`, {
       token,
@@ -337,13 +367,38 @@ export async function openEmlViaDesktopToken(
     json: { case_id: caseId, file_id: fileId, ttl_seconds: 120 },
   })
 
-  // Thunderbird already running + signed in → poller claims; skip the OS protocol prompt.
-  if (await waitForPendingEmlClaimed(token, fileId, 4000)) {
+  // Fast path: Thunderbird already running + signed-in poller claims without an OS prompt.
+  if (await waitForPendingEmlClaimed(token, fileId, 2200)) {
     return 'thunderbird'
   }
 
-  // Still queued → TB is probably closed; protocol handler can start it (one system confirm).
+  // Wake / nudge Thunderbird whether it looks open or not. Closed TB should launch via
+  // canary-eml: (OS). Cold start often takes well over 10s.
   wakeThunderbirdViaProtocol()
+
+  if (await waitForPendingEmlClaimed(token, fileId, 12000)) {
+    return 'thunderbird'
+  }
+
+  // Second nudge after a slow start; keep waiting for a cold Thunderbird launch.
+  wakeThunderbirdViaProtocol()
+  if (await waitForPendingEmlClaimed(token, fileId, 25000)) {
+    return 'thunderbird'
+  }
+
+  // Still queued: add-on never claimed (not installed, not signed in, wrong origin, or
+  // OS protocol handler missing — install linux/install-protocol-handler.sh).
+  try {
+    const st = await apiFetch<{ active: boolean; file_id?: string | null }>(
+      `/mail-plugin/pending-eml-open`,
+      { token },
+    )
+    const stillOurs =
+      st.active && (!st.file_id || String(st.file_id) === String(fileId))
+    if (stillOurs) return 'needs_addon'
+  } catch {
+    /* fall through */
+  }
   return 'launching'
 }
 

@@ -1741,12 +1741,44 @@ select:focus {
   border-bottom: 1px solid rgba(15, 23, 42, 0.12);
 }
 
+/* Match main-menu row selection (blue), not canary-yellow --primary. */
+.caseDocsCard .docsTr.rowbtn:hover {
+  background: rgba(37, 99, 235, 0.06);
+}
+
+.caseDocsCard .docsTr.rowbtn.active {
+  background: rgba(37, 99, 235, 0.1);
+}
+
+.caseDocsCard .docsTr.docsTr--focused {
+  outline: 2px solid rgba(37, 99, 235, 0.45);
+  outline-offset: -2px;
+  background: rgba(37, 99, 235, 0.08);
+}
+
+.caseDocsCard .docsTr.rowbtn.active.docsTr--focused {
+  background: rgba(37, 99, 235, 0.12);
+}
+
 html.dark .caseDocsCard .docsTr {
   border-bottom-color: rgba(148, 163, 184, 0.16);
 }
 
 html.dark .caseDocsCard .docsTr.docsTh {
   border-bottom-color: rgba(148, 163, 184, 0.2);
+}
+
+html.dark .caseDocsCard .docsTr.rowbtn:hover {
+  background: rgba(37, 99, 235, 0.18);
+}
+
+html.dark .caseDocsCard .docsTr.rowbtn.active {
+  background: rgba(37, 99, 235, 0.28);
+}
+
+html.dark .caseDocsCard .docsTr.docsTr--focused {
+  outline-color: rgba(37, 99, 235, 0.55);
+  background: rgba(37, 99, 235, 0.2);
 }
 
 .caseDocsCard .paneHead {
@@ -1823,8 +1855,15 @@ html:has(.portalShell) body {
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: flex-start; /* base uses center; with column that mid-screens the portal */
+  /* Signed-in (wide) stays top-aligned; login (narrow) is vertically centred below. */
+  justify-content: flex-start;
   gap: 18px;
+}
+
+.portalShell:has(.portalLayout--narrow) {
+  justify-content: center;
+  padding-top: 28px;
+  padding-bottom: 28px;
 }
 
 .portalShell::before {

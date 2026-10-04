@@ -235,9 +235,13 @@
       auth = await sh.getStoredAuth(ext)
       if (!auth || !auth.jwt || !auth.origin) {
         const now = Date.now()
-        if (now - lastAuthWarnAt > 60000) {
+        if (now - lastAuthWarnAt > 45000) {
           lastAuthWarnAt = now
           console.warn('Canary: sign in via the Canary toolbar button to open e-mails from the web app.')
+          notify(
+            'Canary',
+            'Sign in via the Canary toolbar button to open e-mails from the web app.',
+          )
         }
         return
       }
@@ -250,6 +254,14 @@
       })
       if (res.status === 401 || res.status === 403) {
         console.warn('Canary: pending eml-open claim auth failed', res.status)
+        const now = Date.now()
+        if (now - lastAuthWarnAt > 45000) {
+          lastAuthWarnAt = now
+          notify(
+            'Canary',
+            'Canary sign-in expired. Open the Canary toolbar button and sign in again.',
+          )
+        }
         return
       }
       if (!res.ok || !body || !body.active) return

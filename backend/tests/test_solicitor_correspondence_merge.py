@@ -88,6 +88,52 @@ def test_splice_strips_duplicate_solicitor_scaffold_from_precedent() -> None:
     assert "Letter body paragraph" in texts
 
 
+def test_splice_collapses_spacer_paragraphs_but_keeps_sign_off_gap() -> None:
+    blank = Document()
+    blank.add_paragraph("Mr J Davies")
+    blank.add_paragraph("")
+    blank.add_paragraph("[DATE]")
+    blank.add_paragraph("")
+    blank.add_paragraph(PRECEDENT_BODY_MARKER)
+    blank.add_paragraph("Yours sincerely,")
+    blank.add_paragraph("")
+    blank.add_paragraph("[FEE_EARNER_SIGNATURE]")
+    blank_buf = io.BytesIO()
+    blank.save(blank_buf)
+
+    prec = Document()
+    for line in [
+        "Re: Your sale of [PROPERTY_ADDRESS]",
+        "",
+        "Thank you for instructing us.",
+        "",
+        "Your instructions",
+        "",
+        "• First bullet",
+        "",
+        "• Second bullet",
+    ]:
+        prec.add_paragraph(line)
+    prec_buf = io.BytesIO()
+    prec.save(prec_buf)
+
+    merged = splice_precedent_into_blank_letter(blank_buf.getvalue(), prec_buf.getvalue())
+    out = Document(io.BytesIO(merged))
+    texts = [(p.text or "").strip() for p in out.paragraphs]
+    assert texts == [
+        "Mr J Davies",
+        "[DATE]",
+        "Re: Your sale of [PROPERTY_ADDRESS]",
+        "Thank you for instructing us.",
+        "Your instructions",
+        "• First bullet",
+        "• Second bullet",
+        "Yours sincerely,",
+        "",
+        "[FEE_EARNER_SIGNATURE]",
+    ]
+
+
 def test_solicitor_line_paragraphs_removed_when_empty() -> None:
     doc = Document()
     doc.add_paragraph("[SOLICITOR_OUR_CLIENT_LINE]")

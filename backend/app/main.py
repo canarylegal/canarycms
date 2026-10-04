@@ -63,6 +63,7 @@ from app.routers import (
     reports,
     reconciliations,
     quote_portal,
+    support,
     users,
     webauthn,
     webdav,
@@ -276,6 +277,7 @@ app.include_router(me_calendars.router)
 app.include_router(reports.router)
 app.include_router(reconciliations.router)
 app.include_router(quote_portal.router)
+app.include_router(support.router)
 app.include_router(docusign.router)
 app.include_router(docusign.case_router)
 app.include_router(canary_sign.router)
