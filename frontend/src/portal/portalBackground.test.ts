@@ -60,7 +60,7 @@ describe('contrast helpers', () => {
   })
 
   it('respects a custom minRatio', () => {
-    expect(portalBackgroundContrastOk('#334155', 21)).toBe(false)
-    expect(portalBackgroundContrastOk('#334155', 3)).toBe(true)
+    expect(portalBackgroundContrastOk('#334155', PORTAL_BRAND_INK, 21)).toBe(false)
+    expect(portalBackgroundContrastOk('#334155', PORTAL_BRAND_INK, 3)).toBe(true)
   })
 })
