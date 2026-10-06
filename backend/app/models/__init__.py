@@ -54,6 +54,11 @@ from app.models.firm import (
     SmtpNotificationSettings,
 )
 
+from app.models.firm_module import (
+    FirmModuleCaseState,
+    FirmLifecycleOutbox,
+)
+
 from app.models.fee_scale import (
     FeeScale,
     UserFeeScaleFavorite,
@@ -184,6 +189,8 @@ __all__ = [
     'PrecedentKind',
     'PrecedentCategory',
     'FirmSettings',
+    'FirmModuleCaseState',
+    'FirmLifecycleOutbox',
     'ReconciliationStatus',
     'ClientAccountReconciliation',
     'MergeCodeCatalog',

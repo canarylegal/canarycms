@@ -25,6 +25,7 @@ export type CaseDetailLeftDocPanel =
   | 'accounts'
   | 'portal-share'
   | 'portal-hub'
+  | 'firm-pilot'
 
 export type CaseDetailLeftOpen = {
   contacts: boolean
@@ -72,6 +73,8 @@ type Props = {
   openCaseEventModal: () => void
   hasFinanceMenu: boolean
   financePreview: FinanceOut | null
+  /** Phase 3 firm module panel (when a firm package module is attached). */
+  firmModuleNavLabel?: string | null
 }
 
 export function CaseDetailLeftNav({
@@ -109,6 +112,7 @@ export function CaseDetailLeftNav({
   openCaseEventModal,
   hasFinanceMenu,
   financePreview,
+  firmModuleNavLabel,
 }: Props) {
   return (
     <>
@@ -122,6 +126,17 @@ export function CaseDetailLeftNav({
           <CaseLeftMenuIcon name="overview" />
           <span>Overview</span>
         </button>
+        {firmModuleNavLabel ? (
+          <button
+            type="button"
+            className={`accHead caseLeftNavItem${caseDocPanel === 'firm-pilot' ? ' is-active' : ''}`}
+            aria-current={caseDocPanel === 'firm-pilot' ? 'page' : undefined}
+            onClick={() => setCaseDocPanel('firm-pilot')}
+          >
+            <CaseLeftMenuIcon name="tasks" />
+            <span>{firmModuleNavLabel}</span>
+          </button>
+        ) : null}
         <div className="accordion">
           <button
             className={`accHead${caseDocPanel === 'contacts' ? ' is-active' : ''}`}

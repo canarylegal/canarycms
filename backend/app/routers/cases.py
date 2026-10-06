@@ -244,6 +244,10 @@ def create_case(
         meta={"case_number": case.case_number, "client_name": case.client_name, "matter_description": case.title},
     )
     try:
+        # Phase 3 pilot: firm-module reaction (config from FIRM_MODULE_DIR). Candidate Phase 4 hook.
+        from app.firm_module_runtime import process_matter_created
+
+        process_matter_created(db, case_id=case.id, actor_user_id=user.id)
         db.commit()
     except Exception:
         db.rollback()

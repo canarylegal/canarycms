@@ -24,6 +24,7 @@ import {
   CaseDetailPropertyPanel,
   CaseDetailTasksPanel,
 } from './CaseDetailDocPanels'
+import { FirmPilotPanel } from './FirmPilotPanel'
 import type { CaseDetailLeftDocPanel } from './CaseDetailLeftNav'
 
 type DropdownOption = { value: string; label: string }
@@ -261,6 +262,8 @@ export function CaseDetailPanelHost(props: CaseDetailPanelHostProps) {
             onRefresh={onRefresh}
             onCaseListInvalidate={onCaseListInvalidate}
           />
+        ) : caseDocPanel === 'firm-pilot' && caseId ? (
+          <FirmPilotPanel caseId={caseId} token={token} onBack={backToDocuments} />
         ) : caseDocPanel === 'portal-hub' && caseId && portalEnabled ? (
           <CaseDetailPortalHubPanel
             caseId={caseId}

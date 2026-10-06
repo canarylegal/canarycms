@@ -20,6 +20,7 @@ A customer install is:
 | `FIRM_PRECEDENTS_SEED_DIR` | `/firm/precedents` | Additive firm precedents (`manifest.json` + `bundle/`). Missing references imported on startup. |
 | `PORTAL_FORMS_SEED_DIR` | `/firm/portal-forms` | Firm portal form templates (`manifest.json`). Missing references imported on startup. |
 | `PORTAL_FORMS_SEED_REPAIR` | — | If `1`/`true`/`yes`, refresh fields on existing templates from the seed (destructive to admin edits). |
+| `FIRM_MODULE_DIR` | `/firm/module` | Phase 3 firm module (`manifest.json`). Enables matter tab, pipeline widget, matter-created seed. |
 
 Branding files (letterheads, logos, portal background) live under the firm package `assets/` tree. Configure them in Admin today; keep the files in the package for ops and future seed hooks.
 

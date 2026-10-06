@@ -710,6 +710,29 @@ export function CaseDetail({
     [caseDetail?.matter_menus],
   )
 
+  const [firmModuleNavLabel, setFirmModuleNavLabel] = useState<string | null>(null)
+  useEffect(() => {
+    let cancelled = false
+    void apiFetch<{ enabled: boolean; panel_label?: string | null; label?: string | null }>(
+      '/firm-modules/active',
+      { token },
+    )
+      .then((m) => {
+        if (cancelled) return
+        if (!m.enabled) {
+          setFirmModuleNavLabel(null)
+          return
+        }
+        setFirmModuleNavLabel((m.panel_label || m.label || 'Purchase journey').trim() || 'Purchase journey')
+      })
+      .catch(() => {
+        if (!cancelled) setFirmModuleNavLabel(null)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [token])
+
   const [sidebarTaskRows, setSidebarTaskRows] = useState<TaskMenuRow[]>([])
   useEffect(() => {
     if (!caseId || !leftOpen.tasks || !hasTasksMenu) return
@@ -1109,6 +1132,7 @@ export function CaseDetail({
             openCaseEventModal={openCaseEventModal}
             hasFinanceMenu={hasFinanceMenu}
             financePreview={financePreview}
+            firmModuleNavLabel={firmModuleNavLabel}
           />
 
         </div>

@@ -67,6 +67,7 @@ import {
   userNeedsSecondFactorSetup,
 } from './auth/sessionFlags'
 import { NewMatterModal } from './NewMatterModal'
+import { FirmPilotPipelineWidget } from './FirmPilotPipelineWidget'
 import { MainMenuCasesPanel } from './mainMenuCases'
 import { UserSettingsPage } from './UserSettingsPage'
 import { Contacts } from './ContactsPage'
@@ -991,29 +992,32 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
   }
 
   const mainMenuCasesPanel = token ? (
-    <MainMenuCasesPanel
-      cases={cases}
-      casesErr={casesErr}
-      users={caseListUsers}
-      filterMatterTypes={mainMenuFilterMatterTypes}
-      filterFeeEarnerUserIds={mainMenuFilterFeeEarnerUserIds}
-      filterCaseStatuses={mainMenuFilterCaseStatuses}
-      onFilterMatterTypesChange={onMainMenuFilterMatterTypesChange}
-      onFilterFeeEarnerIdsChange={onMainMenuFilterFeeEarnerIdsChange}
-      onFilterCaseStatusesChange={onMainMenuFilterCaseStatusesChange}
-      onPersistFilters={persistMainMenuFilters}
-      gridTemplateColumns={casesGridColumns}
-      startColumnResize={casesStartResize}
-      caseListFocusId={caseListFocusId}
-      onCaseRowFocus={setCaseListFocusId}
-      onSelectCase={onMainMenuSelectCase}
-      sortKey={uiPrefs.main_menu_sort_key}
-      sortDir={uiPrefs.main_menu_sort_dir}
-      onSort={onMainMenuSort}
-      onOpenNewMatter={onOpenNewMatter}
-      onRefreshCases={onRefreshCases}
-      keyboardActive={view === 'main-menu'}
-    />
+    <>
+      <FirmPilotPipelineWidget token={token} />
+      <MainMenuCasesPanel
+        cases={cases}
+        casesErr={casesErr}
+        users={caseListUsers}
+        filterMatterTypes={mainMenuFilterMatterTypes}
+        filterFeeEarnerUserIds={mainMenuFilterFeeEarnerUserIds}
+        filterCaseStatuses={mainMenuFilterCaseStatuses}
+        onFilterMatterTypesChange={onMainMenuFilterMatterTypesChange}
+        onFilterFeeEarnerIdsChange={onMainMenuFilterFeeEarnerIdsChange}
+        onFilterCaseStatusesChange={onMainMenuFilterCaseStatusesChange}
+        onPersistFilters={persistMainMenuFilters}
+        gridTemplateColumns={casesGridColumns}
+        startColumnResize={casesStartResize}
+        caseListFocusId={caseListFocusId}
+        onCaseRowFocus={setCaseListFocusId}
+        onSelectCase={onMainMenuSelectCase}
+        sortKey={uiPrefs.main_menu_sort_key}
+        sortDir={uiPrefs.main_menu_sort_dir}
+        onSort={onMainMenuSort}
+        onOpenNewMatter={onOpenNewMatter}
+        onRefreshCases={onRefreshCases}
+        keyboardActive={view === 'main-menu'}
+      />
+    </>
   ) : null
 
   const quotesFeeScalesButton = useMemo(

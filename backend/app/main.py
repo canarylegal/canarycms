@@ -46,6 +46,7 @@ from app.routers import (
     contact_portal,
     matter_portal,
     fee_scales,
+    firm_modules,
     task_menu,
     contacts,
     canary_sign,
@@ -260,6 +261,7 @@ app.include_router(cases.router)
 app.include_router(case_property.router)
 app.include_router(precedents.router)
 app.include_router(fee_scales.router)
+app.include_router(firm_modules.router)
 app.include_router(contacts.router)
 app.include_router(contact_portal.router)
 app.include_router(matter_portal.router)
