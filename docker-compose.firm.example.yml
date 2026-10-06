@@ -1,0 +1,19 @@
+# Example overlay: attach a private firm package beside Canary.
+#
+# Usage (paths relative to the Canary checkout):
+#   export FIRM_PACKAGE_DIR=../example-firm-package-template
+#   docker compose -f docker-compose.yml -f docker-compose.firm.example.yml --profile prod up -d
+#
+# See docs/FIRM_PACKAGE.md. Do not put secrets in this file.
+
+services:
+  backend:
+    environment:
+      # Firm precedents (additive; does not replace Canary's system PRECEDENTS_SEED_DIR)
+      FIRM_PRECEDENTS_SEED_DIR: /firm/precedents
+      # Firm portal form definitions (JSON manifest)
+      PORTAL_FORMS_SEED_DIR: /firm/portal-forms
+      # Optional: refresh field definitions on existing templates from the seed
+      # PORTAL_FORMS_SEED_REPAIR: "0"
+    volumes:
+      - ${FIRM_PACKAGE_DIR:?Set FIRM_PACKAGE_DIR to your firm package path}:/firm:ro

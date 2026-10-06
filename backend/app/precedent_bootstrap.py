@@ -9,6 +9,10 @@ the reserved blank letter template (``reference``: ``BLANK_LETTER``).
 
 On every startup, :func:`sync_missing_global_precedents_from_seed` adds any bundled global
 precedent whose ``reference`` is not yet in the database (admin edits to existing rows are kept).
+
+Optional firm overlay: set ``FIRM_PRECEDENTS_SEED_DIR`` to a sibling package directory with the
+same manifest shape. :func:`sync_missing_precedents_from_firm_seed` imports any missing
+precedent by ``reference`` without replacing Canary's system seed directory.
 """
 
 from __future__ import annotations
@@ -49,6 +53,9 @@ from app.models import (
 log = logging.getLogger(__name__)
 
 DEFAULT_SEED_DIR = Path(os.getenv("PRECEDENTS_SEED_DIR", str(Path(__file__).parent.parent / "precedents_seed")))
+def _firm_seed_dir_from_env() -> Path | None:
+    raw = (os.getenv("FIRM_PRECEDENTS_SEED_DIR") or "").strip()
+    return Path(raw).expanduser() if raw else None
 
 
 def _resolve_sub_type_id(
@@ -78,8 +85,9 @@ def _first_admin_id(db: Session) -> uuid.UUID | None:
     return None
 
 
-def _load_seed_manifest() -> dict[str, Any] | None:
-    manifest_path = DEFAULT_SEED_DIR / "manifest.json"
+def _load_seed_manifest(seed_dir: Path | None = None) -> dict[str, Any] | None:
+    directory = seed_dir if seed_dir is not None else DEFAULT_SEED_DIR
+    manifest_path = directory / "manifest.json"
     if not manifest_path.is_file():
         log.info("No precedent seed manifest at %s — skipping.", manifest_path)
         return None
@@ -132,11 +140,13 @@ def _import_precedent_from_seed(
     admin_id: uuid.UUID,
     payload: dict[str, Any],
     cat_key_to_id: dict[tuple[str, str, str], uuid.UUID],
+    seed_dir: Path | None = None,
 ) -> bool:
     fname = (payload.get("bundle_file") or "").strip()
     if not fname:
         return False
-    src = DEFAULT_SEED_DIR / fname
+    directory = seed_dir if seed_dir is not None else DEFAULT_SEED_DIR
+    src = directory / fname
     if not src.is_file():
         log.warning("Precedent seed: missing file %s — skip %r", fname, payload.get("name"))
         return False
@@ -263,7 +273,7 @@ def _build_category_map(db: Session, categories_payload: list[dict[str, Any]]) -
 
 def sync_missing_global_precedents_from_seed(db: Session) -> int:
     """Import bundled global precedents missing by reference. Returns count added."""
-    raw = _load_seed_manifest()
+    raw = _load_seed_manifest(DEFAULT_SEED_DIR)
     if raw is None:
         return 0
 
@@ -281,11 +291,48 @@ def sync_missing_global_precedents_from_seed(db: Session) -> int:
             ref = (p.get("reference") or "").strip()
             if not ref or _precedent_reference_exists(db, ref):
                 continue
-            if _import_precedent_from_seed(db, admin_id=admin_id, payload=p, cat_key_to_id={}):
+            if _import_precedent_from_seed(
+                db, admin_id=admin_id, payload=p, cat_key_to_id={}, seed_dir=DEFAULT_SEED_DIR
+            ):
                 inserted += 1
         if inserted:
             db.commit()
             log.info("Precedent seed: added %s missing global precedent(s).", inserted)
+    except Exception:
+        db.rollback()
+        raise
+    return inserted
+
+
+def sync_missing_precedents_from_firm_seed(db: Session, *, seed_dir: Path | None = None) -> int:
+    """Import missing precedents from ``FIRM_PRECEDENTS_SEED_DIR`` (any scope). Returns count added."""
+    directory = Path(seed_dir) if seed_dir is not None else _firm_seed_dir_from_env()
+    if directory is None:
+        return 0
+    raw = _load_seed_manifest(directory)
+    if raw is None:
+        return 0
+
+    admin_id = _first_admin_id(db)
+    if admin_id is None:
+        log.warning("No admin user — cannot sync firm precedents from seed.")
+        return 0
+
+    inserted = 0
+    try:
+        ensure_files_root()
+        cat_key_to_id = _build_category_map(db, raw.get("categories") or [])
+        for p in raw.get("precedents") or []:
+            ref = (p.get("reference") or "").strip()
+            if not ref or _precedent_reference_exists(db, ref):
+                continue
+            if _import_precedent_from_seed(
+                db, admin_id=admin_id, payload=p, cat_key_to_id=cat_key_to_id, seed_dir=directory
+            ):
+                inserted += 1
+        if inserted:
+            db.commit()
+            log.info("Firm precedent seed: added %s missing precedent(s) from %s.", inserted, directory)
     except Exception:
         db.rollback()
         raise
@@ -299,7 +346,7 @@ def apply_precedent_seed_if_empty(db: Session) -> bool:
     if n is not None:
         return False
 
-    raw = _load_seed_manifest()
+    raw = _load_seed_manifest(DEFAULT_SEED_DIR)
     if raw is None:
         return False
 
@@ -319,7 +366,13 @@ def apply_precedent_seed_if_empty(db: Session) -> bool:
 
         inserted = 0
         for p in prec_list:
-            if _import_precedent_from_seed(db, admin_id=admin_id, payload=p, cat_key_to_id=cat_key_to_id):
+            if _import_precedent_from_seed(
+                db,
+                admin_id=admin_id,
+                payload=p,
+                cat_key_to_id=cat_key_to_id,
+                seed_dir=DEFAULT_SEED_DIR,
+            ):
                 inserted += 1
 
         if len(prec_list) > 0 and inserted == 0:

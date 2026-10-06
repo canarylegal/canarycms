@@ -86,7 +86,12 @@ async def lifespan(app: FastAPI):
     from app.merge_code_catalog_sync import sync_merge_code_catalog
     from app.permission_category_bootstrap import ensure_builtin_permission_categories
     from app.calendar_label_bootstrap import ensure_calendar_labels_all_calendars
-    from app.precedent_bootstrap import apply_precedent_seed_if_empty, sync_missing_global_precedents_from_seed
+    from app.portal_form_bootstrap import sync_portal_forms_from_seed
+    from app.precedent_bootstrap import (
+        apply_precedent_seed_if_empty,
+        sync_missing_global_precedents_from_seed,
+        sync_missing_precedents_from_firm_seed,
+    )
 
     _log = logging.getLogger("uvicorn.error")
     db = SessionLocal()
@@ -115,6 +120,16 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         db.rollback()
         _log.warning("Global precedent sync skipped: %s", e)
+    try:
+        sync_missing_precedents_from_firm_seed(db)
+    except Exception as e:
+        db.rollback()
+        _log.warning("Firm precedent seed skipped: %s", e)
+    try:
+        sync_portal_forms_from_seed(db)
+    except Exception as e:
+        db.rollback()
+        _log.warning("Portal forms seed skipped: %s", e)
     finally:
         db.close()
 

@@ -17,7 +17,8 @@ data/
 .canary-compose-job-state.json
 .canary-compose-up-*.json
 
-# Firm-specific scripts and deployment configs (local only; not for GitHub)
+# Firm-specific scripts/configs must not land in public canarycms.
+# Prefer a private firm package (docs/FIRM_PACKAGE.md); these patterns catch strays.
 backend/scripts/seed_*_portal_forms.py
 backend/scripts/run_*_precedents_deploy.sh
 backend/scripts/deploy_*_precedents.py
