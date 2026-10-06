@@ -51,6 +51,8 @@ Operational guides live under **[docs/](docs/)**:
 
 Mail add-on detail: [thunderbird-addin/README.md](thunderbird-addin/README.md), [frontend/public/outlook-addin/README.md](frontend/public/outlook-addin/README.md).
 
+**Architecture (maintainers):** how Canary’s maintained core relates to optional product capabilities and proprietary firm packages is documented **internally** (not in this public repository). Firm-specific content and customisation belong beside Canary, not in public `canarycms`.
+
 ## Deploy checklist (after updating)
 
 Prefer a **release tag** over floating `main` (see [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)).
