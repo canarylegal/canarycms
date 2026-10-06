@@ -1,3 +1,6 @@
+import { useEffect, useState } from 'react'
+import { ensureBrandConfig, getProductName } from './brandConfig'
+
 /** Brand assets in ``frontend/public/`` (served at site root). */
 export const CANARY_LOGO_SRC = '/logo.png'
 export const CANARY_ICON_32_SRC = '/icons/icon32.png'
@@ -40,25 +43,35 @@ type Props = {
   compact?: boolean
 }
 
-/** Top-bar brand lockup (mark + wordmark). */
+/** Top-bar brand lockup (mark + wordmark). Product name from env brand config (forks). */
 export function AppBrand({ onClick, compact = false }: Props) {
+  const [productName, setProductName] = useState(() => getProductName())
+  useEffect(() => {
+    void ensureBrandConfig().then((b) => setProductName(b.product_name))
+  }, [])
+
   const inner = (
     <>
       <CanaryMark className="appBrandMark" />
-      {compact ? null : <span className="appBrandName">Canary</span>}
+      {compact ? null : <span className="appBrandName">{productName}</span>}
     </>
   )
 
   if (onClick) {
     return (
-      <button type="button" className="appBrand appBrand--button" onClick={onClick} aria-label="Canary — Main menu">
+      <button
+        type="button"
+        className="appBrand appBrand--button"
+        onClick={onClick}
+        aria-label={`${productName} — Main menu`}
+      >
         {inner}
       </button>
     )
   }
 
   return (
-    <div className="appBrand" aria-label="Canary">
+    <div className="appBrand" aria-label={productName}>
       {inner}
     </div>
   )

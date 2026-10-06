@@ -38,6 +38,7 @@ const DEFAULT_PORTAL_CONFIG: PortalBrandingConfig = {
   portal_background_on_signed_in: true,
   powered_by_label: 'Powered by Canary Legal Software',
   powered_by_url: 'https://canarylegalsoftware.co.uk',
+  powered_by_hide: false,
 }
 
 type SignInMode = 'code' | 'email'
@@ -313,6 +314,7 @@ export default function PortalPage() {
         portal_background_on_signed_in: cfg.portal_background_on_signed_in !== false,
         powered_by_label: cfg.powered_by_label?.trim() || DEFAULT_PORTAL_CONFIG.powered_by_label,
         powered_by_url: cfg.powered_by_url?.trim() || DEFAULT_PORTAL_CONFIG.powered_by_url,
+        powered_by_hide: Boolean(cfg.powered_by_hide),
       })
     } catch {
       /* optional */

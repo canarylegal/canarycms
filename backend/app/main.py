@@ -28,6 +28,7 @@ from app.routers import (
     admin_sub_menu_events,
     admin_users,
     auth,
+    brand,
     case_access,
     case_contacts,
     case_events,
@@ -242,6 +243,7 @@ async def _security_headers_middleware(request, call_next):
 
 
 app.include_router(auth.router)
+app.include_router(brand.router)
 app.include_router(plugin_auth.router)
 app.include_router(webauthn.router)
 app.include_router(admin_users.router)

@@ -97,6 +97,11 @@ class FirmSettings(Base):
     portal_font_color: Mapped[str | None] = mapped_column(String(7), nullable=True)
     # When false, custom portal canvas (colour/image/font) applies to the login screen only.
     portal_background_on_signed_in: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # Install brand overrides (Phase 2). Null/empty = use CANARY_BRAND_* / built-in defaults.
+    brand_support_inbox: Mapped[str | None] = mapped_column(String(320), nullable=True)
+    brand_powered_by_label: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    brand_powered_by_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    brand_powered_by_hide: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     default_signature_file_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("file.id", ondelete="SET NULL"), nullable=True
     )

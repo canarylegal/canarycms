@@ -46,6 +46,15 @@ export type FirmSettingsOut = {
   client_bank_sort_code?: string | null
   client_bank_account_number_last4?: string | null
   client_bank_account_number?: string | null
+  /** Admin override; empty/null = env / product default. Not the product display name. */
+  brand_support_inbox?: string | null
+  brand_powered_by_label?: string | null
+  brand_powered_by_url?: string | null
+  brand_powered_by_hide?: boolean
+  env_support_inbox?: string
+  env_powered_by_label?: string
+  env_powered_by_url?: string
+  env_powered_by_hide?: boolean
 }
 
 export type ClientAccountReconciliationOut = {

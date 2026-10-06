@@ -1,4 +1,4 @@
-"""Staff support tickets and bug reports — e-mailed to Canary."""
+"""Staff support tickets and bug reports — e-mailed to the configured support inbox."""
 
 from __future__ import annotations
 
@@ -10,15 +10,17 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.audit import log_event
+from app.brand_config import product_name, resolve_support_inbox
 from app.db import get_db
 from app.deps import get_current_user
 from app.firm_email_service import FirmEmailMessage, send_firm_email
-from app.models import User
+from app.models import FirmSettings, User
 
 log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/support", tags=["support"])
 
+# Back-compat for importers/tests; prefer resolve_support_inbox(firm).
 SUPPORT_INBOX = "colin@canarylegalsoftware.co.uk"
 
 SupportKind = Literal["support", "bug"]
@@ -65,7 +67,10 @@ def submit_support_ticket(
     display = (user.display_name or "").strip() or user.email
     urgency = int(payload.urgency)
     urgency_label = URGENCY_LABELS.get(urgency, str(urgency))
-    mail_subject = f"[Canary {label}] [U{urgency}] {subject}"
+    firm = db.get(FirmSettings, 1)
+    inbox = resolve_support_inbox(firm)
+    pname = product_name()
+    mail_subject = f"[{pname} {label}] [U{urgency}] {subject}"
     body_text = (
         f"{label}\n"
         f"{'=' * len(label)}\n\n"
@@ -83,7 +88,7 @@ def submit_support_ticket(
         send_firm_email(
             db,
             FirmEmailMessage(
-                to_email=SUPPORT_INBOX,
+                to_email=inbox,
                 subject=mail_subject,
                 body_text=body_text,
             ),

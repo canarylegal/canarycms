@@ -28,8 +28,7 @@ from app.models import (
     PortalFormSubmissionStatus,
 )
 from app.portal_branding import (
-    CANARY_LEGAL_SOFTWARE_URL,
-    POWERED_BY_LABEL,
+    powered_by_for_portal,
     firm_display_name,
     portal_title,
 )
@@ -140,6 +139,7 @@ def portal_config(db: Session = Depends(get_db)) -> PortalConfigOut:
         "/portal/logo" if firm and firm.portal_logo_file_id and logo_enabled else None
     )
     bg_url = "/portal/background" if firm and firm.portal_background_file_id else None
+    pb_label, pb_url, pb_hide = powered_by_for_portal(firm)
     return PortalConfigOut(
         firm_name=name,
         portal_title=portal_title(firm),
@@ -149,8 +149,9 @@ def portal_config(db: Session = Depends(get_db)) -> PortalConfigOut:
         portal_background_url=bg_url,
         portal_font_color=portal_font_color(firm),
         portal_background_on_signed_in=bool(firm.portal_background_on_signed_in) if firm else True,
-        powered_by_label=POWERED_BY_LABEL,
-        powered_by_url=CANARY_LEGAL_SOFTWARE_URL,
+        powered_by_label=pb_label,
+        powered_by_url=pb_url,
+        powered_by_hide=pb_hide,
     )
 
 

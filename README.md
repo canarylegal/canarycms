@@ -49,6 +49,7 @@ Operational guides live under **[docs/](docs/)**:
 | [docs/WEBDAV_DESKTOP_EDIT.md](docs/WEBDAV_DESKTOP_EDIT.md) | Desktop editing via WebDAV |
 | [docs/TESTING.md](docs/TESTING.md) | Unit tests, portal smoke (`make smoke-portal`), CI |
 | [docs/FIRM_PACKAGE.md](docs/FIRM_PACKAGE.md) | Attach a private firm package (precedents, portal forms, assets) |
+| [`.env.proprietary.example`](.env.proprietary.example) | White-label / fork brand profile (`CANARY_BRAND_*`) |
 
 Mail add-on detail: [thunderbird-addin/README.md](thunderbird-addin/README.md), [frontend/public/outlook-addin/README.md](frontend/public/outlook-addin/README.md).
 

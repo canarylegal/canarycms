@@ -52,7 +52,9 @@ def _b64url_encode(raw: bytes) -> str:
 
 
 def _rp_name() -> str:
-    return (os.getenv("WEBAUTHN_RP_NAME") or "Canary").strip() or "Canary"
+    from app.brand_config import webauthn_rp_name
+
+    return webauthn_rp_name()
 
 
 def _rp_id_for_request(request: Request) -> str:

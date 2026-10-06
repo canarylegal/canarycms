@@ -42,6 +42,7 @@ import { usePrimaryNavKeyboard, type PrimaryNavId } from './usePrimaryNavKeyboar
 import { useDialogs } from './DialogProvider'
 import { useNotifications, useNotificationsUserScope } from './NotificationsProvider'
 import { SearchInput } from './SearchInput'
+import { ensureBrandConfig } from './brandConfig'
 import { canaryDocumentTitle } from './tabTitle'
 import {
   isQuoteWorkflowStatus,
@@ -1061,6 +1062,10 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
       keyboardActive={view === 'quotes' && quotesSubPanel === 'list'}
     />
   ) : null
+
+  useEffect(() => {
+    void ensureBrandConfig()
+  }, [])
 
   useEffect(() => {
     if (auth.loading) {

@@ -35,6 +35,7 @@ class PortalConfigOut(BaseModel):
     portal_background_on_signed_in: bool = True
     powered_by_label: str = "Powered by Canary Legal Software"
     powered_by_url: str = "https://canarylegalsoftware.co.uk"
+    powered_by_hide: bool = False
 
 class PortalAuthIn(BaseModel):
     access_code: str = Field(min_length=8, max_length=64)

@@ -338,8 +338,9 @@ def setup_2fa(
         if not plain:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="2FA not set up")
 
-    issuer = os.getenv("TOTP_ISSUER", "Canary")
-    uri = build_totp_uri(secret=plain, email=user.email, issuer=issuer)
+    from app.brand_config import totp_issuer
+
+    uri = build_totp_uri(secret=plain, email=user.email, issuer=totp_issuer())
     return Setup2FAResponse(secret=plain, otpauth_uri=uri)
 
 

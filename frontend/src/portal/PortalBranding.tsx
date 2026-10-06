@@ -19,6 +19,8 @@ export type PortalBrandingConfig = {
   portal_background_on_signed_in?: boolean
   powered_by_label: string
   powered_by_url: string
+  /** When true, hide the powered-by footer (white-label). */
+  powered_by_hide?: boolean
 }
 
 export function PortalBrandHeader({
@@ -42,6 +44,9 @@ export function PortalBrandHeader({
 }
 
 export function PortalPoweredBy({ config }: { config: PortalBrandingConfig }) {
+  if (config.powered_by_hide) return null
+  const label = (config.powered_by_label || '').trim()
+  if (!label) return null
   return (
     <footer className="portalPoweredBy">
       <a
@@ -51,7 +56,7 @@ export function PortalPoweredBy({ config }: { config: PortalBrandingConfig }) {
         rel="noopener noreferrer"
       >
         <img className="portalPoweredByMark" src={CANARY_ICON_32_SRC} alt="" aria-hidden decoding="async" />
-        <span>{config.powered_by_label}</span>
+        <span>{label}</span>
       </a>
     </footer>
   )
