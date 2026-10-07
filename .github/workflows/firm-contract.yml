@@ -49,9 +49,8 @@ jobs:
   firm-contract:
     runs-on: ubuntu-latest
     timeout-minutes: 45
-    # Private pilot checkout needs EXAMPLE_FIRM_PILOT_TOKEN (contents:read on example-firm-pilot).
-    # workflow_dispatch always runs (shows setup notice if secret missing).
-    if: ${{ github.event_name == 'workflow_dispatch' || secrets.EXAMPLE_FIRM_PILOT_TOKEN != '' }}
+    # Always run a job (skipping every job marks the workflow failed). Missing
+    # EXAMPLE_FIRM_PILOT_TOKEN → notice + success exit; secret present → full smoke.
     env:
       COMPOSE_FILE: docker-compose.yml:docker-compose.ci.yml:docker-compose.firm.example.yml
       BACKEND_CONTAINER: canaryci-backend
@@ -71,6 +70,7 @@ jobs:
               echo "\`canarylegal/example-firm-pilot\` and store it as the repo secret"
               echo "\`EXAMPLE_FIRM_PILOT_TOKEN\`."
             } >> "$GITHUB_STEP_SUMMARY"
+            echo "::notice::EXAMPLE_FIRM_PILOT_TOKEN not set — firm contract smoke skipped"
           else
             echo "present=true" >> "$GITHUB_OUTPUT"
           fi

@@ -113,9 +113,14 @@ jobs:
 
       - name: Install Playwright + Chromium
         working-directory: frontend
+        timeout-minutes: 12
         run: |
+          set -euo pipefail
           npm ci
-          npx playwright install chromium --with-deps
+          # --with-deps can hang on apt mirrors; install browser first, then deps with a bound wait.
+          npx playwright install chromium
+          timeout 180 sudo npx playwright install-deps chromium \
+            || echo "::warning::playwright install-deps timed out or failed; continuing with browser-only install"
 
       - name: Run browser E2E
         working-directory: frontend
