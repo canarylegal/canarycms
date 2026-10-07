@@ -17,6 +17,7 @@ const FIELD_TYPE_OPTIONS: { value: PortalFormFieldType; label: string }[] = [
   { value: 'textarea', label: 'Long text' },
   { value: 'date', label: 'Date' },
   { value: 'select', label: 'Dropdown' },
+  { value: 'checkbox', label: 'Checkbox' },
   { value: 'file', label: 'File upload' },
 ]
 

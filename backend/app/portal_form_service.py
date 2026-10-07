@@ -477,6 +477,22 @@ def _field_select_options(field: PortalFormTemplateField) -> list[str]:
     return _normalize_select_options(getattr(field, "select_options", None) or [])
 
 
+def _coerce_checkbox_value(raw: Any) -> bool | None:
+    if raw is None:
+        return None
+    if isinstance(raw, bool):
+        return raw
+    if isinstance(raw, (int, float)) and raw in (0, 1):
+        return bool(raw)
+    if isinstance(raw, str):
+        s = raw.strip().lower()
+        if s in ("true", "1", "yes", "on", "checked"):
+            return True
+        if s in ("false", "0", "no", "off", ""):
+            return False
+    return None
+
+
 def _validate_responses(fields: list[PortalFormTemplateField], responses: dict[str, Any]) -> dict[str, Any]:
     clean: dict[str, Any] = {}
     for field in fields:
@@ -484,6 +500,17 @@ def _validate_responses(fields: list[PortalFormTemplateField], responses: dict[s
             continue
         key = field.field_key
         raw = responses.get(key)
+        if field.field_type == PortalFormFieldType.checkbox:
+            checked = _coerce_checkbox_value(raw)
+            if checked is None:
+                checked = False
+            if field.required and not checked:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail=f"Required field missing: {field.label}",
+                )
+            clean[key] = checked
+            continue
         if raw is None or (isinstance(raw, str) and not raw.strip()):
             if field.required:
                 raise HTTPException(
@@ -541,6 +568,13 @@ def _render_submission_docx(
         if field.field_type == PortalFormFieldType.file:
             if isinstance(val, dict):
                 display = str(val.get("filename") or val.get("file_id") or "—")
+            else:
+                display = "—"
+        elif field.field_type == PortalFormFieldType.checkbox:
+            if val is True:
+                display = "Yes"
+            elif val is False:
+                display = "No"
             else:
                 display = "—"
         else:

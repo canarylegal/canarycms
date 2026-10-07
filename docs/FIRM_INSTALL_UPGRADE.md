@@ -87,16 +87,18 @@ docker compose … up -d       # remount / recreate backend so migrate + manifes
 
 No in-app Compose apply (no Docker socket).
 
-## Survival / contract tests (Phase 7 MVP)
+## Survival / contract tests (Phase 7 / 7b)
 
 Before upgrading Canary under a firm package:
 
 ```bash
 make smoke-firm-contract-ci   # or make smoke-firm-contract on a populated DB
+PREV_TAG=v2.0.0 make smoke-firm-dual-tag   # previous release → current + firm
 ```
 
 See [`TESTING.md`](./TESTING.md) (Firm contract smoke). CI workflow:
-`.github/workflows/firm-contract.yml` (needs secret `EXAMPLE_FIRM_PILOT_TOKEN`).
+`.github/workflows/firm-contract.yml` (needs secret `EXAMPLE_FIRM_PILOT_TOKEN`;
+optional `workflow_dispatch` input `prev_tag` for dual-tag).
 
 ## Related
 

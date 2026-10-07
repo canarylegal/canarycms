@@ -1,6 +1,6 @@
 # Canary CMS — common developer commands (run from repo root).
 
-.PHONY: help test-backend smoke-portal smoke-portal-ci smoke-portal-reset smoke-firm-contract smoke-firm-contract-ci smoke-security test-e2e
+.PHONY: help test-backend smoke-portal smoke-portal-ci smoke-portal-reset smoke-firm-contract smoke-firm-contract-ci smoke-firm-dual-tag smoke-security test-e2e
 
 help:
 	@echo "Targets:"
@@ -10,6 +10,7 @@ help:
 	@echo "  make smoke-portal-reset        Ensure fixture, reset demo pending items, then smoke"
 	@echo "  make smoke-firm-contract       Firm platform contract smoke (firm package must be attached)"
 	@echo "  make smoke-firm-contract-ci    Same + ensure Purchase fixture (CI / empty DB friendly)"
+	@echo "  make smoke-firm-dual-tag       PREV_TAG=vX.Y.Z dual-tag upgrade + contract smoke"
 	@echo "  make smoke-security            Live security verification harness"
 	@echo "  make test-e2e                  Thin Playwright browser smoke (running frontend+backend)"
 
@@ -30,6 +31,10 @@ smoke-firm-contract:
 
 smoke-firm-contract-ci:
 	./scripts/smoke-firm-contract.sh --ensure-fixture
+
+smoke-firm-dual-tag:
+	@test -n "$(PREV_TAG)" || (echo "Set PREV_TAG=vX.Y.Z" >&2; exit 2)
+	PREV_TAG=$(PREV_TAG) ./scripts/smoke-firm-dual-tag-upgrade.sh
 
 smoke-security:
 	docker compose exec -T backend python scripts/live_security_verify.py

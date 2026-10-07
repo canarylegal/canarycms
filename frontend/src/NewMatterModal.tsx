@@ -45,6 +45,7 @@ export function NewMatterModal({
   /** Active = open; Quote = quote (only these may be set on create). */
   const [newMatterStatus, setNewMatterStatus] = useState<'open' | 'quote'>(defaultStatus)
   const [portalEnabled, setPortalEnabled] = useState(false)
+  const [firmPortalProductOn, setFirmPortalProductOn] = useState(true)
   const [step, setStep] = useState<'details' | 'property' | 'description' | 'contacts'>('details')
   const [propertyDraft, setPropertyDraft] = useState<CasePropertyPayload | null>(null)
   const [users, setUsers] = useState<UserSummary[]>([])
@@ -143,6 +144,32 @@ export function NewMatterModal({
       cancelled = true
     }
   }, [token])
+
+  useEffect(() => {
+    let cancelled = false
+    async function loadCaps() {
+      try {
+        const data = await apiFetch<{ client_portal_enabled?: boolean }>('/firm-capabilities', { token })
+        if (!cancelled) setFirmPortalProductOn(data.client_portal_enabled !== false)
+      } catch {
+        if (!cancelled) setFirmPortalProductOn(true)
+      }
+    }
+    void loadCaps()
+    return () => {
+      cancelled = true
+    }
+  }, [token])
+
+  useEffect(() => {
+    if (!firmPortalProductOn) {
+      setPortalEnabled(false)
+      return
+    }
+    if (selectedSubType) {
+      setPortalEnabled(Boolean(selectedSubType.portal_enabled_default))
+    }
+  }, [selectedSubType?.id, selectedSubType?.portal_enabled_default, firmPortalProductOn])
 
   return (
     <div className="modalOverlay" role="dialog" aria-modal="true">
@@ -253,21 +280,27 @@ export function NewMatterModal({
               </label>
             </div>
           </div>
-          <label className="row field" style={{ gap: 10, alignItems: 'flex-start', cursor: busy ? 'default' : 'pointer' }}>
-            <input
-              type="checkbox"
-              checked={portalEnabled}
-              disabled={busy}
-              onChange={(e) => setPortalEnabled(e.target.checked)}
-              style={{ marginTop: 3 }}
-            />
-            <span>
-              Enable portal
-              <span className="muted" style={{ display: 'block', fontSize: 13, marginTop: 2 }}>
-                Allow client folder sharing and portal notifications for this matter.
+          {firmPortalProductOn ? (
+            <label className="row field" style={{ gap: 10, alignItems: 'flex-start', cursor: busy ? 'default' : 'pointer' }}>
+              <input
+                type="checkbox"
+                checked={portalEnabled}
+                disabled={busy}
+                onChange={(e) => setPortalEnabled(e.target.checked)}
+                style={{ marginTop: 3 }}
+              />
+              <span>
+                Enable portal
+                <span className="muted" style={{ display: 'block', fontSize: 13, marginTop: 2 }}>
+                  Allow client folder sharing and portal notifications for this matter.
+                </span>
               </span>
-            </span>
-          </label>
+            </label>
+          ) : (
+            <div className="muted field" style={{ fontSize: 13 }}>
+              Client portal is turned off for this firm (Admin → Firm details).
+            </div>
+          )}
           {err ? <div className="error">{err}</div> : null}
           <div className="row" style={{ justifyContent: 'flex-end' }}>
             <button className="btn" onClick={onClose} disabled={busy}>

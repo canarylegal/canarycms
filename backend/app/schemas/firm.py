@@ -35,6 +35,8 @@ class FirmSettingsOut(BaseModel):
     portal_background_original_filename: str | None = None
     portal_font_color: str | None = None
     portal_background_on_signed_in: bool = True
+    client_portal_enabled: bool = True
+    canary_sign_enabled: bool = True
     default_signature_configured: bool = False
     default_signature_original_filename: str | None = None
     default_signature_scale: int = Field(default=7, ge=1, le=10)
@@ -90,6 +92,8 @@ class FirmSettingsUpdate(BaseModel):
     portal_font_color: str | None = Field(default=None, max_length=32)
     portal_background_on_signed_in: bool | None = None
     portal_logo_enabled: bool | None = None
+    client_portal_enabled: bool | None = None
+    canary_sign_enabled: bool | None = None
     mandate_two_factor: bool | None = None
     mandate_password_rotation: bool | None = None
     password_rotation_days: int | None = Field(default=None, ge=1, le=3650)
@@ -106,6 +110,10 @@ class FirmSettingsUpdate(BaseModel):
 class MatterHeadTypeVisibilityUpdate(BaseModel):
     is_hidden: bool
 
+
+class MatterHeadTypeCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+
 class MatterSubTypeMenuOut(BaseModel):
     id: uuid.UUID
     name: str
@@ -120,6 +128,7 @@ class MatterSubTypeOut(BaseModel):
     id: uuid.UUID
     name: str
     prefix: str | None
+    portal_enabled_default: bool = False
     menus: list[MatterSubTypeMenuOut] = []
 
 class MatterHeadTypeOut(BaseModel):
@@ -134,6 +143,7 @@ class MatterSubTypeCreate(BaseModel):
 class MatterSubTypeUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=200)
     prefix: str | None = None
+    portal_enabled_default: bool | None = None
 
 class CaseCreate(BaseModel):
     matter_description: str = Field(min_length=1, max_length=300)

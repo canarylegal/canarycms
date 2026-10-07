@@ -37,6 +37,8 @@ export function AdminFirmDetails({ token }: { token: string }) {
   const [portalFontHex, setPortalFontHex] = useState('')
   const [portalBgOnSignedIn, setPortalBgOnSignedIn] = useState(true)
   const [portalLogoEnabled, setPortalLogoEnabled] = useState(true)
+  const [clientPortalEnabled, setClientPortalEnabled] = useState(true)
+  const [canarySignEnabled, setCanarySignEnabled] = useState(true)
   const [brandSupportInbox, setBrandSupportInbox] = useState('')
   const [brandPoweredByLabel, setBrandPoweredByLabel] = useState('')
   const [brandPoweredByUrl, setBrandPoweredByUrl] = useState('')
@@ -74,6 +76,8 @@ export function AdminFirmDetails({ token }: { token: string }) {
       setPortalFontHex((data.portal_font_color || '').trim())
       setPortalBgOnSignedIn(data.portal_background_on_signed_in !== false)
       setPortalLogoEnabled(data.portal_logo_enabled !== false)
+      setClientPortalEnabled(data.client_portal_enabled !== false)
+      setCanarySignEnabled(data.canary_sign_enabled !== false)
       setBrandSupportInbox((data.brand_support_inbox || '').trim())
       setBrandPoweredByLabel((data.brand_powered_by_label || '').trim())
       setBrandPoweredByUrl((data.brand_powered_by_url || '').trim())
@@ -122,6 +126,8 @@ export function AdminFirmDetails({ token }: { token: string }) {
           portal_font_color: portalFontNormalized ?? '',
           portal_background_on_signed_in: portalBgOnSignedIn,
           portal_logo_enabled: portalLogoEnabled,
+          client_portal_enabled: clientPortalEnabled,
+          canary_sign_enabled: canarySignEnabled,
           brand_support_inbox: brandSupportInbox.trim(),
           brand_powered_by_label: brandPoweredByLabel.trim(),
           brand_powered_by_url: brandPoweredByUrl.trim(),
@@ -133,6 +139,8 @@ export function AdminFirmDetails({ token }: { token: string }) {
       setPortalFontHex((data.portal_font_color || '').trim())
       setPortalBgOnSignedIn(data.portal_background_on_signed_in !== false)
       setPortalLogoEnabled(data.portal_logo_enabled !== false)
+      setClientPortalEnabled(data.client_portal_enabled !== false)
+      setCanarySignEnabled(data.canary_sign_enabled !== false)
       setBrandSupportInbox((data.brand_support_inbox || '').trim())
       setBrandPoweredByLabel((data.brand_powered_by_label || '').trim())
       setBrandPoweredByUrl((data.brand_powered_by_url || '').trim())
@@ -251,6 +259,39 @@ export function AdminFirmDetails({ token }: { token: string }) {
               <span>Registered company name (optional)</span>
               <input value={registeredName} onChange={(e) => setRegisteredName(e.target.value)} disabled={busy} />
             </label>
+            <div style={{ fontWeight: 600, marginTop: 8 }}>Optional products</div>
+            <label className="row" style={{ gap: 10, alignItems: 'flex-start', cursor: busy ? 'default' : 'pointer' }}>
+              <input
+                type="checkbox"
+                checked={clientPortalEnabled}
+                disabled={busy}
+                onChange={(e) => setClientPortalEnabled(e.target.checked)}
+                style={{ marginTop: 3 }}
+              />
+              <span>
+                <span style={{ fontWeight: 600 }}>Client portal product</span>
+                <div className="muted" style={{ fontSize: 13, marginTop: 2 }}>
+                  Untick to turn the portal off firm-wide. Matter toggles and type defaults are ignored while this is
+                  off.
+                </div>
+              </span>
+            </label>
+            <label className="row" style={{ gap: 10, alignItems: 'flex-start', cursor: busy ? 'default' : 'pointer' }}>
+              <input
+                type="checkbox"
+                checked={canarySignEnabled}
+                disabled={busy}
+                onChange={(e) => setCanarySignEnabled(e.target.checked)}
+                style={{ marginTop: 3 }}
+              />
+              <span>
+                <span style={{ fontWeight: 600 }}>Canary Sign</span>
+                <div className="muted" style={{ fontSize: 13, marginTop: 2 }}>
+                  Independent of the portal. Untick if the firm uses another e-sign product or wet ink only.
+                </div>
+              </span>
+            </label>
+
             <div style={{ fontWeight: 600, marginTop: 8 }}>Client portal</div>
             <div className="muted" style={{ fontSize: 13, marginBottom: 4 }}>
               Shown at the top of the client portal as <strong>{tradingName.trim() || 'Firm name'} Portal</strong>.

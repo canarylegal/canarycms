@@ -100,16 +100,42 @@ def _ensure_staff(db) -> User:
 
 
 def _matter_types(db) -> tuple[uuid.UUID | None, uuid.UUID | None]:
+    """Return Purchase under Conveyancing, Residential — create if catalogue empty (no core seed)."""
     sub = db.execute(
         select(MatterSubType)
         .join(MatterHeadType, MatterSubType.head_type_id == MatterHeadType.id)
         .where(MatterHeadType.name == "Conveyancing, Residential", MatterSubType.name == "Purchase")
     ).scalar_one_or_none()
-    if sub is None:
-        sub = db.execute(select(MatterSubType).order_by(MatterSubType.name.asc())).scalars().first()
-    if sub is None:
-        return None, None
-    return sub.head_type_id, sub.id
+    if sub is not None:
+        return sub.head_type_id, sub.id
+
+    now = _utcnow()
+    head = db.execute(
+        select(MatterHeadType).where(MatterHeadType.name == "Conveyancing, Residential")
+    ).scalar_one_or_none()
+    if head is None:
+        head = MatterHeadType(
+            id=uuid.uuid4(),
+            name="Conveyancing, Residential",
+            is_hidden=False,
+            created_at=now,
+            updated_at=now,
+        )
+        db.add(head)
+        db.flush()
+    sub = MatterSubType(
+        id=uuid.uuid4(),
+        head_type_id=head.id,
+        name="Purchase",
+        prefix="Purchase of",
+        portal_enabled_default=True,
+        created_at=now,
+        updated_at=now,
+    )
+    db.add(sub)
+    db.flush()
+    print("  + created matter types Conveyancing, Residential → Purchase")
+    return head.id, sub.id
 
 
 def _ensure_case(db, staff: User) -> Case:

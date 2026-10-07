@@ -49,6 +49,8 @@ class MatterSubType(Base):
     )
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     prefix: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Default for new matters of this sub-type (per-matter case.portal_enabled remains the override).
+    portal_enabled_default: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
 

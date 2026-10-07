@@ -11,6 +11,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from app.audit import log_event
 from app.db import get_db
 from app.deps import get_current_user, require_case_access
 from app.firm_module_runtime import (
@@ -182,6 +183,14 @@ def put_case_state(
     row.payload = data
     row.updated_at = datetime.now(timezone.utc)
     db.add(row)
+    log_event(
+        db,
+        actor_user_id=user.id,
+        action="firm_module.case_state_update",
+        entity_type="case",
+        entity_id=str(case_id),
+        meta={"module_id": module_id, "stage": data.get("stage")},
+    )
     db.commit()
     db.refresh(row)
     return _state_out(row)

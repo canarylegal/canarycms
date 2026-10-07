@@ -313,6 +313,8 @@ def build_form_responses(fields: list[dict[str, Any]]) -> dict[str, Any]:
                 out[key] = CONTACT_EMAIL
         elif ftype == "date" and required:
             out[key] = "1990-01-01"
+        elif ftype == "checkbox":
+            out[key] = True if required else False
         elif required:
             out[key] = "smoke"
     # Ensure known required keys for general_information

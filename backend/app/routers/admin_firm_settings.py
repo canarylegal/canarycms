@@ -139,6 +139,8 @@ def _to_out(db: Session, row: FirmSettings) -> FirmSettingsOut:
         portal_background_original_filename=portal_bg_name,
         portal_font_color=row.portal_font_color,
         portal_background_on_signed_in=bool(row.portal_background_on_signed_in),
+        client_portal_enabled=bool(getattr(row, "client_portal_enabled", True)),
+        canary_sign_enabled=bool(getattr(row, "canary_sign_enabled", True)),
         default_signature_configured=bool(row.default_signature_file_id),
         default_signature_original_filename=default_sig_name,
         default_signature_scale=int(row.default_signature_scale or 7),

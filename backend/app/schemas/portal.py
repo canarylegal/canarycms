@@ -93,7 +93,7 @@ class PortalBrowseOut(BaseModel):
 class PortalFormTemplateFieldIn(BaseModel):
     field_key: str = Field(min_length=1, max_length=80)
     label: str = Field(min_length=1, max_length=500)
-    field_type: Literal["section", "text", "textarea", "date", "select", "file"]
+    field_type: Literal["section", "text", "textarea", "date", "select", "checkbox", "file"]
     help_text: str | None = Field(default=None, max_length=2000)
     required: bool = False
     sort_order: int = 0

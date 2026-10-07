@@ -14,6 +14,7 @@ from app.matter_type_bootstrap import ensure_sub_type_menus, load_default_sub_me
 from app.models import MatterHeadType, MatterSubType, MatterSubTypeMenu, Precedent, PrecedentCategory, User
 from app.schemas import (
     CalendarEventTemplatePickOut,
+    MatterHeadTypeCreate,
     MatterHeadTypeOut,
     MatterHeadTypeVisibilityUpdate,
     MatterSubTypeCreate,
@@ -45,6 +46,7 @@ def _sub_out(sub: MatterSubType, db: Session) -> MatterSubTypeOut:
         id=sub.id,
         name=sub.name,
         prefix=sub.prefix,
+        portal_enabled_default=bool(getattr(sub, "portal_enabled_default", False)),
         menus=[MatterSubTypeMenuOut(id=m.id, name=m.name) for m in menus],
     )
 
@@ -89,7 +91,30 @@ def list_event_line_templates_for_calendar(
     return list_calendar_event_template_picks(db)
 
 
-# ── Admin: head type visibility (canonical names come from Canary seed; no create/rename/delete) ──
+# ── Admin: head type CRUD (catalogue is firm-owned; core ships none) ──
+
+@router.post("/heads", response_model=MatterHeadTypeOut, status_code=status.HTTP_201_CREATED)
+def create_head_type(
+    payload: MatterHeadTypeCreate,
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+) -> MatterHeadTypeOut:
+    name = payload.name.strip()
+    conflict = db.execute(select(MatterHeadType).where(MatterHeadType.name == name)).scalar_one_or_none()
+    if conflict:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Head type name already exists")
+    head = MatterHeadType(
+        id=uuid.uuid4(),
+        name=name,
+        is_hidden=False,
+        created_at=datetime.utcnow(),
+        updated_at=datetime.utcnow(),
+    )
+    db.add(head)
+    db.commit()
+    db.refresh(head)
+    return _head_out(head, db)
+
 
 @router.patch("/heads/{head_id}", response_model=MatterHeadTypeOut)
 def set_head_type_visibility(
@@ -167,6 +192,8 @@ def update_sub_type(
     data = payload.model_dump(exclude_unset=True)
     if "prefix" in data:
         sub.prefix = data["prefix"].strip() if data["prefix"] else None
+    if "portal_enabled_default" in data and data["portal_enabled_default"] is not None:
+        sub.portal_enabled_default = bool(data["portal_enabled_default"])
     sub.updated_at = datetime.utcnow()
     db.add(sub)
     db.commit()

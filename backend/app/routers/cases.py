@@ -218,6 +218,9 @@ def create_case(
         source_name=payload.source_name,
     )
 
+    from app.portal_case import firm_client_portal_enabled
+
+    portal_on = bool(payload.portal_enabled) and firm_client_portal_enabled(db)
     case = Case(
         case_number=case_number,
         client_name=None,
@@ -231,7 +234,7 @@ def create_case(
         created_by=user.id,
         is_locked=False,
         lock_mode=CaseLockMode.open_by_default,
-        portal_enabled=payload.portal_enabled,
+        portal_enabled=portal_on,
     )
     db.add(counter)
     db.add(case)
@@ -372,6 +375,11 @@ def update_case(
     # Map API field to DB field
     if "matter_description" in data:
         data["title"] = data.pop("matter_description")
+    if "portal_enabled" in data and data["portal_enabled"]:
+        from app.portal_case import firm_client_portal_enabled
+
+        if not firm_client_portal_enabled(db):
+            data["portal_enabled"] = False
 
     if "fee_earner_user_id" in data:
         if data["fee_earner_user_id"] is None:

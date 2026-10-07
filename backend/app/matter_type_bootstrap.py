@@ -1,12 +1,10 @@
-"""Seed and sync matter head / sub types and sub-menus from Canary ``seed.json``.
+"""Merge matter head / sub types and sub-menus from a seed JSON file.
 
-Head matter type **names** are canonical (defined in ``matter_types_seed/seed.json``).
-On each startup we **merge** any missing heads, sub-types, and menus from the seed
-without removing firm-specific rows. Admins cannot create or rename head types via API;
-they may only hide heads the firm does not use.
+Core Canary no longer ships a product catalogue. Firm packages supply
+``seed.json`` via ``FIRM_MATTER_TYPES_SEED_DIR`` (see ``firm_matter_type_bootstrap``).
+Admins may also create head/sub types in Admin → Matters.
 
-``default_sub_menus`` in the seed lists sub-menus applied to every sub-type (existing
-and new from seed). Future sub-menus are opt-in via admin or an updated seed list.
+``default_sub_menus`` in the seed lists sub-menus applied to every sub-type.
 """
 
 from __future__ import annotations
@@ -97,14 +95,14 @@ def ensure_all_sub_types_have_default_menus(db: Session, menu_names: list[str], 
         ensure_sub_type_menus(db, sub, menu_names, now=now)
 
 
-def sync_matter_types_from_seed(db: Session) -> bool:
-    """Apply or merge matter types from ``seed.json``. Returns True if the file was read and processed."""
+def sync_matter_types_from_path(db: Session, seed_path: Path) -> bool:
+    """Apply or merge matter types from ``seed_path``. Returns True if processed."""
 
-    if not SEED_PATH.is_file():
-        log.info("No matter type seed at %s — skipping.", SEED_PATH)
+    if not seed_path.is_file():
+        log.info("No matter type seed at %s — skipping.", seed_path)
         return False
 
-    raw = json.loads(SEED_PATH.read_text(encoding="utf-8"))
+    raw = json.loads(seed_path.read_text(encoding="utf-8"))
     if raw.get("version") != 1:
         log.warning("Unsupported matter type seed version: %s", raw.get("version"))
         return False
@@ -152,12 +150,14 @@ def sync_matter_types_from_seed(db: Session) -> bool:
                 ).scalar_one_or_none()
                 if not sub:
                     sub_id = uuid.uuid4()
+                    portal_default = bool(st.get("portal_enabled_default", False))
                     db.add(
                         MatterSubType(
                             id=sub_id,
                             head_type_id=head.id,
                             name=sub_name,
                             prefix=st.get("prefix"),
+                            portal_enabled_default=portal_default,
                             created_at=now,
                             updated_at=now,
                         )
@@ -181,5 +181,14 @@ def sync_matter_types_from_seed(db: Session) -> bool:
         db.rollback()
         raise
 
-    log.info("Matter types synced from %s.", SEED_PATH)
+    log.info("Matter types synced from %s.", seed_path)
     return True
+
+
+def sync_matter_types_from_seed(db: Session) -> bool:
+    """Deprecated product-seed path — no-op. Use firm package seed instead."""
+    log.info(
+        "Core matter type product seed is disabled (catalogue is firm-layer). "
+        "Set FIRM_MATTER_TYPES_SEED_DIR or create types in Admin → Matters."
+    )
+    return False

@@ -52,8 +52,13 @@ _STATUS_FILTERS: dict[str, CanarySignStatus] = {
 
 
 @router.get("/canary-sign/options", response_model=CanarySignStaffOptionsOut)
-def staff_canary_sign_options(user: User = Depends(get_current_user)) -> CanarySignStaffOptionsOut:
-    return CanarySignStaffOptionsOut(enabled=True)
+def staff_canary_sign_options(
+    _user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> CanarySignStaffOptionsOut:
+    from app.portal_case import firm_canary_sign_enabled
+
+    return CanarySignStaffOptionsOut(enabled=firm_canary_sign_enabled(db))
 
 
 @router.get("/canary-sign/requests", response_model=list[CanarySignMenuRowOut])

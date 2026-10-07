@@ -131,6 +131,10 @@ export function PortalFormFillPanel({ submissionId, portalToken, onBack, onSubmi
       const payload: Record<string, unknown> = {}
       for (const f of form.fields) {
         if (f.field_type === 'section' || f.field_type === 'file') continue
+        if (f.field_type === 'checkbox') {
+          payload[f.field_key] = Boolean(values[f.field_key])
+          continue
+        }
         const v = values[f.field_key]
         if (v !== undefined && v !== '') payload[f.field_key] = v
       }
@@ -225,6 +229,25 @@ export function PortalFormFillPanel({ submissionId, portalToken, onBack, onSubmi
             </div>
           ) : null}
         </div>
+      )
+    }
+
+    if (field.field_type === 'checkbox') {
+      const checked = val === true || val === 'true' || val === 1
+      return (
+        <label key={field.field_key} className="field portalFormField" style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 10 }}>
+          <input
+            type="checkbox"
+            checked={checked}
+            onChange={(e) => setFieldValue(field.field_key, e.target.checked)}
+            disabled={busy}
+            style={{ marginTop: 3 }}
+          />
+          <span>
+            <span style={{ display: 'block' }}>{label}</span>
+            {help ? <span className="muted" style={{ fontSize: 13 }}>{help}</span> : null}
+          </span>
+        </label>
       )
     }
 

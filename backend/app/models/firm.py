@@ -109,6 +109,9 @@ class FirmSettings(Base):
     invoice_template_file_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("file.id", ondelete="SET NULL"), nullable=True
     )
+    # Optional-core product switches (firm-wide).
+    client_portal_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    canary_sign_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     mandate_two_factor: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     mandate_password_rotation: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     password_rotation_days: Mapped[int | None] = mapped_column(Integer, nullable=True)

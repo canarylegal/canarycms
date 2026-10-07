@@ -36,7 +36,12 @@ export type FirmSettingsOut = {
   portal_font_color?: string | null
   /** When false, custom portal canvas applies to the login screen only. */
   portal_background_on_signed_in?: boolean
+  /** Firm-wide optional-core: client portal product on/off. */
+  client_portal_enabled?: boolean
+  /** Firm-wide optional-core: Canary Sign on/off (independent of portal). */
+  canary_sign_enabled?: boolean
   default_signature_configured?: boolean
+
   default_signature_original_filename?: string | null
   default_signature_scale?: number
   mandate_two_factor?: boolean

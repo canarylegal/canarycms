@@ -80,7 +80,37 @@ def _purchase_sub_type(db) -> MatterSubType | None:
     ).scalar_one_or_none()
     if sub is not None:
         return sub
-    return db.execute(select(MatterSubType).where(MatterSubType.name == "Purchase")).scalars().first()
+    sub = db.execute(select(MatterSubType).where(MatterSubType.name == "Purchase")).scalars().first()
+    if sub is not None:
+        return sub
+
+    now = _utcnow()
+    head = db.execute(
+        select(MatterHeadType).where(MatterHeadType.name == "Conveyancing, Residential")
+    ).scalar_one_or_none()
+    if head is None:
+        head = MatterHeadType(
+            id=uuid.uuid4(),
+            name="Conveyancing, Residential",
+            is_hidden=False,
+            created_at=now,
+            updated_at=now,
+        )
+        db.add(head)
+        db.flush()
+    sub = MatterSubType(
+        id=uuid.uuid4(),
+        head_type_id=head.id,
+        name="Purchase",
+        prefix="Purchase of",
+        portal_enabled_default=True,
+        created_at=now,
+        updated_at=now,
+    )
+    db.add(sub)
+    db.flush()
+    print("  + created matter types Conveyancing, Residential → Purchase")
+    return sub
 
 
 def _ensure_purchase_case(db, staff: User) -> Case:

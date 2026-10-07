@@ -146,7 +146,7 @@ export function CaseDetail({
     }
     void apiFetch<{ enabled: boolean }>('/canary-sign/options', { token })
       .then((o) => setCanarySignEnabled(Boolean(o.enabled)))
-      .catch(() => setCanarySignEnabled(true))
+      .catch(() => setCanarySignEnabled(false))
   }, [token])
   useEffect(() => {
     if (!busy) return

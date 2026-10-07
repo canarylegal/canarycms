@@ -77,7 +77,9 @@ Platform contract checks against a **running** backend with a firm package attac
 
 Covers: `canary-firm.json` compat gate, firm SQL migrations applied, published
 `/firm-package/*` + `/firm-modules/*` response shapes, lifecycle payload
-`schema_version: 1` keys.
+`schema_version: 1` keys, firm matter-type / assets attach surfaces, permission
+boundary, audit on firm case-state update, outbox drain/once-only, light
+concurrency on firm case-state writes.
 
 ```bash
 # Stack must already be up with firm overlay, e.g.:
@@ -87,12 +89,16 @@ make smoke-firm-contract
 
 # Empty / CI-style DB: ensure staff + Purchase matter first
 make smoke-firm-contract-ci
+
+# Phase 7b dual-tag: previous release → current with firm attached
+PREV_TAG=v2.0.0 make smoke-firm-dual-tag
 ```
 
 CI: `.github/workflows/firm-contract.yml` checks out the private pilot via repo secret
 `EXAMPLE_FIRM_PILOT_TOKEN` (fine-scoped PAT, `contents:read` on `example-firm-pilot`),
 attaches it with `docker-compose.firm.example.yml`, and runs the same script.
 Without the secret, push/PR skips the job; `workflow_dispatch` prints setup instructions.
+Optional dual-tag job: `workflow_dispatch` with `prev_tag` set.
 
 Static lifecycle key lists also run under `make test-backend`
 (`backend/tests/test_firm_lifecycle_payload_schema.py`).

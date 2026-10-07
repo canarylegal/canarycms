@@ -397,6 +397,13 @@ def send_signing_request(
     supersedes_id: uuid.UUID | None = None,
     retain_fillable_form: bool | None = None,
 ) -> CanarySignRequest:
+    from app.portal_case import firm_canary_sign_enabled
+
+    if not firm_canary_sign_enabled(db):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Canary Sign is turned off for this firm.",
+        )
     require_case_portal_enabled(db, case_id)
 
     if not recipient_specs:

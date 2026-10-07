@@ -47,6 +47,7 @@ from app.routers import (
     contact_portal,
     matter_portal,
     fee_scales,
+    firm_capabilities,
     firm_modules,
     firm_package,
     task_menu,
@@ -86,7 +87,8 @@ async def lifespan(app: FastAPI):
     import logging
 
     from app.db import SessionLocal
-    from app.matter_type_bootstrap import sync_matter_types_from_seed
+    from app.firm_asset_bootstrap import sync_firm_assets_from_seed
+    from app.firm_matter_type_bootstrap import sync_matter_types_from_firm_seed
     from app.merge_code_catalog_sync import sync_merge_code_catalog
     from app.permission_category_bootstrap import ensure_builtin_permission_categories
     from app.calendar_label_bootstrap import ensure_calendar_labels_all_calendars
@@ -100,10 +102,10 @@ async def lifespan(app: FastAPI):
     _log = logging.getLogger("uvicorn.error")
     db = SessionLocal()
     try:
-        sync_matter_types_from_seed(db)
+        sync_matter_types_from_firm_seed(db)
     except Exception as e:
         db.rollback()
-        _log.warning("Matter type seed skipped: %s", e)
+        _log.warning("Firm matter type seed skipped: %s", e)
     try:
         ensure_builtin_permission_categories(db)
     except Exception as e:
@@ -134,6 +136,11 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         db.rollback()
         _log.warning("Portal forms seed skipped: %s", e)
+    try:
+        sync_firm_assets_from_seed(db)
+    except Exception as e:
+        db.rollback()
+        _log.warning("Firm asset seed skipped: %s", e)
     finally:
         db.close()
 
@@ -265,6 +272,7 @@ app.include_router(precedents.router)
 app.include_router(fee_scales.router)
 app.include_router(firm_modules.router)
 app.include_router(firm_package.router)
+app.include_router(firm_capabilities.router)
 app.include_router(contacts.router)
 app.include_router(contact_portal.router)
 app.include_router(matter_portal.router)

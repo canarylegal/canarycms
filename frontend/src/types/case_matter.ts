@@ -7,6 +7,8 @@ export type MatterSubTypeOut = {
   id: string
   name: string
   prefix?: string | null
+  /** Default for new matters of this sub-type. */
+  portal_enabled_default?: boolean
   menus: MatterSubTypeMenuOut[]
 }
 

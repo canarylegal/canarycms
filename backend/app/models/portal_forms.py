@@ -36,6 +36,7 @@ class PortalFormFieldType(str, enum.Enum):
     textarea = "textarea"
     date = "date"
     select = "select"
+    checkbox = "checkbox"
     file = "file"
 
 class PortalFormSubmissionStatus(str, enum.Enum):

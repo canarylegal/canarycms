@@ -160,6 +160,38 @@ def test_validate_responses_select_rejects_invalid() -> None:
     assert ei.value.status_code == 422
 
 
+def test_validate_responses_checkbox_required_must_be_checked() -> None:
+    field = PortalFormTemplateField(
+        id=uuid.uuid4(),
+        template_id=uuid.uuid4(),
+        field_key="consent",
+        label="I consent",
+        field_type=PortalFormFieldType.checkbox,
+        required=True,
+        sort_order=0,
+        select_options=[],
+    )
+    with pytest.raises(HTTPException) as ei:
+        _validate_responses([field], {"consent": False})
+    assert ei.value.status_code == 422
+    assert _validate_responses([field], {"consent": True}) == {"consent": True}
+
+
+def test_validate_responses_checkbox_optional_stores_bool() -> None:
+    field = PortalFormTemplateField(
+        id=uuid.uuid4(),
+        template_id=uuid.uuid4(),
+        field_key="marketing",
+        label="Marketing",
+        field_type=PortalFormFieldType.checkbox,
+        required=False,
+        sort_order=0,
+        select_options=[],
+    )
+    assert _validate_responses([field], {}) == {"marketing": False}
+    assert _validate_responses([field], {"marketing": "yes"}) == {"marketing": True}
+
+
 def test_validate_responses_file_required() -> None:
     field = PortalFormTemplateField(
         id=uuid.uuid4(),

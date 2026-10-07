@@ -1,4 +1,4 @@
-"""Case-level portal enablement checks."""
+"""Case-level portal enablement checks (firm-wide × matter flag)."""
 
 from __future__ import annotations
 
@@ -8,12 +8,30 @@ from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import Case, ContactPortalGrant
+from app.models import Case, ContactPortalGrant, FirmSettings
 
 PORTAL_DISABLED_MSG = "Portal is not enabled for this matter."
+FIRM_PORTAL_DISABLED_MSG = "Client portal is turned off for this firm."
+
+
+def firm_client_portal_enabled(db: Session) -> bool:
+    row = db.get(FirmSettings, 1)
+    if row is None:
+        return True
+    return bool(row.client_portal_enabled)
+
+
+def firm_canary_sign_enabled(db: Session) -> bool:
+    row = db.get(FirmSettings, 1)
+    if row is None:
+        return True
+    return bool(row.canary_sign_enabled)
 
 
 def case_portal_enabled(db: Session, case_id: uuid.UUID) -> bool:
+    """Effective portal: firm product on AND matter ``portal_enabled``."""
+    if not firm_client_portal_enabled(db):
+        return False
     case = db.get(Case, case_id)
     return bool(case and case.portal_enabled)
 
@@ -22,6 +40,8 @@ def require_case_portal_enabled(db: Session, case_id: uuid.UUID) -> Case:
     case = db.get(Case, case_id)
     if case is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Case not found")
+    if not firm_client_portal_enabled(db):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=FIRM_PORTAL_DISABLED_MSG)
     if not case.portal_enabled:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=PORTAL_DISABLED_MSG)
     return case
@@ -32,6 +52,8 @@ def filter_grants_for_portal_enabled_cases(
     grants: list[ContactPortalGrant],
 ) -> list[ContactPortalGrant]:
     if not grants:
+        return []
+    if not firm_client_portal_enabled(db):
         return []
     case_ids = {g.case_id for g in grants}
     enabled_ids = set(

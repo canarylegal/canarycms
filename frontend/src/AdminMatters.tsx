@@ -21,13 +21,16 @@ export function AdminMatters({ token }: { token: string }) {
   const [editingPrecCatId, setEditingPrecCatId] = useState<string | null>(null)
   const [editingPrecCatName, setEditingPrecCatName] = useState('')
 
+  const [newHeadName, setNewHeadName] = useState('')
+
   // Sub type form state
   const [newSubName, setNewSubName] = useState('')
   const [editingSubId, setEditingSubId] = useState<string | null>(null)
   const [editingSubName, setEditingSubName] = useState('')
 
-  // Sub type config state (prefix + menus)
+  // Sub type config state (prefix + menus + portal default)
   const [prefixInput, setPrefixInput] = useState('')
+  const [portalDefault, setPortalDefault] = useState(false)
   const [newMenuName, setNewMenuName] = useState('')
   const [editingMenuId, setEditingMenuId] = useState<string | null>(null)
   const [editingMenuName, setEditingMenuName] = useState('')
@@ -38,6 +41,26 @@ export function AdminMatters({ token }: { token: string }) {
       setHeads(data)
     } catch (e: any) {
       setErr(e?.message ?? 'Failed to load matter types')
+    }
+  }
+
+  async function createHead() {
+    if (!newHeadName.trim()) return
+    setBusy(true)
+    setErr(null)
+    try {
+      const head = await apiFetch<MatterHeadTypeOut>('/matter-types/heads', {
+        token,
+        method: 'POST',
+        json: { name: newHeadName.trim() },
+      })
+      setNewHeadName('')
+      await loadHeads()
+      setSelectedHeadId(head.id)
+    } catch (e: any) {
+      setErr(e?.message ?? 'Failed to create head type')
+    } finally {
+      setBusy(false)
     }
   }
 
@@ -57,9 +80,10 @@ export function AdminMatters({ token }: { token: string }) {
   const selectedSub: MatterSubTypeOut | null =
     selectedHead?.sub_types.find((s) => s.id === selectedSubId) ?? null
 
-  // Sync prefix input when selected sub changes
+  // Sync prefix / portal default when selected sub changes
   useEffect(() => {
     setPrefixInput(selectedSub?.prefix ?? '')
+    setPortalDefault(Boolean(selectedSub?.portal_enabled_default))
     setNewPrecCatName('')
     setNewMenuName('')
     setEditingMenuId(null)
@@ -164,7 +188,9 @@ export function AdminMatters({ token }: { token: string }) {
     setBusy(true); setErr(null)
     try {
       await apiFetch(`/matter-types/sub-types/${selectedSubId}`, {
-        token, method: 'PATCH', json: { prefix: prefixInput.trim() || null },
+        token,
+        method: 'PATCH',
+        json: { prefix: prefixInput.trim() || null, portal_enabled_default: portalDefault },
       })
       await loadHeads()
     } catch (e: any) { setErr(e?.message ?? 'Failed') } finally { setBusy(false) }
@@ -218,8 +244,24 @@ export function AdminMatters({ token }: { token: string }) {
         <div className="card" style={{ flex: 1 }}>
           <h3 style={{ marginTop: 0 }}>Head matter types</h3>
           <p className="muted" style={{ marginTop: 0, fontSize: 13 }}>
-            Head types are defined by Canary and sync from the product seed. Hide a head here if your firm does not use that area of law (it disappears from fee-earner matter pickers but stays in the database for existing matters).
+            Matter types are firm-owned (no Canary product catalogue). Seed them from the firm package or add heads
+            here. Hide a head if fee-earners should not pick it (existing matters keep their type).
           </p>
+          <div className="row" style={{ gap: 6, marginBottom: 10 }}>
+            <input
+              style={{ flex: 1 }}
+              placeholder="New head type name…"
+              value={newHeadName}
+              onChange={(e) => setNewHeadName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') void createHead()
+              }}
+              disabled={busy}
+            />
+            <button className="btn primary" disabled={busy || !newHeadName.trim()} onClick={() => void createHead()}>
+              Add
+            </button>
+          </div>
           <div className="list">
             {heads.map((h) => (
               <div
@@ -351,7 +393,11 @@ export function AdminMatters({ token }: { token: string }) {
                 />
                 <button
                   className="btn primary"
-                  disabled={busy || prefixInput === (selectedSub.prefix ?? '')}
+                  disabled={
+                    busy ||
+                    (prefixInput === (selectedSub.prefix ?? '') &&
+                      portalDefault === Boolean(selectedSub.portal_enabled_default))
+                  }
                   onClick={() => void savePrefix()}
                 >
                   Save
@@ -362,6 +408,25 @@ export function AdminMatters({ token }: { token: string }) {
                   Current: <em>{selectedSub.prefix}</em>
                 </div>
               )}
+              <label
+                className="row"
+                style={{ gap: 8, alignItems: 'flex-start', marginTop: 12, cursor: busy ? 'default' : 'pointer' }}
+              >
+                <input
+                  type="checkbox"
+                  checked={portalDefault}
+                  disabled={busy}
+                  onChange={(e) => setPortalDefault(e.target.checked)}
+                  style={{ marginTop: 3 }}
+                />
+                <span>
+                  <span style={{ fontWeight: 600 }}>Portal on by default for new matters</span>
+                  <div className="muted" style={{ fontSize: 13, marginTop: 2 }}>
+                    Seeds the Enable portal checkbox when creating a matter of this type. Per-matter override still
+                    applies; firm-wide portal off wins.
+                  </div>
+                </span>
+              </label>
             </div>
 
             {/* Default menus */}
