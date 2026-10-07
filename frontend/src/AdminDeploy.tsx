@@ -4,11 +4,28 @@ import { AdminStorage } from './AdminStorage'
 import type { ApiError } from './api'
 import type { AdminDeployUpdateCheckOut } from './types'
 
+export type AdminFirmPackageStatusOut = {
+  attached: boolean
+  compatible: boolean
+  fault: boolean
+  package_id?: string | null
+  package_version?: string | null
+  label?: string | null
+  requires_canary?: string | null
+  canary_version: string
+  message?: string | null
+  detail?: string | null
+  mounts?: string[]
+  modules?: string[]
+}
+
 export type AdminDeployStatusOut = {
   configured: boolean
   compose_update_enabled?: boolean
   compose_git_reset_enabled?: boolean
   compose_git_ref?: string
+  canary_product_version?: string
+  firm_package?: AdminFirmPackageStatusOut | null
 }
 
 export function AdminDeploy({ token }: { token: string }) {
@@ -152,6 +169,53 @@ export function AdminDeploy({ token }: { token: string }) {
             </span>
           ) : null}
         </div>
+      </div>
+
+      <div className="card">
+        <h3 style={{ marginTop: 0 }}>Firm package</h3>
+        <p className="muted" style={{ lineHeight: 1.55 }}>
+          Notify-only status for the mounted firm package (<code>canary-firm.json</code>). Incompatible packages refuse
+          firm features; all staff see a fault marker in the side menu.
+        </p>
+        {status?.firm_package ? (
+          <ul className="muted" style={{ marginTop: 12, lineHeight: 1.6, fontSize: '0.95em' }}>
+            <li>
+              Canary product version: <strong>{status.canary_product_version || status.firm_package.canary_version}</strong>
+            </li>
+            <li>
+              Package attached: <strong>{status.firm_package.attached ? 'yes' : 'no'}</strong>
+            </li>
+            {status.firm_package.attached ? (
+              <>
+                <li>
+                  Package:{' '}
+                  <strong>
+                    {status.firm_package.label || status.firm_package.package_id || '—'}
+                    {status.firm_package.package_version ? ` ${status.firm_package.package_version}` : ''}
+                  </strong>
+                </li>
+                <li>
+                  Requires Canary: <strong>{status.firm_package.requires_canary || '—'}</strong>
+                </li>
+                <li>
+                  Compatible:{' '}
+                  <strong style={{ color: status.firm_package.fault ? '#b91c1c' : undefined }}>
+                    {status.firm_package.compatible ? 'yes' : 'no'}
+                  </strong>
+                </li>
+                {status.firm_package.fault && status.firm_package.detail ? (
+                  <li style={{ color: '#b91c1c' }}>{status.firm_package.detail}</li>
+                ) : null}
+              </>
+            ) : (
+              <li>No firm package mounted (or no <code>canary-firm.json</code>).</li>
+            )}
+          </ul>
+        ) : (
+          <p className="muted" style={{ marginTop: 12 }}>
+            Firm package status not loaded.
+          </p>
+        )}
       </div>
 
       <div className="card">

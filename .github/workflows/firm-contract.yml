@@ -1,0 +1,175 @@
+name: Firm contract
+
+# Phase 7 MVP: attach private example-firm-pilot and run platform contract smoke
+# (compat gate, firm migrate, /firm-modules/* shapes, lifecycle payload schema).
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v[0-9]*'
+    branches: [main]
+    paths:
+      - "backend/app/firm_package.py"
+      - "backend/app/firm_module_*.py"
+      - "backend/app/canary_version.py"
+      - "backend/app/routers/firm_*.py"
+      - "backend/app/models/firm_module.py"
+      - "backend/scripts/smoke_firm_contract.py"
+      - "backend/scripts/ensure_firm_contract_fixture.py"
+      - "backend/tests/test_firm_*.py"
+      - "backend/tests/test_canary_version.py"
+      - "scripts/smoke-firm-contract.sh"
+      - ".github/workflows/firm-contract.yml"
+      - "docker-compose.yml"
+      - "docker-compose.ci.yml"
+      - "docker-compose.firm.example.yml"
+      - "backend/requirements.txt"
+      - "backend/Dockerfile"
+      - "backend/alembic/**"
+  pull_request:
+    paths:
+      - "backend/app/firm_package.py"
+      - "backend/app/firm_module_*.py"
+      - "backend/app/canary_version.py"
+      - "backend/app/routers/firm_*.py"
+      - "backend/app/models/firm_module.py"
+      - "backend/scripts/smoke_firm_contract.py"
+      - "backend/scripts/ensure_firm_contract_fixture.py"
+      - "backend/tests/test_firm_*.py"
+      - "backend/tests/test_canary_version.py"
+      - "scripts/smoke-firm-contract.sh"
+      - ".github/workflows/firm-contract.yml"
+      - "docker-compose.yml"
+      - "docker-compose.ci.yml"
+      - "docker-compose.firm.example.yml"
+      - "backend/alembic/**"
+
+jobs:
+  firm-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    # Private pilot checkout needs EXAMPLE_FIRM_PILOT_TOKEN (contents:read on example-firm-pilot).
+    # workflow_dispatch always runs (shows setup notice if secret missing).
+    if: ${{ github.event_name == 'workflow_dispatch' || secrets.EXAMPLE_FIRM_PILOT_TOKEN != '' }}
+    env:
+      COMPOSE_FILE: docker-compose.yml:docker-compose.ci.yml:docker-compose.firm.example.yml
+      BACKEND_CONTAINER: canaryci-backend
+      FIRM_PACKAGE_DIR: ${{ github.workspace }}/example-firm-pilot
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Check pilot checkout secret
+        id: secret
+        run: |
+          if [ -z "${{ secrets.EXAMPLE_FIRM_PILOT_TOKEN }}" ]; then
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            {
+              echo "## Firm contract skipped"
+              echo ""
+              echo "Create a fine-scoped GitHub PAT with \`contents:read\` on"
+              echo "\`canarylegal/example-firm-pilot\` and store it as the repo secret"
+              echo "\`EXAMPLE_FIRM_PILOT_TOKEN\`."
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout example-firm-pilot
+        if: steps.secret.outputs.present == 'true'
+        uses: actions/checkout@v6
+        with:
+          repository: canarylegal/example-firm-pilot
+          token: ${{ secrets.EXAMPLE_FIRM_PILOT_TOKEN }}
+          path: example-firm-pilot
+
+      - name: Write CI .env
+        if: steps.secret.outputs.present == 'true'
+        run: |
+          set -euo pipefail
+          python3 -m pip install --quiet 'cryptography>=42'
+          FERNET="$(python3 -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())')"
+          {
+            echo "COMPOSE_PROJECT_NAME=canaryci"
+            echo "COMPOSE_PROFILES="
+            echo "JWT_SECRET=$(openssl rand -hex 32)"
+            echo "DATA_ENCRYPTION_KEY=${FERNET}"
+            echo "ONLYOFFICE_JWT_SECRET=$(openssl rand -hex 32)"
+            echo "ONLYOFFICE_SECURE_LINK_SECRET=$(openssl rand -hex 32)"
+            echo "MASTER_ADMIN_LOGIN=ci-master-$(openssl rand -hex 8)"
+            echo "MASTER_ADMIN_PASSWORD=$(openssl rand -hex 24)"
+            echo "MASTER_ADMIN_REQUIRE_2FA=false"
+            echo "MASTER_ADMIN_TOTP_SECRET="
+            echo "POSTGRES_USER=canary"
+            echo "POSTGRES_PASSWORD=$(openssl rand -hex 16)"
+            echo "POSTGRES_DB=canary"
+            echo "CANARY_PUBLIC_URL=http://127.0.0.1:8080"
+            echo "CANARY_CORS_ORIGINS=http://127.0.0.1:8080"
+            echo "ONLYOFFICE_DS_PUBLIC_URL=http://127.0.0.1:8080/office-ds"
+            echo "CANARY_CALDAV_PUBLIC_URL=http://127.0.0.1:8080"
+            echo "CANARY_GITHUB_DEPLOY_REF=latest-release"
+            echo "CANARY_PRODUCT_VERSION=2.0.0"
+            echo "BACKEND_PORT_PUBLISH=127.0.0.1:18000:8000"
+            echo "POSTGRES_PORT_PUBLISH=127.0.0.1:15432:5432"
+            echo "FRONTEND_PORT_PUBLISH=127.0.0.1:18080:80"
+            echo "ONLYOFFICE_PORT_PUBLISH=127.0.0.1:18084:80"
+            echo "RADICALE_PORT_PUBLISH=127.0.0.1:15232:5232"
+            echo "GIT_COMMIT=${GITHUB_SHA}"
+            echo "FIRM_PACKAGE_DIR=${FIRM_PACKAGE_DIR}"
+          } > .env
+
+      - name: Build and start db + backend (firm attached)
+        if: steps.secret.outputs.present == 'true'
+        run: |
+          set -euo pipefail
+          test -f example-firm-pilot/canary-firm.json
+          docker compose config >/dev/null
+          docker compose up -d --build db backend
+          docker compose ps -a
+
+      - name: Wait for backend health
+        if: steps.secret.outputs.present == 'true'
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 120); do
+            if curl -fsS --max-time 5 http://127.0.0.1:18000/health >/dev/null 2>&1; then
+              echo "healthy via host port after ${i} attempts"
+              exit 0
+            fi
+            if docker compose exec -T backend python -c \
+              "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5)" \
+              >/dev/null 2>&1; then
+              echo "healthy via exec after ${i} attempts"
+              exit 0
+            fi
+            if (( i % 15 == 0 )); then
+              echo "attempt ${i}: still waiting"
+              docker compose ps -a || true
+              docker compose logs --tail=80 backend || true
+            fi
+            sleep 3
+          done
+          {
+            echo "## Firm contract: backend never became healthy"
+            echo '```'
+            docker compose ps -a || true
+            docker compose logs --tail=400 backend db || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit 1
+
+      - name: Firm contract smoke (ensure fixture)
+        if: steps.secret.outputs.present == 'true'
+        run: ./scripts/smoke-firm-contract.sh --ensure-fixture
+
+      - name: Dump logs on failure
+        if: failure() && steps.secret.outputs.present == 'true'
+        run: |
+          {
+            echo "## Firm contract failure logs"
+            echo '```'
+            docker compose ps -a || true
+            docker compose logs --tail=400 backend db || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          docker compose logs --tail=200 backend db || true

@@ -9,11 +9,13 @@
 services:
   backend:
     environment:
+      # Package root (canary-firm.json) — same mount as volume below
+      FIRM_PACKAGE_DIR: /firm
       # Firm precedents (additive; does not replace Canary's system PRECEDENTS_SEED_DIR)
       FIRM_PRECEDENTS_SEED_DIR: /firm/precedents
       # Firm portal form definitions (JSON manifest)
       PORTAL_FORMS_SEED_DIR: /firm/portal-forms
-      # Phase 3 firm module (manifest.json + config under /firm/module)
+      # Firm module (manifest.json + ui/dist + migrations under /firm/module)
       FIRM_MODULE_DIR: /firm/module
       # Optional: refresh field definitions on existing templates from the seed
       # PORTAL_FORMS_SEED_REPAIR: "0"

@@ -6,6 +6,23 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator, model_validator
 
+class AdminFirmPackageStatusOut(BaseModel):
+    """Firm package pin / compatibility (notify-only)."""
+
+    attached: bool
+    compatible: bool
+    fault: bool
+    package_id: str | None = None
+    package_version: str | None = None
+    label: str | None = None
+    requires_canary: str | None = None
+    canary_version: str
+    message: str | None = None
+    detail: str | None = None
+    mounts: list[str] = Field(default_factory=list)
+    modules: list[str] = Field(default_factory=list)
+
+
 class AdminDeployStatusOut(BaseModel):
     """Deploy/update capabilities exposed to admins (no secrets)."""
 
@@ -13,6 +30,8 @@ class AdminDeployStatusOut(BaseModel):
     compose_update_enabled: bool = False
     compose_git_reset_enabled: bool = False
     compose_git_ref: str = "main"
+    canary_product_version: str = "2.0.0"
+    firm_package: AdminFirmPackageStatusOut | None = None
 
 class AdminDeployTriggerIn(BaseModel):
     """Legacy body for ``POST /admin/deploy/trigger`` (always returns HTTP 410 — GUI updates removed)."""

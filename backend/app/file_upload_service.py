@@ -213,6 +213,20 @@ def upload_case_file(
                 "compose_global_contact_id": str(compose_global_contact_id) if compose_global_contact_id else None,
             },
         )
+        # Phase 4: firm lifecycle outbox in the same transaction as the upload.
+        try:
+            from app.firm_module_runtime import process_document_uploaded
+
+            process_document_uploaded(
+                db,
+                case_id=case_id,
+                file_id=row.id,
+                actor_user_id=user.id,
+                filename=row.original_filename,
+            )
+        except Exception:
+            log.exception("firm_module document.uploaded hook failed case_id=%s", case_id)
+            raise
         db.commit()
         disk_written = False
     finally:

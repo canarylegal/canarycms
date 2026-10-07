@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app import models  # noqa: F401
 from app import portal_grant_views  # noqa: F401 — register ContactPortalGrantView on metadata
 from app.build_metadata import effective_build_commit
+from app.canary_version import canary_product_version
 from app.canary_public_url import get_canary_public_base
 from app.calendar_notification_job import start_calendar_notification_job
 from app.event_tracked_task_job import start_event_tracked_task_job
@@ -47,6 +48,7 @@ from app.routers import (
     matter_portal,
     fee_scales,
     firm_modules,
+    firm_package,
     task_menu,
     contacts,
     canary_sign,
@@ -262,6 +264,7 @@ app.include_router(case_property.router)
 app.include_router(precedents.router)
 app.include_router(fee_scales.router)
 app.include_router(firm_modules.router)
+app.include_router(firm_package.router)
 app.include_router(contacts.router)
 app.include_router(contact_portal.router)
 app.include_router(matter_portal.router)
@@ -306,4 +309,8 @@ app.include_router(portal.router)
 @app.get("/health")
 def health():
     commit = effective_build_commit()
-    return {"status": "ok", "build_commit": commit or None}
+    return {
+        "status": "ok",
+        "build_commit": commit or None,
+        "product_version": canary_product_version(),
+    }

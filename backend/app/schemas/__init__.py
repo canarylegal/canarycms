@@ -145,6 +145,7 @@ from app.schemas.compose_mail import (
 
 from app.schemas.admin_ops import (
     AdminDeployStatusOut,
+    AdminFirmPackageStatusOut,
     AdminDeployTriggerIn,
     AdminDeployTriggerOut,
     AdminDeployComposeJobOut,
@@ -507,6 +508,7 @@ __all__ = [
     'SmtpNotificationSettingsUpdate',
     'SmtpNotificationTestIn',
     'AdminDeployStatusOut',
+    'AdminFirmPackageStatusOut',
     'AdminDeployTriggerIn',
     'AdminDeployTriggerOut',
     'AdminDeployComposeJobOut',

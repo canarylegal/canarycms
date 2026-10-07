@@ -713,17 +713,19 @@ export function CaseDetail({
   const [firmModuleNavLabel, setFirmModuleNavLabel] = useState<string | null>(null)
   useEffect(() => {
     let cancelled = false
-    void apiFetch<{ enabled: boolean; panel_label?: string | null; label?: string | null }>(
-      '/firm-modules/active',
-      { token },
-    )
+    void apiFetch<{
+      enabled: boolean
+      panel_label?: string | null
+      label?: string | null
+      slots?: { matter_panel?: boolean }
+    }>('/firm-modules/active', { token })
       .then((m) => {
         if (cancelled) return
-        if (!m.enabled) {
+        if (!m.enabled || m.slots?.matter_panel === false) {
           setFirmModuleNavLabel(null)
           return
         }
-        setFirmModuleNavLabel((m.panel_label || m.label || 'Purchase journey').trim() || 'Purchase journey')
+        setFirmModuleNavLabel((m.panel_label || m.label || 'Firm module').trim() || 'Firm module')
       })
       .catch(() => {
         if (!cancelled) setFirmModuleNavLabel(null)

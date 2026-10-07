@@ -244,7 +244,7 @@ def create_case(
         meta={"case_number": case.case_number, "client_name": case.client_name, "matter_description": case.title},
     )
     try:
-        # Phase 3 pilot: firm-module reaction (config from FIRM_MODULE_DIR). Candidate Phase 4 hook.
+        # Phase 4: firm lifecycle — enqueue + deliver in same txn as case create.
         from app.firm_module_runtime import process_matter_created
 
         process_matter_created(db, case_id=case.id, actor_user_id=user.id)
@@ -500,6 +500,16 @@ def update_case(
         from app.portal_service import revoke_matter_portal_access_for_case
 
         revoke_matter_portal_access_for_case(db, case.id)
+    if "status" in data:
+        # Phase 5: firm lifecycle — closed/archived (no hard-delete in product).
+        from app.firm_module_runtime import process_matter_status_changed
+
+        process_matter_status_changed(
+            db,
+            case_id=case.id,
+            status=str(data["status"].value if hasattr(data["status"], "value") else data["status"]),
+            actor_user_id=user.id,
+        )
     log_event(
         db,
         actor_user_id=user.id,

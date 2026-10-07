@@ -67,7 +67,7 @@ import {
   userNeedsSecondFactorSetup,
 } from './auth/sessionFlags'
 import { NewMatterModal } from './NewMatterModal'
-import { FirmPilotPipelineWidget } from './FirmPilotPipelineWidget'
+import { FirmModuleDashboardSlot } from './firm/FirmModuleDashboardSlot'
 import { MainMenuCasesPanel } from './mainMenuCases'
 import { UserSettingsPage } from './UserSettingsPage'
 import { Contacts } from './ContactsPage'
@@ -993,7 +993,7 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
 
   const mainMenuCasesPanel = token ? (
     <>
-      <FirmPilotPipelineWidget token={token} />
+      <FirmModuleDashboardSlot token={token} />
       <MainMenuCasesPanel
         cases={cases}
         casesErr={casesErr}
@@ -1181,6 +1181,7 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
         canAdminConsole={canAdminConsole}
         docusignEnabled={docusignEnabled === true}
         onLogout={confirmLogout}
+        token={auth.token}
       />
       <div
         className={`appMainColumn${

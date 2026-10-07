@@ -70,6 +70,33 @@ Backend `pytest` also covers (unit / service level, not full HTTP E2E):
 - **Portal** — OTP mint/verify, portal auth service, grant expiry/path rules, form complete + PDF fill
 - **Files / OnlyOffice** — callback SSRF URL checks, editable type sets, case file mutate/folder services, force-save wait/command
 
+## Firm contract smoke (Phase 7 MVP)
+
+Platform contract checks against a **running** backend with a firm package attached
+(reference: private `canarylegal/example-firm-pilot`).
+
+Covers: `canary-firm.json` compat gate, firm SQL migrations applied, published
+`/firm-package/*` + `/firm-modules/*` response shapes, lifecycle payload
+`schema_version: 1` keys.
+
+```bash
+# Stack must already be up with firm overlay, e.g.:
+#   export FIRM_PACKAGE_DIR=../example-firm-pilot
+#   docker compose -f docker-compose.yml -f docker-compose.firm.example.yml --profile prod up -d
+make smoke-firm-contract
+
+# Empty / CI-style DB: ensure staff + Purchase matter first
+make smoke-firm-contract-ci
+```
+
+CI: `.github/workflows/firm-contract.yml` checks out the private pilot via repo secret
+`EXAMPLE_FIRM_PILOT_TOKEN` (fine-scoped PAT, `contents:read` on `example-firm-pilot`),
+attaches it with `docker-compose.firm.example.yml`, and runs the same script.
+Without the secret, push/PR skips the job; `workflow_dispatch` prints setup instructions.
+
+Static lifecycle key lists also run under `make test-backend`
+(`backend/tests/test_firm_lifecycle_payload_schema.py`).
+
 ## Live security checks
 
 ```bash

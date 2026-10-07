@@ -1,10 +1,24 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { apiFetch } from './api'
 import { CanaryMark } from './AppBrand'
 import { PrimaryNavButton } from './NavIcon'
 import { useNotifications } from './NotificationsProvider'
 import { SupportTicketModal, type SupportTicketKind } from './SupportTicketModal'
 import { useDialogs } from './DialogProvider'
+
+export type FirmPackageStatus = {
+  attached: boolean
+  compatible: boolean
+  fault: boolean
+  package_id?: string | null
+  package_version?: string | null
+  label?: string | null
+  requires_canary?: string | null
+  canary_version: string
+  message?: string | null
+  detail?: string | null
+}
 
 const SIDEBAR_EXPANDED_KEY = 'canary-sidebar-expanded'
 
@@ -74,6 +88,8 @@ type Props = {
   canAdminConsole: boolean
   docusignEnabled?: boolean
   onLogout: () => void
+  /** Auth token for firm-package status (Phase 6 fault marker). */
+  token?: string | null
 }
 
 /** Primary app navigation — vertical sidebar (Option 4). */
@@ -94,6 +110,7 @@ export function AppSidebar({
   canAdminConsole,
   docusignEnabled = false,
   onLogout,
+  token = null,
 }: Props) {
   const [expanded, setExpanded] = useState(readSidebarExpanded)
   const [notifyOpen, setNotifyOpen] = useState(false)
@@ -105,8 +122,28 @@ export function AppSidebar({
   const [supportMenuOpen, setSupportMenuOpen] = useState(false)
   const [supportMenuPos, setSupportMenuPos] = useState<{ top: number; left: number } | null>(null)
   const [ticketKind, setTicketKind] = useState<SupportTicketKind | null>(null)
+  const [firmPackage, setFirmPackage] = useState<FirmPackageStatus | null>(null)
   const { notifications, unreadCount, markAllRead, clearAll } = useNotifications()
   const { alert } = useDialogs()
+  const firmFault = Boolean(firmPackage?.fault)
+
+  useEffect(() => {
+    if (!token) {
+      setFirmPackage(null)
+      return
+    }
+    let cancelled = false
+    void apiFetch<FirmPackageStatus>('/firm-package/status', { token })
+      .then((s) => {
+        if (!cancelled) setFirmPackage(s)
+      })
+      .catch(() => {
+        if (!cancelled) setFirmPackage(null)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [token])
 
   // Keep preference in sync across remounts / other tabs.
   useEffect(() => {
@@ -246,19 +283,32 @@ export function AppSidebar({
         <button
           type="button"
           ref={brandBtnRef}
-          className="appSidebarBrand appSidebarBrand--button"
+          className={`appSidebarBrand appSidebarBrand--button${firmFault ? ' appSidebarBrand--fault' : ''}`}
           aria-label={
-            unreadCount
-              ? `Notifications, ${unreadCount} unread`
-              : 'Notifications'
+            firmFault
+              ? `${firmPackage?.message || 'Firm package incompatible'}. ${firmPackage?.detail || ''}`.trim()
+              : unreadCount
+                ? `Notifications, ${unreadCount} unread`
+                : 'Notifications'
           }
           aria-haspopup="dialog"
           aria-expanded={notifyOpen}
-          title="Notifications"
+          aria-invalid={firmFault || undefined}
+          title={
+            firmFault
+              ? [firmPackage?.message, firmPackage?.detail].filter(Boolean).join(' — ')
+              : 'Notifications'
+          }
           onClick={() => setNotifyOpen((o) => !o)}
         >
           <span className="appSidebarNotifyMark">
-            <CanaryMark className="appBrandMark" size="sidebar" />
+            {firmFault ? (
+              <span className="appSidebarFirmFaultMark" aria-hidden>
+                !
+              </span>
+            ) : (
+              <CanaryMark className="appBrandMark" size="sidebar" />
+            )}
             {unreadCount > 0 ? (
               <span className="appSidebarNotifyBadge" aria-hidden>
                 {badgeLabel}
@@ -266,7 +316,7 @@ export function AppSidebar({
             ) : null}
           </span>
           <span className="appSidebarBrandName" aria-hidden={!expanded}>
-            Canary
+            {firmFault ? 'Fault' : 'Canary'}
           </span>
         </button>
         {notifyOpen && panelPos
@@ -275,9 +325,21 @@ export function AppSidebar({
                 id="app-sidebar-notify-panel"
                 className="appSidebarNotifyPanel"
                 role="dialog"
-                aria-label="Notifications"
+                aria-label={firmFault ? 'Firm package fault and notifications' : 'Notifications'}
                 style={{ top: panelPos.top, left: panelPos.left }}
               >
+                {firmFault ? (
+                  <div className="appSidebarFirmFaultBanner" role="alert">
+                    <strong>{firmPackage?.message || 'Firm package incompatible'}</strong>
+                    {firmPackage?.detail ? (
+                      <p className="appSidebarFirmFaultDetail">{firmPackage.detail}</p>
+                    ) : null}
+                    <p className="muted" style={{ margin: '8px 0 0', fontSize: 12, lineHeight: 1.45 }}>
+                      Canary core is running. Firm features are disabled until the package and Canary
+                      versions match. Admins: see Admin → Deploy.
+                    </p>
+                  </div>
+                ) : null}
                 <div className="appSidebarNotifyPanelHead">
                   <strong>Notifications</strong>
                   {notifications.length ? (

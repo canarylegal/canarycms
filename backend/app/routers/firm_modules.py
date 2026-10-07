@@ -1,4 +1,4 @@
-"""Firm module APIs (Phase 3 pilot — config-driven module from FIRM_MODULE_DIR)."""
+"""Firm module APIs (Phase 4 — published slots, UI bundle, lifecycle contract)."""
 
 from __future__ import annotations
 
@@ -7,8 +7,8 @@ from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db import get_db
@@ -18,10 +18,20 @@ from app.firm_module_runtime import (
     load_manifest,
     module_applies_to_case,
     pipeline_summary,
+    resolve_ui_asset,
+    slots_enabled,
+    ui_section,
 )
 from app.models import FirmModuleCaseState, User
 
 router = APIRouter(prefix="/firm-modules", tags=["firm-modules"])
+
+
+class FirmModuleUiOut(BaseModel):
+    """Build-time firm UI bundle metadata (served from FIRM_MODULE_DIR)."""
+
+    bundle_url: str | None = None
+    exports: dict[str, str] = Field(default_factory=dict)
 
 
 class FirmModuleManifestOut(BaseModel):
@@ -35,6 +45,8 @@ class FirmModuleManifestOut(BaseModel):
     attr_fields: list[dict[str, Any]] = Field(default_factory=list)
     matter_head_type_name: str | None = None
     matter_sub_type_names: list[str] = Field(default_factory=list)
+    slots: dict[str, bool] = Field(default_factory=dict)
+    ui: FirmModuleUiOut | None = None
 
 
 class FirmModuleCaseStateOut(BaseModel):
@@ -70,6 +82,21 @@ def _require_manifest() -> dict[str, Any]:
     return manifest
 
 
+def _ui_out(manifest: dict[str, Any]) -> FirmModuleUiOut | None:
+    ui = ui_section(manifest)
+    if not ui:
+        return None
+    exports_raw = ui.get("exports") if isinstance(ui.get("exports"), dict) else {}
+    exports = {str(k): str(v) for k, v in exports_raw.items() if k and v}
+    bundle = str(ui.get("bundle") or "ui/dist/firm-module.js").strip()
+    # Public path relative to API — host loads via /firm-modules/active/ui/…
+    filename = bundle.rsplit("/", 1)[-1] if bundle else "firm-module.js"
+    return FirmModuleUiOut(
+        bundle_url=f"/firm-modules/active/ui/{filename}",
+        exports=exports,
+    )
+
+
 @router.get("/active", response_model=FirmModuleManifestOut)
 def get_active_module(_user: User = Depends(get_current_user)) -> FirmModuleManifestOut:
     manifest = load_manifest()
@@ -86,6 +113,8 @@ def get_active_module(_user: User = Depends(get_current_user)) -> FirmModuleMani
         attr_fields=list(manifest.get("attr_fields") or []),
         matter_head_type_name=(manifest.get("matter_head_type_name") or None),
         matter_sub_type_names=[str(s) for s in (manifest.get("matter_sub_type_names") or [])],
+        slots=slots_enabled(manifest),
+        ui=_ui_out(manifest),
     )
 
 
@@ -96,6 +125,21 @@ def get_pipeline(_user: User = Depends(get_current_user), db: Session = Depends(
         return FirmModulePipelineOut(enabled=False)
     summary = pipeline_summary(db, manifest)
     return FirmModulePipelineOut(enabled=True, **summary)
+
+
+@router.get("/active/ui/{asset_path:path}")
+def get_ui_asset(asset_path: str) -> FileResponse:
+    """Serve the firm package UI bundle (same-origin, build-time artifact — not remote JS).
+
+    Unauthenticated: the bundle contains no matter data; APIs remain token-gated.
+    """
+    path = resolve_ui_asset(asset_path)
+    if path is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Firm UI asset not found")
+    media = "application/javascript" if path.suffix in {".js", ".mjs"} else None
+    if path.suffix == ".css":
+        media = "text/css"
+    return FileResponse(path, media_type=media, headers={"Cache-Control": "no-cache"})
 
 
 @router.get("/active/matters/{case_id}", response_model=FirmModuleCaseStateOut)

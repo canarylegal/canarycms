@@ -452,6 +452,49 @@ button.appSidebarBrand--button:focus-visible {
   height: var(--app-main-menu-toolbar-height);
 }
 
+.appSidebarFirmFaultMark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  background: #b91c1c;
+  color: #fff;
+  font-size: 18px;
+  font-weight: 800;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+button.appSidebarBrand--fault:hover .appSidebarBrandName,
+button.appSidebarBrand--fault:focus-visible .appSidebarBrandName {
+  color: #fecaca;
+}
+
+.appSidebarFirmFaultBanner {
+  margin: 0 0 10px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #450a0a;
+  color: #fee2e2;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.appSidebarFirmFaultBanner strong {
+  display: block;
+  margin-bottom: 4px;
+  color: #fff;
+}
+
+.appSidebarFirmFaultDetail {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: #fecaca;
+}
+
 .appSidebarNotifyBadge {
   position: absolute;
   /* Midway between outer corner and tight-on-bird */

@@ -22,6 +22,7 @@ import type {
 import type { UserUiPreferences } from '../userUiPreferences'
 import { CaseContactsAddDocForm, CaseContactsEditDocForm } from './CaseContactsDocForms'
 import { CaseDocPanelChrome, CaseDocPanelScroll } from './caseDetailChrome'
+import { FirmModulePortalSectionSlot } from '../firm/FirmModuleStubSlots'
 import { CasePortalPanel } from './CasePortalPanel'
 import { PortalFolderSharePanel } from './PortalFolderSharePanel'
 import { PropertyDetailsForm } from './PropertyDetailsForm'
@@ -118,6 +119,8 @@ export function CaseDetailPortalHubPanel({ caseId, token, busy, backToDocuments,
       <CaseDocPanelChrome title="Portal" onClose={backToDocuments} closeDisabled={busy} />
       <CaseDocPanelScroll>
         <CasePortalPanel token={token} caseId={caseId} onFilesChanged={onRefresh} />
+        {/* Phase 4 stub slot — mounts only if firm bundle exports PortalSection */}
+        <FirmModulePortalSectionSlot caseId={caseId} token={token} />
       </CaseDocPanelScroll>
     </div>
   )

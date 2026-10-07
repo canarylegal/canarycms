@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { apiFetch, apiUrl } from './api'
 import type { ApiError } from './api'
 import type { FirmSettingsOut } from './types'
+import { FirmModuleAdminPageSlot } from './firm/FirmModuleStubSlots'
 import {
   DEFAULT_PORTAL_BACKGROUND,
   DEFAULT_PORTAL_FONT_COLOR,
@@ -668,6 +669,8 @@ export function AdminFirmDetails({ token }: { token: string }) {
             </button>
           </div>
         )}
+        {/* Phase 4 stub slot — mounts only if firm bundle exports AdminPage */}
+        <FirmModuleAdminPageSlot token={token} />
       </div>
     </div>
   )
