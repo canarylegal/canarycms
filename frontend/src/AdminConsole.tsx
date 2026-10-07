@@ -3,7 +3,7 @@ import { AdminAudit } from './AdminAudit'
 import { AdminBilling } from './AdminBilling'
 import { AdminDeploy } from './AdminDeploy'
 import { AdminEmail } from './AdminEmail'
-import { AdminDocuSign } from './AdminDocuSign'
+import { AdminIntegrations } from './AdminIntegrations'
 import { AdminPortalForms } from './AdminPortalForms'
 import { AdminFirmDetails } from './AdminFirmDetails'
 import { AdminMatterContacts } from './AdminMatterContacts'
@@ -22,7 +22,7 @@ export function AdminConsole({ token, refreshMe }: { token: string; refreshMe: (
     | 'matters'
     | 'billing'
     | 'email'
-    | 'docusign'
+    | 'integrations'
     | 'portalForms'
     | 'deploy'
     | 'submenus'
@@ -36,8 +36,8 @@ export function AdminConsole({ token, refreshMe }: { token: string; refreshMe: (
       ? 'Trading name, registered name, and firm address for precedent merge codes.'
       : tab === 'email'
       ? 'Org-wide e-mail integration (mailto vs Microsoft 365).'
-      : tab === 'docusign'
-        ? 'DocuSign integration credentials and send options.'
+      : tab === 'integrations'
+        ? 'Third-party connectors (DocuSign and more as they are added).'
         : tab === 'portalForms'
           ? 'Portal form templates sent manually to clients.'
           : tab === 'deploy'
@@ -85,8 +85,8 @@ export function AdminConsole({ token, refreshMe }: { token: string; refreshMe: (
           <button type="button" role="tab" aria-selected={tab === 'email'} className={`adminTab${tab === 'email' ? ' is-active' : ''}`} onClick={() => setTab('email')}>
             E-mail
           </button>
-          <button type="button" role="tab" aria-selected={tab === 'docusign'} className={`adminTab${tab === 'docusign' ? ' is-active' : ''}`} onClick={() => setTab('docusign')}>
-            DocuSign
+          <button type="button" role="tab" aria-selected={tab === 'integrations'} className={`adminTab${tab === 'integrations' ? ' is-active' : ''}`} onClick={() => setTab('integrations')}>
+            Integrations
           </button>
           <button type="button" role="tab" aria-selected={tab === 'portalForms'} className={`adminTab${tab === 'portalForms' ? ' is-active' : ''}`} onClick={() => setTab('portalForms')}>
             Portal forms
@@ -122,8 +122,8 @@ export function AdminConsole({ token, refreshMe }: { token: string; refreshMe: (
           <AdminBilling token={token} />
         ) : tab === 'email' ? (
           <AdminEmail token={token} onSaved={() => void refreshMe()} />
-        ) : tab === 'docusign' ? (
-          <AdminDocuSign token={token} />
+        ) : tab === 'integrations' ? (
+          <AdminIntegrations token={token} />
         ) : tab === 'portalForms' ? (
           <AdminPortalForms token={token} />
         ) : tab === 'deploy' ? (
