@@ -122,7 +122,11 @@ jobs:
         if: steps.secret.outputs.present == 'true'
         run: |
           set -euo pipefail
-          test -f example-firm-pilot/canary-firm.json
+          if [[ ! -f example-firm-pilot/canary-firm.json ]]; then
+            echo "example-firm-pilot/canary-firm.json missing after checkout" >&2
+            ls -la example-firm-pilot || true
+            exit 1
+          fi
           docker compose config >/dev/null
           docker compose up -d --build db backend
           docker compose ps -a
