@@ -124,7 +124,7 @@ export type PortalBrowseOut = {
   last_viewed_at?: string | null
 }
 
-export type PortalFormFieldType = 'section' | 'text' | 'textarea' | 'date' | 'select' | 'checkbox' | 'file'
+export type PortalFormFieldType = 'section' | 'text' | 'textarea' | 'date' | 'select' | 'checkbox' | 'file' | 'files'
 
 export type PortalFormTemplateFieldIn = {
   field_key: string

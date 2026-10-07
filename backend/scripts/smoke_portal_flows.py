@@ -315,6 +315,10 @@ def build_form_responses(fields: list[dict[str, Any]]) -> dict[str, Any]:
             out[key] = "1990-01-01"
         elif ftype == "checkbox":
             out[key] = True if required else False
+        elif ftype == "files":
+            # Uploads are separate; leave empty unless required (smoke skips multi-upload)
+            if required:
+                out[key] = []
         elif required:
             out[key] = "smoke"
     # Ensure known required keys for general_information

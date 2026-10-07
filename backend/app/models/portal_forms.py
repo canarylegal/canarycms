@@ -38,6 +38,7 @@ class PortalFormFieldType(str, enum.Enum):
     select = "select"
     checkbox = "checkbox"
     file = "file"
+    files = "files"
 
 class PortalFormSubmissionStatus(str, enum.Enum):
     pending = "pending"

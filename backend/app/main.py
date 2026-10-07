@@ -87,6 +87,7 @@ async def lifespan(app: FastAPI):
     import logging
 
     from app.db import SessionLocal
+    from app.fee_scale_bootstrap import sync_fee_scales_from_seed
     from app.firm_asset_bootstrap import sync_firm_assets_from_seed
     from app.firm_matter_type_bootstrap import sync_matter_types_from_firm_seed
     from app.merge_code_catalog_sync import sync_merge_code_catalog
@@ -136,6 +137,11 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         db.rollback()
         _log.warning("Portal forms seed skipped: %s", e)
+    try:
+        sync_fee_scales_from_seed(db)
+    except Exception as e:
+        db.rollback()
+        _log.warning("Fee scales seed skipped: %s", e)
     try:
         sync_firm_assets_from_seed(db)
     except Exception as e:

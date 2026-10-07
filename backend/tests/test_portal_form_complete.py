@@ -192,6 +192,35 @@ def test_validate_responses_checkbox_optional_stores_bool() -> None:
     assert _validate_responses([field], {"marketing": "yes"}) == {"marketing": True}
 
 
+def test_validate_responses_files_accepts_list() -> None:
+    field = PortalFormTemplateField(
+        id=uuid.uuid4(),
+        template_id=uuid.uuid4(),
+        field_key="docs",
+        label="Documents",
+        field_type=PortalFormFieldType.files,
+        required=True,
+        sort_order=0,
+        select_options=[],
+    )
+    with pytest.raises(HTTPException) as ei:
+        _validate_responses([field], {})
+    assert ei.value.status_code == 422
+    a = uuid.uuid4()
+    b = uuid.uuid4()
+    clean = _validate_responses(
+        [field],
+        {
+            "docs": [
+                {"file_id": str(a), "filename": "a.pdf"},
+                {"file_id": str(b), "filename": "b.pdf"},
+            ]
+        },
+    )
+    assert len(clean["docs"]) == 2
+    assert clean["docs"][0]["file_id"] == str(a)
+
+
 def test_validate_responses_file_required() -> None:
     field = PortalFormTemplateField(
         id=uuid.uuid4(),

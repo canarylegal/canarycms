@@ -350,7 +350,7 @@ async def portal_upload_form_file(
     contact: Contact = Depends(get_portal_contact),
     session: PortalSessionPayload = Depends(get_portal_session),
     db: Session = Depends(get_db),
-) -> dict[str, str]:
+) -> dict:
     from pathlib import Path
 
     from app.file_storage import unlink_stored_file
@@ -365,6 +365,26 @@ async def portal_upload_form_file(
         if abs_path:
             unlink_stored_file(Path(abs_path))
         raise
+    return result
+
+
+@router.delete("/forms/{submission_id}/upload")
+def portal_remove_form_file(
+    submission_id: uuid.UUID,
+    field_key: str = Query(..., min_length=1, max_length=80),
+    file_id: uuid.UUID = Query(...),
+    contact: Contact = Depends(get_portal_contact),
+    session: PortalSessionPayload = Depends(get_portal_session),
+    db: Session = Depends(get_db),
+) -> dict:
+    from app.portal_form_service import remove_submission_file
+
+    require_portal_client_write(session)
+    sub = get_submission_for_contact(db, submission_id, contact.id)
+    result = remove_submission_file(
+        db, submission=sub, field_key=field_key, file_id=file_id, contact=contact
+    )
+    db.commit()
     return result
 
 

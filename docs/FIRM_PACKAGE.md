@@ -22,15 +22,15 @@ Install/upgrade runbook: [`FIRM_INSTALL_UPGRADE.md`](./FIRM_INSTALL_UPGRADE.md).
 | `FIRM_PRECEDENTS_SEED_DIR` | `/firm/precedents` | Additive firm precedents (`manifest.json` + `bundle/`). Missing references imported on startup. |
 | `PORTAL_FORMS_SEED_DIR` | `/firm/portal-forms` | Firm portal form templates (`manifest.json`). Missing references imported on startup. |
 | `PORTAL_FORMS_SEED_REPAIR` | — | If `1`/`true`/`yes`, refresh fields on existing templates from the seed (destructive to admin edits). |
+| `FEE_SCALES_SEED_DIR` | `/firm/fee-scales` | Firm fee scale templates (`manifest.json`). Missing references imported on startup. |
+| `FEE_SCALES_SEED_REPAIR` | — | If `1`/`true`/`yes`, replace categories/lines/bands on existing scales from the seed. |
 | `FIRM_MATTER_TYPES_SEED_DIR` | `/firm/matter-types` | Firm matter-type catalogue (`seed.json`). Core ships no product types; missing heads/subs merged on startup. |
 | `FIRM_ASSETS_SEED_DIR` | `/firm/assets` | Branding files under `letterheads/`, `quote-letterheads/`, `logos/`, `portal-background/`. Seeds Admin firm-settings slots when empty (never clobbers Admin uploads). |
 | `FIRM_MODULE_DIR` | `/firm/module` | Firm module (`manifest.json` + optional `ui/dist` bundle + `migrations/`). Enables published UI slots, firm-schema case state, and lifecycle reactions. |
 
 **Contract smoke (Phase 7 / 7b):** with a package attached, run `make smoke-firm-contract` (or `make smoke-firm-contract-ci` on an empty DB). Dual-tag upgrade: `PREV_TAG=vX.Y.Z make smoke-firm-dual-tag`. See [`TESTING.md`](./TESTING.md).
 
-Portal form field types include `checkbox` (boolean; required = must be checked). One `file` field accepts one upload.
-
-Fee-scale seed from the firm package is not wired yet — configure fee scales in Admin (follow-up).
+Portal form field types include `checkbox` (boolean; required = must be checked), `file` (one upload), and `files` (multiple uploads on one field, max 20).
 
 ## Firm module (Phase 4)
 
@@ -86,6 +86,8 @@ your-firm-package/
     manifest.json
     bundle/
   portal-forms/
+    manifest.json
+  fee-scales/
     manifest.json
   matter-types/
     seed.json

@@ -15,6 +15,8 @@ services:
       FIRM_PRECEDENTS_SEED_DIR: /firm/precedents
       # Firm portal form definitions (JSON manifest)
       PORTAL_FORMS_SEED_DIR: /firm/portal-forms
+      # Firm fee scale templates (JSON manifest) — missing references imported on startup
+      FEE_SCALES_SEED_DIR: /firm/fee-scales
       # Firm matter type catalogue (seed.json) — core ships no types
       FIRM_MATTER_TYPES_SEED_DIR: /firm/matter-types
       # Firm branding assets (letterheads / logos / portal background) — seed when Admin slots empty

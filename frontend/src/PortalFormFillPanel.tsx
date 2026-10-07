@@ -34,10 +34,18 @@ function displaySelectValue(raw: unknown): string {
 }
 
 function fileFromResponse(raw: unknown): FileValue | null {
-  if (!raw || typeof raw !== 'object') return null
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
   const o = raw as Record<string, unknown>
   if (!o.file_id) return null
   return { file_id: String(o.file_id), filename: String(o.filename || 'upload') }
+}
+
+function filesFromResponse(raw: unknown): FileValue[] {
+  if (Array.isArray(raw)) {
+    return raw.map(fileFromResponse).filter((x): x is FileValue => x != null)
+  }
+  const single = fileFromResponse(raw)
+  return single ? [single] : []
 }
 
 export function PortalFormFillPanel({ submissionId, portalToken, onBack, onSubmitted, previewMode = false }: Props) {
@@ -114,10 +122,42 @@ export function PortalFormFillPanel({ submissionId, portalToken, onBack, onSubmi
         /* keep text */
       }
       if (!res.ok) throw new Error(formatApiErrorDetail(parsed, res.statusText))
-      const out = parsed as FileValue
-      setFieldValue(field.field_key, { file_id: out.file_id, filename: out.filename })
+      const out = parsed as FileValue & { files?: FileValue[] }
+      if (field.field_type === 'files' && Array.isArray(out.files)) {
+        setFieldValue(field.field_key, out.files)
+      } else {
+        setFieldValue(field.field_key, { file_id: out.file_id, filename: out.filename })
+      }
     } catch (e: unknown) {
       setErr((e as { message?: string }).message ?? 'Upload failed')
+    } finally {
+      setUploadBusyKey(null)
+    }
+  }
+
+  async function removeUploadedFile(field: PortalFormFieldOut, fileId: string) {
+    if (previewMode || field.field_type !== 'files') return
+    setUploadBusyKey(field.field_key)
+    setErr(null)
+    try {
+      const headers = new Headers()
+      applyAuthHeaders(headers, portalToken)
+      const url = apiUrl(
+        `/portal/forms/${submissionId}/upload?field_key=${encodeURIComponent(field.field_key)}&file_id=${encodeURIComponent(fileId)}`,
+      )
+      const res = await fetch(url, { method: 'DELETE', headers })
+      const text = await res.text()
+      let parsed: unknown = text
+      try {
+        parsed = JSON.parse(text)
+      } catch {
+        /* keep text */
+      }
+      if (!res.ok) throw new Error(formatApiErrorDetail(parsed, res.statusText))
+      const out = parsed as { files?: FileValue[] }
+      setFieldValue(field.field_key, Array.isArray(out.files) ? out.files : [])
+    } catch (e: unknown) {
+      setErr((e as { message?: string }).message ?? 'Could not remove file')
     } finally {
       setUploadBusyKey(null)
     }
@@ -130,7 +170,7 @@ export function PortalFormFillPanel({ submissionId, portalToken, onBack, onSubmi
     try {
       const payload: Record<string, unknown> = {}
       for (const f of form.fields) {
-        if (f.field_type === 'section' || f.field_type === 'file') continue
+        if (f.field_type === 'section' || f.field_type === 'file' || f.field_type === 'files') continue
         if (f.field_type === 'checkbox') {
           payload[f.field_key] = Boolean(values[f.field_key])
           continue
@@ -261,6 +301,53 @@ export function PortalFormFillPanel({ submissionId, portalToken, onBack, onSubmi
           {uploaded ? <div className="muted" style={{ fontSize: 13 }}>Uploaded: {uploaded.filename}</div> : null}
           <label className="btn" style={{ cursor: uploading || busy || previewMode ? 'not-allowed' : 'pointer', alignSelf: 'flex-start', opacity: previewMode ? 0.6 : 1 }}>
             {uploading ? 'Uploading…' : uploaded ? 'Replace file' : 'Choose file'}
+            <input
+              type="file"
+              hidden
+              disabled={busy || uploading || previewMode}
+              onChange={(e) => {
+                const file = e.target.files?.[0]
+                if (file) void uploadFile(field, file)
+                e.target.value = ''
+              }}
+            />
+          </label>
+        </div>
+      )
+    }
+
+    if (field.field_type === 'files') {
+      const uploaded =
+        filesFromResponse(val).length > 0
+          ? filesFromResponse(val)
+          : filesFromResponse(responseValue(form?.responses ?? {}, field.field_key))
+      const uploading = uploadBusyKey === field.field_key
+      return (
+        <div key={field.field_key} className="field portalFormField">
+          <span>{label}</span>
+          {help ? <span className="muted" style={{ fontSize: 13 }}>{help}</span> : null}
+          {uploaded.length ? (
+            <ul style={{ margin: '6px 0', paddingLeft: 18, fontSize: 13 }}>
+              {uploaded.map((f) => (
+                <li key={f.file_id} style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 4 }}>
+                  <span className="muted">{f.filename}</span>
+                  {!previewMode ? (
+                    <button
+                      type="button"
+                      className="btn"
+                      style={{ padding: '2px 8px', fontSize: 12 }}
+                      disabled={busy || uploading}
+                      onClick={() => void removeUploadedFile(field, f.file_id)}
+                    >
+                      Remove
+                    </button>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+          ) : null}
+          <label className="btn" style={{ cursor: uploading || busy || previewMode ? 'not-allowed' : 'pointer', alignSelf: 'flex-start', opacity: previewMode ? 0.6 : 1 }}>
+            {uploading ? 'Uploading…' : 'Add file'}
             <input
               type="file"
               hidden

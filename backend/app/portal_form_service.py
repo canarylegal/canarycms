@@ -477,6 +477,24 @@ def _field_select_options(field: PortalFormTemplateField) -> list[str]:
     return _normalize_select_options(getattr(field, "select_options", None) or [])
 
 
+_MAX_FILES_PER_FIELD = 20
+
+
+def _normalize_files_response(raw: Any) -> list[dict[str, str]]:
+    """Accept a list of {file_id, filename} (or a single object for leniency)."""
+    if raw is None:
+        return []
+    if isinstance(raw, dict) and raw.get("file_id"):
+        return [{"file_id": str(raw["file_id"]), "filename": str(raw.get("filename") or "upload")}]
+    if not isinstance(raw, list):
+        return []
+    out: list[dict[str, str]] = []
+    for item in raw:
+        if isinstance(item, dict) and item.get("file_id"):
+            out.append({"file_id": str(item["file_id"]), "filename": str(item.get("filename") or "upload")})
+    return out
+
+
 def _coerce_checkbox_value(raw: Any) -> bool | None:
     if raw is None:
         return None
@@ -540,6 +558,16 @@ def _validate_responses(fields: list[PortalFormTemplateField], responses: dict[s
                     raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"File required: {field.label}")
                 continue
             clean[key] = {"file_id": str(raw["file_id"]), "filename": str(raw.get("filename") or "upload")}
+        elif field.field_type == PortalFormFieldType.files:
+            items = _normalize_files_response(raw)
+            if not items:
+                if field.required:
+                    raise HTTPException(
+                        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                        detail=f"File required: {field.label}",
+                    )
+                continue
+            clean[key] = items
         else:
             clean[key] = str(raw).strip()
     return clean
@@ -570,6 +598,9 @@ def _render_submission_docx(
                 display = str(val.get("filename") or val.get("file_id") or "—")
             else:
                 display = "—"
+        elif field.field_type == PortalFormFieldType.files:
+            items = _normalize_files_response(val)
+            display = ", ".join(i["filename"] for i in items) if items else "—"
         elif field.field_type == PortalFormFieldType.checkbox:
             if val is True:
                 display = "Yes"
@@ -637,7 +668,7 @@ async def upload_submission_file(
     field_key: str,
     upload: UploadFile,
     contact: Contact,
-) -> dict[str, str]:
+) -> dict[str, Any]:
     if submission.status != PortalFormSubmissionStatus.pending:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Form is not pending")
     template = db.get(PortalFormTemplate, submission.template_id)
@@ -645,7 +676,7 @@ async def upload_submission_file(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Template not found")
     fields = load_template_fields(db, template.id)
     field = next((f for f in fields if f.field_key == field_key), None)
-    if field is None or field.field_type != PortalFormFieldType.file:
+    if field is None or field.field_type not in (PortalFormFieldType.file, PortalFormFieldType.files):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid file field")
 
     raw = await upload.read()
@@ -699,7 +730,18 @@ async def upload_submission_file(
         db.flush()
 
         responses = dict(submission.responses or {})
-        responses[field_key] = {"file_id": str(file_id), "filename": original}
+        entry = {"file_id": str(file_id), "filename": original}
+        if field.field_type == PortalFormFieldType.files:
+            existing = _normalize_files_response(responses.get(field_key))
+            if len(existing) >= _MAX_FILES_PER_FIELD:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail=f"At most {_MAX_FILES_PER_FIELD} files allowed for {field.label}",
+                )
+            existing.append(entry)
+            responses[field_key] = existing
+        else:
+            responses[field_key] = entry
         submission.responses = responses
         db.add(submission)
         db.flush()
@@ -708,11 +750,50 @@ async def upload_submission_file(
             unlink_stored_file(paths.abs_path)
         raise
 
-    return {
+    out: dict[str, Any] = {
         "file_id": str(file_id),
         "filename": original,
         "abs_path": str(paths.abs_path),
     }
+    if field.field_type == PortalFormFieldType.files:
+        out["files"] = _normalize_files_response(submission.responses.get(field_key))
+    return out
+
+
+def remove_submission_file(
+    db: Session,
+    *,
+    submission: PortalFormSubmission,
+    field_key: str,
+    file_id: uuid.UUID,
+    contact: Contact,
+) -> dict[str, Any]:
+    """Remove one uploaded file from a multi-file (`files`) field response."""
+    _ = contact  # auth already enforced by caller
+    if submission.status != PortalFormSubmissionStatus.pending:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Form is not pending")
+    template = db.get(PortalFormTemplate, submission.template_id)
+    if template is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Template not found")
+    fields = load_template_fields(db, template.id)
+    field = next((f for f in fields if f.field_key == field_key), None)
+    if field is None or field.field_type != PortalFormFieldType.files:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid multi-file field")
+
+    responses = dict(submission.responses or {})
+    existing = _normalize_files_response(responses.get(field_key))
+    fid = str(file_id)
+    kept = [i for i in existing if i["file_id"] != fid]
+    if len(kept) == len(existing):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found on this field")
+    if kept:
+        responses[field_key] = kept
+    else:
+        responses.pop(field_key, None)
+    submission.responses = responses
+    db.add(submission)
+    db.flush()
+    return {"files": kept}
 
 
 def complete_submission(

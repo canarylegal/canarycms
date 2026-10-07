@@ -19,6 +19,7 @@ const FIELD_TYPE_OPTIONS: { value: PortalFormFieldType; label: string }[] = [
   { value: 'select', label: 'Dropdown' },
   { value: 'checkbox', label: 'Checkbox' },
   { value: 'file', label: 'File upload' },
+  { value: 'files', label: 'File upload (multiple)' },
 ]
 
 function randomHexRef(): string {
