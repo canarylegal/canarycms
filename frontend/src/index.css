@@ -1691,6 +1691,18 @@ html.dark .topbar--content .btn:not(.primary):not(.danger) {
     minmax(0, 10fr);
 }
 
+/* Portal summary desk: Kind · Reference · Client · Title · Recipients · Status · Sent */
+.mainMenuShell--mainMenu .portalSummaryTableScroll .tr {
+  grid-template-columns:
+    minmax(0, 10fr)
+    minmax(0, 8fr)
+    minmax(0, 18fr)
+    minmax(0, 22fr)
+    minmax(0, 18fr)
+    minmax(0, 8fr)
+    minmax(0, 12fr);
+}
+
 .mainMenuFilterRow--toolbar {
   justify-content: space-between;
   align-items: center;

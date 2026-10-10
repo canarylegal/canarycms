@@ -561,17 +561,6 @@ body {
   background: rgba(37, 99, 235, 0.1);
 }
 
-/* HTML table rows (Portal summary desk): select vs open */
-.mainMenuShell--mainMenu .casesTableCard .casesTable tbody tr.casesTableRow {
-  cursor: default;
-}
-.mainMenuShell--mainMenu .casesTableCard .casesTable tbody tr.casesTableRow:hover {
-  background: rgba(37, 99, 235, 0.06);
-}
-.mainMenuShell--mainMenu .casesTableCard .casesTable tbody tr.casesTableRow.active {
-  background: rgba(37, 99, 235, 0.1);
-}
-
 /* Closed / archived: muted text, no zebra fill */
 .mainMenuShell--mainMenu .casesTableScroll .tr.rowbtn.casesRowInactive {
   color: #64748b;
