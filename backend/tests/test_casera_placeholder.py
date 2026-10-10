@@ -6,6 +6,12 @@ from datetime import datetime, timezone
 from io import BytesIO
 
 import pikepdf
+import pytest
+
+from app.commercial_runtime import ensure_commercial_path
+
+if not ensure_commercial_path():
+    pytest.skip("requires Canary commercial package", allow_module_level=True)
 
 from app.casera_service import build_placeholder_pdf, normalize_risk_badges, status_label
 
