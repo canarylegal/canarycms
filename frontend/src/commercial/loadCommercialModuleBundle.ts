@@ -14,20 +14,30 @@ declare global {
 }
 
 let loadPromise: Promise<CommercialModuleBundle | null> | null = null
+let loadedSrc: string | null = null
 
 /** Load the commercial package IIFE UI bundle (same-origin via Canary API). */
 export function loadCommercialModuleBundle(bundleUrl: string): Promise<CommercialModuleBundle | null> {
   if (typeof window === 'undefined') return Promise.resolve(null)
-  if (window.CanaryCommercialModule) return Promise.resolve(window.CanaryCommercialModule)
-  if (loadPromise) return loadPromise
-
-  window.React = React
-  window.ReactDOM = ReactDOM
-  window.jsxRuntime = jsxRuntime
 
   const src = bundleUrl.startsWith('http')
     ? bundleUrl
     : apiUrl(bundleUrl.startsWith('/') ? bundleUrl : `/${bundleUrl}`)
+
+  // Re-fetch when the manifest URL changes (mtime cache-bust after commercial rebuild).
+  if (loadedSrc && loadedSrc !== src) {
+    resetCommercialModuleBundleCache()
+  }
+
+  if (window.CanaryCommercialModule && loadedSrc === src) {
+    return Promise.resolve(window.CanaryCommercialModule)
+  }
+  if (loadPromise && loadedSrc === src) return loadPromise
+
+  window.React = React
+  window.ReactDOM = ReactDOM
+  window.jsxRuntime = jsxRuntime
+  loadedSrc = src
 
   loadPromise = new Promise((resolve) => {
     const existing = document.querySelector<HTMLScriptElement>(`script[data-canary-commercial-ui="${src}"]`)
@@ -44,6 +54,7 @@ export function loadCommercialModuleBundle(bundleUrl: string): Promise<Commercia
     }
     script.onerror = () => {
       loadPromise = null
+      loadedSrc = null
       resolve(null)
     }
     document.head.appendChild(script)
@@ -53,6 +64,7 @@ export function loadCommercialModuleBundle(bundleUrl: string): Promise<Commercia
 
 export function resetCommercialModuleBundleCache() {
   loadPromise = null
+  loadedSrc = null
   if (typeof window !== 'undefined') {
     delete window.CanaryCommercialModule
   }
