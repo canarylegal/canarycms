@@ -113,6 +113,8 @@ def list_case_invoices(case_id: uuid.UUID, db: Session) -> CaseInvoicesOut:
                 voided_at=inv.voided_at,
                 created_at=inv.created_at,
                 document_file_id=inv.document_file_id,
+                amount_allocated_pence=int(getattr(inv, "amount_allocated_pence", 0) or 0),
+                paid_at=getattr(inv, "paid_at", None),
                 lines=[
                     CaseInvoiceLineOut(
                         id=ln.id,

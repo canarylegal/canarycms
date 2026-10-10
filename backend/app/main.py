@@ -18,9 +18,11 @@ from app.routers import (
     admin_deploy,
     admin_storage,
     admin_billing,
+    admin_bank_accounts,
     admin_portal_forms,
     admin_email_integration,
     admin_firm_settings,
+    bank_recon,
     admin_finance,
     admin_merge_codes,
     admin_matter_contact_types,
@@ -305,6 +307,8 @@ app.include_router(case_sources.router)
 app.include_router(case_events.router)
 app.include_router(admin_finance.router)
 app.include_router(admin_billing.router)
+app.include_router(admin_bank_accounts.router)
+app.include_router(bank_recon.router)
 app.include_router(admin_email_integration.router)
 app.include_router(commercial_package.router)
 app.include_router(commercial_modules.router)

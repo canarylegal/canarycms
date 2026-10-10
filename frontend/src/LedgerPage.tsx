@@ -23,6 +23,8 @@ import type {
   LedgerPostCreate,
   UserPublic,
 } from './types'
+import type { FirmBankAccountOut, PaymentMethod } from './types/bank'
+import { PAYMENT_METHOD_LABELS } from './types/bank'
 import {
   canAmendLedgerPair,
   canApproveLedgerPair,
@@ -140,6 +142,9 @@ export function LedgerPage({ caseId, token, currentUserId, onCaseChanged }: Prop
   const [postBusy, setPostBusy] = useState(false)
   const [postKind, setPostKind] = useState<PostKind>('anticipated')
   const [anticipatedForDate, setAnticipatedForDate] = useState('')
+  const [bankAccounts, setBankAccounts] = useState<FirmBankAccountOut[]>([])
+  const [bankAccountId, setBankAccountId] = useState('')
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod | ''>('')
   const [ledgerPerm, setLedgerPerm] = useState<LedgerPermissionsOut | null>(null)
   const [invoicesData, setInvoicesData] = useState<CaseInvoicesOut | null>(null)
   const [invoiceModalOpen, setInvoiceModalOpen] = useState(false)
@@ -304,11 +309,22 @@ export function LedgerPage({ caseId, token, currentUserId, onCaseChanged }: Prop
     setPostError(null)
     setPostKind('anticipated')
     setAnticipatedForDate('')
+    setPaymentMethod('')
     setContactMode('')
     setContactPickId('')
     setContactOther('')
     setGlobalPickerOpen(false)
     setSelectedGlobalContact(null)
+    void apiFetch<FirmBankAccountOut[]>('/accounts/banking/bank-accounts?kind=client', { token })
+      .then((rows) => {
+        setBankAccounts(rows)
+        const d = rows.find((r) => r.is_default) ?? rows[0]
+        setBankAccountId(d?.id ?? '')
+      })
+      .catch(() => {
+        setBankAccounts([])
+        setBankAccountId('')
+      })
     setPostOpen(true)
   }
 
@@ -393,6 +409,15 @@ export function LedgerPage({ caseId, token, currentUserId, onCaseChanged }: Prop
       setPostError('You cannot post actual payments for the selected account directions.')
       return
     }
+    const needsBank = Boolean(form.client_direction) && !postingAnticipated && bankAccounts.length > 0
+    if (needsBank && !bankAccountId) {
+      setPostError('Select the client bank account.')
+      return
+    }
+    if (needsBank && !paymentMethod) {
+      setPostError('Select a payment method.')
+      return
+    }
 
     const payload: LedgerPostCreate = {
       ...form,
@@ -404,6 +429,8 @@ export function LedgerPage({ caseId, token, currentUserId, onCaseChanged }: Prop
       contact_id: contactMode === 'global' ? contactPickId : null,
       anticipated: postingAnticipated,
       anticipated_for_date: postingAnticipated ? anticipatedForDate : null,
+      firm_bank_account_id: needsBank ? bankAccountId : null,
+      payment_method: needsBank ? (paymentMethod as PaymentMethod) : null,
     }
     setPostBusy(true)
     try {
@@ -1035,6 +1062,49 @@ export function LedgerPage({ caseId, token, currentUserId, onCaseChanged }: Prop
                             Download
                           </button>
                         ) : null}
+                        {approved && !inv.paid_at && canApprove ? (
+                          <button
+                            type="button"
+                            className="btn ledgerInvoiceActionBtn"
+                            disabled={busy}
+                            title={
+                              inv.amount_allocated_pence
+                                ? `Allocated ${pence(inv.amount_allocated_pence)} of ${pence(inv.total_pence)}`
+                                : 'Allocate a ledger receipt against this invoice'
+                            }
+                            onClick={() =>
+                              void (async () => {
+                                const pair = window.prompt('Ledger pair id for the receipt/payment')
+                                if (!pair?.trim()) return
+                                const remaining =
+                                  inv.total_pence - (inv.amount_allocated_pence || 0)
+                                const pounds = window.prompt(
+                                  `Amount to allocate (£). Remaining ${(remaining / 100).toFixed(2)}`,
+                                  (remaining / 100).toFixed(2),
+                                )
+                                if (!pounds) return
+                                const amt = Math.round(parseFloat(pounds) * 100)
+                                if (!amt || amt <= 0) return
+                                setBusy(true)
+                                try {
+                                  await apiFetch(`/cases/${caseId}/invoices/${inv.id}/allocations`, {
+                                    token,
+                                    method: 'POST',
+                                    json: { ledger_pair_id: pair.trim(), amount_pence: amt },
+                                  })
+                                  await load()
+                                } catch (e) {
+                                  setError((e as ApiError).message ?? 'Allocation failed')
+                                } finally {
+                                  setBusy(false)
+                                }
+                              })()
+                            }
+                          >
+                            Allocate
+                          </button>
+                        ) : null}
+                        {inv.paid_at ? <span className="muted">Paid</span> : null}
                         {canApproveInvoices && pending ? (
                           <button
                             type="button"
@@ -1304,6 +1374,42 @@ export function LedgerPage({ caseId, token, currentUserId, onCaseChanged }: Prop
                   required
                 />
               </label>
+            ) : null}
+
+            {form.client_direction && !postingAnticipated && bankAccounts.length > 0 ? (
+              <>
+                <label className="ledgerPostLabel">
+                  <span>
+                    Client bank account <span aria-hidden>*</span>
+                  </span>
+                  <select value={bankAccountId} onChange={(e) => setBankAccountId(e.target.value)}>
+                    {bankAccounts.map((b) => (
+                      <option key={b.id} value={b.id}>
+                        {b.name}
+                        {b.account_number_last4 ? ` (•••• ${b.account_number_last4})` : ''}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="ledgerPostLabel">
+                  <span>
+                    Payment method <span aria-hidden>*</span>
+                  </span>
+                  <select
+                    value={paymentMethod}
+                    onChange={(e) => setPaymentMethod(e.target.value as PaymentMethod | '')}
+                  >
+                    <option value="">Select…</option>
+                    {(Object.keys(PAYMENT_METHOD_LABELS) as PaymentMethod[])
+                      .filter((m) => m !== 'journal')
+                      .map((m) => (
+                        <option key={m} value={m}>
+                          {PAYMENT_METHOD_LABELS[m]}
+                        </option>
+                      ))}
+                  </select>
+                </label>
+              </>
             ) : null}
 
             {postError && <div className="error">{postError}</div>}

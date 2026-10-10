@@ -22,7 +22,9 @@ from app.invoice_service import (
     void_case_invoice,
 )
 from app.models import Case, CaseInvoice, User
+from app.invoice_allocation_service import allocate_to_invoice, list_allocations
 from app.schemas import CaseInvoiceCreate, CaseInvoiceOut, CaseInvoicesOut, InvoiceBillingDefaultsOut, RejectCommentIn
+from app.schemas.bank import InvoiceAllocationIn, InvoiceAllocationOut
 
 router = APIRouter(prefix="/cases", tags=["case-invoices"])
 
@@ -97,6 +99,66 @@ def download_invoice_document(
         iter([data]),
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.get("/{case_id}/invoices/{invoice_id}/allocations", response_model=list[InvoiceAllocationOut])
+def read_invoice_allocations(
+    case_id: uuid.UUID,
+    invoice_id: uuid.UUID,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> list[InvoiceAllocationOut]:
+    require_case_access(case_id, user, db)
+    inv = db.get(CaseInvoice, invoice_id)
+    if not inv or inv.case_id != case_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invoice not found")
+    return [
+        InvoiceAllocationOut(
+            id=r.id,
+            invoice_id=r.invoice_id,
+            ledger_pair_id=r.ledger_pair_id,
+            amount_pence=r.amount_pence,
+            allocated_at=r.allocated_at,
+            notes=r.notes,
+        )
+        for r in list_allocations(db, invoice_id)
+    ]
+
+
+@router.post(
+    "/{case_id}/invoices/{invoice_id}/allocations",
+    response_model=InvoiceAllocationOut,
+    status_code=status.HTTP_201_CREATED,
+)
+def add_invoice_allocation(
+    case_id: uuid.UUID,
+    invoice_id: uuid.UUID,
+    payload: InvoiceAllocationIn,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> InvoiceAllocationOut:
+    require_case_access(case_id, user, db)
+    inv = db.get(CaseInvoice, invoice_id)
+    if not inv or inv.case_id != case_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invoice not found")
+    row = allocate_to_invoice(
+        db,
+        invoice_id=invoice_id,
+        ledger_pair_id=payload.ledger_pair_id,
+        amount_pence=payload.amount_pence,
+        actor=user,
+        notes=payload.notes,
+    )
+    db.commit()
+    db.refresh(row)
+    return InvoiceAllocationOut(
+        id=row.id,
+        invoice_id=row.invoice_id,
+        ledger_pair_id=row.ledger_pair_id,
+        amount_pence=row.amount_pence,
+        allocated_at=row.allocated_at,
+        notes=row.notes,
     )
 
 

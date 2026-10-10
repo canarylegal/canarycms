@@ -37,6 +37,19 @@ class LedgerPostCreate(BaseModel):
     office_direction: Literal["debit", "credit"] | None = None
     anticipated: bool = False
     anticipated_for_date: date | None = None
+    firm_bank_account_id: uuid.UUID | None = None
+    payment_method: (
+        Literal[
+            "faster_payments",
+            "bacs",
+            "chaps",
+            "cheque",
+            "card",
+            "journal",
+            "other",
+        ]
+        | None
+    ) = None
 
     @model_validator(mode="after")
     def anticipated_date_required(self) -> LedgerPostCreate:
@@ -90,6 +103,8 @@ class LedgerEntryOut(BaseModel):
     is_approved: bool
     is_anticipated: bool = False
     anticipated_for_date: date | None = None
+    firm_bank_account_id: uuid.UUID | None = None
+    payment_method: str | None = None
 
     model_config = {"from_attributes": True}
 
@@ -149,6 +164,8 @@ class CaseInvoiceOut(BaseModel):
     voided_at: datetime | None
     created_at: datetime
     document_file_id: uuid.UUID | None = None
+    amount_allocated_pence: int = 0
+    paid_at: datetime | None = None
     lines: list[CaseInvoiceLineOut]
 
 class CaseInvoicesOut(BaseModel):

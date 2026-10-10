@@ -515,6 +515,51 @@ export function FinancePage({ caseId, token, onSaved, embedded = false }: Props)
           >
             {genBusy ? 'Generating…' : 'Generate completion statement'}
           </button>
+          <button
+            type="button"
+            className="btn"
+            disabled={busy || genBusy || !finance}
+            title="Post debit finance lines with amounts as anticipated office disbursements on the matter ledger"
+            onClick={() =>
+              void (async () => {
+                if (!finance) return
+                const itemIds = finance.categories
+                  .filter((c) => !c.credit_only)
+                  .flatMap((c) => c.items)
+                  .filter((i) => i.direction === 'debit' && (i.amount_pence || 0) > 0)
+                  .map((i) => i.id)
+                if (itemIds.length === 0) {
+                  await alert('No debit lines with amounts to post.', 'Post to ledger')
+                  return
+                }
+                const ok = await askConfirm(
+                  `Post ${itemIds.length} debit line(s) to the office ledger as anticipated disbursements?`,
+                  'Post to ledger',
+                )
+                if (!ok) return
+                setBusy(true)
+                setError(null)
+                try {
+                  await apiFetch(`/cases/${caseId}/finance/post-to-ledger`, {
+                    token,
+                    method: 'POST',
+                    json: {
+                      item_ids: itemIds,
+                      ledger_account: 'office',
+                      anticipated: true,
+                    },
+                  })
+                  await alert('Posted to ledger as anticipated items.', 'Post to ledger')
+                } catch (e) {
+                  setError((e as ApiError).message ?? 'Could not post to ledger')
+                } finally {
+                  setBusy(false)
+                }
+              })()
+            }
+          >
+            Post debits to ledger
+          </button>
         </div>
       </div>
 
