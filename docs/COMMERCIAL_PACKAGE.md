@@ -75,4 +75,7 @@ export COMMERCIAL_PACKAGE_DIR=/path/to/canary-commercial
 ./scripts/smoke-commercial-contract.sh
 ```
 
+Proves Core alone (no connector routes; `/commercial-modules/active` disabled; UI 404) vs
+attached (connector routes; active slots + exports; IIFE served).
+
 Actions: `.github/workflows/commercial-contract.yml` (secret `CANARY_COMMERCIAL_TOKEN`).
