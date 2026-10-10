@@ -63,6 +63,17 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 if not DATABASE_URL.startswith("sqlite"):
     from sqlalchemy import event
 
+    from app.firm_catalogue import FIRM_CATALOGUE_SCHEMA
+
+    @event.listens_for(engine, "connect")
+    def _set_firm_catalogue_search_path(dbapi_connection, connection_record) -> None:  # noqa: ARG001
+        """Resolve unqualified catalogue table names in schema ``firm`` after migration."""
+        cursor = dbapi_connection.cursor()
+        try:
+            cursor.execute(f'SET search_path TO public, "{FIRM_CATALOGUE_SCHEMA}"')
+        finally:
+            cursor.close()
+
     @event.listens_for(engine, "checkin")
     def _clear_session_advisory_locks_on_checkin(dbapi_connection, connection_record) -> None:  # noqa: ARG001
         try:

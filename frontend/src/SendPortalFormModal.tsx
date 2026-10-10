@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { apiFetch } from './api'
 import { lockBodyWaitCursor, unlockBodyWaitCursor } from './bodyCursorLock'
 import { useDialogs } from './DialogProvider'
+import { parsePortalEmailConflict, portalEmailConflictStaffMessage } from './portalEmailConflict'
 import { SingleSelectDropdown } from './SingleSelectDropdown'
 import type {
   CasePortalFolderShareContactOut,
@@ -143,7 +144,12 @@ export function SendPortalFormModal({ token, caseId, open, onClose, onSent }: Se
         : `Form sent to ${out.contact_name} via portal; e-mail was not sent.`
       setNotice(msg)
     } catch (e: unknown) {
-      setErr((e as { message?: string }).message ?? 'Could not send form')
+      const conflict = parsePortalEmailConflict(e)
+      setErr(
+        conflict
+          ? portalEmailConflictStaffMessage(conflict, 'delivery')
+          : ((e as { message?: string }).message ?? 'Could not send form'),
+      )
     } finally {
       setBusy(false)
     }

@@ -1,0 +1,14 @@
+# Example overlay: attach the private commercial package beside Canary.
+#
+# Usage (paths relative to the Canary checkout):
+#   export COMMERCIAL_PACKAGE_DIR=../canary-commercial
+#   docker compose -f docker-compose.yml -f docker-compose.commercial.example.yml --profile prod up -d
+#
+# See docs/COMMERCIAL_PACKAGE.md. Do not put secrets in this file.
+
+services:
+  backend:
+    environment:
+      COMMERCIAL_PACKAGE_DIR: /commercial
+    volumes:
+      - ${COMMERCIAL_PACKAGE_DIR:?Set COMMERCIAL_PACKAGE_DIR to your commercial package path}:/commercial:ro

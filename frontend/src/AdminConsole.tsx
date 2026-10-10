@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { AdminAudit } from './AdminAudit'
 import { AdminBilling } from './AdminBilling'
 import { AdminDeploy } from './AdminDeploy'
@@ -12,6 +12,11 @@ import { AdminPrecedents } from './AdminPrecedents'
 import { AdminSubMenus } from './AdminSubMenus'
 import { AdminTasks } from './AdminTasks'
 import { AdminUsers } from './AdminUsers'
+import { apiFetch } from './api'
+import {
+  commercialPackageActive,
+  type CommercialPackageStatus,
+} from './types/commercial'
 
 export { AdminUsers } from './AdminUsers'
 
@@ -31,13 +36,37 @@ export function AdminConsole({ token, refreshMe }: { token: string; refreshMe: (
     | 'precedents'
     | 'audit'
   >('firm')
+  const [commercial, setCommercial] = useState<CommercialPackageStatus | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    void apiFetch<CommercialPackageStatus>('/commercial-package/status', { token })
+      .then((s) => {
+        if (!cancelled) setCommercial(s)
+      })
+      .catch(() => {
+        if (!cancelled) setCommercial(null)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [token])
+
+  const showIntegrations = commercialPackageActive(commercial)
+
+  useEffect(() => {
+    if (tab === 'integrations' && commercial !== null && !showIntegrations) {
+      setTab('firm')
+    }
+  }, [tab, commercial, showIntegrations])
+
   const adminSubtitle =
     tab === 'firm'
       ? 'Trading name, registered name, and firm address for precedent merge codes.'
       : tab === 'email'
       ? 'Org-wide e-mail integration (mailto vs Microsoft 365).'
       : tab === 'integrations'
-        ? 'Third-party connectors (DocuSign and more as they are added).'
+        ? 'Commercial connectors (DocuSign, Searches, Land Registry).'
         : tab === 'portalForms'
           ? 'Portal form templates sent manually to clients.'
           : tab === 'deploy'
@@ -85,9 +114,11 @@ export function AdminConsole({ token, refreshMe }: { token: string; refreshMe: (
           <button type="button" role="tab" aria-selected={tab === 'email'} className={`adminTab${tab === 'email' ? ' is-active' : ''}`} onClick={() => setTab('email')}>
             E-mail
           </button>
-          <button type="button" role="tab" aria-selected={tab === 'integrations'} className={`adminTab${tab === 'integrations' ? ' is-active' : ''}`} onClick={() => setTab('integrations')}>
-            Integrations
-          </button>
+          {showIntegrations ? (
+            <button type="button" role="tab" aria-selected={tab === 'integrations'} className={`adminTab${tab === 'integrations' ? ' is-active' : ''}`} onClick={() => setTab('integrations')}>
+              Integrations
+            </button>
+          ) : null}
           <button type="button" role="tab" aria-selected={tab === 'portalForms'} className={`adminTab${tab === 'portalForms' ? ' is-active' : ''}`} onClick={() => setTab('portalForms')}>
             Portal forms
           </button>
@@ -122,7 +153,7 @@ export function AdminConsole({ token, refreshMe }: { token: string; refreshMe: (
           <AdminBilling token={token} />
         ) : tab === 'email' ? (
           <AdminEmail token={token} onSaved={() => void refreshMe()} />
-        ) : tab === 'integrations' ? (
+        ) : tab === 'integrations' && showIntegrations ? (
           <AdminIntegrations token={token} />
         ) : tab === 'portalForms' ? (
           <AdminPortalForms token={token} />

@@ -28,18 +28,17 @@ from app.models import (
     PortalFormSubmissionStatus,
 )
 from app.portal_branding import (
-    powered_by_for_portal,
     firm_display_name,
     portal_title,
 )
 from app.portal_auth_service import (
     portal_auth as portal_auth_service,
     portal_canary_sign_exchange as portal_canary_sign_exchange_service,
+    portal_confirm_code_reset as portal_confirm_code_reset_service,
     portal_form_exchange as portal_form_exchange_service,
     portal_preview_exchange as portal_preview_exchange_service,
     portal_quote_exchange as portal_quote_exchange_service,
-    portal_request_otp as portal_request_otp_service,
-    portal_verify_otp as portal_verify_otp_service,
+    portal_request_code_reset as portal_request_code_reset_service,
 )
 from app.portal_browse_service import (
     browse_grant as browse_grant_service,
@@ -103,8 +102,9 @@ from app.schemas import (
     PortalClientActionsOut,
     PortalConfigOut,
     PortalFileOut,
-    PortalOtpRequestIn,
-    PortalOtpVerifyIn,
+    PortalCodeResetConfirmIn,
+    PortalCodeResetConfirmOut,
+    PortalCodeResetRequestIn,
     PortalPreviewExchangeIn,
     PortalQuoteDeliveryViewOut,
     PortalQuoteExchangeIn,
@@ -139,7 +139,6 @@ def portal_config(db: Session = Depends(get_db)) -> PortalConfigOut:
         "/portal/logo" if firm and firm.portal_logo_file_id and logo_enabled else None
     )
     bg_url = "/portal/background" if firm and firm.portal_background_file_id else None
-    pb_label, pb_url, pb_hide = powered_by_for_portal(firm)
     return PortalConfigOut(
         firm_name=name,
         portal_title=portal_title(firm),
@@ -149,9 +148,6 @@ def portal_config(db: Session = Depends(get_db)) -> PortalConfigOut:
         portal_background_url=bg_url,
         portal_font_color=portal_font_color(firm),
         portal_background_on_signed_in=bool(firm.portal_background_on_signed_in) if firm else True,
-        powered_by_label=pb_label,
-        powered_by_url=pb_url,
-        powered_by_hide=pb_hide,
     )
 
 
@@ -190,14 +186,18 @@ def portal_auth(payload: PortalAuthIn, request: Request, db: Session = Depends(g
     return portal_auth_service(payload, request, db)
 
 
-@router.post("/auth/request-otp", status_code=status.HTTP_204_NO_CONTENT)
-def portal_request_otp(payload: PortalOtpRequestIn, request: Request, db: Session = Depends(get_db)) -> None:
-    return portal_request_otp_service(payload, request, db)
+@router.post("/auth/request-code-reset", status_code=status.HTTP_204_NO_CONTENT)
+def portal_request_code_reset(
+    payload: PortalCodeResetRequestIn, request: Request, db: Session = Depends(get_db)
+) -> None:
+    return portal_request_code_reset_service(payload, request, db)
 
 
-@router.post("/auth/verify-otp", response_model=PortalAuthOut)
-def portal_verify_otp(payload: PortalOtpVerifyIn, request: Request, db: Session = Depends(get_db)) -> PortalAuthOut:
-    return portal_verify_otp_service(payload, request, db)
+@router.post("/auth/confirm-code-reset", response_model=PortalCodeResetConfirmOut)
+def portal_confirm_code_reset(
+    payload: PortalCodeResetConfirmIn, request: Request, db: Session = Depends(get_db)
+) -> PortalCodeResetConfirmOut:
+    return portal_confirm_code_reset_service(payload, request, db)
 
 
 @router.post("/auth/preview-exchange", response_model=PortalAuthOut)

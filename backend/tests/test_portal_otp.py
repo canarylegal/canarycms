@@ -49,7 +49,13 @@ def _session() -> Session:
     return sessionmaker(bind=engine)()
 
 
-def _seed_contact(db: Session, *, email: str = "client@example.com", enabled: bool = True) -> tuple[User, Contact]:
+def _seed_contact(
+    db: Session,
+    *,
+    email: str = "client@example.com",
+    enabled: bool = True,
+    access_code: str = "ABCD1234WXYZ",
+) -> tuple[User, Contact]:
     uid = uuid.uuid4()
     user = User(
         id=uid,
@@ -73,7 +79,7 @@ def _seed_contact(db: Session, *, email: str = "client@example.com", enabled: bo
         ContactPortalAccess(
             id=uuid.uuid4(),
             contact_id=contact.id,
-            code_sha256=hash_access_code("ABCD1234WXYZ"),
+            code_sha256=hash_access_code(access_code),
             enabled=enabled,
             created_by_user_id=user.id,
             created_at=datetime.utcnow(),
@@ -167,3 +173,10 @@ def test_find_portal_contact_by_email_unknown_or_blank() -> None:
     _seed_contact(db)
     assert find_portal_contact_by_email(db, "nobody@example.com") is None
     assert find_portal_contact_by_email(db, "  ") is None
+
+
+def test_find_portal_contact_by_email_duplicate_active_returns_none() -> None:
+    db = _session()
+    _seed_contact(db, email="dup@example.com", access_code="AAAA1111BBBB")
+    _seed_contact(db, email="dup@example.com", access_code="CCCC2222DDDD")
+    assert find_portal_contact_by_email(db, "dup@example.com") is None

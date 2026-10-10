@@ -34,6 +34,9 @@ class FeeScale(Base):
     """Firm-wide fee scale templates used when composing quotes."""
 
     __tablename__ = "fee_scale"
+    __table_args__ = (
+        UniqueConstraint("reference", name="uq_fee_scale_reference"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name: Mapped[str] = mapped_column(String(300), nullable=False)
@@ -41,16 +44,20 @@ class FeeScale(Base):
     vat_rate_bps: Mapped[int] = mapped_column(Integer, nullable=False, default=2000)
     # Scope: (NULL,NULL) = all cases; (H,NULL) = all sub-types under head H; (H,S) = one sub-type.
     matter_head_type_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("matter_head_type.id", ondelete="RESTRICT"), nullable=True, index=True
+        UUID(as_uuid=True),
+        ForeignKey("matter_head_type.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
     )
     matter_sub_type_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("matter_sub_type.id", ondelete="RESTRICT"), nullable=True, index=True
+        UUID(as_uuid=True),
+        ForeignKey("matter_sub_type.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
     )
     owner_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("user.id", ondelete="RESTRICT"), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
-
-    __table_args__ = (UniqueConstraint("reference", name="uq_fee_scale_reference"),)
 
 class UserFeeScaleFavorite(Base):
     """Per-user starred fee scales for quick quote selection."""
@@ -62,7 +69,10 @@ class UserFeeScaleFavorite(Base):
         UUID(as_uuid=True), ForeignKey("user.id", ondelete="CASCADE"), nullable=False, index=True
     )
     fee_scale_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("fee_scale.id", ondelete="CASCADE"), nullable=False, index=True
+        UUID(as_uuid=True),
+        ForeignKey("fee_scale.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
     )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
 
@@ -91,7 +101,10 @@ class FeeScaleCategory(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     fee_scale_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("fee_scale.id", ondelete="CASCADE"), nullable=False, index=True
+        UUID(as_uuid=True),
+        ForeignKey("fee_scale.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
     )
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
@@ -103,7 +116,10 @@ class FeeScaleBandSet(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     fee_scale_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("fee_scale.id", ondelete="CASCADE"), nullable=False, index=True
+        UUID(as_uuid=True),
+        ForeignKey("fee_scale.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
     )
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
@@ -115,7 +131,10 @@ class FeeScaleBandRow(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     band_set_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("fee_scale_band_set.id", ondelete="CASCADE"), nullable=False, index=True
+        UUID(as_uuid=True),
+        ForeignKey("fee_scale_band_set.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
     )
     min_value_pence: Mapped[int] = mapped_column(BigInteger, nullable=False)
     max_value_pence: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
@@ -129,7 +148,10 @@ class FeeScaleLine(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     category_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("fee_scale_category.id", ondelete="CASCADE"), nullable=False, index=True
+        UUID(as_uuid=True),
+        ForeignKey("fee_scale_category.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
     )
     name: Mapped[str] = mapped_column(String(300), nullable=False)
     line_kind: Mapped[FeeScaleLineKind] = mapped_column(
@@ -140,7 +162,9 @@ class FeeScaleLine(Base):
     )
     default_amount_pence: Mapped[int | None] = mapped_column(Integer, nullable=True)
     band_set_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("fee_scale_band_set.id", ondelete="SET NULL"), nullable=True
+        UUID(as_uuid=True),
+        ForeignKey("fee_scale_band_set.id", ondelete="SET NULL"),
+        nullable=True,
     )
     vat_treatment: Mapped[FeeScaleVatTreatment] = mapped_column(
         Enum(FeeScaleVatTreatment, name="fee_scale_vat_treatment"),

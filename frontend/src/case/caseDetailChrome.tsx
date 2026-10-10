@@ -70,6 +70,8 @@ export type CaseLeftMenuIconName =
   | 'accounts'
   | 'tasks'
   | 'property'
+  | 'searches'
+  | 'land-registry'
   | 'events'
   | 'finance'
 
@@ -107,6 +109,34 @@ export function CaseLeftMenuIcon({ name }: { name: CaseLeftMenuIconName }) {
         <rect x="13" y="4" width="7" height="7" rx="1.5" stroke="currentColor" strokeWidth="2" />
         <rect x="4" y="13" width="7" height="7" rx="1.5" stroke="currentColor" strokeWidth="2" />
         <rect x="13" y="13" width="7" height="7" rx="1.5" stroke="currentColor" strokeWidth="2" />
+      </svg>
+    )
+  }
+  if (name === 'searches') {
+    return (
+      <svg {...common}>
+        <path
+          d="M6 3.5h8l4 4V20a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4.5a1 1 0 0 1 1-1Z"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinejoin="round"
+        />
+        <path d="M14 3.5V8h4" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
+        <path d="M8 12h8M8 15.5h5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+      </svg>
+    )
+  }
+  if (name === 'land-registry') {
+    return (
+      <svg {...common}>
+        <path
+          d="M4 20V9l8-5 8 5v11"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinejoin="round"
+          fill="none"
+        />
+        <path d="M9 20v-6h6v6" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" fill="none" />
       </svg>
     )
   }

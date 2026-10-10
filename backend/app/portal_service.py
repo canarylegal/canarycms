@@ -628,24 +628,48 @@ def verify_portal_login_otp(db: Session, contact_id: uuid.UUID, code: str) -> bo
     return True
 
 
-def find_portal_contact_by_email(db: Session, email: str) -> Contact | None:
+def find_active_portal_contacts_by_email(db: Session, email: str) -> list[Contact]:
+    """Return every contact with an active portal login for this e-mail (case-insensitive)."""
     from sqlalchemy import func
 
     addr = (email or "").strip().lower()
     if not addr:
-        return None
+        return []
     rows = (
         db.execute(
             select(Contact, ContactPortalAccess)
             .join(ContactPortalAccess, ContactPortalAccess.contact_id == Contact.id)
             .where(func.lower(Contact.email) == addr)
+            .order_by(Contact.created_at.asc())
         )
         .all()
     )
-    for contact, access in rows:
-        if portal_access_is_active(access):
-            return contact
+    return [contact for contact, access in rows if portal_access_is_active(access)]
+
+
+def find_portal_contact_by_email(db: Session, email: str) -> Contact | None:
+    """Return the unique active portal contact for this e-mail, or None if none/ambiguous."""
+    matches = find_active_portal_contacts_by_email(db, email)
+    if len(matches) == 1:
+        return matches[0]
     return None
+
+
+def regenerate_contact_portal_access_code(db: Session, contact_id: uuid.UUID) -> str:
+    """Issue a new access code for an active contact portal login (invalidates prior sessions)."""
+    row = db.execute(
+        select(ContactPortalAccess).where(ContactPortalAccess.contact_id == contact_id)
+    ).scalar_one_or_none()
+    if row is None or not portal_access_is_active(row):
+        raise ValueError("Portal access is not active")
+    code = allocate_unique_access_code(db)
+    store_portal_access_code(row, code)
+    row.failed_attempts = 0
+    row.locked_until = None
+    row.updated_at = utcnow()
+    db.add(row)
+    db.flush()
+    return code
 
 
 def ensure_contact_portal_access_for_delivery(
@@ -669,6 +693,12 @@ def ensure_contact_portal_access_for_delivery(
     ).scalar_one_or_none()
     if row is not None and portal_access_is_active(row):
         return row, False, None
+
+    from app.portal_email_conflict import find_active_portal_email_conflict, raise_portal_email_conflict
+
+    conflict = find_active_portal_email_conflict(db, contact_id=contact_id)
+    if conflict is not None:
+        raise_portal_email_conflict(conflict)
 
     code = allocate_unique_access_code(db)
     created = row is None

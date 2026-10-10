@@ -272,6 +272,10 @@ export type ContactPortalAccessCreateOut = {
   expires_at: string | null
   email_sent?: boolean
   email_skip_reason?: string | null
+  joined_existing?: boolean
+  joined_contact_id?: string | null
+  joined_contact_name?: string
+  matter_contact_relinked?: boolean
 }
 
 export type ContactPortalGrantOut = {

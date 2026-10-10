@@ -185,7 +185,8 @@ export function DocsFileDescCell({ f, showPin }: { f: FileSummary; showPin: bool
   const formSub = f.portal_form_submission ? portalFormStatusLabel(f.portal_form_submission) : null
   const docusignSub = f.docusign_signing ? docusignStatusLabel(f.docusign_signing) : null
   const canarySub = f.canary_signing ? canarySignStatusLabel(f.canary_signing) : null
-  const statusSub = quoteSub || formSub || canarySub || docusignSub
+  const caseraSub = f.casera_search?.status_label ?? null
+  const statusSub = quoteSub || formSub || canarySub || docusignSub || caseraSub
   const mailRoot = isCaseMailRootFile(f)
   const displayName = f.parent_file_id ? `↳ ${docsListDisplayFilename(f)}` : docsListDisplayFilename(f)
   return (
@@ -214,6 +215,9 @@ export function DocsFileDescCell({ f, showPin }: { f: FileSummary; showPin: bool
             ) : null}
             {docusignSub && !quoteSub && !formSub && !canarySub ? (
               <div className="docsDescSub muted portalQuoteFileStatus">{docusignSub}</div>
+            ) : null}
+            {caseraSub && !quoteSub && !formSub && !canarySub && !docusignSub ? (
+              <div className="docsDescSub muted portalQuoteFileStatus">{caseraSub}</div>
             ) : null}
           </div>
         </div>

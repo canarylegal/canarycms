@@ -101,8 +101,9 @@ def test_portal_client_emails_use_styled_cta():
         portal_url=portal_url,
         otp_code="123456",
     )
-    _assert_portal_html_has_cta(otp_html, portal_url, "Sign in to portal")
+    _assert_portal_html_has_cta(otp_html, portal_url, "Open portal")
     assert "123456" in otp_html
+    assert "verification code" in otp_html.lower()
 
 
 def test_portal_staff_alerts_include_matter_deep_link():

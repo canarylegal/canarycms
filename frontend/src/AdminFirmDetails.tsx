@@ -40,9 +40,6 @@ export function AdminFirmDetails({ token }: { token: string }) {
   const [clientPortalEnabled, setClientPortalEnabled] = useState(true)
   const [canarySignEnabled, setCanarySignEnabled] = useState(true)
   const [brandSupportInbox, setBrandSupportInbox] = useState('')
-  const [brandPoweredByLabel, setBrandPoweredByLabel] = useState('')
-  const [brandPoweredByUrl, setBrandPoweredByUrl] = useState('')
-  const [brandPoweredByHide, setBrandPoweredByHide] = useState(false)
 
   const portalBgNormalized = useMemo(() => normalizePortalBackgroundColor(portalBgHex), [portalBgHex])
   const portalBgPreview = portalBgNormalized ?? DEFAULT_PORTAL_BACKGROUND
@@ -79,9 +76,6 @@ export function AdminFirmDetails({ token }: { token: string }) {
       setClientPortalEnabled(data.client_portal_enabled !== false)
       setCanarySignEnabled(data.canary_sign_enabled !== false)
       setBrandSupportInbox((data.brand_support_inbox || '').trim())
-      setBrandPoweredByLabel((data.brand_powered_by_label || '').trim())
-      setBrandPoweredByUrl((data.brand_powered_by_url || '').trim())
-      setBrandPoweredByHide(Boolean(data.brand_powered_by_hide))
     } catch (e) {
       setErr((e as ApiError).message ?? 'Failed to load firm details')
     }
@@ -129,9 +123,6 @@ export function AdminFirmDetails({ token }: { token: string }) {
           client_portal_enabled: clientPortalEnabled,
           canary_sign_enabled: canarySignEnabled,
           brand_support_inbox: brandSupportInbox.trim(),
-          brand_powered_by_label: brandPoweredByLabel.trim(),
-          brand_powered_by_url: brandPoweredByUrl.trim(),
-          brand_powered_by_hide: brandPoweredByHide,
         },
       })
       setRow(data)
@@ -142,9 +133,6 @@ export function AdminFirmDetails({ token }: { token: string }) {
       setClientPortalEnabled(data.client_portal_enabled !== false)
       setCanarySignEnabled(data.canary_sign_enabled !== false)
       setBrandSupportInbox((data.brand_support_inbox || '').trim())
-      setBrandPoweredByLabel((data.brand_powered_by_label || '').trim())
-      setBrandPoweredByUrl((data.brand_powered_by_url || '').trim())
-      setBrandPoweredByHide(Boolean(data.brand_powered_by_hide))
       setSaved(true)
     } catch (e) {
       setErr((e as ApiError).message ?? 'Save failed')
@@ -495,8 +483,8 @@ export function AdminFirmDetails({ token }: { token: string }) {
 
             <div style={{ fontWeight: 600, marginTop: 4 }}>Portal font colour</div>
             <div className="muted" style={{ fontSize: 13 }}>
-              Colour for the portal title, subtitle, sign-out control, and powered-by text on the page background
-              (content inside the white card stays dark for readability). Leave empty for the default light ink.
+              Colour for the portal title, subtitle, and sign-out control on the page background (content inside the
+              white card stays dark for readability). Leave empty for the default light ink.
             </div>
             <div className="row" style={{ gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
               <label className="field" style={{ margin: 0 }}>
@@ -590,14 +578,13 @@ export function AdminFirmDetails({ token }: { token: string }) {
               </div>
             </div>
 
-            <div style={{ fontWeight: 600, marginTop: 8 }}>Support &amp; portal attribution</div>
+            <div style={{ fontWeight: 600, marginTop: 8 }}>Support inbox</div>
             <div className="muted" style={{ fontSize: 13, marginBottom: 4 }}>
-              Overrides for this install. Leave blank to use the deployment defaults
+              Override for this install. Leave blank to use the deployment default
               {row.env_support_inbox ? (
                 <>
                   {' '}
-                  (<code>{row.env_support_inbox}</code>
-                  {row.env_powered_by_hide ? '; powered-by hidden by env' : ''})
+                  (<code>{row.env_support_inbox}</code>)
                 </>
               ) : null}
               . Does not rename the Canary product.
@@ -610,41 +597,6 @@ export function AdminFirmDetails({ token }: { token: string }) {
                 disabled={busy}
                 placeholder={row.env_support_inbox || 'support@example.com'}
                 autoComplete="off"
-              />
-            </label>
-            <label className="row" style={{ gap: 8, alignItems: 'flex-start' }}>
-              <input
-                type="checkbox"
-                checked={brandPoweredByHide}
-                disabled={busy}
-                onChange={(e) => setBrandPoweredByHide(e.target.checked)}
-                style={{ marginTop: 3 }}
-              />
-              <span>
-                <span style={{ fontWeight: 600 }}>Hide “Powered by” on the client portal</span>
-                <div className="muted" style={{ fontSize: 13, marginTop: 2 }}>
-                  {row.env_powered_by_hide
-                    ? 'Also hidden by deployment env (CANARY_BRAND_POWERED_BY_HIDE).'
-                    : 'When unchecked, the footer uses the label/URL below or the deployment default.'}
-                </div>
-              </span>
-            </label>
-            <label className="field">
-              <span>Powered-by label</span>
-              <input
-                value={brandPoweredByLabel}
-                onChange={(e) => setBrandPoweredByLabel(e.target.value)}
-                disabled={busy || brandPoweredByHide}
-                placeholder={row.env_powered_by_label || 'Powered by …'}
-              />
-            </label>
-            <label className="field">
-              <span>Powered-by URL</span>
-              <input
-                value={brandPoweredByUrl}
-                onChange={(e) => setBrandPoweredByUrl(e.target.value)}
-                disabled={busy || brandPoweredByHide}
-                placeholder={row.env_powered_by_url || 'https://…'}
               />
             </label>
 

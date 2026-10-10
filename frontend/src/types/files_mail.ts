@@ -1,4 +1,5 @@
 import type { CanarySignSigningRequestOut } from './canary_sign'
+import type { CaseraSearchFileSummary } from './casera'
 import type { DocusignSigningRequestOut } from './docusign'
 import type { QuotePortalDeliverySummary, PortalFormSubmissionSummary } from './portal'
 
@@ -40,6 +41,7 @@ export type FileSummary = {
   portal_form_submission?: PortalFormSubmissionSummary | null
   docusign_signing?: DocusignSigningRequestOut | null
   canary_signing?: CanarySignSigningRequestOut | null
+  casera_search?: CaseraSearchFileSummary | null
 }
 
 export type CaseEmailDraftM365AttachmentOut = {

@@ -7,6 +7,7 @@ import {
   defaultFieldSize,
   fieldTypeLabel,
 } from './CanarySignPdfDocument'
+import { parsePortalEmailConflict, portalEmailConflictStaffMessage } from './portalEmailConflict'
 import { SingleSelectDropdown } from './SingleSelectDropdown'
 import type {
   CanarySignAcroFormFieldOut,
@@ -73,6 +74,8 @@ function looksTechnicalApiDetail(msg: string): boolean {
 }
 
 function friendlySendError(e: unknown): string {
+  const conflict = parsePortalEmailConflict(e)
+  if (conflict) return portalEmailConflictStaffMessage(conflict, 'delivery')
   const err = e as { message?: string; status?: number }
   const raw = (err.message || '').trim() || 'Could not send for signature'
   if (err.status === 503 && looksTechnicalApiDetail(raw)) {

@@ -205,8 +205,7 @@ def portal_contact_access_granted(
             "",
             "Sign in with this access code. Keep it confidential and do not forward it.",
             "",
-            "If the code does not work, reply to this e-mail or contact the firm and ask them to send a new code.",
-            "You can also request a one-time sign-in code by e-mail from the portal sign-in page.",
+            "If the code does not work, use Forgotten access code on the portal sign-in page, or contact the firm.",
             "",
             f"— {_firm_line(firm_name)}",
         ]
@@ -224,8 +223,7 @@ def portal_contact_access_granted(
             "Sign in with this access code. Keep it confidential and do not forward it."
             "</p>"
             '<p style="font-size:13px;color:#64748b;margin:0;">'
-            "If the code does not work, reply to this e-mail or contact the firm and ask them to send a new code. "
-            "You can also request a one-time sign-in code by e-mail from the portal sign-in page."
+            "If the code does not work, use Forgotten access code on the portal sign-in page, or contact the firm."
             "</p>"
         ),
     )
@@ -322,8 +320,8 @@ def portal_contact_folder_granted(
             "",
             f"{cta_label}: {portal_url}",
             "",
-            "Sign in with your personal access code, or request a one-time sign-in code by e-mail from the portal sign-in page.",
-            "If you cannot sign in, reply to this e-mail or contact the firm.",
+            "Sign in with your personal access code. If you cannot sign in, use Forgotten access code on the portal "
+            "sign-in page, or contact the firm.",
             "",
             f"— {_firm_line(firm_name)}",
         ]
@@ -337,8 +335,8 @@ def portal_contact_folder_granted(
             f"{_html_cta_button(portal_url, cta_label)}"
             f"{_html_fallback_link(portal_url)}"
             '<p style="font-size:13px;color:#64748b;margin:0;">'
-            "Sign in with your personal access code, or request a one-time sign-in code by e-mail from the portal "
-            "sign-in page. If you cannot sign in, reply to this e-mail or contact the firm."
+            "Sign in with your personal access code. If you cannot sign in, use Forgotten access code on the portal "
+            "sign-in page, or contact the firm."
             "</p>"
         ),
     )
@@ -368,7 +366,8 @@ def portal_contact_files_added(
             "",
             f"{cta_label}: {portal_url}",
             "",
-            "Sign in with your access code, or request a one-time sign-in code by e-mail from the portal sign-in page.",
+            "Sign in with your access code. If you cannot sign in, use Forgotten access code on the portal "
+            "sign-in page, or contact the firm.",
             "",
             f"— {_firm_line(firm_name)}",
         ]
@@ -384,7 +383,8 @@ def portal_contact_files_added(
             f"{_html_cta_button(portal_url, cta_label)}"
             f"{_html_fallback_link(portal_url)}"
             '<p style="font-size:13px;color:#64748b;margin:0;">'
-            "Sign in with your access code, or request a one-time sign-in code by e-mail from the portal sign-in page."
+            "Sign in with your access code. If you cannot sign in, use Forgotten access code on the portal "
+            "sign-in page, or contact the firm."
             "</p>"
         ),
     )
@@ -434,16 +434,14 @@ def _optional_access_code_blocks(access_code: str | None) -> tuple[list[str], st
         "Portal access has been enabled for you so you can open this link.",
         f"Your access code: {code}",
         "Keep this code confidential and do not forward it.",
-        "If the code does not work, reply to this e-mail or contact the firm and ask them to send a new code.",
-        "You can also request a one-time sign-in code by e-mail from the portal sign-in page.",
+        "If the code does not work, use Forgotten access code on the portal sign-in page, or contact the firm.",
     ]
     html = (
         "<p>Portal access has been enabled for you so you can open this link.</p>"
         f"{_html_highlight_code('Your access code', code)}"
         "<p style=\"margin:12px 0 0;color:#64748b;font-size:13px;\">"
         "Keep this code confidential and do not forward it. "
-        "If the code does not work, reply to this e-mail or contact the firm and ask them to send a new code. "
-        "You can also request a one-time sign-in code by e-mail from the portal sign-in page."
+        "If the code does not work, use Forgotten access code on the portal sign-in page, or contact the firm."
         "</p>"
     )
     return lines, html
@@ -616,21 +614,22 @@ def portal_login_otp(
     portal_url: str,
     otp_code: str,
 ) -> tuple[str, str, str]:
-    subject = f"Your Canary Portal sign-in code — {_firm_line(firm_name)}"
-    cta_label = "Sign in to portal"
+    """E-mail verification code for Forgotten access code (not a login credential)."""
+    subject = f"Reset your Canary Portal access code — {_firm_line(firm_name)}"
+    cta_label = "Open portal"
     body = "\n".join(
         [
             f"Dear {contact_name},",
             "",
-            f"Use this one-time code to sign in to {_firm_line(firm_name)}'s Canary Portal:",
+            f"Use this verification code to reset your {_firm_line(firm_name)} Canary Portal access code:",
             "",
-            f"Your sign-in code: {otp_code}",
+            f"Your verification code: {otp_code}",
             "",
             f"{cta_label}: {portal_url}",
             "",
             "This code is valid for 15 minutes.",
             "",
-            "If you did not request this code, you can ignore this e-mail.",
+            "If you did not request a reset, you can ignore this e-mail.",
             "",
             f"— {_firm_line(firm_name)}",
         ]
@@ -639,12 +638,52 @@ def portal_login_otp(
         firm_name=firm_name,
         inner_html=(
             f"<p>Dear {_escape_html(contact_name)},</p>"
-            f"<p>Use this one-time code to sign in to {_escape_html(_firm_line(firm_name))}'s Canary Portal:</p>"
-            f"{_html_highlight_code('Your sign-in code', otp_code)}"
+            f"<p>Use this verification code to reset your {_escape_html(_firm_line(firm_name))} "
+            "Canary Portal access code:</p>"
+            f"{_html_highlight_code('Your verification code', otp_code)}"
             f"{_html_cta_button(portal_url, cta_label)}"
             f"{_html_fallback_link(portal_url)}"
             '<p style="font-size:13px;color:#64748b;margin:0;">'
-            "This code is valid for 15 minutes. If you did not request this code, you can ignore this e-mail."
+            "This code is valid for 15 minutes. If you did not request a reset, you can ignore this e-mail."
+            "</p>"
+        ),
+    )
+    return subject, body, html
+
+
+def portal_access_code_reset(
+    *,
+    firm_name: str,
+    contact_name: str,
+    portal_url: str,
+    access_code: str,
+) -> tuple[str, str, str]:
+    subject = f"Your new Canary Portal access code — {_firm_line(firm_name)}"
+    cta_label = "Open client portal"
+    body = "\n".join(
+        [
+            f"Dear {contact_name},",
+            "",
+            f"Your {_firm_line(firm_name)} Canary Portal access code has been reset.",
+            "",
+            f"{cta_label}: {portal_url}",
+            f"Your new access code: {access_code}",
+            "",
+            "Sign in with this access code. Your previous code no longer works.",
+            "",
+            f"— {_firm_line(firm_name)}",
+        ]
+    )
+    html = _html_email_shell(
+        firm_name=firm_name,
+        inner_html=(
+            f"<p>Dear {_escape_html(contact_name)},</p>"
+            f"<p>Your {_escape_html(_firm_line(firm_name))} Canary Portal access code has been reset.</p>"
+            f"{_html_cta_button(portal_url, cta_label)}"
+            f"{_html_fallback_link(portal_url)}"
+            f"{_html_highlight_code('Your new access code', access_code)}"
+            '<p style="font-size:13px;color:#64748b;margin:0;">'
+            "Sign in with this access code. Your previous code no longer works."
             "</p>"
         ),
     )
@@ -1117,4 +1156,43 @@ def invoice_rejected_staff(
         firm_name=firm_name,
         inner_html=_html_info_block(title=f"Hello {staff_name}", lines=html_lines),
     )
+    return subject, body, html
+
+
+def casera_search_result_ready(
+    *,
+    firm_name: str,
+    product_name: str,
+    matter_label: str = "",
+    matter_url: str = "",
+    file_count: int = 1,
+) -> tuple[str, str, str]:
+    """Staff alert when a Casera search result file has landed on the matter."""
+    matter = (matter_label or "").strip() or "matter"
+    product = (product_name or "").strip() or "Search"
+    subject = f"Search result ready — {matter}: {product}"
+    files_note = "The result is on the matter in Searches."
+    if file_count > 1:
+        files_note = f"{file_count} result files are on the matter in Searches."
+    next_step = "Open the matter in Canary to review the document(s)."
+    body_lines = [
+        "A Casera search result is ready.",
+        "",
+        f"Matter: {matter}",
+        f"Search: {product}",
+        files_note,
+        "",
+        next_step,
+    ]
+    if matter_url:
+        body_lines.extend(["", f"Open matter: {matter_url}"])
+    body_lines.extend(["", f"— {_firm_line(firm_name)}"])
+    body = "\n".join(body_lines)
+    html_inner = _html_info_block(
+        title="A Casera search result is ready",
+        lines=[f"Matter: {matter}", f"Search: {product}", files_note],
+    ) + f"<p>{_escape_html(next_step)}</p>"
+    if matter_url:
+        html_inner += _html_cta_button(matter_url, "Open matter in Canary") + _html_fallback_link(matter_url)
+    html = _html_email_shell(firm_name=firm_name, inner_html=html_inner)
     return subject, body, html

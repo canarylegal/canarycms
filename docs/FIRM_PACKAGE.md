@@ -105,13 +105,44 @@ Copy [canarylegal/example-firm-package-template](https://github.com/canarylegal/
 
 ## What stays in public Canary
 
-- The six system precedents  
-- Portal **forms engine** and Admin/UI to build forms  
+- Portal **forms engine** and Admin/UI to build forms (runtime submissions stay in core)  
 - Published firm **slots** and `/firm-modules/*` APIs  
 - Fictional/sample generators for tests (no real firms)  
 - This document and the example compose overlay  
+- Users, cases, file **bytes/metadata**, integrations  
 
-Firm form **definitions**, firm precedents beyond the system six, and firm **UI** do not ship in the kernel.
+Firm form **definitions**, precedents (including kernel-seeded system six rows), fee scales, matter types, and firm **UI** are firm-layer data — see below.
+
+## Firm catalogue schema (`firm`)
+
+Catalogue data lives in Postgres schema **`firm`** (always created by core migrations), not in `public`. API connections set `search_path` to `public, firm` so application SQL stays unqualified:
+
+| Firm-owned | Core (`public`) |
+|------------|-----------------|
+| Matter head/sub types, menus, standard tasks, event templates | Users, cases (nullable FKs into `firm` matter types) |
+| Fee scales (+ categories/lines/bands) | `user_fee_scale_favorite` |
+| Portal form **templates** + fields | Portal form **submissions** |
+| Precedents + categories (system six seed files ship in the image; rows live in `firm`) | File storage rows/bytes |
+| Branding slots on `firm_settings` (cleared on force-detach) | `firm_settings` singleton row |
+| Firm module schema (`storage.schema`, e.g. `firm_*`) + `case_state` | Lifecycle outbox |
+
+**Boot-merge (every startup when the package is attached and compatible):** insert missing package refs; do not overwrite Admin edits unless `*_SEED_REPAIR`; branding slots seed only when empty; Admin-created extras are never deleted on boot. If the package is absent, firm seeds are skipped and existing `firm` data is left alone until an explicit detach.
+
+## Detach
+
+Unmounting the package volume does **not** wipe the database. Use an explicit detach:
+
+- **Preflight (admin):** `GET /firm-package/detach/preflight` — blocked while any case still has matter types set, firm-module `case_state` rows exist, or portal submissions exist.
+- **Detach:** `POST /firm-package/detach` with `{"force": false}` — only when preflight is clear; then wipes unused catalogue.
+- **Force detach (sandboxes):** `POST /firm-package/detach` with `{"force": true, "confirm": true}`, or CLI:
+
+```bash
+I_CONFIRM_FIRM_DETACH=yes python -m app.firm_detach --force
+```
+
+Force nulls case matter-type FKs, deletes firm catalogue rows and portal submissions, clears branding slots, and drops firm-module schemas. Re-attach by remounting the package and restarting (boot-merge re-seeds).
+
+**Matter type snapshots:** each case stores `matter_head_type_name` / `matter_sub_type_name` (stable labels). Detach clears live FKs but keeps those names; on the next attach/boot, Canary restores FKs by matching names in the firm catalogue.
 
 ## Hygiene
 

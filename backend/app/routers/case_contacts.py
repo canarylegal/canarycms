@@ -170,6 +170,11 @@ def update_case_contact(
     if push_to_global and cc.contact_id:
         contact = db.get(Contact, cc.contact_id)
         if contact:
+            from app.portal_email_conflict import raise_if_email_conflicts_with_portal_login
+
+            raise_if_email_conflicts_with_portal_login(
+                db, contact_id=cc.contact_id, new_email=cc.email
+            )
             # Apply snapshot fields to the global contact card.
             contact.type = cc.type
             contact.name = cc.name

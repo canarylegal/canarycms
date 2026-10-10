@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { apiFetch } from './api'
 import { lockBodyWaitCursor, unlockBodyWaitCursor } from './bodyCursorLock'
 import { useDialogs } from './DialogProvider'
+import { parsePortalEmailConflict, portalEmailConflictStaffMessage } from './portalEmailConflict'
 import { SingleSelectDropdown } from './SingleSelectDropdown'
 import type { CasePortalFolderShareContactOut, QuotePortalDeliveryOut, QuotePortalSendPreflightOut } from './types'
 import { PORTAL_ALERTS_NOT_CONFIGURED_MSG } from './types'
@@ -141,7 +142,12 @@ export function SendQuoteViaPortalModal({
       onSent?.()
       onClose()
     } catch (e: unknown) {
-      setErr((e as { message?: string }).message ?? 'Could not send via portal')
+      const conflict = parsePortalEmailConflict(e)
+      setErr(
+        conflict
+          ? portalEmailConflictStaffMessage(conflict, 'delivery')
+          : ((e as { message?: string }).message ?? 'Could not send via portal'),
+      )
     } finally {
       setBusy(false)
     }

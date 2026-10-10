@@ -106,11 +106,19 @@ class Case(Base):
     status: Mapped[CaseStatus] = mapped_column(Enum(CaseStatus, name="case_status"), nullable=False, default=CaseStatus.open)
     practice_area: Mapped[str | None] = mapped_column(String(200), nullable=True)
     matter_head_type_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("matter_head_type.id", ondelete="SET NULL"), nullable=True, index=True
+        UUID(as_uuid=True),
+        ForeignKey("matter_head_type.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
     )
     matter_sub_type_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("matter_sub_type.id", ondelete="SET NULL"), nullable=True
+        UUID(as_uuid=True),
+        ForeignKey("matter_sub_type.id", ondelete="SET NULL"),
+        nullable=True,
     )
+    # Detach-safe labels: survive firm catalogue wipe; used to restore FKs on reattach.
+    matter_head_type_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    matter_sub_type_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
     created_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("user.id"), nullable=False)
     is_locked: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     lock_mode: Mapped[CaseLockMode] = mapped_column(

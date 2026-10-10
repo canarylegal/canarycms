@@ -14,6 +14,7 @@ from app.alert_templates import (
     anticipated_payment_approved,
     anticipated_payment_rejected,
     calendar_event_reminder,
+    casera_search_result_ready,
     canary_sign_completed_staff,
     canary_sign_declined_staff,
     canary_sign_reminded,
@@ -28,6 +29,7 @@ from app.alert_templates import (
     portal_contact_access_granted,
     portal_contact_files_added,
     portal_contact_folder_granted,
+    portal_access_code_reset,
     portal_form_completed_staff,
     portal_form_sent,
     portal_login_otp,
@@ -55,6 +57,7 @@ class AlertKind(str, enum.Enum):
     portal_matter_exchange_shared = "portal_matter_exchange_shared"
     portal_contact_files_added = "portal_contact_files_added"
     portal_login_otp = "portal_login_otp"
+    portal_access_code_reset = "portal_access_code_reset"
     portal_quote_sent = "portal_quote_sent"
     portal_quote_accepted = "portal_quote_accepted"
     portal_quote_declined = "portal_quote_declined"
@@ -73,6 +76,7 @@ class AlertKind(str, enum.Enum):
     anticipated_payment_amended = "anticipated_payment_amended"
     invoice_approved = "invoice_approved"
     invoice_rejected = "invoice_rejected"
+    casera_search_result = "casera_search_result"
 
 
 def firm_alerts_configured(db: Session) -> bool:
@@ -181,6 +185,13 @@ def dispatch_alert(
                 contact_name=str(context.get("contact_name") or "Client"),
                 portal_url=str(context.get("portal_url") or portal_public_url()),
                 otp_code=str(context.get("otp_code") or ""),
+            )
+        elif kind == AlertKind.portal_access_code_reset:
+            subject, body, body_html = portal_access_code_reset(
+                firm_name=firm,
+                contact_name=str(context.get("contact_name") or "Client"),
+                portal_url=str(context.get("portal_url") or portal_public_url()),
+                access_code=str(context.get("access_code") or ""),
             )
         elif kind == AlertKind.portal_quote_sent:
             subject, body, body_html = portal_quote_sent(
@@ -339,6 +350,14 @@ def dispatch_alert(
                 invoice_number=str(context.get("invoice_number") or ""),
                 amount_gbp=str(context.get("amount_gbp") or ""),
                 comment=str(context.get("comment") or ""),
+            )
+        elif kind == AlertKind.casera_search_result:
+            subject, body, body_html = casera_search_result_ready(
+                firm_name=firm,
+                product_name=str(context.get("product_name") or "Search"),
+                matter_label=str(context.get("matter_label") or ""),
+                matter_url=str(context.get("matter_url") or ""),
+                file_count=int(context.get("file_count") or 1),
             )
         else:
             log.warning("alert_dispatch: unknown kind %s", kind)

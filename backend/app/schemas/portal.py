@@ -33,9 +33,6 @@ class PortalConfigOut(BaseModel):
     portal_font_color: str | None = None
     # When false, custom canvas is login-screen only; signed-in uses product default chrome.
     portal_background_on_signed_in: bool = True
-    powered_by_label: str = "Powered by Canary Legal Software"
-    powered_by_url: str = "https://canarylegalsoftware.co.uk"
-    powered_by_hide: bool = False
 
 class PortalAuthIn(BaseModel):
     access_code: str = Field(min_length=8, max_length=64)
@@ -180,12 +177,20 @@ class PortalFormDetailOut(PortalFormSubmissionOut):
 class PortalFormSubmitIn(BaseModel):
     responses: dict = Field(default_factory=dict)
 
-class PortalOtpRequestIn(BaseModel):
+class PortalCodeResetRequestIn(BaseModel):
     email: str = Field(min_length=3, max_length=320)
 
-class PortalOtpVerifyIn(BaseModel):
+class PortalCodeResetConfirmIn(BaseModel):
     email: str = Field(min_length=3, max_length=320)
     code: str = Field(min_length=4, max_length=12)
+
+class PortalCodeResetConfirmOut(BaseModel):
+    access_code: str
+    contact_name: str = ""
+
+# Back-compat aliases (OTP login removed; reset uses the same e-mail + code shape).
+PortalOtpRequestIn = PortalCodeResetRequestIn
+PortalOtpVerifyIn = PortalCodeResetConfirmIn
 
 class CasePortalNotifyFilesIn(BaseModel):
     folder_path: str = ""
@@ -327,11 +332,17 @@ class ContactPortalAccessCreateOut(BaseModel):
     expires_at: datetime | None
     email_sent: bool = False
     email_skip_reason: str | None = None
+    joined_existing: bool = False
+    joined_contact_id: uuid.UUID | None = None
+    joined_contact_name: str = ""
+    matter_contact_relinked: bool = False
 
 class ContactPortalAccessActionIn(BaseModel):
     send_email: bool = False
     """When set (matter contact UI), portal must be enabled on that matter before granting access."""
     case_id: uuid.UUID | None = None
+    """Required when another contact already has an active portal login for this e-mail."""
+    conflict_resolution: Literal["join_existing", "revoke_other"] | None = None
 
 class MatterPortalAccessOut(BaseModel):
     enabled: bool

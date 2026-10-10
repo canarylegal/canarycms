@@ -155,6 +155,21 @@ from app.models.signing import (
     CanarySignAuditEvent,
 )
 
+from app.models.casera import (
+    CaseraIntegrationSettings,
+    CaseraCaseLink,
+    CaseraOrder,
+    CaseraOrderProduct,
+    CaseraWebhookEvent,
+)
+
+from app.models.hmlr import (
+    HmlrIntegrationSettings,
+    HmlrOrder,
+)
+
+from app.models.search_integration import SearchIntegrationSettings
+
 __all__ = [
     'Base',
     'UserRole',
@@ -266,4 +281,12 @@ __all__ = [
     'CanarySignRecipient',
     'CanarySignField',
     'CanarySignAuditEvent',
+    'CaseraIntegrationSettings',
+    'CaseraCaseLink',
+    'CaseraOrder',
+    'CaseraOrderProduct',
+    'CaseraWebhookEvent',
+    'HmlrIntegrationSettings',
+    'HmlrOrder',
+    'SearchIntegrationSettings',
 ]

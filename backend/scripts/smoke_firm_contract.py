@@ -283,6 +283,27 @@ def _find_in_scope_case(db, manifest: dict[str, Any]) -> Case | None:
 
 def check_attach_surfaces(report: Report, db) -> None:
     """Wave E: firm-supplied matter types + assets mount env when package attached."""
+    from app.firm_catalogue import FIRM_CATALOGUE_SCHEMA
+    from app.firm_detach import preflight_detach
+
+    schema_ok = bool(
+        db.execute(
+            text("SELECT EXISTS(SELECT 1 FROM pg_namespace WHERE nspname = :s)"),
+            {"s": FIRM_CATALOGUE_SCHEMA},
+        ).scalar()
+    )
+    report.add(
+        "attach: firm catalogue schema exists",
+        schema_ok,
+        f"schema={FIRM_CATALOGUE_SCHEMA}",
+    )
+    pre = preflight_detach(db)
+    report.add(
+        "attach: detach preflight callable",
+        pre.blockers is not None,
+        f"blocked={pre.blockers.blocked} typed_cases={pre.blockers.typed_cases}",
+    )
+
     st = evaluate_firm_package_status(force=True)
     mounts = set(st.mounts or [])
     report.add(

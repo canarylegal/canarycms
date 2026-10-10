@@ -15,6 +15,18 @@ export type { FileSummary, CaseEmailDraftM365AttachmentOut, CaseEmailDraftM365Ou
 export type { ContactOut, ContactMergePreviewOut, ContactMergeOut, CaseContactOut, MatterContactTypeOut } from './contact'
 export type { CaseEventOut, CaseEventsOut } from './events'
 export type { DocusignIntegrationSettingsOut, DocusignTemplateOut, DocusignStaffOptionsOut, DocusignMenuRowOut, DocusignSigningRecipientOut, DocusignSigningRequestOut, DocusignSendRecipientIn, PortalDocusignSigningOut } from './docusign'
+export type {
+  CaseraIntegrationSettingsOut,
+  CaseraOrderProductOut,
+  CaseraOrderOut,
+  CaseraSearchesSummaryOut,
+  CaseraConveyancingDetails,
+  CaseraPrefillOut,
+  CaseraAvailableProductOut,
+  CaseraAvailablePackOut,
+  CaseraCreateOrderOut,
+  CaseraSearchFileSummary,
+} from './casera'
 export type { CanarySignSendRecipientIn, CanarySignFieldOut, CanarySignRecipientOut, CanarySignSigningRequestOut, CanarySignAcroFormFieldOut, PortalCanarySignOut, PortalClientActionItemOut, PortalClientActionsOut, PortalCanarySignExchangeOut } from './canary_sign'
 export type { PortalFormSubmissionSummary, QuotePortalDeliverySummary, QuotePortalDeliveryOut, QuotePortalSendPreflightOut, PortalQuoteDeliveryViewOut, PortalQuoteExchangeOut, PortalFormExchangeOut, PortalGrantSummaryOut, PortalAuthOut, PortalSessionOut, PortalFileOut, PortalBrowseOut, PortalFormFieldType, PortalFormTemplateFieldIn, PortalFormTemplateFieldOut, PortalFormTemplateOut, PortalFormTemplateDetailOut, PortalFormSubmissionOut, PortalFormFieldOut, PortalFormPendingOut, PortalFormDetailOut, CasePortalActivityOut, CasePortalStaffUserOut, CasePortalNotificationSettingsOut, CasePortalShareStatusOut, CasePortalPreviewContactOut, CasePortalPreviewOut, CasePortalNotifyFilesOut, ContactPortalNotificationPrefsOut, ContactPortalAccessOut, ContactPortalAccessCreateOut, ContactPortalGrantOut, ContactPortalGrantCreateIn, CasePortalFolderShareContactOut, MatterPortalAccessOut, MatterPortalAccessCreateOut, CasePortalFolderAccessGrantOut } from './portal'
 export { PORTAL_ALERTS_NOT_CONFIGURED_MSG } from './portal'
