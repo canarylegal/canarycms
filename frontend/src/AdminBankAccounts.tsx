@@ -24,6 +24,7 @@ export function AdminBankAccounts({ token }: { token: string }) {
 
   useEffect(() => {
     void load()
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- reload when token changes
   }, [token])
 
   async function create() {
