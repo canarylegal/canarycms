@@ -157,6 +157,15 @@ export function LedgerPage({ caseId, token, currentUserId, onCaseChanged }: Prop
   const [wipEntries, setWipEntries] = useState<CaseTimeEntryOut[]>([])
   const [selectedWipIds, setSelectedWipIds] = useState<Set<string>>(new Set())
   const [voidInvoiceTarget, setVoidInvoiceTarget] = useState<{ id: string; pending: boolean } | null>(null)
+  const [allocateTarget, setAllocateTarget] = useState<{
+    id: string
+    invoiceNumber: string
+    remainingPence: number
+  } | null>(null)
+  const [allocatePairId, setAllocatePairId] = useState('')
+  const [allocateAmountStr, setAllocateAmountStr] = useState('')
+  const [allocateErr, setAllocateErr] = useState<string | null>(null)
+  const [allocateBusy, setAllocateBusy] = useState(false)
   const [editPair, setEditPair] = useState<{
     pairId: string
     amountPence: number
@@ -1072,34 +1081,17 @@ export function LedgerPage({ caseId, token, currentUserId, onCaseChanged }: Prop
                                 ? `Allocated ${pence(inv.amount_allocated_pence)} of ${pence(inv.total_pence)}`
                                 : 'Allocate a ledger receipt against this invoice'
                             }
-                            onClick={() =>
-                              void (async () => {
-                                const pair = window.prompt('Ledger pair id for the receipt/payment')
-                                if (!pair?.trim()) return
-                                const remaining =
-                                  inv.total_pence - (inv.amount_allocated_pence || 0)
-                                const pounds = window.prompt(
-                                  `Amount to allocate (£). Remaining ${(remaining / 100).toFixed(2)}`,
-                                  (remaining / 100).toFixed(2),
-                                )
-                                if (!pounds) return
-                                const amt = Math.round(parseFloat(pounds) * 100)
-                                if (!amt || amt <= 0) return
-                                setBusy(true)
-                                try {
-                                  await apiFetch(`/cases/${caseId}/invoices/${inv.id}/allocations`, {
-                                    token,
-                                    method: 'POST',
-                                    json: { ledger_pair_id: pair.trim(), amount_pence: amt },
-                                  })
-                                  await load()
-                                } catch (e) {
-                                  setError((e as ApiError).message ?? 'Allocation failed')
-                                } finally {
-                                  setBusy(false)
-                                }
-                              })()
-                            }
+                            onClick={() => {
+                              const remaining = inv.total_pence - (inv.amount_allocated_pence || 0)
+                              setAllocatePairId('')
+                              setAllocateAmountStr((remaining / 100).toFixed(2))
+                              setAllocateErr(null)
+                              setAllocateTarget({
+                                id: inv.id,
+                                invoiceNumber: inv.invoice_number,
+                                remainingPence: remaining,
+                              })
+                            }}
                           >
                             Allocate
                           </button>
@@ -1135,6 +1127,104 @@ export function LedgerPage({ caseId, token, currentUserId, onCaseChanged }: Prop
             </tbody>
           </table>
           )}
+        </div>
+      ) : null}
+
+      {allocateTarget ? (
+        <div
+          className="modalOverlay"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="allocateInvoiceTitle"
+          onClick={(e) => {
+            if (e.target === e.currentTarget && !allocateBusy) setAllocateTarget(null)
+          }}
+        >
+          <div className="card ledgerPostModal">
+            <h3 id="allocateInvoiceTitle" className="ledgerPostTitle">
+              Allocate — {allocateTarget.invoiceNumber}
+            </h3>
+            <p className="muted" style={{ marginTop: 0 }}>
+              Remaining {pence(allocateTarget.remainingPence)}. Enter the ledger pair id for the
+              receipt/payment and the amount to allocate.
+            </p>
+            <label className="ledgerPostLabel">
+              <span>
+                Ledger pair id <span aria-hidden>*</span>
+              </span>
+              <input
+                value={allocatePairId}
+                onChange={(e) => setAllocatePairId(e.target.value)}
+                autoFocus
+                disabled={allocateBusy}
+                placeholder="UUID of receipt/payment pair"
+              />
+            </label>
+            <label className="ledgerPostLabel">
+              <span>
+                Amount (£) <span aria-hidden>*</span>
+              </span>
+              <input
+                value={allocateAmountStr}
+                onChange={(e) => setAllocateAmountStr(e.target.value)}
+                disabled={allocateBusy}
+                inputMode="decimal"
+              />
+            </label>
+            {allocateErr ? <div className="error">{allocateErr}</div> : null}
+            <div className="ledgerPostActions">
+              <button
+                type="button"
+                className="btn"
+                disabled={allocateBusy}
+                onClick={() => setAllocateTarget(null)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn ledgerPostBtn"
+                disabled={allocateBusy}
+                onClick={() =>
+                  void (async () => {
+                    const pair = allocatePairId.trim()
+                    if (!pair) {
+                      setAllocateErr('Enter the ledger pair id.')
+                      return
+                    }
+                    const amt = Math.round(parseFloat(allocateAmountStr) * 100)
+                    if (!Number.isFinite(amt) || amt <= 0) {
+                      setAllocateErr('Enter a positive amount.')
+                      return
+                    }
+                    if (amt > allocateTarget.remainingPence) {
+                      setAllocateErr(
+                        `Amount cannot exceed remaining ${pence(allocateTarget.remainingPence)}.`,
+                      )
+                      return
+                    }
+                    setAllocateBusy(true)
+                    setAllocateErr(null)
+                    try {
+                      await apiFetch(`/cases/${caseId}/invoices/${allocateTarget.id}/allocations`, {
+                        token,
+                        method: 'POST',
+                        json: { ledger_pair_id: pair, amount_pence: amt },
+                      })
+                      setAllocateTarget(null)
+                      await refreshAll()
+                    } catch (e) {
+                      setAllocateErr((e as ApiError).message ?? 'Allocation failed')
+                    } finally {
+                      setAllocateBusy(false)
+                    }
+                  })()
+                }
+              >
+                {allocateBusy ? 'Allocating…' : 'Allocate'}
+              </button>
+            </div>
+          </div>
         </div>
       ) : null}
 
