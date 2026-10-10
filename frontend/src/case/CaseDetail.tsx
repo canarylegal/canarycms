@@ -61,7 +61,7 @@ import { CaseMatterHero } from './CaseMatterHero'
 import { CaseDocsContextMenu } from './CaseDocsContextMenu'
 import { CaseDetailOverlayModals } from './CaseDetailOverlayModals'
 
-export type CaseOpenDocPanel = 'accounts'
+export type CaseOpenDocPanel = 'accounts' | 'portal-hub'
 
 export function CaseDetail({
   token,
@@ -342,7 +342,7 @@ export function CaseDetail({
   }, [])
 
   const [caseDocPanel, setCaseDocPanel] = useState<CaseDetailLeftDocPanel>(() =>
-    openDocPanel === 'accounts' ? 'accounts' : 'documents',
+    openDocPanel === 'accounts' ? 'accounts' : openDocPanel === 'portal-hub' ? 'portal-hub' : 'documents',
   )
   const goToOverview = useCallback(() => {
     setLeftOpen({
@@ -589,6 +589,23 @@ export function CaseDetail({
         finance: false,
       })
       setCaseDocPanel('accounts')
+      syncedMatterIdRef.current = caseId
+      onOpenDocPanelConsumed?.()
+      return
+    }
+
+    if (openDocPanel === 'portal-hub') {
+      setLeftOpen({
+        contacts: false,
+        accounts: false,
+        tasks: false,
+        property: false,
+        searches: false,
+        landRegistry: false,
+        events: false,
+        finance: false,
+      })
+      setCaseDocPanel('portal-hub')
       syncedMatterIdRef.current = caseId
       onOpenDocPanelConsumed?.()
       return

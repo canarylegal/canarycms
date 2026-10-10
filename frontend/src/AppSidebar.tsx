@@ -64,7 +64,7 @@ export type AppSidebarView =
   | 'case-menu'
   | 'contacts'
   | 'calendar'
-  | 'docusign'
+  | 'portal-summary'
   | 'accounts'
   | 'reports'
   | 'user-settings'
@@ -79,14 +79,14 @@ type Props = {
   onCalendar: () => void
   onTasks: () => void
   onContacts: () => void
-  onDocusign?: () => void
+  onPortalSummary?: () => void
   onAccounts: () => void
   onReports: () => void
   onUserSettings: () => void
   onAdminConsole: () => void
   canAccessAccounts: boolean
   canAdminConsole: boolean
-  docusignEnabled?: boolean
+  portalSummaryEnabled?: boolean
   onLogout: () => void
   /** Auth token for firm-package status (Phase 6 fault marker). */
   token?: string | null
@@ -101,14 +101,14 @@ export function AppSidebar({
   onCalendar,
   onTasks,
   onContacts,
-  onDocusign,
+  onPortalSummary,
   onAccounts,
   onReports,
   onUserSettings,
   onAdminConsole,
   canAccessAccounts,
   canAdminConsole,
-  docusignEnabled = false,
+  portalSummaryEnabled = false,
   onLogout,
   token = null,
 }: Props) {
@@ -416,14 +416,14 @@ export function AppSidebar({
           active={view === 'contacts'}
           onClick={onContacts}
         />
-        {docusignEnabled && onDocusign ? (
+        {portalSummaryEnabled && onPortalSummary ? (
           <PrimaryNavButton
             layout="sidebar"
             collapsed={!expanded}
-            name="docusign"
-            label="DocuSign"
-            active={view === 'docusign'}
-            onClick={onDocusign}
+            name="portal-summary"
+            label="Portal"
+            active={view === 'portal-summary'}
+            onClick={onPortalSummary}
           />
         ) : null}
         {canAccessAccounts ? (

@@ -83,6 +83,27 @@ def docusign_enabled(db: Session) -> bool:
     return bool(getattr(row, "enabled", False))
 
 
+def list_docusign_menu_rows(
+    db: Session,
+    *,
+    user: Any,
+    status_filter: str | None = None,
+) -> list[dict[str, Any]]:
+    """Firm-wide DocuSign envelope rows for staff menus (empty when commercial detached)."""
+    mod = _docusign_signing()
+    if mod is None:
+        return []
+    status_enum = None
+    if status_filter:
+        try:
+            from app.models import DocusignSigningStatus
+
+            status_enum = DocusignSigningStatus(status_filter)
+        except ValueError:
+            return []
+    return list(mod.list_signing_menu_rows(db, user=user, status_filter=status_enum))
+
+
 def search_file_summaries_for_case(db: Session, case_id: uuid.UUID) -> dict:
     mod = _casera_service()
     if mod is None:

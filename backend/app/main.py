@@ -55,6 +55,7 @@ from app.routers import (
     firm_modules,
     firm_package,
     task_menu,
+    portal_summary,
     contacts,
     canary_sign,
     files,
@@ -300,6 +301,7 @@ app.include_router(case_notes.router)
 app.include_router(case_tasks.router)
 app.include_router(case_time.router)
 app.include_router(task_menu.router)
+app.include_router(portal_summary.router)
 app.include_router(case_ledger.router)
 app.include_router(case_invoices.router)
 app.include_router(case_finance.router)

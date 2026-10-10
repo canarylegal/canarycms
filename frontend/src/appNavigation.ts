@@ -5,7 +5,7 @@ export type AppView =
   | 'case-menu'
   | 'contacts'
   | 'calendar'
-  | 'docusign'
+  | 'portal-summary'
   | 'accounts'
   | 'reports'
   | 'user-settings'
@@ -28,7 +28,9 @@ const STATIC_ROUTES: Record<string, AppView> = {
   '/calendar': 'calendar',
   '/tasks': 'tasks',
   '/contacts': 'contacts',
-  '/docusign': 'docusign',
+  '/portal-summary': 'portal-summary',
+  // Legacy DocuSign desk URL — map to Portal summary.
+  '/docusign': 'portal-summary',
   '/accounts': 'accounts',
   '/reports': 'reports',
   '/settings': 'user-settings',
@@ -118,8 +120,8 @@ export function buildAppNavigationUrl(state: AppNavState): string {
     case 'contacts':
       pathname = '/contacts'
       break
-    case 'docusign':
-      pathname = '/docusign'
+    case 'portal-summary':
+      pathname = '/portal-summary'
       break
     case 'accounts':
       pathname = '/accounts'
@@ -163,12 +165,12 @@ export function readBootNavigation(initialTasksCaseFilter?: string | null): AppN
   return nav
 }
 
-/** Strip admin / accounts / DocuSign navigation when unavailable. */
+/** Strip admin / accounts / Portal summary navigation when unavailable. */
 export function sanitizeAppNavigation(
   nav: AppNavState,
   canAccessAdmin: boolean,
   canAccessAccounts: boolean = false,
-  docusignEnabled: boolean = false,
+  portalSummaryEnabled: boolean = false,
 ): AppNavState {
   if (!canAccessAdmin && nav.view === 'admin-console') {
     return { ...DEFAULT_NAV }
@@ -176,7 +178,7 @@ export function sanitizeAppNavigation(
   if (!canAccessAccounts && nav.view === 'accounts') {
     return { ...DEFAULT_NAV }
   }
-  if (!docusignEnabled && nav.view === 'docusign') {
+  if (!portalSummaryEnabled && nav.view === 'portal-summary') {
     return { ...DEFAULT_NAV }
   }
   return nav

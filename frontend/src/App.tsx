@@ -79,8 +79,8 @@ const RecoveryConsole = lazy(() =>
   import('./AdminConsole').then((m) => ({ default: m.RecoveryConsole })),
 )
 const CalendarPage = lazy(() => import('./CalendarPage').then((m) => ({ default: m.CalendarPage })))
-const CommercialAppDocusignSlot = lazy(() =>
-  import('./commercial/CommercialSlotHosts').then((m) => ({ default: m.CommercialAppDocusignSlot })),
+const PortalSummaryPage = lazy(() =>
+  import('./PortalSummaryPage').then((m) => ({ default: m.PortalSummaryPage })),
 )
 const ReportsPage = lazy(() => import('./ReportsPage').then((m) => ({ default: m.ReportsPage })))
 const AccountsPage = lazy(() => import('./AccountsPage').then((m) => ({ default: m.AccountsPage })))
@@ -101,7 +101,7 @@ type View =
   | 'case-menu'
   | 'contacts'
   | 'calendar'
-  | 'docusign'
+  | 'portal-summary'
   | 'accounts'
   | 'reports'
   | 'user-settings'
@@ -123,8 +123,8 @@ function canaryViewTitleSegment(view: View, caseDetail: CaseOut | null): string 
       return 'Tasks'
     case 'contacts':
       return 'Contacts'
-    case 'docusign':
-      return 'DocuSign'
+    case 'portal-summary':
+      return 'Portal'
     case 'calendar':
       return 'Calendar'
     case 'accounts':
@@ -200,9 +200,9 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
   const canAccessAccounts = userCanAccessAccountsWorkspace(auth.me)
   const canAccessAccountsRef = useRef(canAccessAccounts)
   canAccessAccountsRef.current = canAccessAccounts
-  const [docusignEnabled, setDocusignEnabled] = useState<boolean | null>(null)
-  const docusignEnabledRef = useRef(docusignEnabled)
-  docusignEnabledRef.current = docusignEnabled
+  const [portalSummaryEnabled, setPortalSummaryEnabled] = useState<boolean | null>(null)
+  const portalSummaryEnabledRef = useRef(portalSummaryEnabled)
+  portalSummaryEnabledRef.current = portalSummaryEnabled
   const [reportsInitialTab, setReportsInitialTab] = useState<
     'client_account_reconcile' | null
   >(null)
@@ -256,7 +256,7 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
       if (next === 'accounts' && !canAccessAccountsRef.current) {
         next = 'main-menu'
       }
-      if (next === 'docusign' && docusignEnabledRef.current !== true) {
+      if (next === 'portal-summary' && portalSummaryEnabledRef.current !== true) {
         next = 'main-menu'
       }
       if (viewRef.current === 'case-menu' && next !== 'case-menu' && !opts?.skipExitConfirm) {
@@ -292,7 +292,7 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
       calendar: () => setView('calendar'),
       tasks: () => setView('tasks'),
       contacts: () => setView('contacts'),
-      docusign: () => setView('docusign'),
+      'portal-summary': () => setView('portal-summary'),
       accounts: () => setView('accounts'),
       reports: () => setView('reports'),
       'user-settings': () => setView('user-settings'),
@@ -316,7 +316,7 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
     caseMenuQuoteContext,
     canAccessAccounts,
     canAdminConsole,
-    docusignEnabled: docusignEnabled === true,
+    portalSummaryEnabled: portalSummaryEnabled === true,
     onNavigate: primaryNavHandlers,
   })
 
@@ -550,13 +550,13 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
 
   useEffect(() => {
     if (!token) {
-      setDocusignEnabled(false)
+      setPortalSummaryEnabled(false)
       return
     }
-    setDocusignEnabled(null)
-    void apiFetch<{ enabled: boolean }>('/docusign/options', { token })
-      .then((o) => setDocusignEnabled(Boolean(o.enabled)))
-      .catch(() => setDocusignEnabled(false))
+    setPortalSummaryEnabled(null)
+    void apiFetch<{ enabled: boolean }>('/portal-summary/options', { token })
+      .then((o) => setPortalSummaryEnabled(Boolean(o.enabled)))
+      .catch(() => setPortalSummaryEnabled(false))
   }, [token])
 
   useEffect(() => {
@@ -567,11 +567,11 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
   }, [auth.me, canAccessAccounts, syncNavFromState])
 
   useEffect(() => {
-    if (docusignEnabled !== false) return
-    if (viewRef.current !== 'docusign') return
+    if (portalSummaryEnabled !== false) return
+    if (viewRef.current !== 'portal-summary') return
     setViewState('main-menu')
     syncNavFromState({ view: 'main-menu', caseId: null }, 'replace')
-  }, [docusignEnabled, syncNavFromState])
+  }, [portalSummaryEnabled, syncNavFromState])
 
   useEffect(() => {
     function onPopState() {
@@ -580,7 +580,7 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
         parsed,
         canAdminConsoleRef.current,
         canAccessAccountsRef.current,
-        docusignEnabledRef.current === true,
+        portalSummaryEnabledRef.current === true,
       )
       if (nav.view !== parsed.view) {
         syncAppNavigationUrl(nav, 'replace')
@@ -761,11 +761,14 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
         </Suspense>
       )
     if (view === 'contacts') return <Contacts token={token} me={auth.me} />
-    if (view === 'docusign') {
-      if (docusignEnabled !== true) return null
+    if (view === 'portal-summary') {
+      if (portalSummaryEnabled !== true) return null
       return (
         <Suspense fallback={<LazyFallback />}>
-          <CommercialAppDocusignSlot token={token} onSelectCase={openCaseView} />
+          <PortalSummaryPage
+            token={token}
+            onSelectCase={(caseId) => onMainMenuSelectCase(caseId, { docPanel: 'portal-hub' })}
+          />
         </Suspense>
       )
     }
@@ -1174,14 +1177,14 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
         onCalendar={() => setView('calendar')}
         onTasks={() => setView('tasks')}
         onContacts={() => setView('contacts')}
-        onDocusign={() => setView('docusign')}
+        onPortalSummary={() => setView('portal-summary')}
         onAccounts={() => setView('accounts')}
         onReports={() => setView('reports')}
         onUserSettings={() => setView('user-settings')}
         onAdminConsole={() => setView('admin-console')}
         canAccessAccounts={canAccessAccounts}
         canAdminConsole={canAdminConsole}
-        docusignEnabled={docusignEnabled === true}
+        portalSummaryEnabled={portalSummaryEnabled === true}
         onLogout={confirmLogout}
         token={auth.token}
       />
@@ -1193,7 +1196,7 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
                 view === 'quotes' ||
                 view === 'contacts' ||
                 view === 'tasks' ||
-                view === 'docusign' ||
+                view === 'portal-summary' ||
                 view === 'accounts' ||
                 view === 'reports'
               ? ' appMainColumn--mainMenu'
@@ -1204,7 +1207,13 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
           className={
             view === 'case-menu'
               ? 'main main--caseView'
-              : view === 'main-menu' || view === 'quotes' || view === 'contacts' || view === 'tasks' || view === 'docusign' || view === 'accounts' || view === 'reports'
+              : view === 'main-menu' ||
+                  view === 'quotes' ||
+                  view === 'contacts' ||
+                  view === 'tasks' ||
+                  view === 'portal-summary' ||
+                  view === 'accounts' ||
+                  view === 'reports'
                 ? 'main main--mainMenu'
                 : 'main'
           }

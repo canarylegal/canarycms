@@ -51,11 +51,19 @@ describe('parseAppNavigation / buildAppNavigationUrl', () => {
 })
 
 describe('sanitizeAppNavigation', () => {
-  it('strips admin / accounts / docusign when unavailable', () => {
+  it('strips admin / accounts / portal-summary when unavailable', () => {
     expect(sanitizeAppNavigation({ ...base, view: 'admin-console' }, false).view).toBe('main-menu')
     expect(sanitizeAppNavigation({ ...base, view: 'accounts' }, true, false).view).toBe('main-menu')
-    expect(sanitizeAppNavigation({ ...base, view: 'docusign' }, true, true, false).view).toBe('main-menu')
+    expect(sanitizeAppNavigation({ ...base, view: 'portal-summary' }, true, true, false).view).toBe(
+      'main-menu',
+    )
     expect(sanitizeAppNavigation({ ...base, view: 'admin-console' }, true).view).toBe('admin-console')
+  })
+
+  it('maps legacy /docusign to portal-summary and builds /portal-summary', () => {
+    expect(parseAppNavigation({ pathname: '/docusign', search: '' }).view).toBe('portal-summary')
+    expect(parseAppNavigation({ pathname: '/portal-summary', search: '' }).view).toBe('portal-summary')
+    expect(buildAppNavigationUrl({ ...base, view: 'portal-summary' })).toBe('/portal-summary')
   })
 })
 
