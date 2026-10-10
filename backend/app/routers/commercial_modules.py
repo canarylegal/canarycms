@@ -38,8 +38,16 @@ def _ui_out(manifest: dict[str, Any]) -> CommercialModuleUiOut | None:
     exports = {str(k): str(v) for k, v in exports_raw.items() if k and v}
     bundle = str(ui.get("bundle") or "ui/dist/commercial-module.js").strip()
     filename = bundle.rsplit("/", 1)[-1] if bundle else "commercial-module.js"
+    # Cache-bust so staff browsers pick up rebuilt commercial IIFEs after attach/redeploy.
+    bust = ""
+    path = resolve_ui_asset(filename)
+    if path is not None:
+        try:
+            bust = f"?v={int(path.stat().st_mtime)}"
+        except OSError:
+            bust = ""
     return CommercialModuleUiOut(
-        bundle_url=f"/commercial-modules/active/ui/{filename}",
+        bundle_url=f"/commercial-modules/active/ui/{filename}{bust}",
         exports=exports,
     )
 
@@ -78,5 +86,5 @@ def get_active_ui_asset(asset_path: str) -> FileResponse:
     return FileResponse(
         path,
         media_type=media,
-        headers={"Cache-Control": "no-cache"},
+        headers={"Cache-Control": "no-store"},
     )
