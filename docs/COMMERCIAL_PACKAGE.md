@@ -17,8 +17,21 @@ Core attaches the package at `/commercial`; without it, Core boots and those pro
 
 | Layer | Owns |
 |-------|------|
-| **Commercial** | Connector runtime, routers, UI IIFE, **future** vendor DDL |
+| **Commercial** | Connector runtime, routers, UI IIFE, **all new** vendor DDL |
 | **Core** | Attach/status APIs, thin UI hosts, historical Alembic, ORM table definitions (shared persistence), soft shims |
+
+### Where new work goes
+
+| Change | Put it in |
+|--------|-----------|
+| Casera / HMLR / DocuSign / Searches UI | `canary-commercial/module/ui` (slot export) |
+| Connector API / client / router | `canary-commercial/python/canary_commercial` |
+| New vendor tables / columns | `canary-commercial/module/migrations/versions/*.sql` |
+| Core attach sockets, slot hosts, soft shims | Core only |
+
+Do **not** add Core Alembic revisions for vendor DDL, reintroduce Admin/matter DocuSign–Searches–HMLR components under `frontend/src/`, or add `*casera*` / `*hmlr*` / `*docusign*` routers under `backend/app/routers/`.
+
+CI enforces this via `scripts/check_commercial_boundary.py` (job `commercial-boundary`).
 
 ## Attach
 

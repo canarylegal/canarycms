@@ -5,6 +5,13 @@ on:
   pull_request:
 
 jobs:
+  commercial-boundary:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Guard commercial vendor ownership
+        run: python3 scripts/check_commercial_boundary.py
+
   backend:
     runs-on: ubuntu-latest
     defaults:
