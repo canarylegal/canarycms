@@ -353,7 +353,6 @@ export function CaseDetailPanelHost(props: CaseDetailPanelHostProps) {
             onOpenSearchFile={onOpenSearchFile}
             onPlaced={() => {
               onRefresh()
-              backToDocuments()
             }}
           />
         ) : caseDocPanel === 'land-registry' && caseId ? (

@@ -832,10 +832,13 @@ export function CaseDetail({
   useEffect(() => {
     if (!caseId || !hasSearchesMenu || !leftOpen.searches) return
     let cancelled = false
-    void apiFetch<{ orders: unknown[]; total_pence: number }>(`/cases/${caseId}/searches`, { token })
+    void apiFetch<{ orders: { placed_at?: string | null }[]; total_pence: number }>(`/cases/${caseId}/searches`, {
+      token,
+    })
       .then((s) => {
         if (cancelled) return
-        setSearchesPreviewCount(Array.isArray(s.orders) ? s.orders.length : 0)
+        const placed = Array.isArray(s.orders) ? s.orders.filter((o) => Boolean(o?.placed_at)) : []
+        setSearchesPreviewCount(placed.length)
         setSearchesPreviewTotalPence(typeof s.total_pence === 'number' ? s.total_pence : 0)
       })
       .catch(() => {
