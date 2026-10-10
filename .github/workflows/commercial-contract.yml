@@ -10,10 +10,7 @@ on:
     paths:
       - "backend/app/commercial_*.py"
       - "backend/app/routers/commercial_package.py"
-      - "backend/app/docusign_*.py"
-      - "backend/app/casera_*.py"
-      - "backend/app/hmlr_*.py"
-      - "backend/app/search_settings.py"
+      - "backend/app/routers/commercial_modules.py"
       - "backend/app/main.py"
       - "backend/app/canary_version.py"
       - "scripts/smoke-commercial-contract.sh"
@@ -24,10 +21,7 @@ on:
     paths:
       - "backend/app/commercial_*.py"
       - "backend/app/routers/commercial_package.py"
-      - "backend/app/docusign_*.py"
-      - "backend/app/casera_*.py"
-      - "backend/app/hmlr_*.py"
-      - "backend/app/search_settings.py"
+      - "backend/app/routers/commercial_modules.py"
       - "backend/app/main.py"
       - "backend/app/canary_version.py"
       - "scripts/smoke-commercial-contract.sh"
