@@ -66,8 +66,9 @@ export function AgedDebtReportBody({ shared, state }: { shared: ReportSectionSha
   return (
     <section className="reportsSection">
       <p className="muted" style={{ marginTop: 0 }}>
-        Approved invoices on matters whose office balance is still debit (client owes). There is no separate
-        paid flag — matter office balance is the debt indicator.
+        Approved invoices that are not fully allocated, on matters whose office balance is still debit
+        (client owes). Fully paid invoices (Paid on the matter ledger, or allocations covering the total)
+        are excluded.
       </p>
       <div className="row" style={{ gap: 8, marginTop: 10 }}>
         <button
