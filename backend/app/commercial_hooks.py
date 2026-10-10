@@ -79,7 +79,11 @@ def docusign_enabled(db: Session) -> bool:
     mod = _docusign_settings()
     if mod is None:
         return False
-    row = mod.get_docusign_settings(db)
+    try:
+        row = mod.get_docusign_settings(db)
+    except Exception:
+        # Detached/partial installs and unit-test DBs may lack the settings table/row.
+        return False
     return bool(getattr(row, "enabled", False))
 
 
