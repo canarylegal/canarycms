@@ -6,6 +6,8 @@ import uuid
 from datetime import datetime
 from typing import Any
 
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 
@@ -18,8 +20,9 @@ class CaseraIntegrationSettingsOut(BaseModel):
     webhook_path_token: str | None = None
     webhook_url: str | None = None
     api_base_uri: str | None = None
-    # When true, place-order posts each product cost as an anticipated office disbursement.
+    # When true, place-order posts each product cost as an anticipated disbursement.
     post_anticipated_disbursement: bool = False
+    anticipated_ledger_account: Literal["office", "client"] = "office"
     # When true, place-order ensures a Finance "Searches" category and debit rows for costs.
     add_to_completion_statement: bool = False
     # When true, e-mail matter staff when a search result file lands.
@@ -36,6 +39,7 @@ class CaseraIntegrationSettingsUpdate(BaseModel):
     webhook_path_token: str | None = None
     api_base_uri: str | None = None
     post_anticipated_disbursement: bool | None = None
+    anticipated_ledger_account: Literal["office", "client"] | None = None
     add_to_completion_statement: bool | None = None
     email_on_result_ready: bool | None = None
 
@@ -152,6 +156,10 @@ class CaseraCreateOrderOut(BaseModel):
 class CaseraSetProductsIn(BaseModel):
     products: list[str] = Field(default_factory=list)
     packs: list[str] = Field(default_factory=list)
+
+
+class CaseraPlaceOrderIn(BaseModel):
+    override_funds_warning: bool = False
 
 
 class CaseraSearchFileSummary(BaseModel):
