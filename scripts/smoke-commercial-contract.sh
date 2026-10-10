@@ -62,7 +62,12 @@ paths = [getattr(r, "path", "") or "" for r in app.routes]
 assert any("docusign" in p for p in paths)
 assert any("casera" in p for p in paths)
 assert any("hmlr" in p or "land-registry" in p for p in paths)
+assert any("commercial-modules" in p for p in paths)
+from app.commercial_module_runtime import load_manifest
+m = load_manifest(force=True)
+assert m and m.get("ui"), m
 print("pass attached:", st.as_dict())
+print("pass module:", {"module_id": m.get("module_id"), "slots": (m.get("slots") or {})})
 PY
 
 echo "smoke-commercial-contract: OK"

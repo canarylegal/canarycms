@@ -79,7 +79,9 @@ const RecoveryConsole = lazy(() =>
   import('./AdminConsole').then((m) => ({ default: m.RecoveryConsole })),
 )
 const CalendarPage = lazy(() => import('./CalendarPage').then((m) => ({ default: m.CalendarPage })))
-const DocusignPage = lazy(() => import('./DocusignPage').then((m) => ({ default: m.DocusignPage })))
+const CommercialAppDocusignSlot = lazy(() =>
+  import('./commercial/CommercialSlotHosts').then((m) => ({ default: m.CommercialAppDocusignSlot })),
+)
 const ReportsPage = lazy(() => import('./ReportsPage').then((m) => ({ default: m.ReportsPage })))
 const AccountsPage = lazy(() => import('./AccountsPage').then((m) => ({ default: m.AccountsPage })))
 
@@ -763,7 +765,7 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
       if (docusignEnabled !== true) return null
       return (
         <Suspense fallback={<LazyFallback />}>
-          <DocusignPage token={token} onSelectCase={openCaseView} />
+          <CommercialAppDocusignSlot token={token} onSelectCase={openCaseView} />
         </Suspense>
       )
     }

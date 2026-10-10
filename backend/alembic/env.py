@@ -4,6 +4,8 @@ from sqlalchemy import engine_from_config, pool
 from alembic import context
 from app.db import DATABASE_URL, Base  # noqa: F401
 from app import models  # noqa: F401
+from app import commercial_models  # noqa: F401 — ensure commercial tables in metadata
+
 config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)

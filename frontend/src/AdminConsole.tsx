@@ -3,7 +3,7 @@ import { AdminAudit } from './AdminAudit'
 import { AdminBilling } from './AdminBilling'
 import { AdminDeploy } from './AdminDeploy'
 import { AdminEmail } from './AdminEmail'
-import { AdminIntegrations } from './AdminIntegrations'
+import { CommercialAdminIntegrationsSlot } from './commercial/CommercialSlotHosts'
 import { AdminPortalForms } from './AdminPortalForms'
 import { AdminFirmDetails } from './AdminFirmDetails'
 import { AdminMatterContacts } from './AdminMatterContacts'
@@ -150,7 +150,7 @@ export function AdminConsole({ token, refreshMe }: { token: string; refreshMe: (
         ) : activeTab === 'email' ? (
           <AdminEmail token={token} onSaved={() => void refreshMe()} />
         ) : activeTab === 'integrations' && showIntegrations ? (
-          <AdminIntegrations token={token} />
+          <CommercialAdminIntegrationsSlot token={token} />
         ) : activeTab === 'portalForms' ? (
           <AdminPortalForms token={token} />
         ) : activeTab === 'deploy' ? (

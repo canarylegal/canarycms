@@ -155,6 +155,8 @@ from app.models.signing import (
     CanarySignAuditEvent,
 )
 
+# Commercial persistence (Casera / HMLR / search / DocuSign tables).
+# New DDL: canary-commercial module migrations — see app.commercial_models.
 from app.models.casera import (
     CaseraIntegrationSettings,
     CaseraCaseLink,

@@ -10,5 +10,6 @@ services:
   backend:
     environment:
       COMMERCIAL_PACKAGE_DIR: /commercial
+      COMMERCIAL_MODULE_DIR: /commercial/module
     volumes:
       - ${COMMERCIAL_PACKAGE_DIR:?Set COMMERCIAL_PACKAGE_DIR to your commercial package path}:/commercial:ro
