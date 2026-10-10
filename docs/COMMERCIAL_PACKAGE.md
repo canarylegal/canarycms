@@ -1,16 +1,24 @@
-# Commercial package
+# Commercial package (Level C)
 
 Private product layer for paid connectors (DocuSign, Casera / Searches, HMLR).  
-Core stays attachable without it; commercial code loads only when the package is mounted and compatible.
+Core attaches the package at `/commercial`; without it, Core boots and those products are omitted (no routers, no UI bundle).
 
-## Layout
+## Layout (`canarylegal/canary-commercial`)
 
 | Path | Purpose |
 |------|---------|
 | `canary-commercial.json` | Package id / version / `requires_canary` / `products` |
-| `python/canary_commercial/` | Connector clients, services, settings, FastAPI routers |
+| `python/canary_commercial/` | Connector clients, services, FastAPI routers |
+| `module/manifest.json` | UI slots + storage schema for migrations |
+| `module/ui/dist/commercial-module.js` | IIFE UI bundle (Admin / matter / DocuSign) |
+| `module/migrations/versions/` | Commercial-owned SQL (after Core Alembic history) |
 
-ORM models and public API schemas for these products remain in Core (shared with Alembic and the staff UI). Runtime connectors and routers live in the commercial package.
+## Ownership
+
+| Layer | Owns |
+|-------|------|
+| **Commercial** | Connector runtime, routers, UI IIFE, **future** vendor DDL |
+| **Core** | Attach/status APIs, thin UI hosts, historical Alembic, ORM table definitions (shared persistence), soft shims |
 
 ## Attach
 
@@ -22,41 +30,36 @@ docker compose \
   --profile prod up -d
 ```
 
-Compose sets `COMMERCIAL_PACKAGE_DIR=/commercial` and mounts the package read-only.
+Sets `COMMERCIAL_PACKAGE_DIR=/commercial` and `COMMERCIAL_MODULE_DIR=/commercial/module`.
 
-## Status
+Boot order: `commercial_module_migrate` → `firm_module_migrate` → `alembic upgrade head` → API.
 
-Staff: `GET /commercial-package/status`  
-When `attached`, `compatible`, and `loaded` are true, Admin → Integrations and matter Searches / Land Registry surfaces appear.
+## Status / UI
 
-## Split test
+- Staff: `GET /commercial-package/status`
+- Module: `GET /commercial-modules/active` (+ `/active/ui/{file}` for the IIFE)
+- When attached + compatible + loaded: Admin → Integrations and matter Searches / Land Registry / DocuSign surfaces mount commercial slot components.
 
-1. Start Core **without** the commercial overlay → Integrations tab hidden; DocuSign/Casera/HMLR routes absent.  
-2. Restart **with** the overlay → status `loaded: true`; connectors available.
+## Dev habit
 
-Local / CI contract (no Compose required):
+| Work | Compose |
+|------|---------|
+| Core-only | Omit commercial overlay |
+| Commercial | Include `docker-compose.commercial.example.yml` + `COMMERCIAL_PACKAGE_DIR` |
+
+Rebuild commercial UI after editing `module/ui/src`:
+
+```bash
+cd module/ui && npm install && npm run build
+```
+
+After recreating **frontend**, also recreate `cloudflared-socat` / `cloudflared-dev`.
+
+## Contract smoke
 
 ```bash
 export COMMERCIAL_PACKAGE_DIR=/path/to/canary-commercial
 ./scripts/smoke-commercial-contract.sh
 ```
 
-Canary Actions: `.github/workflows/commercial-contract.yml` (needs secret `CANARY_COMMERCIAL_TOKEN`).
-
-## Dev habit
-
-| Work | Compose files | Result |
-|------|---------------|--------|
-| Core-only | `docker-compose.yml` (+ tunnel if needed) — **omit** commercial overlay | Integrations off; Core CI shape |
-| Commercial | also `-f docker-compose.commercial.example.yml` with `COMMERCIAL_PACKAGE_DIR` set | Connectors load |
-
-After recreating **frontend**, also recreate tunnel sidecars (`cloudflared-socat` / `cloudflared-dev`) so they share the new network namespace.
-
-## Ownership (current soft boundary)
-
-| Layer | Owns today |
-|-------|------------|
-| **Commercial** (`canarylegal/canary-commercial`) | Connector clients, services, settings, FastAPI routers (`register.py`) |
-| **Core** (`canarylegal/canarycms`) | ORM models, Alembic history, public API schemas, Admin/case UI hosts, soft shims, attach/status API |
-
-See the decision notes in chat / team docs before moving models or UI fully into commercial.
+Actions: `.github/workflows/commercial-contract.yml` (secret `CANARY_COMMERCIAL_TOKEN`).

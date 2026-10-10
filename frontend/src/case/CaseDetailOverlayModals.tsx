@@ -4,7 +4,7 @@ import { ManageCaseAccessModal } from '../ManageCaseAccessModal'
 import { apiFetch } from '../api'
 import { SendQuoteViaPortalModal } from '../SendQuoteViaPortalModal'
 import { SendPortalFormModal } from '../SendPortalFormModal'
-import { SendDocusignModal } from '../SendDocusignModal'
+import { CommercialSendDocusignModalSlot } from '../commercial/CommercialSlotHosts'
 import { SendCanarySignModal } from '../SendCanarySignModal'
 import { TaskCreateModal } from '../TaskCreateModal'
 import { QuoteWizard } from '../QuoteWizard'
@@ -278,7 +278,7 @@ export function CaseDetailOverlayModals(props: CaseDetailOverlayModalsProps) {
       ) : null}
 
       {caseId && props.docusignSend ? (
-        <SendDocusignModal
+        <CommercialSendDocusignModalSlot
           token={token}
           caseId={caseId}
           fileId={props.docusignSend.fileId}

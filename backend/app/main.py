@@ -44,6 +44,7 @@ from app.routers import (
     case_tasks,
     case_time,
     cases,
+    commercial_modules,
     commercial_package,
     contact_portal,
     matter_portal,
@@ -306,6 +307,7 @@ app.include_router(admin_finance.router)
 app.include_router(admin_billing.router)
 app.include_router(admin_email_integration.router)
 app.include_router(commercial_package.router)
+app.include_router(commercial_modules.router)
 register_commercial_routers(app)
 app.include_router(admin_portal_forms.router)
 app.include_router(admin_standard_tasks.router)

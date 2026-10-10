@@ -24,8 +24,10 @@ import {
   CaseDetailPropertyPanel,
   CaseDetailTasksPanel,
 } from './CaseDetailDocPanels'
-import { CaseDetailHmlrPanel } from './CaseDetailHmlrPanel'
-import { CaseDetailSearchesPanel } from './CaseDetailSearchesPanel'
+import {
+  CommercialMatterLandRegistrySlot,
+  CommercialMatterSearchesSlot,
+} from '../commercial/CommercialSlotHosts'
 import { FirmModulePanelSlot } from '../firm/FirmModulePanelSlot'
 import { FirmModuleMatterActionsSlot } from '../firm/FirmModuleStubSlots'
 import type { CaseDetailLeftDocPanel } from './CaseDetailLeftNav'
@@ -340,7 +342,7 @@ export function CaseDetailPanelHost(props: CaseDetailPanelHostProps) {
             onRefresh={onRefresh}
           />
         ) : caseDocPanel === 'searches' && caseId ? (
-          <CaseDetailSearchesPanel
+          <CommercialMatterSearchesSlot
             caseId={caseId}
             token={token}
             busy={busy}
@@ -355,7 +357,7 @@ export function CaseDetailPanelHost(props: CaseDetailPanelHostProps) {
             }}
           />
         ) : caseDocPanel === 'land-registry' && caseId ? (
-          <CaseDetailHmlrPanel
+          <CommercialMatterLandRegistrySlot
             caseId={caseId}
             token={token}
             busy={busy}
