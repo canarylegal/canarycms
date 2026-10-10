@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { lockBodyWaitCursor, unlockBodyWaitCursor } from '../bodyCursorLock'
 import { resolveContactNameWithFallback } from '../GlobalContactCreateForm'
 import { MATTER_CONTACT_TYPE_OPTIONS_FALLBACK } from '../matterContactTypeOptions'
-import { apiFetch } from '../api'
+import { apiFetch, type ApiError } from '../api'
 import { useDialogs } from '../DialogProvider'
 import { useNotifications } from '../NotificationsProvider'
 import {
@@ -1157,8 +1157,8 @@ export function CaseDetail({
       )
       setContactPickModal(null)
       resetContactPickForm()
-    } catch (e: any) {
-      setActionErr(e?.message ?? 'Failed')
+    } catch (e) {
+      setActionErr((e as ApiError).message ?? 'Failed')
     } finally {
       setBusy(false)
     }

@@ -53,39 +53,35 @@ export function AdminConsole({ token, refreshMe }: { token: string; refreshMe: (
   }, [token])
 
   const showIntegrations = commercialPackageActive(commercial)
-
-  useEffect(() => {
-    if (tab === 'integrations' && commercial !== null && !showIntegrations) {
-      setTab('firm')
-    }
-  }, [tab, commercial, showIntegrations])
+  // Fall back when Integrations is selected but the commercial package is not attached.
+  const activeTab = tab === 'integrations' && commercial !== null && !showIntegrations ? 'firm' : tab
 
   const adminSubtitle =
-    tab === 'firm'
+    activeTab === 'firm'
       ? 'Trading name, registered name, and firm address for precedent merge codes.'
-      : tab === 'email'
+      : activeTab === 'email'
       ? 'Org-wide e-mail integration (mailto vs Microsoft 365).'
-      : tab === 'integrations'
+      : activeTab === 'integrations'
         ? 'Commercial connectors (DocuSign, Searches, Land Registry).'
-        : tab === 'portalForms'
+        : activeTab === 'portalForms'
           ? 'Portal form templates sent manually to clients.'
-          : tab === 'deploy'
+          : activeTab === 'deploy'
         ? 'Deploy, updates, and file storage usage.'
-        : tab === 'audit'
+        : activeTab === 'audit'
         ? 'Activity and audit trail.'
-        : tab === 'users'
+        : activeTab === 'users'
           ? 'User accounts and permission categories.'
-          : tab === 'matters'
+          : activeTab === 'matters'
             ? 'Matter types and defaults.'
-            : tab === 'billing'
+            : activeTab === 'billing'
               ? 'Billing configuration.'
-              : tab === 'submenus'
+              : activeTab === 'submenus'
                 ? 'Case sub-menu configuration.'
-                : tab === 'tasks'
+                : activeTab === 'tasks'
                   ? 'Task templates and defaults.'
-                  : tab === 'contacts'
+                  : activeTab === 'contacts'
                     ? 'Matter contact types.'
-                    : tab === 'precedents'
+                    : activeTab === 'precedents'
                       ? 'Precedent library.'
                       : ''
   return (
@@ -99,73 +95,73 @@ export function AdminConsole({ token, refreshMe }: { token: string; refreshMe: (
           <div className="muted" style={{ marginTop: 4 }}>{adminSubtitle}</div>
         </div>
         <div className="adminTabStrip" role="tablist" aria-label="Admin sections">
-          <button type="button" role="tab" aria-selected={tab === 'firm'} className={`adminTab${tab === 'firm' ? ' is-active' : ''}`} onClick={() => setTab('firm')}>
+          <button type="button" role="tab" aria-selected={activeTab === 'firm'} className={`adminTab${activeTab === 'firm' ? ' is-active' : ''}`} onClick={() => setTab('firm')}>
             Firm details
           </button>
-          <button type="button" role="tab" aria-selected={tab === 'users'} className={`adminTab${tab === 'users' ? ' is-active' : ''}`} onClick={() => setTab('users')}>
+          <button type="button" role="tab" aria-selected={activeTab === 'users'} className={`adminTab${activeTab === 'users' ? ' is-active' : ''}`} onClick={() => setTab('users')}>
             Users
           </button>
-          <button type="button" role="tab" aria-selected={tab === 'matters'} className={`adminTab${tab === 'matters' ? ' is-active' : ''}`} onClick={() => setTab('matters')}>
+          <button type="button" role="tab" aria-selected={activeTab === 'matters'} className={`adminTab${activeTab === 'matters' ? ' is-active' : ''}`} onClick={() => setTab('matters')}>
             Matters
           </button>
-          <button type="button" role="tab" aria-selected={tab === 'billing'} className={`adminTab${tab === 'billing' ? ' is-active' : ''}`} onClick={() => setTab('billing')}>
+          <button type="button" role="tab" aria-selected={activeTab === 'billing'} className={`adminTab${activeTab === 'billing' ? ' is-active' : ''}`} onClick={() => setTab('billing')}>
             Billing
           </button>
-          <button type="button" role="tab" aria-selected={tab === 'email'} className={`adminTab${tab === 'email' ? ' is-active' : ''}`} onClick={() => setTab('email')}>
+          <button type="button" role="tab" aria-selected={activeTab === 'email'} className={`adminTab${activeTab === 'email' ? ' is-active' : ''}`} onClick={() => setTab('email')}>
             E-mail
           </button>
           {showIntegrations ? (
-            <button type="button" role="tab" aria-selected={tab === 'integrations'} className={`adminTab${tab === 'integrations' ? ' is-active' : ''}`} onClick={() => setTab('integrations')}>
+            <button type="button" role="tab" aria-selected={activeTab === 'integrations'} className={`adminTab${activeTab === 'integrations' ? ' is-active' : ''}`} onClick={() => setTab('integrations')}>
               Integrations
             </button>
           ) : null}
-          <button type="button" role="tab" aria-selected={tab === 'portalForms'} className={`adminTab${tab === 'portalForms' ? ' is-active' : ''}`} onClick={() => setTab('portalForms')}>
+          <button type="button" role="tab" aria-selected={activeTab === 'portalForms'} className={`adminTab${activeTab === 'portalForms' ? ' is-active' : ''}`} onClick={() => setTab('portalForms')}>
             Portal forms
           </button>
-          <button type="button" role="tab" aria-selected={tab === 'deploy'} className={`adminTab${tab === 'deploy' ? ' is-active' : ''}`} onClick={() => setTab('deploy')}>
+          <button type="button" role="tab" aria-selected={activeTab === 'deploy'} className={`adminTab${activeTab === 'deploy' ? ' is-active' : ''}`} onClick={() => setTab('deploy')}>
             Deploy
           </button>
-          <button type="button" role="tab" aria-selected={tab === 'submenus'} className={`adminTab${tab === 'submenus' ? ' is-active' : ''}`} onClick={() => setTab('submenus')}>
+          <button type="button" role="tab" aria-selected={activeTab === 'submenus'} className={`adminTab${activeTab === 'submenus' ? ' is-active' : ''}`} onClick={() => setTab('submenus')}>
             Sub-Menus
           </button>
-          <button type="button" role="tab" aria-selected={tab === 'tasks'} className={`adminTab${tab === 'tasks' ? ' is-active' : ''}`} onClick={() => setTab('tasks')}>
+          <button type="button" role="tab" aria-selected={activeTab === 'tasks'} className={`adminTab${activeTab === 'tasks' ? ' is-active' : ''}`} onClick={() => setTab('tasks')}>
             Tasks
           </button>
-          <button type="button" role="tab" aria-selected={tab === 'contacts'} className={`adminTab${tab === 'contacts' ? ' is-active' : ''}`} onClick={() => setTab('contacts')}>
+          <button type="button" role="tab" aria-selected={activeTab === 'contacts'} className={`adminTab${activeTab === 'contacts' ? ' is-active' : ''}`} onClick={() => setTab('contacts')}>
             Contacts
           </button>
-          <button type="button" role="tab" aria-selected={tab === 'precedents'} className={`adminTab${tab === 'precedents' ? ' is-active' : ''}`} onClick={() => setTab('precedents')}>
+          <button type="button" role="tab" aria-selected={activeTab === 'precedents'} className={`adminTab${activeTab === 'precedents' ? ' is-active' : ''}`} onClick={() => setTab('precedents')}>
             Precedents
           </button>
-          <button type="button" role="tab" aria-selected={tab === 'audit'} className={`adminTab${tab === 'audit' ? ' is-active' : ''}`} onClick={() => setTab('audit')}>
+          <button type="button" role="tab" aria-selected={activeTab === 'audit'} className={`adminTab${activeTab === 'audit' ? ' is-active' : ''}`} onClick={() => setTab('audit')}>
             Audit
           </button>
         </div>
       </div>
       <div style={{ flex: 1, minHeight: 0, marginTop: 12, overflow: 'auto' }}>
-        {tab === 'firm' ? (
+        {activeTab === 'firm' ? (
           <AdminFirmDetails token={token} />
-        ) : tab === 'users' ? (
+        ) : activeTab === 'users' ? (
           <AdminUsers token={token} embedded />
-        ) : tab === 'matters' ? (
+        ) : activeTab === 'matters' ? (
           <AdminMatters token={token} />
-        ) : tab === 'billing' ? (
+        ) : activeTab === 'billing' ? (
           <AdminBilling token={token} />
-        ) : tab === 'email' ? (
+        ) : activeTab === 'email' ? (
           <AdminEmail token={token} onSaved={() => void refreshMe()} />
-        ) : tab === 'integrations' && showIntegrations ? (
+        ) : activeTab === 'integrations' && showIntegrations ? (
           <AdminIntegrations token={token} />
-        ) : tab === 'portalForms' ? (
+        ) : activeTab === 'portalForms' ? (
           <AdminPortalForms token={token} />
-        ) : tab === 'deploy' ? (
+        ) : activeTab === 'deploy' ? (
           <AdminDeploy token={token} />
-        ) : tab === 'submenus' ? (
+        ) : activeTab === 'submenus' ? (
           <AdminSubMenus token={token} />
-        ) : tab === 'tasks' ? (
+        ) : activeTab === 'tasks' ? (
           <AdminTasks token={token} />
-        ) : tab === 'contacts' ? (
+        ) : activeTab === 'contacts' ? (
           <AdminMatterContacts token={token} />
-        ) : tab === 'precedents' ? (
+        ) : activeTab === 'precedents' ? (
           <AdminPrecedents token={token} />
         ) : (
           <AdminAudit token={token} embedded />

@@ -5,7 +5,4 @@ from __future__ import annotations
 from app.commercial_runtime import reexport_commercial
 
 if not reexport_commercial(globals(), "canary_commercial.docusign_client"):
-    raise ImportError(
-        "docusign_client requires the Canary commercial package "
-        "(set COMMERCIAL_PACKAGE_DIR / attach docker-compose.commercial.example.yml)."
-    )
+    pass  # commercial not attached — callers must gate on package status

@@ -36,6 +36,7 @@ export function AdminHmlr({ token }: { token: string }) {
 
   useEffect(() => {
     void load()
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- reload when staff token changes
   }, [token])
 
   async function save() {
