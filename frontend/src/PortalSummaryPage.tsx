@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { apiFetch, type ApiError } from './api'
 import type {
   PortalSummaryBucket,
@@ -46,6 +46,10 @@ function kindBadgeClass(kind: PortalSummaryKind): string {
   }
 }
 
+function rowKey(r: PortalSummaryRowOut): string {
+  return `${r.kind}:${r.id}`
+}
+
 function formatWhen(iso: string | null | undefined): string {
   if (!iso) return '—'
   const d = new Date(iso)
@@ -59,6 +63,9 @@ export function PortalSummaryPage({ token, onSelectCase }: Props) {
   const [rows, setRows] = useState<PortalSummaryRowOut[]>([])
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
+  const [focusKey, setFocusKey] = useState<string | null>(null)
+  const [ctx, setCtx] = useState<null | { x: number; y: number; row: PortalSummaryRowOut }>(null)
+  const ctxRef = useRef<HTMLDivElement | null>(null)
 
   const load = useCallback(async () => {
     setBusy(true)
@@ -80,6 +87,22 @@ export function PortalSummaryPage({ token, onSelectCase }: Props) {
     void load()
   }, [load])
 
+  useEffect(() => {
+    setFocusKey(null)
+    setCtx(null)
+  }, [bucket, kind, search])
+
+  useEffect(() => {
+    if (!ctx) return
+    function onMouseDown(e: MouseEvent) {
+      const t = e.target as Node
+      if (ctxRef.current?.contains(t)) return
+      setCtx(null)
+    }
+    document.addEventListener('mousedown', onMouseDown)
+    return () => document.removeEventListener('mousedown', onMouseDown)
+  }, [ctx])
+
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
     if (!q) return rows
@@ -100,6 +123,25 @@ export function PortalSummaryPage({ token, onSelectCase }: Props) {
       return hay.includes(q)
     })
   }, [rows, search])
+
+  const openMatter = useCallback(
+    (r: PortalSummaryRowOut) => {
+      setCtx(null)
+      onSelectCase(r.case_id)
+    },
+    [onSelectCase],
+  )
+
+  const copyReference = useCallback(async (r: PortalSummaryRowOut) => {
+    setCtx(null)
+    const text = (r.case_number || '').trim()
+    if (!text) return
+    try {
+      await navigator.clipboard.writeText(text)
+    } catch {
+      // ignore clipboard failures (permissions / insecure context)
+    }
+  }, [])
 
   return (
     <div className="mainMenuShell mainMenuShell--mainMenu">
@@ -187,41 +229,93 @@ export function PortalSummaryPage({ token, onSelectCase }: Props) {
               </tr>
             </thead>
             <tbody>
-              {filtered.map((r) => (
-                <tr
-                  key={`${r.kind}:${r.id}`}
-                  className="casesTableRow"
-                  tabIndex={0}
-                  onClick={() => onSelectCase(r.case_id)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === ' ') {
+              {filtered.map((r) => {
+                const key = rowKey(r)
+                const active = focusKey === key
+                return (
+                  <tr
+                    key={key}
+                    className={`casesTableRow${active ? ' active' : ''}`}
+                    tabIndex={0}
+                    aria-selected={active}
+                    onClick={() => setFocusKey(key)}
+                    onDoubleClick={() => openMatter(r)}
+                    onContextMenu={(e) => {
                       e.preventDefault()
-                      onSelectCase(r.case_id)
-                    }
-                  }}
-                >
-                  <td>
-                    <span className={kindBadgeClass(r.kind)}>{kindLabel(r.kind)}</span>
-                  </td>
-                  <td>{r.case_number || '—'}</td>
-                  <td>
-                    <div>{r.client_name || '—'}</div>
-                    {r.matter_description ? (
-                      <div className="muted" style={{ fontSize: 12 }}>
-                        {r.matter_description}
-                      </div>
-                    ) : null}
-                  </td>
-                  <td>{r.title}</td>
-                  <td>{r.contact_or_recipients || '—'}</td>
-                  <td>{r.status}</td>
-                  <td>{formatWhen(r.created_at)}</td>
-                </tr>
-              ))}
+                      e.stopPropagation()
+                      setFocusKey(key)
+                      setCtx({ x: e.clientX, y: e.clientY, row: r })
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault()
+                        openMatter(r)
+                      }
+                    }}
+                  >
+                    <td>
+                      <span className={kindBadgeClass(r.kind)}>{kindLabel(r.kind)}</span>
+                    </td>
+                    <td>{r.case_number || '—'}</td>
+                    <td>
+                      <div>{r.client_name || '—'}</div>
+                      {r.matter_description ? (
+                        <div className="muted" style={{ fontSize: 12 }}>
+                          {r.matter_description}
+                        </div>
+                      ) : null}
+                    </td>
+                    <td>{r.title}</td>
+                    <td>{r.contact_or_recipients || '—'}</td>
+                    <td>{r.status}</td>
+                    <td>{formatWhen(r.created_at)}</td>
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
         ) : null}
       </div>
+
+      {ctx ? (
+        <div
+          ref={ctxRef}
+          className="docContextMenu"
+          style={{ left: ctx.x, top: ctx.y, zIndex: 30 }}
+          onMouseDown={(e) => e.stopPropagation()}
+        >
+          <div
+            className="docContextItem"
+            role="menuitem"
+            tabIndex={0}
+            onClick={() => openMatter(ctx.row)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault()
+                openMatter(ctx.row)
+              }
+            }}
+          >
+            Open matter
+          </div>
+          {ctx.row.case_number?.trim() ? (
+            <div
+              className="docContextItem"
+              role="menuitem"
+              tabIndex={0}
+              onClick={() => void copyReference(ctx.row)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault()
+                  void copyReference(ctx.row)
+                }
+              }}
+            >
+              Copy reference
+            </div>
+          ) : null}
+        </div>
+      ) : null}
     </div>
   )
 }
