@@ -47,12 +47,16 @@ _engine_kwargs: dict = {}
 if DATABASE_URL.startswith("sqlite"):
     pass
 else:
+    from app.firm_catalogue import FIRM_CATALOGUE_SCHEMA
+
+    # libpq startup option survives psycopg3 pool reset()/DISCARD ALL; SET on connect alone does not.
     _engine_kwargs.update(
         pool_pre_ping=True,
         pool_size=_int_env("DATABASE_POOL_SIZE", 10),
         max_overflow=_int_env("DATABASE_MAX_OVERFLOW", 20),
         pool_timeout=_int_env("DATABASE_POOL_TIMEOUT", 30),
         pool_recycle=_int_env("DATABASE_POOL_RECYCLE", 1800),
+        connect_args={"options": f"-csearch_path=public,{FIRM_CATALOGUE_SCHEMA}"},
     )
 engine = create_engine(DATABASE_URL, **_engine_kwargs)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -65,9 +69,13 @@ if not DATABASE_URL.startswith("sqlite"):
 
     from app.firm_catalogue import FIRM_CATALOGUE_SCHEMA
 
-    @event.listens_for(engine, "connect")
-    def _set_firm_catalogue_search_path(dbapi_connection, connection_record) -> None:  # noqa: ARG001
-        """Resolve unqualified catalogue table names in schema ``firm`` after migration."""
+    @event.listens_for(engine, "checkout")
+    def _set_firm_catalogue_search_path(
+        dbapi_connection,
+        connection_record,  # noqa: ARG001
+        connection_proxy,  # noqa: ARG001
+    ) -> None:
+        """Re-apply after pool reset — connect-only SET is wiped by psycopg3 reset()."""
         cursor = dbapi_connection.cursor()
         try:
             cursor.execute(f'SET search_path TO public, "{FIRM_CATALOGUE_SCHEMA}"')
@@ -92,7 +100,6 @@ if not DATABASE_URL.startswith("sqlite"):
                 dbapi_connection.rollback()
             except Exception:
                 pass
-
 
 class Base(DeclarativeBase):
     pass
