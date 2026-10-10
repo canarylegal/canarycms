@@ -67,10 +67,11 @@ from app.quote_portal_service import (
     list_pending_quote_deliveries_for_contact,
     respond_to_quote_delivery,
 )
-from app.docusign_signing_service import (
+from app.commercial_hooks import (
     create_signing_redirect_url,
-    list_pending_for_contact as list_pending_docusign_for_contact,
-    portal_signing_view as docusign_portal_signing_view,
+    docusign_portal_signing_view,
+    get_recipient_by_sign_token,
+    list_pending_docusign_for_contact,
     sync_envelope_status,
 )
 from app.canary_sign_service import (
@@ -461,7 +462,10 @@ def portal_list_signing_requests(
         sync_envelope_status(db, req)
         if req.status.value != "pending":
             continue
-        out.append(PortalDocusignSigningOut(**docusign_portal_signing_view(db, req, contact_id=contact.id)))
+        view = docusign_portal_signing_view(db, req, contact_id=contact.id)
+        if view is None:
+            continue
+        out.append(PortalDocusignSigningOut(**view))
     return out
 
 
@@ -479,12 +483,21 @@ def portal_start_signing(
     if req is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Signing request not found")
     view = docusign_portal_signing_view(db, req, contact_id=contact.id)
-    from app.docusign_signing_service import get_recipient_by_sign_token
-
+    if view is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="DocuSign is not available",
+        )
     recipient = get_recipient_by_sign_token(db, view["sign_token"])
     if recipient is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Recipient not found")
-    url = create_signing_redirect_url(db, recipient)
+    try:
+        url = create_signing_redirect_url(db, recipient)
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+        ) from exc
     return PortalSignStartOut(url=url)
 
 

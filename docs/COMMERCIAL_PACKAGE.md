@@ -18,7 +18,7 @@ Core attaches the package at `/commercial`; without it, Core boots and those pro
 | Layer | Owns |
 |-------|------|
 | **Commercial** | Connector runtime, routers, UI IIFE, **all new** vendor DDL |
-| **Core** | Attach/status APIs, thin UI hosts, historical Alembic, ORM table definitions (shared persistence), soft shims |
+| **Core** | Attach/status APIs, thin UI hosts, `commercial_hooks` (optional enrichment), historical Alembic, ORM table definitions |
 
 ### Where new work goes
 
@@ -27,9 +27,9 @@ Core attaches the package at `/commercial`; without it, Core boots and those pro
 | Casera / HMLR / DocuSign / Searches UI | `canary-commercial/module/ui` (slot export) |
 | Connector API / client / router | `canary-commercial/python/canary_commercial` |
 | New vendor tables / columns | `canary-commercial/module/migrations/versions/*.sql` |
-| Core attach sockets, slot hosts, soft shims | Core only |
+| Core attach sockets, slot hosts, portal/files enrichment | Core (`commercial_hooks` only) |
 
-Do **not** add Core Alembic revisions for vendor DDL, reintroduce Admin/matter DocuSign–Searches–HMLR components under `frontend/src/`, or add `*casera*` / `*hmlr*` / `*docusign*` routers under `backend/app/routers/`.
+Do **not** add Core Alembic revisions for vendor DDL, reintroduce Admin/matter DocuSign–Searches–HMLR components under `frontend/src/`, add `*casera*` / `*hmlr*` / `*docusign*` routers under `backend/app/routers/`, or resurrect deleted `app.docusign_*` / `app.casera_*` / `app.hmlr_*` shim modules.
 
 CI enforces this via `scripts/check_commercial_boundary.py` (job `commercial-boundary`).
 

@@ -313,9 +313,9 @@ def contact_has_portal_delivery_content(db: Session, *, contact_id: uuid.UUID) -
 
     if list_pending_canary_sign(db, contact_id):
         return True
-    from app.docusign_signing_service import list_pending_for_contact as list_pending_docusign
+    from app.commercial_hooks import list_pending_docusign_for_contact
 
-    return bool(list_pending_docusign(db, contact_id))
+    return bool(list_pending_docusign_for_contact(db, contact_id))
 
 
 def contact_has_portal_content_on_case(db: Session, *, contact_id: uuid.UUID, case_id: uuid.UUID) -> bool:
@@ -345,9 +345,9 @@ def contact_has_portal_content_on_case(db: Session, *, contact_id: uuid.UUID, ca
 
     if any(s.case_id == case_id for s in list_pending_portal_forms(db, contact_id)):
         return True
-    from app.docusign_signing_service import list_pending_for_contact as list_pending_docusign
+    from app.commercial_hooks import list_pending_docusign_for_contact
 
-    return any(req.case_id == case_id for req, _ in list_pending_docusign(db, contact_id))
+    return any(req.case_id == case_id for req, _ in list_pending_docusign_for_contact(db, contact_id))
 
 
 def get_grant_for_contact(db: Session, *, contact_id: uuid.UUID, grant_id: uuid.UUID) -> ContactPortalGrant:

@@ -335,8 +335,12 @@ def list_case_files(
         for d in deliveries:
             delivery_by_file[d.file_id] = d
 
-    from app.docusign_settings import get_docusign_settings
-    from app.docusign_signing_service import signing_request_file_list_item, sync_pending_signing_requests
+    from app.commercial_hooks import (
+        docusign_enabled,
+        search_file_summaries_for_case,
+        signing_request_file_list_item,
+        sync_pending_signing_requests,
+    )
     from app.canary_sign_service import signing_request_file_list_item as canary_signing_file_list_item
     from app.models import (
         CanarySignRequest,
@@ -359,7 +363,7 @@ def list_case_files(
 
     signing_by_file: dict[uuid.UUID, dict] = {}
     if file_ids:
-        if get_docusign_settings(db).enabled:
+        if docusign_enabled(db):
             sync_pending_signing_requests(db, case_id=case_id, source_file_ids=file_ids)
         signing_rows = (
             db.execute(
@@ -422,8 +426,6 @@ def list_case_files(
         for sub in form_rows:
             if sub.snapshot_file_id and sub.snapshot_file_id not in form_by_file:
                 form_by_file[sub.snapshot_file_id] = sub
-
-    from app.casera_service import search_file_summaries_for_case
 
     casera_by_file = search_file_summaries_for_case(db, case_id) if file_ids else {}
 

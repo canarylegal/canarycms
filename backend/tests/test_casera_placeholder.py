@@ -13,7 +13,7 @@ from app.commercial_runtime import ensure_commercial_path
 if not ensure_commercial_path():
     pytest.skip("requires Canary commercial package", allow_module_level=True)
 
-from app.casera_service import build_placeholder_pdf, normalize_risk_badges, status_label
+from canary_commercial.casera_service import build_placeholder_pdf, normalize_risk_badges, status_label
 
 
 def test_build_placeholder_pdf_is_readable() -> None:

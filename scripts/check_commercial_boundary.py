@@ -56,6 +56,21 @@ _FORBIDDEN_ROUTER_GLOBS = (
     "backend/app/routers/*searches*",
 )
 
+# Deleted Level-C soft shims — Core uses commercial_hooks + canary_commercial.*.
+_FORBIDDEN_SHIMS = (
+    "backend/app/docusign_client.py",
+    "backend/app/docusign_tabs.py",
+    "backend/app/docusign_signing_service.py",
+    "backend/app/docusign_settings.py",
+    "backend/app/casera_client.py",
+    "backend/app/casera_settings.py",
+    "backend/app/casera_service.py",
+    "backend/app/hmlr_client.py",
+    "backend/app/hmlr_service.py",
+    "backend/app/hmlr_settings.py",
+    "backend/app/search_settings.py",
+)
+
 
 def _fail(msg: str, failures: list[str]) -> None:
     failures.append(msg)
@@ -102,11 +117,22 @@ def check_routers(failures: list[str]) -> None:
                 )
 
 
+def check_shims(failures: list[str]) -> None:
+    for rel in _FORBIDDEN_SHIMS:
+        if (ROOT / rel).is_file():
+            _fail(
+                f"legacy commercial shim reintroduced: {rel} "
+                f"(use app.commercial_hooks or canary_commercial.*)",
+                failures,
+            )
+
+
 def main() -> int:
     failures: list[str] = []
     check_alembic(failures)
     check_frontend(failures)
     check_routers(failures)
+    check_shims(failures)
     if failures:
         print("commercial boundary check FAILED:", file=sys.stderr)
         for item in failures:

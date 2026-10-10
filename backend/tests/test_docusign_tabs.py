@@ -1,8 +1,15 @@
-"""DocuSign default tab placement for non-template sends."""
+"""DocuSign default tab placement — lives in canary-commercial."""
 
 from __future__ import annotations
 
-from app.docusign_tabs import signer_tabs_for_document
+import pytest
+
+from app.commercial_runtime import ensure_commercial_path
+
+if not ensure_commercial_path():
+    pytest.skip("requires Canary commercial package", allow_module_level=True)
+
+from canary_commercial.docusign_tabs import signer_tabs_for_document  # noqa: E402
 
 
 def test_signer_tabs_use_integer_page_number() -> None:
@@ -46,4 +53,4 @@ def test_multiple_signers_stack_vertically() -> None:
     )
     y1 = int(t1["signHereTabs"][0]["yPosition"])
     y2 = int(t2["signHereTabs"][0]["yPosition"])
-    assert y2 < y1
+    assert y1 > y2
