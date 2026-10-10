@@ -532,10 +532,11 @@ export function FinancePage({ caseId, token, onSaved, embedded = false }: Props)
                   await alert('No debit lines with amounts to post.', 'Post to ledger')
                   return
                 }
-                const ok = await askConfirm(
-                  `Post ${itemIds.length} debit line(s) to the office ledger as anticipated disbursements?`,
-                  'Post to ledger',
-                )
+                const ok = await askConfirm({
+                  title: 'Post to ledger',
+                  message: `Post ${itemIds.length} debit line(s) to the office ledger as anticipated disbursements?`,
+                  confirmLabel: 'Post',
+                })
                 if (!ok) return
                 setBusy(true)
                 setError(null)
