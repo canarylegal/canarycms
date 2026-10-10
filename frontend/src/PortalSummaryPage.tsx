@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { apiFetch, type ApiError } from './api'
+import { SearchInput } from './SearchInput'
+import { SingleSelectDropdown } from './SingleSelectDropdown'
 import type {
   PortalSummaryBucket,
   PortalSummaryKind,
@@ -12,13 +14,23 @@ type Props = {
   onSelectCase: (caseId: string) => void
 }
 
-const KIND_OPTIONS: { value: '' | PortalSummaryKind; label: string }[] = [
+const KIND_OPTIONS: { value: string; label: string }[] = [
   { value: '', label: 'All kinds' },
   { value: 'quote', label: 'Quote' },
   { value: 'form', label: 'Form' },
   { value: 'canary_sign', label: 'Canary Sign' },
   { value: 'docusign', label: 'DocuSign' },
 ]
+
+const PORTAL_COLUMNS = [
+  ['kind', 'Kind'],
+  ['reference', 'Reference'],
+  ['client', 'Client'],
+  ['title', 'Title'],
+  ['recipients', 'Recipients'],
+  ['status', 'Status'],
+  ['sent', 'Sent'],
+] as const
 
 function kindLabel(kind: PortalSummaryKind): string {
   switch (kind) {
@@ -59,6 +71,7 @@ function formatWhen(iso: string | null | undefined): string {
 export function PortalSummaryPage({ token, onSelectCase }: Props) {
   const [bucket, setBucket] = useState<PortalSummaryBucket>('outstanding')
   const [kind, setKind] = useState<'' | PortalSummaryKind>('')
+  const [kindOpen, setKindOpen] = useState(false)
   const [search, setSearch] = useState('')
   const [rows, setRows] = useState<PortalSummaryRowOut[]>([])
   const [busy, setBusy] = useState(false)
@@ -145,17 +158,8 @@ export function PortalSummaryPage({ token, onSelectCase }: Props) {
 
   return (
     <div className="mainMenuShell mainMenuShell--mainMenu">
-      <div className="paneHead" style={{ marginBottom: 12 }}>
-        <h1 style={{ margin: 0, fontSize: 22 }}>Portal</h1>
-        <div className="muted" style={{ marginTop: 4 }}>
-          Outstanding client actions across matters (quotes, forms, signing). Shared folders are not listed
-          here.
-        </div>
-      </div>
-
       {err ? <div className="error">{err}</div> : null}
-
-      <div className="mainMenuFilterBar">
+      <div className={`mainMenuFilterBar${kindOpen ? ' mainMenuFilterBar--dropdownOpen' : ''}`}>
         <div className="row mainMenuFilterRow mainMenuFilterRow--toolbar mainMenuFilterRow--searchRight">
           <div className="mainMenuFilterRowLeft">
             <button
@@ -174,30 +178,30 @@ export function PortalSummaryPage({ token, onSelectCase }: Props) {
             >
               Completed
             </button>
-            <select
-              className="input"
-              aria-label="Kind filter"
-              value={kind}
-              disabled={busy}
-              onChange={(e) => setKind(e.target.value as '' | PortalSummaryKind)}
-            >
-              {KIND_OPTIONS.map((o) => (
-                <option key={o.value || '__all'} value={o.value}>
-                  {o.label}
-                </option>
-              ))}
-            </select>
+            <div className="tasksToolbarLayoutGroup">
+              <span className="tasksToolbarLayoutLabel">Kind</span>
+              <SingleSelectDropdown
+                hideLabel
+                label="Kind filter"
+                options={KIND_OPTIONS}
+                value={kind}
+                disabled={busy}
+                onChange={(v) => setKind(v as '' | PortalSummaryKind)}
+                open={kindOpen}
+                onOpenChange={setKindOpen}
+              />
+            </div>
             <button type="button" className="btn" disabled={busy} onClick={() => void load()}>
               Refresh
             </button>
           </div>
           <div className="mainMenuFilterRowRight">
-            <input
-              className="input mainMenuSearchInput"
-              type="search"
+            <SearchInput
               placeholder="Search"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
+              onClear={() => setSearch('')}
+              className="mainMenuSearchInput"
               aria-label="Search portal actions"
             />
           </div>
@@ -205,76 +209,72 @@ export function PortalSummaryPage({ token, onSelectCase }: Props) {
       </div>
 
       <div className="card casesTableCard" style={{ padding: 0, overflow: 'hidden' }}>
-        {busy && rows.length === 0 ? <div className="muted" style={{ padding: 12 }}>Loading…</div> : null}
-        {!busy && filtered.length === 0 ? (
-          <div className="muted" style={{ padding: 12 }}>
-            {rows.length === 0
-              ? bucket === 'outstanding'
-                ? 'No outstanding portal actions.'
-                : 'No completed portal actions.'
-              : 'No actions match your search.'}
-          </div>
-        ) : null}
-        {filtered.length > 0 ? (
-          <table className="casesTable">
-            <thead>
-              <tr>
-                <th>Kind</th>
-                <th>Reference</th>
-                <th>Client</th>
-                <th>Title</th>
-                <th>Recipients</th>
-                <th>Status</th>
-                <th>Sent</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map((r) => {
-                const key = rowKey(r)
-                const active = focusKey === key
-                return (
-                  <tr
-                    key={key}
-                    className={`casesTableRow${active ? ' active' : ''}`}
-                    tabIndex={0}
-                    aria-selected={active}
-                    onClick={() => setFocusKey(key)}
-                    onDoubleClick={() => openMatter(r)}
-                    onContextMenu={(e) => {
+        <div className="casesTableScroll portalSummaryTableScroll">
+          <div className="table">
+            <div className="tr th">
+              {PORTAL_COLUMNS.map(([k, label]) => (
+                <div key={k} className="thCell">
+                  <span className="thbtn" style={{ cursor: 'default' }}>
+                    {label}
+                  </span>
+                </div>
+              ))}
+            </div>
+            {busy && rows.length === 0 ? <div className="muted" style={{ padding: 12 }}>Loading…</div> : null}
+            {!busy && filtered.length === 0 ? (
+              <div className="muted" style={{ padding: 12 }}>
+                {rows.length === 0
+                  ? bucket === 'outstanding'
+                    ? 'No outstanding portal actions.'
+                    : 'No completed portal actions.'
+                  : 'No actions match your search.'}
+              </div>
+            ) : null}
+            {filtered.map((r) => {
+              const key = rowKey(r)
+              const active = focusKey === key
+              return (
+                <button
+                  key={key}
+                  type="button"
+                  className={`tr rowbtn${active ? ' active' : ''}`}
+                  aria-selected={active}
+                  onClick={() => setFocusKey(key)}
+                  onDoubleClick={() => openMatter(r)}
+                  onContextMenu={(e) => {
+                    e.preventDefault()
+                    e.stopPropagation()
+                    setFocusKey(key)
+                    setCtx({ x: e.clientX, y: e.clientY, row: r })
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
                       e.preventDefault()
-                      e.stopPropagation()
-                      setFocusKey(key)
-                      setCtx({ x: e.clientX, y: e.clientY, row: r })
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        e.preventDefault()
-                        openMatter(r)
-                      }
-                    }}
-                  >
-                    <td>
-                      <span className={kindBadgeClass(r.kind)}>{kindLabel(r.kind)}</span>
-                    </td>
-                    <td>{r.case_number || '—'}</td>
-                    <td>
-                      <div>{r.client_name || '—'}</div>
-                      {r.matter_description ? (
-                        <div className="muted" style={{ fontSize: 12 }}>
-                          {r.matter_description}
-                        </div>
-                      ) : null}
-                    </td>
-                    <td>{r.title}</td>
-                    <td>{r.contact_or_recipients || '—'}</td>
-                    <td>{r.status}</td>
-                    <td>{formatWhen(r.created_at)}</td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
-        ) : null}
+                      openMatter(r)
+                    }
+                  }}
+                >
+                  <div className="td">
+                    <span className={kindBadgeClass(r.kind)}>{kindLabel(r.kind)}</span>
+                  </div>
+                  <div className="td">{r.case_number || '—'}</div>
+                  <div className="td">
+                    <div>{r.client_name || '—'}</div>
+                    {r.matter_description ? (
+                      <div className="muted" style={{ fontSize: 12 }}>
+                        {r.matter_description}
+                      </div>
+                    ) : null}
+                  </div>
+                  <div className="td">{r.title}</div>
+                  <div className="td">{r.contact_or_recipients || '—'}</div>
+                  <div className="td">{r.status}</div>
+                  <div className="td">{formatWhen(r.created_at)}</div>
+                </button>
+              )
+            })}
+          </div>
+        </div>
       </div>
 
       {ctx ? (
