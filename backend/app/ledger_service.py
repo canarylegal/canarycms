@@ -227,6 +227,17 @@ def post_transaction(
 
     party = resolve_ledger_party(case_id, payload, db)
 
+    bank_id = getattr(payload, "firm_bank_account_id", None)
+    payment_method = getattr(payload, "payment_method", None)
+    if payload.client_direction and not is_anticipated:
+        from app.bank_accounts_service import enforce_client_post_bank_fields
+
+        bank_id, payment_method = enforce_client_post_bank_fields(
+            db,
+            firm_bank_account_id=bank_id,
+            payment_method=payment_method,
+        )
+
     accounts = _get_or_create_accounts(case_id, db, for_update=is_approved)
     if is_approved and payload.client_direction:
         current = _balance(accounts["client"].id, db, approved_only=True)
@@ -260,6 +271,8 @@ def post_transaction(
                 is_approved=is_approved,
                 is_anticipated=is_anticipated,
                 anticipated_for_date=anticipated_for_date,
+                firm_bank_account_id=bank_id,
+                payment_method=payment_method,
             )
         )
 
@@ -281,6 +294,8 @@ def post_transaction(
                 is_approved=is_approved,
                 is_anticipated=is_anticipated,
                 anticipated_for_date=anticipated_for_date,
+                firm_bank_account_id=bank_id if payload.client_direction else getattr(payload, "firm_bank_account_id", None),
+                payment_method=payment_method if payload.client_direction else getattr(payload, "payment_method", None),
             )
         )
 
@@ -490,6 +505,8 @@ def get_ledger(case_id: uuid.UUID, db: Session) -> LedgerOut:
                 is_approved=e.is_approved,
                 is_anticipated=e.is_anticipated,
                 anticipated_for_date=e.anticipated_for_date,
+                firm_bank_account_id=e.firm_bank_account_id,
+                payment_method=e.payment_method,
             )
         )
 

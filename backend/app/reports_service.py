@@ -656,10 +656,10 @@ def report_aged_debt(
     *,
     as_of: date | None = None,
 ) -> tuple[list[AgedDebtRow], dict[str, int]]:
-    """Approved invoices on matters whose office balance is still debit (client owes).
+    """Approved invoices that are not fully allocated and whose office balance is still debit.
 
-    Age is measured from ``approved_at`` (fallback ``created_at``). There is no separate
-    paid flag — matter office balance is the debt indicator.
+    Age is measured from ``approved_at`` (fallback ``created_at``). Fully paid invoices
+    (``paid_at`` set or allocations covering the total) are excluded.
     """
     ref = as_of or datetime.now(timezone.utc).date()
     pairs = (
@@ -670,6 +670,7 @@ def report_aged_debt(
                 Case.fee_earner_user_id.in_(fee_earner_user_ids),
                 Case.fee_earner_user_id.isnot(None),
                 CaseInvoice.status == INV_APPROVED,
+                CaseInvoice.paid_at.is_(None),
             )
             .order_by(CaseInvoice.approved_at.desc().nullslast(), CaseInvoice.created_at.desc())
         )
@@ -682,13 +683,16 @@ def report_aged_debt(
     out: list[AgedDebtRow] = []
     bucket_totals = {"0-30": 0, "31-60": 0, "61-90": 0, "90+": 0}
     for inv, case in pairs:
+        allocated = int(getattr(inv, "amount_allocated_pence", 0) or 0)
+        if allocated >= int(inv.total_pence):
+            continue
         _client, office = bal.get(case.id, (0, 0))
         if office >= 0:
             continue
         anchor = inv.approved_at or inv.created_at
         age_days = max(0, (ref - _as_utc_date(anchor)).days)
         bucket = _age_bucket_label(age_days)
-        total = int(inv.total_pence)
+        total = int(inv.total_pence) - allocated
         bucket_totals[bucket] += total
         out.append(
             AgedDebtRow(

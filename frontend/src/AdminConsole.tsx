@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { AdminAudit } from './AdminAudit'
 import { AdminBilling } from './AdminBilling'
+import { AdminBankAccounts } from './AdminBankAccounts'
 import { AdminDeploy } from './AdminDeploy'
 import { AdminEmail } from './AdminEmail'
 import { CommercialAdminIntegrationsSlot } from './commercial/CommercialSlotHosts'
@@ -26,6 +27,7 @@ export function AdminConsole({ token, refreshMe }: { token: string; refreshMe: (
     | 'users'
     | 'matters'
     | 'billing'
+    | 'banks'
     | 'email'
     | 'integrations'
     | 'portalForms'
@@ -75,15 +77,17 @@ export function AdminConsole({ token, refreshMe }: { token: string; refreshMe: (
             ? 'Matter types and defaults.'
             : activeTab === 'billing'
               ? 'Billing configuration.'
-              : activeTab === 'submenus'
-                ? 'Case sub-menu configuration.'
-                : activeTab === 'tasks'
-                  ? 'Task templates and defaults.'
-                  : activeTab === 'contacts'
-                    ? 'Matter contact types.'
-                    : activeTab === 'precedents'
-                      ? 'Precedent library.'
-                      : ''
+              : activeTab === 'banks'
+                ? 'Client and office bank accounts for ledger posting and reconciliation.'
+                : activeTab === 'submenus'
+                  ? 'Case sub-menu configuration.'
+                  : activeTab === 'tasks'
+                    ? 'Task templates and defaults.'
+                    : activeTab === 'contacts'
+                      ? 'Matter contact types.'
+                      : activeTab === 'precedents'
+                        ? 'Precedent library.'
+                        : ''
   return (
     <div
       className="mainMenuShell mainMenuShell--surface"
@@ -106,6 +110,9 @@ export function AdminConsole({ token, refreshMe }: { token: string; refreshMe: (
           </button>
           <button type="button" role="tab" aria-selected={activeTab === 'billing'} className={`adminTab${activeTab === 'billing' ? ' is-active' : ''}`} onClick={() => setTab('billing')}>
             Billing
+          </button>
+          <button type="button" role="tab" aria-selected={activeTab === 'banks'} className={`adminTab${activeTab === 'banks' ? ' is-active' : ''}`} onClick={() => setTab('banks')}>
+            Banks
           </button>
           <button type="button" role="tab" aria-selected={activeTab === 'email'} className={`adminTab${activeTab === 'email' ? ' is-active' : ''}`} onClick={() => setTab('email')}>
             E-mail
@@ -147,6 +154,8 @@ export function AdminConsole({ token, refreshMe }: { token: string; refreshMe: (
           <AdminMatters token={token} />
         ) : activeTab === 'billing' ? (
           <AdminBilling token={token} />
+        ) : activeTab === 'banks' ? (
+          <AdminBankAccounts token={token} />
         ) : activeTab === 'email' ? (
           <AdminEmail token={token} onSaved={() => void refreshMe()} />
         ) : activeTab === 'integrations' && showIntegrations ? (

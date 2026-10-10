@@ -20,8 +20,9 @@ import {
   type PendingLedgerAccountFilter,
   type PendingLedgerDirectionFilter,
 } from './ledgerApproval'
+import { AccountsBankingPanel } from './AccountsBankingPanel'
 
-type AccountsTab = 'queue' | 'exceptions' | 'activity' | 'reconcile'
+type AccountsTab = 'queue' | 'exceptions' | 'activity' | 'reconcile' | 'banking'
 
 type FeeEarnerPick = { id: string; display_name: string; email: string }
 
@@ -109,6 +110,7 @@ const TAB_OPTIONS: { value: AccountsTab; label: string }[] = [
   { value: 'exceptions', label: 'Exceptions' },
   { value: 'activity', label: 'Ledger activity' },
   { value: 'reconcile', label: 'Client account' },
+  { value: 'banking', label: 'Banking' },
 ]
 
 function formatMoneyPence(p: number): string {
@@ -882,6 +884,18 @@ export function AccountsPage({ token, me, onOpenCase, onOpenReportsReconcile }: 
                   </table>
                 </>
               ) : null}
+            </section>
+          ) : null}
+
+          {tab === 'banking' ? (
+            <section className="reportsSection">
+              <AccountsBankingPanel
+                token={token}
+                busy={busy || actionKey !== null}
+                setBusy={setBusy}
+                setErr={setErr}
+                active={tab === 'banking'}
+              />
             </section>
           ) : null}
         </div>

@@ -90,6 +90,8 @@ class CaseInvoice(Base):
     document_file_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("file.id", ondelete="SET NULL"), nullable=True
     )
+    amount_allocated_pence: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
 
 class CaseInvoiceLine(Base):

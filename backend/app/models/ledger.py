@@ -84,3 +84,7 @@ class LedgerEntry(Base):
     is_approved: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     is_anticipated: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     anticipated_for_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    firm_bank_account_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("firm_bank_account.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    payment_method: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)

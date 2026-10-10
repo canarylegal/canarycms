@@ -24,6 +24,8 @@ export type CaseInvoiceOut = {
   voided_at?: string | null
   created_at: string
   document_file_id?: string | null
+  amount_allocated_pence?: number
+  paid_at?: string | null
   lines: CaseInvoiceLineOut[]
 }
 
@@ -88,6 +90,8 @@ export type LedgerEntryOut = {
   is_approved?: boolean
   is_anticipated?: boolean
   anticipated_for_date?: string | null
+  firm_bank_account_id?: string | null
+  payment_method?: string | null
 }
 
 export type LedgerAccountSummary = {
@@ -112,6 +116,8 @@ export type LedgerPostCreate = {
   office_direction?: 'debit' | 'credit' | null
   anticipated?: boolean
   anticipated_for_date?: string | null
+  firm_bank_account_id?: string | null
+  payment_method?: string | null
 }
 
 // ---------------------------------------------------------------------------

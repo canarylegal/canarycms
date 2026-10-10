@@ -116,6 +116,18 @@ from app.models.ledger import (
     LedgerEntry,
 )
 
+from app.models.bank import (
+    FirmBankAccount,
+    BankStatementImport,
+    BankStatementLine,
+    BankReconciliation,
+    ClientAccountEom,
+    CaseInvoiceAllocation,
+    InterMatterJournal,
+    XeroIntegrationSettings,
+    XeroJournalExport,
+)
+
 from app.models.finance import (
     FinanceCategoryTemplate,
     FinanceItemTemplate,
@@ -259,6 +271,15 @@ __all__ = [
     'LedgerDirection',
     'LedgerAccount',
     'LedgerEntry',
+    'FirmBankAccount',
+    'BankStatementImport',
+    'BankStatementLine',
+    'BankReconciliation',
+    'ClientAccountEom',
+    'CaseInvoiceAllocation',
+    'InterMatterJournal',
+    'XeroIntegrationSettings',
+    'XeroJournalExport',
     'FinanceCategoryTemplate',
     'FinanceItemTemplate',
     'FinanceCategory',

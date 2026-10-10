@@ -23,6 +23,7 @@ from app.finance_service import (
     update_finance_item,
 )
 from app.models import Case, File as DbFile, FileCategory, User
+from app.finance_ledger_bridge import post_finance_items_to_ledger
 from app.schemas import (
     FinanceCategoryCreate,
     FinanceCategoryOut,
@@ -32,6 +33,7 @@ from app.schemas import (
     FinanceItemUpdate,
     FinanceOut,
 )
+from app.schemas.bank import FinanceLedgerBridgeIn, FinanceLedgerBridgeOut
 
 router = APIRouter(prefix="/cases", tags=["finance"])
 
@@ -189,3 +191,16 @@ def generate_completion_statement(
     commit_keeping_stored_file(db, paths.abs_path)
     db.refresh(row)
     return {"id": str(row.id)}
+
+
+@router.post("/{case_id}/finance/post-to-ledger", response_model=FinanceLedgerBridgeOut)
+def post_finance_to_ledger(
+    case_id: uuid.UUID,
+    payload: FinanceLedgerBridgeIn,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> FinanceLedgerBridgeOut:
+    require_case_access(case_id, user, db)
+    out = post_finance_items_to_ledger(db, case_id=case_id, payload=payload, user=user)
+    db.commit()
+    return out
