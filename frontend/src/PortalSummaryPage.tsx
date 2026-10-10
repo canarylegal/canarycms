@@ -258,15 +258,17 @@ export function PortalSummaryPage({ token, onSelectCase }: Props) {
                     <span className={kindBadgeClass(r.kind)}>{kindLabel(r.kind)}</span>
                   </div>
                   <div className="td">{r.case_number || '—'}</div>
-                  <div className="td">
-                    <div>{r.client_name || '—'}</div>
-                    {r.matter_description ? (
-                      <div className="muted" style={{ fontSize: 12 }}>
-                        {r.matter_description}
-                      </div>
-                    ) : null}
+                  <div
+                    className="td"
+                    title={
+                      [r.client_name, r.matter_description].filter(Boolean).join(' — ') || undefined
+                    }
+                  >
+                    {r.client_name || '—'}
                   </div>
-                  <div className="td">{r.title}</div>
+                  <div className="td" title={r.title || undefined}>
+                    {r.title}
+                  </div>
                   <div className="td">{r.contact_or_recipients || '—'}</div>
                   <div className="td">{r.status}</div>
                   <div className="td">{formatWhen(r.created_at)}</div>
