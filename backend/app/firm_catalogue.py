@@ -1,8 +1,9 @@
 """Firm catalogue schema ownership.
 
 Firm-owned catalogue tables live in the Postgres schema ``firm`` (created by
-core migrations). ORM models stay schema-unqualified; PostgreSQL connections
-set ``search_path`` to ``public, firm`` so names resolve correctly.
+core migrations). ORM models stay schema-unqualified; the DB engine sets
+``search_path`` to ``public, firm`` via libpq options and on each pool checkout
+(so psycopg3 pool reset does not drop ``firm``).
 
 Core ``public`` keeps users, cases, file metadata, and portal submissions.
 System precedent *seed files* ship in the Canary image; their DB rows live in
