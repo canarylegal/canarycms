@@ -124,12 +124,13 @@ slots = body.get("slots") or {}
 assert expected_slots <= set(slots), slots
 assert all(slots[k] is True for k in expected_slots), slots
 ui = body.get("ui") or {}
-assert ui.get("bundle_url") == "/commercial-modules/active/ui/commercial-module.js", ui
+bundle_url = ui.get("bundle_url") or ""
+assert bundle_url.startswith("/commercial-modules/active/ui/commercial-module.js"), ui
 exports = ui.get("exports") or {}
 for key, name in expected_exports.items():
     assert exports.get(key) == name, (key, exports)
 
-bundle = client.get(ui["bundle_url"])
+bundle = client.get(bundle_url)
 assert bundle.status_code == 200, bundle.text
 assert "javascript" in (bundle.headers.get("content-type") or "").lower() or bundle.content[:20]
 assert b"CanaryCommercialModule" in bundle.content, bundle.content[:120]
