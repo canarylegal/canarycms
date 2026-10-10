@@ -78,18 +78,3 @@ def register_commercial_routers(app: Any) -> list[str]:
     _REGISTERED_PRODUCTS = products
     return products
 
-
-def reexport_commercial(globals_dict: dict[str, Any], module_name: str) -> bool:
-    """Copy public attrs from a commercial module into a Core shim module.
-
-    Returns True when the commercial module was loaded.
-    """
-    mod = import_commercial(module_name)
-    if mod is None:
-        return False
-    for name, value in vars(mod).items():
-        if name.startswith("_"):
-            continue
-        globals_dict[name] = value
-    globals_dict["__doc__"] = getattr(mod, "__doc__", globals_dict.get("__doc__"))
-    return True

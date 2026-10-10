@@ -24,9 +24,9 @@ from app.canary_sign_service import (
     read_snapshot_pdf_bytes,
 )
 from app.download_headers import content_disposition_headers
-from app.docusign_signing_service import (
-    list_pending_for_contact as list_pending_docusign_for_contact,
-    portal_signing_view as docusign_portal_signing_view,
+from app.commercial_hooks import (
+    docusign_portal_signing_view,
+    list_pending_docusign_for_contact,
     sync_envelope_status,
 )
 from app.file_storage import (
@@ -302,8 +302,10 @@ def browse_grant(
             []
             if exchange
             else [
-                PortalDocusignSigningOut(**docusign_portal_signing_view(db, req, contact_id=contact.id))
+                PortalDocusignSigningOut(**view)
                 for req, _recip in list_pending_docusign_for_contact(db, contact.id)
+                for view in [docusign_portal_signing_view(db, req, contact_id=contact.id)]
+                if view is not None
             ]
         ),
         pending_canary_signings=(
@@ -784,6 +786,8 @@ def client_actions(contact: Contact, db: Session) -> PortalClientActionsOut:
         if req.status.value != "pending":
             continue
         view = docusign_portal_signing_view(db, req, contact_id=contact.id)
+        if view is None:
+            continue
         outstanding.append(
             PortalClientActionItemOut(
                 kind="docusign",
