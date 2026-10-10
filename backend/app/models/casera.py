@@ -26,6 +26,8 @@ class CaseraIntegrationSettings(Base):
     webhook_path_token: Mapped[str | None] = mapped_column(Text, nullable=True)
     api_base_uri: Mapped[str | None] = mapped_column(Text, nullable=True)
     post_anticipated_disbursement: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # office | client — which ledger anticipated search costs debit.
+    anticipated_ledger_account: Mapped[str] = mapped_column(String(16), nullable=False, default="office")
     add_to_completion_statement: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     email_on_result_ready: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=text("now()"))

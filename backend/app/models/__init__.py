@@ -167,10 +167,13 @@ from app.models.casera import (
 
 from app.models.hmlr import (
     HmlrIntegrationSettings,
+    HmlrCaseLink,
     HmlrOrder,
 )
 
 from app.models.search_integration import SearchIntegrationSettings
+
+from app.models.commercial_funds import CommercialFundsSettings
 
 __all__ = [
     'Base',
@@ -289,6 +292,8 @@ __all__ = [
     'CaseraOrderProduct',
     'CaseraWebhookEvent',
     'HmlrIntegrationSettings',
+    'HmlrCaseLink',
     'HmlrOrder',
+    'CommercialFundsSettings',
     'SearchIntegrationSettings',
 ]

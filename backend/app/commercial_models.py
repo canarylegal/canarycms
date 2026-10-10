@@ -17,9 +17,11 @@ from app.models.casera import (  # noqa: F401
     CaseraWebhookEvent,
 )
 from app.models.hmlr import (  # noqa: F401
+    HmlrCaseLink,
     HmlrIntegrationSettings,
     HmlrOrder,
 )
+from app.models.commercial_funds import CommercialFundsSettings  # noqa: F401
 from app.models.search_integration import SearchIntegrationSettings  # noqa: F401
 from app.models.signing import (  # noqa: F401
     DocusignDocumentTier,
