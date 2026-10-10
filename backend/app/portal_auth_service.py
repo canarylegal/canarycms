@@ -1,4 +1,4 @@
-"""Portal auth helpers (access code, OTP, preview / link exchange)."""
+"""Portal auth helpers (access code, code reset, preview / link exchange)."""
 
 from __future__ import annotations
 
@@ -44,6 +44,7 @@ from app.portal_service import (
     record_matter_portal_auth_success,
     record_portal_auth_failure,
     record_portal_auth_success,
+    regenerate_contact_portal_access_code,
     verify_portal_login_otp,
 )
 from app.quote_portal_service import resolve_quote_exchange_delivery
@@ -53,10 +54,11 @@ from app.schemas import (
     PortalCanarySignExchangeIn,
     PortalCanarySignExchangeOut,
     PortalCanarySignOut,
+    PortalCodeResetConfirmIn,
+    PortalCodeResetConfirmOut,
+    PortalCodeResetRequestIn,
     PortalFormExchangeIn,
     PortalFormExchangeOut,
-    PortalOtpRequestIn,
-    PortalOtpVerifyIn,
     PortalPreviewExchangeIn,
     PortalQuoteExchangeIn,
     PortalQuoteExchangeOut,
@@ -144,8 +146,8 @@ def portal_auth(payload: PortalAuthIn, request: Request, db: Session) -> PortalA
     )
 
 
-def portal_request_otp(payload: PortalOtpRequestIn, request: Request, db: Session) -> None:
-    """Send a one-time sign-in code if this e-mail has active portal access."""
+def portal_request_code_reset(payload: PortalCodeResetRequestIn, request: Request, db: Session) -> None:
+    """Send a verification code if this e-mail has active portal access (always silent 204)."""
     ip = client_ip_from_request(request)
     email = (payload.email or "").strip().lower()
     check_portal_otp_request_rate_limits(db, email=email, ip=ip)
@@ -167,40 +169,49 @@ def portal_request_otp(payload: PortalOtpRequestIn, request: Request, db: Sessio
     )
 
 
-def portal_verify_otp(payload: PortalOtpVerifyIn, request: Request, db: Session) -> PortalAuthOut:
+def portal_confirm_code_reset(
+    payload: PortalCodeResetConfirmIn, request: Request, db: Session
+) -> PortalCodeResetConfirmOut:
+    """Verify e-mail OTP, rotate the access code, and e-mail the new code."""
     ip = client_ip_from_request(request)
     email = (payload.email or "").strip().lower()
     check_portal_otp_verify_rate_limits(db, email=email, ip=ip)
     contact = find_portal_contact_by_email(db, payload.email)
     if contact is None or not verify_portal_login_otp(db, contact.id, payload.code.strip()):
         record_portal_otp_verify_failure(db, email=email, ip=ip)
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired sign-in code")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired verification code")
     clear_portal_otp_verify_rate_limits(db, email=email)
-    # Valid OTP + active portal access is enough; empty portal home is allowed.
-    access_row = db.execute(
-        select(ContactPortalAccess).where(ContactPortalAccess.contact_id == contact.id)
-    ).scalar_one_or_none()
-    if access_row:
-        record_portal_auth_success(db, access_row)
-    token = create_portal_session_token(
-        contact_id=str(contact.id),
-        session_version=portal_session_version(access_row),
-    )
+    try:
+        new_code = regenerate_contact_portal_access_code(db, contact.id)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
     log_event(
         db,
         actor_user_id=None,
-        action="portal.auth.otp",
+        action="portal.auth.code_reset",
         entity_type="contact",
         entity_id=str(contact.id),
         meta={"contact_id": str(contact.id)},
     )
     db.commit()
-    return PortalAuthOut(
-        session_token=token,
-        contact_name=contact_display_name(contact),
-        grants=grant_summaries(db, contact.id),
-        audience="client",
+    dispatch_alert(
+        db,
+        AlertKind.portal_access_code_reset,
+        to_email=contact.email or "",
+        context={
+            "contact_name": contact_display_name(contact),
+            "access_code": new_code,
+            "portal_url": portal_public_url(),
+        },
     )
+    return PortalCodeResetConfirmOut(
+        access_code=new_code,
+        contact_name=contact_display_name(contact),
+    )
+
+
+# Back-compat names used by older tests / imports.
+portal_request_otp = portal_request_code_reset
 
 
 def portal_preview_exchange(payload: PortalPreviewExchangeIn, db: Session) -> PortalAuthOut:

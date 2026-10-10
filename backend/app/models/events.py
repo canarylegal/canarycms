@@ -37,7 +37,9 @@ class MatterSubTypeEventTemplate(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     matter_sub_type_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("matter_sub_type.id", ondelete="CASCADE"), nullable=False
+        UUID(as_uuid=True),
+        ForeignKey("matter_sub_type.id", ondelete="CASCADE"),
+        nullable=False,
     )
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
@@ -57,7 +59,9 @@ class CaseEvent(Base):
         UUID(as_uuid=True), ForeignKey("case.id", ondelete="CASCADE"), nullable=False
     )
     template_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("matter_sub_type_event_template.id", ondelete="SET NULL"), nullable=True
+        UUID(as_uuid=True),
+        ForeignKey("matter_sub_type_event_template.id", ondelete="SET NULL"),
+        nullable=True,
     )
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

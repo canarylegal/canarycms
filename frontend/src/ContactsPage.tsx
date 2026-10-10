@@ -19,6 +19,7 @@ import {
   contactIdentityFieldsChanged,
   revokeContactPortalAccess,
 } from './portalIdentityGuard'
+import { parsePortalEmailConflict, portalEmailConflictStaffMessage } from './portalEmailConflict'
 import { useDebouncedValue } from './useDebouncedValue'
 import { useColumnWidths } from './useColumnWidths'
 import { useUserUiPreferences } from './useUserUiPreferences'
@@ -608,8 +609,13 @@ function ContactEditor({
                   await revokeContactPortalAccess(token, contact.id)
                 }
                 onSaved()
-              } catch (e: any) {
-                setErr(e?.message ?? 'Save failed')
+              } catch (e: unknown) {
+                const conflict = parsePortalEmailConflict(e)
+                setErr(
+                  conflict
+                    ? portalEmailConflictStaffMessage(conflict, 'email_change')
+                    : ((e as { message?: string })?.message ?? 'Save failed'),
+                )
               } finally {
                 setBusy(false)
               }

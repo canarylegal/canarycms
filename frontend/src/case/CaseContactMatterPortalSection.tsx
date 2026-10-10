@@ -60,7 +60,7 @@ export function CaseContactMatterPortalSection({
       <div className="stack" style={{ marginTop: 16, paddingTop: 12, borderTop: '1px solid var(--border)' }}>
         <h4 style={{ margin: 0 }}>Matter document exchange</h4>
         <p className="muted" style={{ margin: 0, lineHeight: 1.5 }}>
-          Link this matter contact to a global contact card before issuing a matter access code.
+          This matter only — link to a global contact card before issuing an exchange access code.
         </p>
       </div>
     )
@@ -135,8 +135,8 @@ export function CaseContactMatterPortalSection({
 
   async function revokeAccess() {
     const ok = await askConfirm({
-      title: 'Revoke matter portal access?',
-      message: `${contactName} will no longer be able to sign in to this matter’s shared folders with their access code.`,
+      title: 'Revoke matter exchange code?',
+      message: `Revoke this matter’s exchange code? ${contactName} will lose access to shared folders on this matter immediately.`,
       danger: true,
       confirmLabel: 'Revoke',
     })
@@ -165,14 +165,15 @@ export function CaseContactMatterPortalSection({
     <div className="stack" style={{ marginTop: 16, paddingTop: 12, borderTop: '1px solid var(--border)' }}>
       <h4 style={{ margin: 0 }}>Matter document exchange</h4>
       <p className="muted" style={{ margin: 0, lineHeight: 1.5 }}>
-        Issue a matter-specific access code so this contact can download shared folders on the portal. Share folders from
-        Documents → right-click folder → Portal → Share.
+        This matter only — for third parties (other solicitors, lenders, brokers). Not a global client login. Share
+        folders via Documents → right-click folder → Portal → Share.
       </p>
       {err ? <div className="error">{err}</div> : null}
       {notice ? <div className="notice">{notice}</div> : null}
       {busy && !access ? <div className="muted">Loading…</div> : null}
       {hasAccess && code ? (
         <div className="row" style={{ gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          <span className="muted">Matter exchange code</span>
           <code style={{ fontSize: 14 }}>{code}</code>
           <CopyButton text={code} label="Copy code" />
         </div>
@@ -180,7 +181,7 @@ export function CaseContactMatterPortalSection({
       <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
         {!hasAccess ? (
           <button type="button" className="btn primary" disabled={busy || !portalEnabled} onClick={() => void grantAccess()}>
-            {busy ? 'Working…' : 'Enable matter portal access'}
+            {busy ? 'Working…' : 'Issue matter access code'}
           </button>
         ) : (
           <>

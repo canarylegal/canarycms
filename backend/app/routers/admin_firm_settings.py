@@ -41,12 +41,7 @@ from app.onlyoffice_force_save import (
     oo_force_save_wait,
 )
 from app.routers.onlyoffice import persist_onlyoffice_browser_url_to_file
-from app.brand_config import (
-    env_powered_by_hide,
-    env_powered_by_label,
-    env_powered_by_url,
-    env_support_inbox,
-)
+from app.brand_config import env_support_inbox
 from app.schemas import FirmSettingsOut, FirmSettingsUpdate, OnlyofficeEditorConfigOut, OoPersistDownloadIn
 from app.signature_image import (
     MAX_SIGNATURE_BYTES as _MAX_SIGNATURE_BYTES,
@@ -152,13 +147,7 @@ def _to_out(db: Session, row: FirmSettings) -> FirmSettingsOut:
         client_bank_account_number_last4=row.client_bank_account_number_last4,
         client_bank_account_number=row.client_bank_account_number,
         brand_support_inbox=row.brand_support_inbox,
-        brand_powered_by_label=row.brand_powered_by_label,
-        brand_powered_by_url=row.brand_powered_by_url,
-        brand_powered_by_hide=bool(row.brand_powered_by_hide),
         env_support_inbox=env_support_inbox(),
-        env_powered_by_label=env_powered_by_label(),
-        env_powered_by_url=env_powered_by_url(),
-        env_powered_by_hide=env_powered_by_hide(),
     )
 
 
@@ -355,10 +344,9 @@ def patch_firm_settings(
             data["portal_font_color"] = normalize_portal_font_color(data.get("portal_font_color"))
         except ValueError as e:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
-    for key in ("brand_support_inbox", "brand_powered_by_label", "brand_powered_by_url"):
-        if key in data:
-            raw = data.get(key)
-            data[key] = (str(raw).strip() if raw is not None else "") or None
+    if "brand_support_inbox" in data:
+        raw = data.get("brand_support_inbox")
+        data["brand_support_inbox"] = (str(raw).strip() if raw is not None else "") or None
     for k, v in data.items():
         setattr(row, k, v)
     row.updated_at = datetime.utcnow()

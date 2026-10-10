@@ -1,4 +1,4 @@
-"""Portal auth service: access-code and OTP request/verify flows."""
+"""Portal auth service: access-code login and forgotten-code reset flows."""
 
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ from sqlalchemy import JSON, create_engine
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Session, sessionmaker
 
+from app.alert_dispatch import AlertKind
 from app.models import (
     AuditEvent,
     Base,
@@ -23,9 +24,9 @@ from app.models import (
     PortalLoginOtp,
     User,
 )
-from app.portal_auth_service import portal_auth, portal_request_otp, portal_verify_otp
+from app.portal_auth_service import portal_auth, portal_confirm_code_reset, portal_request_code_reset
 from app.portal_service import hash_access_code, issue_portal_login_otp
-from app.schemas import PortalAuthIn, PortalOtpRequestIn, PortalOtpVerifyIn
+from app.schemas import PortalAuthIn, PortalCodeResetConfirmIn, PortalCodeResetRequestIn
 
 
 ACCESS_CODE = "ABCD1234WXYZ"
@@ -115,7 +116,7 @@ def _patch_rate_limits(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_portal_auth_success(monkeypatch: pytest.MonkeyPatch) -> None:
     db = _session()
-    contact = _seed_contact(db)
+    _seed_contact(db)
     _patch_rate_limits(monkeypatch)
     out = portal_auth(PortalAuthIn(access_code=ACCESS_CODE), _request(), db)
     assert out.contact_name == "Alex Client"
@@ -142,7 +143,7 @@ def test_portal_auth_rejects_disabled_access(monkeypatch: pytest.MonkeyPatch) ->
     assert ei.value.status_code == 401
 
 
-def test_portal_request_otp_dispatches_alert(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_portal_request_code_reset_dispatches_alert(monkeypatch: pytest.MonkeyPatch) -> None:
     db = _session()
     contact = _seed_contact(db, email="otp@example.com")
     _patch_rate_limits(monkeypatch)
@@ -152,13 +153,14 @@ def test_portal_request_otp_dispatches_alert(monkeypatch: pytest.MonkeyPatch) ->
         captured.append({"kind": kind, "to_email": to_email, "context": context})
 
     monkeypatch.setattr("app.portal_auth_service.dispatch_alert", _capture)
-    portal_request_otp(PortalOtpRequestIn(email="otp@example.com"), _request(), db)
+    portal_request_code_reset(PortalCodeResetRequestIn(email="otp@example.com"), _request(), db)
     assert len(captured) == 1
+    assert captured[0]["kind"] == AlertKind.portal_login_otp
     assert captured[0]["to_email"] == contact.email
     assert len(captured[0]["context"]["otp_code"]) == 6
 
 
-def test_portal_request_otp_silent_for_unknown_email(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_portal_request_code_reset_silent_for_unknown_email(monkeypatch: pytest.MonkeyPatch) -> None:
     db = _session()
     _seed_contact(db)
     _patch_rate_limits(monkeypatch)
@@ -168,35 +170,51 @@ def test_portal_request_otp_silent_for_unknown_email(monkeypatch: pytest.MonkeyP
         called["n"] += 1
 
     monkeypatch.setattr("app.portal_auth_service.dispatch_alert", _capture)
-    portal_request_otp(PortalOtpRequestIn(email="unknown@example.com"), _request(), db)
+    portal_request_code_reset(PortalCodeResetRequestIn(email="unknown@example.com"), _request(), db)
     assert called["n"] == 0
 
 
-def test_portal_verify_otp_success(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_portal_confirm_code_reset_success(monkeypatch: pytest.MonkeyPatch) -> None:
     db = _session()
     contact = _seed_contact(db, email="verify@example.com")
     _patch_rate_limits(monkeypatch)
-    code = issue_portal_login_otp(db, contact.id)
+    verify_code = issue_portal_login_otp(db, contact.id)
     db.commit()
-    out = portal_verify_otp(
-        PortalOtpVerifyIn(email="verify@example.com", code=code),
+    captured: list[dict] = []
+
+    def _capture(db_arg, kind, *, to_email, context):
+        captured.append({"kind": kind, "to_email": to_email, "context": context})
+
+    monkeypatch.setattr("app.portal_auth_service.dispatch_alert", _capture)
+    out = portal_confirm_code_reset(
+        PortalCodeResetConfirmIn(email="verify@example.com", code=verify_code),
         _request(),
         db,
     )
     assert out.contact_name == "Alex Client"
-    assert out.session_token
-    assert out.audience == "client"
+    assert out.access_code
+    assert out.access_code != ACCESS_CODE
+    assert len(captured) == 1
+    assert captured[0]["kind"] == AlertKind.portal_access_code_reset
+    assert captured[0]["context"]["access_code"] == out.access_code
+
+    # New code works; old code does not.
+    auth = portal_auth(PortalAuthIn(access_code=out.access_code), _request(), db)
+    assert auth.contact_name == "Alex Client"
+    with pytest.raises(HTTPException) as ei:
+        portal_auth(PortalAuthIn(access_code=ACCESS_CODE), _request(), db)
+    assert ei.value.status_code == 401
 
 
-def test_portal_verify_otp_rejects_bad_code(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_portal_confirm_code_reset_rejects_bad_code(monkeypatch: pytest.MonkeyPatch) -> None:
     db = _session()
     contact = _seed_contact(db, email="verify@example.com")
     _patch_rate_limits(monkeypatch)
     issue_portal_login_otp(db, contact.id)
     db.commit()
     with pytest.raises(HTTPException) as ei:
-        portal_verify_otp(
-            PortalOtpVerifyIn(email="verify@example.com", code="999999"),
+        portal_confirm_code_reset(
+            PortalCodeResetConfirmIn(email="verify@example.com", code="999999"),
             _request(),
             db,
         )

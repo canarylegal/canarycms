@@ -971,7 +971,7 @@ html.dark .contactPortalPanel > .card code {
   color: #cbd5e1;
 }
 
-input,
+input:not([type='checkbox']):not([type='radio']),
 textarea,
 select {
   background: #fff !important;
@@ -980,7 +980,7 @@ select {
   color: #0f172a !important;
 }
 
-html.dark input,
+html.dark input:not([type='checkbox']):not([type='radio']),
 html.dark textarea,
 html.dark select {
   background: #334155 !important;
@@ -988,11 +988,38 @@ html.dark select {
   border-color: rgba(148, 163, 184, 0.28) !important;
 }
 
-input:focus,
+input:not([type='checkbox']):not([type='radio']):focus,
 textarea:focus,
 select:focus {
   border-color: rgba(37, 99, 235, 0.55) !important;
   box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+}
+
+/* Native controls — do not inherit text-field chrome (bordered blue square). */
+input[type='checkbox'],
+input[type='radio'] {
+  background: transparent !important;
+  border: none !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  color: inherit !important;
+  outline: none !important;
+}
+
+input[type='checkbox']:focus,
+input[type='radio']:focus,
+input[type='checkbox']:focus-visible,
+input[type='radio']:focus-visible {
+  border: none !important;
+  box-shadow: none !important;
+  outline: none !important;
+}
+
+/* Keyboard focus goes on the wrapping label instead of a square ring on the control. */
+label:has(> input[type='radio']:focus-visible),
+label:has(> input[type='checkbox']:focus-visible) {
+  outline: 2px solid rgba(37, 99, 235, 0.45);
+  outline-offset: 2px;
 }
 
 /* ── Login: modern form on Canary chrome blue (not pale page wash) ─ */
@@ -1973,31 +2000,46 @@ html:has(.portalShell) body {
   color: color-mix(in srgb, var(--portal-brand-ink, #64748b) 88%, transparent);
 }
 
-/* Powered-by: canvas-only chrome — never compete with the white card */
-.portalPoweredBy {
-  display: flex;
+.portalSignInTabs {
+  width: 100%;
+}
+
+.portalSignInTabs .portalSignInTab {
+  flex: 1 1 0;
   justify-content: center;
-  margin: 0;
-  padding: 2px 8px 10px;
 }
 
-.portalCard .portalPoweredBy {
-  display: none;
+.portalSignInFieldRow {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  width: 100%;
 }
 
-.portalPoweredByLink {
-  color: color-mix(in srgb, var(--portal-brand-ink, #ffffff) 72%, transparent) !important;
-  font-size: 0.82rem;
-  font-weight: 500;
-  letter-spacing: 0.01em;
+.portalSignInFieldRow input {
+  flex: 1 1 auto;
+  min-width: 0;
+  width: auto !important;
 }
 
-.portalPoweredByLink:hover {
-  color: color-mix(in srgb, var(--portal-brand-ink, #ffffff) 95%, transparent) !important;
+.portalSignInFieldRow .btn {
+  flex: 0 0 auto;
+  white-space: nowrap;
+  justify-content: center;
 }
 
-.portalPoweredByMark {
-  opacity: 0.9;
+.portalSignInActions {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  width: 100%;
+  margin-top: 8px;
+}
+
+.portalSignInActions .btn {
+  flex: 1 1 0;
+  justify-content: center;
+  white-space: nowrap;
 }
 
 .portalQuotePanel.card,

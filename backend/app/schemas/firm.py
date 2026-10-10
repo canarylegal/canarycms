@@ -49,14 +49,8 @@ class FirmSettingsOut(BaseModel):
     client_bank_account_number: str | None = None
     # Brand overrides (null/empty = env / product default). Not the product display name.
     brand_support_inbox: str | None = None
-    brand_powered_by_label: str | None = None
-    brand_powered_by_url: str | None = None
-    brand_powered_by_hide: bool = False
     # Env-layer defaults for Admin placeholders (read-only).
     env_support_inbox: str = ""
-    env_powered_by_label: str = ""
-    env_powered_by_url: str = ""
-    env_powered_by_hide: bool = False
 
 class MergeCodeCatalogOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -103,9 +97,6 @@ class FirmSettingsUpdate(BaseModel):
     client_bank_account_number: str | None = Field(default=None, max_length=20)
     # Empty string clears override to env/product default.
     brand_support_inbox: str | None = Field(default=None, max_length=320)
-    brand_powered_by_label: str | None = Field(default=None, max_length=200)
-    brand_powered_by_url: str | None = Field(default=None, max_length=500)
-    brand_powered_by_hide: bool | None = None
 
 class MatterHeadTypeVisibilityUpdate(BaseModel):
     is_hidden: bool

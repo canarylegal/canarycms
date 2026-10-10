@@ -19,6 +19,8 @@ export type CaseDetailLeftDocPanel =
   | 'events'
   | 'finance'
   | 'property'
+  | 'searches'
+  | 'land-registry'
   | 'tasks'
   | 'contacts'
   | 'edit-details'
@@ -32,6 +34,8 @@ export type CaseDetailLeftOpen = {
   accounts: boolean
   tasks: boolean
   property: boolean
+  searches: boolean
+  landRegistry: boolean
   events: boolean
   finance: boolean
 }
@@ -68,6 +72,11 @@ type Props = {
   propertyDetails: CasePropertyDetailsOut | null
   setPropertyDraft: (d: CasePropertyPayload) => void
   setPropertyBaseline: (d: CasePropertyPayload) => void
+  hasSearchesMenu: boolean
+  searchesPreviewTotalPence: number | null
+  searchesPreviewCount: number | null
+  hasLandRegistryMenu: boolean
+  landRegistryPreviewCount: number | null
   hasEventsMenu: boolean
   eventsPreview: CaseEventsOut | null
   openCaseEventModal: () => void
@@ -107,6 +116,11 @@ export function CaseDetailLeftNav({
   propertyDetails,
   setPropertyDraft,
   setPropertyBaseline,
+  hasSearchesMenu,
+  searchesPreviewTotalPence,
+  searchesPreviewCount,
+  hasLandRegistryMenu,
+  landRegistryPreviewCount,
   hasEventsMenu,
   eventsPreview,
   openCaseEventModal,
@@ -427,6 +441,84 @@ export function CaseDetailLeftNav({
                     </button>
                   </>
                 )}
+              </div>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+
+      {hasSearchesMenu ? (
+        <div className="card">
+          <div className="accordion">
+            <button
+              className={`accHead${caseDocPanel === 'searches' ? ' is-active' : ''}`}
+              aria-expanded={leftOpen.searches}
+              aria-current={caseDocPanel === 'searches' ? 'page' : undefined}
+              onClick={() => toggleLeftAccordion('searches')}
+            >
+              <CaseLeftMenuIcon name="searches" />
+              <span>Searches</span>
+              <span className="muted">{leftOpen.searches ? '▾' : '▸'}</span>
+            </button>
+            {leftOpen.searches ? (
+              <div className="accBody">
+                <div className="caseLeftRailPreview">
+                  {searchesPreviewCount == null
+                    ? 'Loading…'
+                    : searchesPreviewCount === 0
+                      ? 'No search orders yet.'
+                      : `${searchesPreviewCount} order(s)${
+                          searchesPreviewTotalPence != null
+                            ? ` · £${(searchesPreviewTotalPence / 100).toFixed(2)}`
+                            : ''
+                        }`}
+                </div>
+                <button
+                  type="button"
+                  className="btn primary"
+                  style={{ marginTop: 8, width: '100%', boxSizing: 'border-box' }}
+                  disabled={busy}
+                  onClick={() => setCaseDocPanel('searches')}
+                >
+                  View searches
+                </button>
+              </div>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+
+      {hasLandRegistryMenu ? (
+        <div className="card">
+          <div className="accordion">
+            <button
+              className={`accHead${caseDocPanel === 'land-registry' ? ' is-active' : ''}`}
+              aria-expanded={leftOpen.landRegistry}
+              aria-current={caseDocPanel === 'land-registry' ? 'page' : undefined}
+              onClick={() => toggleLeftAccordion('landRegistry')}
+            >
+              <CaseLeftMenuIcon name="land-registry" />
+              <span>Land Registry</span>
+              <span className="muted">{leftOpen.landRegistry ? '▾' : '▸'}</span>
+            </button>
+            {leftOpen.landRegistry ? (
+              <div className="accBody">
+                <div className="caseLeftRailPreview">
+                  {landRegistryPreviewCount == null
+                    ? 'Loading…'
+                    : landRegistryPreviewCount === 0
+                      ? 'No official copies yet.'
+                      : `${landRegistryPreviewCount} order(s)`}
+                </div>
+                <button
+                  type="button"
+                  className="btn primary"
+                  style={{ marginTop: 8, width: '100%', boxSizing: 'border-box' }}
+                  disabled={busy}
+                  onClick={() => setCaseDocPanel('land-registry')}
+                >
+                  View Land Registry
+                </button>
               </div>
             ) : null}
           </div>

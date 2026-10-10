@@ -24,6 +24,8 @@ import {
   CaseDetailPropertyPanel,
   CaseDetailTasksPanel,
 } from './CaseDetailDocPanels'
+import { CaseDetailHmlrPanel } from './CaseDetailHmlrPanel'
+import { CaseDetailSearchesPanel } from './CaseDetailSearchesPanel'
 import { FirmModulePanelSlot } from '../firm/FirmModulePanelSlot'
 import { FirmModuleMatterActionsSlot } from '../firm/FirmModuleStubSlots'
 import type { CaseDetailLeftDocPanel } from './CaseDetailLeftNav'
@@ -98,6 +100,7 @@ export type CaseDetailPanelHostProps = {
   propertyBaseline: CasePropertyPayload | null
   setPropertyDetails: Dispatch<SetStateAction<CasePropertyDetailsOut | null>>
   setActionErr: Dispatch<SetStateAction<string | null>>
+  onOpenSearchFile?: (fileId: string) => void
   caseContacts: CaseContactOut[]
   contactAddOpen: boolean
   setContactAddErr: Dispatch<SetStateAction<string | null>>
@@ -185,6 +188,7 @@ export function CaseDetailPanelHost(props: CaseDetailPanelHostProps) {
     propertyBaseline,
     setPropertyDetails,
     setActionErr,
+    onOpenSearchFile,
     caseContacts,
     contactAddOpen,
     setContactAddErr,
@@ -334,6 +338,37 @@ export function CaseDetailPanelHost(props: CaseDetailPanelHostProps) {
             backToDocuments={backToDocuments}
             caseContacts={caseContacts}
             onRefresh={onRefresh}
+          />
+        ) : caseDocPanel === 'searches' && caseId ? (
+          <CaseDetailSearchesPanel
+            caseId={caseId}
+            token={token}
+            busy={busy}
+            setBusy={setBusy}
+            setActionErr={setActionErr}
+            backToDocuments={backToDocuments}
+            onRefresh={onRefresh}
+            onOpenSearchFile={onOpenSearchFile}
+            onPlaced={() => {
+              onRefresh()
+              backToDocuments()
+            }}
+          />
+        ) : caseDocPanel === 'land-registry' && caseId ? (
+          <CaseDetailHmlrPanel
+            caseId={caseId}
+            token={token}
+            busy={busy}
+            setBusy={setBusy}
+            setActionErr={setActionErr}
+            backToDocuments={backToDocuments}
+            onRefresh={onRefresh}
+            onOpenFile={(fileId) => {
+              if (onOpenSearchFile) {
+                onOpenSearchFile(fileId)
+                return
+              }
+            }}
           />
         ) : caseDocPanel === 'contacts' && caseId && (contactAddOpen || editSnapshot) ? (
           <CaseDetailContactsPanel

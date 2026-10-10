@@ -33,6 +33,8 @@ def _session() -> Session:
             if isinstance(column.type, JSONB):
                 patched.append((column, column.type))
                 column.type = JSON()
+    from app.models import FeeScaleBandRow
+
     Base.metadata.create_all(
         engine,
         tables=[
@@ -43,12 +45,9 @@ def _session() -> Session:
             FeeScaleCategory.__table__,
             FeeScaleBandSet.__table__,
             FeeScaleLine.__table__,
+            FeeScaleBandRow.__table__,
         ],
     )
-    # FeeScaleBandRow needed for apply
-    from app.models import FeeScaleBandRow
-
-    FeeScaleBandRow.__table__.create(bind=engine, checkfirst=True)
     for column, original in patched:
         column.type = original
     return sessionmaker(bind=engine)()

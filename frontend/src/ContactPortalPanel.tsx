@@ -2,6 +2,11 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { apiFetch } from './api'
 import { CopyButton } from './CopyButton'
 import { useDialogs } from './DialogProvider'
+import {
+  choosePortalEmailConflictResolution,
+  parsePortalEmailConflict,
+  type PortalConflictResolution,
+} from './portalEmailConflict'
 import type {
   ContactPortalAccessCreateOut,
   ContactPortalAccessOut,
@@ -18,7 +23,7 @@ type Props = {
 }
 
 export function ContactPortalPanel({ token, contactId, contactName, contactEmail }: Props) {
-  const { askConfirm, alert: showAlert } = useDialogs()
+  const { askConfirm, askConfirmChoice, alert: showAlert } = useDialogs()
   const [access, setAccess] = useState<ContactPortalAccessOut | null>(null)
   const [grants, setGrants] = useState<ContactPortalGrantOut[]>([])
   const [busy, setBusy] = useState(false)
@@ -59,15 +64,47 @@ export function ContactPortalPanel({ token, contactId, contactName, contactEmail
     })()
   }, [load])
 
-  async function askSendAccessEmail(): Promise<boolean> {
+  async function postAccess(
+    path: 'access' | 'access/rotate',
+    opts: { conflictResolution?: PortalConflictResolution } = {},
+  ): Promise<ContactPortalAccessCreateOut> {
+    return apiFetch<ContactPortalAccessCreateOut>(`/contacts/${contactId}/portal/${path}`, {
+      token,
+      method: 'POST',
+      json: {
+        send_email: false,
+        ...(opts.conflictResolution ? { conflict_resolution: opts.conflictResolution } : {}),
+      },
+    })
+  }
+
+  async function sendAccessEmailForCode(opts: {
+    accessCode: string
+    emailContactId: string
+    joinedExisting: boolean
+  }): Promise<boolean> {
     const email = (contactEmail || '').trim()
-    if (!email) return false
-    return askConfirm({
+    if (!email || !opts.accessCode.trim()) return false
+    const send = await askConfirm({
       title: 'Send access e-mail?',
-      message: `Send the portal access code to ${email}?`,
+      message: opts.joinedExisting
+        ? `Send the existing portal access code to ${email}?`
+        : `Send the portal access code to ${email}?`,
       confirmLabel: 'Send e-mail',
       cancelLabel: 'Skip',
     })
+    if (!send) return false
+    try {
+      await apiFetch(`/contacts/${opts.emailContactId}/portal/access/email`, {
+        token,
+        method: 'POST',
+        json: { access_code: opts.accessCode },
+      })
+      return true
+    } catch (e: unknown) {
+      setEmailNotice((e as { message?: string }).message ?? PORTAL_ALERTS_NOT_CONFIGURED_MSG)
+      return false
+    }
   }
 
   async function enableAccess() {
@@ -75,23 +112,34 @@ export function ContactPortalPanel({ token, contactId, contactName, contactEmail
     setErr(null)
     setEmailNotice(null)
     try {
-      const sendEmail = await askSendAccessEmail()
-      const out = await apiFetch<ContactPortalAccessCreateOut>(`/contacts/${contactId}/portal/access`, {
-        token,
-        method: 'POST',
-        json: { send_email: sendEmail },
+      let out: ContactPortalAccessCreateOut
+      try {
+        out = await postAccess('access')
+      } catch (e: unknown) {
+        const conflict = parsePortalEmailConflict(e)
+        if (!conflict) throw e
+        const resolution = await choosePortalEmailConflictResolution(askConfirmChoice, conflict)
+        if (!resolution) return
+        out = await postAccess('access', { conflictResolution: resolution })
+      }
+      setRevealedCode(out.access_code || null)
+      const emailContactId =
+        out.joined_existing && out.joined_contact_id ? out.joined_contact_id : contactId
+      const emailed = await sendAccessEmailForCode({
+        accessCode: out.access_code || '',
+        emailContactId,
+        joinedExisting: Boolean(out.joined_existing),
       })
-      setRevealedCode(out.access_code)
-      if (sendEmail) {
-        setEmailNotice(
-          out.email_sent
-            ? `Access e-mail sent to ${contactEmail}.`
-            : out.email_skip_reason ?? PORTAL_ALERTS_NOT_CONFIGURED_MSG,
-        )
+      if (out.joined_existing) {
+        const joinMsg = `Joined existing portal login on ${out.joined_contact_name || 'the other contact'}. That access code remains active.`
+        setEmailNotice(emailed ? `${joinMsg} Access e-mail sent to ${contactEmail}.` : joinMsg)
+      } else if (emailed) {
+        setEmailNotice(`Access e-mail sent to ${contactEmail}.`)
       }
       await load()
     } catch (e: unknown) {
-      setErr((e as { message?: string }).message ?? 'Could not create portal access')
+      const conflict = parsePortalEmailConflict(e)
+      setErr(conflict?.message ?? (e as { message?: string }).message ?? 'Could not create portal access')
     } finally {
       setBusy(false)
     }
@@ -102,23 +150,34 @@ export function ContactPortalPanel({ token, contactId, contactName, contactEmail
     setErr(null)
     setEmailNotice(null)
     try {
-      const sendEmail = await askSendAccessEmail()
-      const out = await apiFetch<ContactPortalAccessCreateOut>(`/contacts/${contactId}/portal/access/rotate`, {
-        token,
-        method: 'POST',
-        json: { send_email: sendEmail },
+      let out: ContactPortalAccessCreateOut
+      try {
+        out = await postAccess('access/rotate')
+      } catch (e: unknown) {
+        const conflict = parsePortalEmailConflict(e)
+        if (!conflict) throw e
+        const resolution = await choosePortalEmailConflictResolution(askConfirmChoice, conflict)
+        if (!resolution) return
+        out = await postAccess('access/rotate', { conflictResolution: resolution })
+      }
+      setRevealedCode(out.access_code || null)
+      const emailContactId =
+        out.joined_existing && out.joined_contact_id ? out.joined_contact_id : contactId
+      const emailed = await sendAccessEmailForCode({
+        accessCode: out.access_code || '',
+        emailContactId,
+        joinedExisting: Boolean(out.joined_existing),
       })
-      setRevealedCode(out.access_code)
-      if (sendEmail) {
-        setEmailNotice(
-          out.email_sent
-            ? `Access e-mail sent to ${contactEmail}.`
-            : out.email_skip_reason ?? PORTAL_ALERTS_NOT_CONFIGURED_MSG,
-        )
+      if (out.joined_existing) {
+        const joinMsg = `Joined existing portal login on ${out.joined_contact_name || 'the other contact'}. That access code remains active.`
+        setEmailNotice(emailed ? `${joinMsg} Access e-mail sent to ${contactEmail}.` : joinMsg)
+      } else if (emailed) {
+        setEmailNotice(`Access e-mail sent to ${contactEmail}.`)
       }
       await load()
     } catch (e: unknown) {
-      setErr((e as { message?: string }).message ?? 'Could not rotate access code')
+      const conflict = parsePortalEmailConflict(e)
+      setErr(conflict?.message ?? (e as { message?: string }).message ?? 'Could not rotate access code')
     } finally {
       setBusy(false)
     }
@@ -213,9 +272,10 @@ export function ContactPortalPanel({ token, contactId, contactName, contactEmail
   return (
     <div className="stack contactPortalPanel" style={{ marginTop: 20, paddingTop: 16, borderTop: '1px solid var(--border)' }}>
       <div>
-        <h3 style={{ margin: 0 }}>Canary Portal</h3>
+        <h3 style={{ margin: 0 }}>Client portal access</h3>
         <p className="muted" style={{ margin: '6px 0 0' }}>
-          Grant portal login here. Share folders from each matter (Documents → right-click folder → Portal → Share).
+          Global client login for {contactName}. One access code across all matters. Share folders from each matter
+          (Documents → right-click folder → Portal → Share).
         </p>
       </div>
       {err ? <div className="error">{err}</div> : null}
@@ -230,7 +290,7 @@ export function ContactPortalPanel({ token, contactId, contactName, contactEmail
 
       {!access?.has_access ? (
         <button type="button" className="btn primary" disabled={busy} onClick={() => void enableAccess()}>
-          Grant portal access
+          Enable client portal login
         </button>
       ) : (
         <div className="stack" style={{ gap: 10 }}>

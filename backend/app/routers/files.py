@@ -423,6 +423,10 @@ def list_case_files(
             if sub.snapshot_file_id and sub.snapshot_file_id not in form_by_file:
                 form_by_file[sub.snapshot_file_id] = sub
 
+    from app.casera_service import search_file_summaries_for_case
+
+    casera_by_file = search_file_summaries_for_case(db, case_id) if file_ids else {}
+
     out = []
     for (f, owner_display_name, owner_email, owner_initials) in rows:
         item = {
@@ -472,6 +476,9 @@ def list_case_files(
         form_sub = form_by_file.get(f.id)
         if form_sub is not None:
             item["portal_form_submission"] = form_submission_file_list_item(db, form_sub)
+        casera_sum = casera_by_file.get(f.id) if casera_by_file else None
+        if casera_sum is not None:
+            item["casera_search"] = casera_sum.model_dump(mode="json")
         out.append(item)
     return out
 

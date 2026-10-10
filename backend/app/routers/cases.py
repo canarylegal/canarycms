@@ -173,6 +173,11 @@ def _menus_for_sub_types(sub_ids: set[uuid.UUID], db: Session) -> dict[uuid.UUID
 
 def _case_out(case: Case, db: Session) -> CaseOut:
     sub_name, head_name = _matter_names(case.matter_sub_type_id, case.matter_head_type_id, db)
+    # After detach, live FKs are null — fall back to persisted name snapshots.
+    if head_name is None and case.matter_head_type_name:
+        head_name = case.matter_head_type_name
+    if sub_name is None and case.matter_sub_type_name:
+        sub_name = case.matter_sub_type_name
     menus = (
         _menus_for_sub_types({case.matter_sub_type_id}, db).get(case.matter_sub_type_id, [])
         if case.matter_sub_type_id
@@ -236,6 +241,9 @@ def create_case(
         lock_mode=CaseLockMode.open_by_default,
         portal_enabled=portal_on,
     )
+    from app.matter_type_snapshot import sync_case_matter_type_snapshot
+
+    sync_case_matter_type_snapshot(case, db)
     db.add(counter)
     db.add(case)
     log_event(
@@ -291,6 +299,10 @@ def _cases_to_out_list(cases: list[Case], db: Session) -> list[CaseOut]:
             head_name = head.name if head else None
         elif c.matter_head_type_id and c.matter_head_type_id in head_map:
             head_name = head_map[c.matter_head_type_id].name
+        if head_name is None and c.matter_head_type_name:
+            head_name = c.matter_head_type_name
+        if sub_name is None and c.matter_sub_type_name:
+            sub_name = c.matter_sub_type_name
         menus = menu_map.get(c.matter_sub_type_id, []) if c.matter_sub_type_id else []
         src_name = source_map.get(c.source_id) if c.source_id else None
         result.append(CaseOut.model_validate(_case_dict(c, sub_name, head_name, menus, src_name)))
@@ -463,6 +475,9 @@ def update_case(
                 case.matter_head_type_id = mh
 
         _raise_if_hidden_matter_head_for_user(case.matter_sub_type_id, case.matter_head_type_id, user, db)
+        from app.matter_type_snapshot import sync_case_matter_type_snapshot
+
+        sync_case_matter_type_snapshot(case, db)
 
     if "status" in data and data["status"] == CaseStatus.quote:
         if case.status != CaseStatus.quote:

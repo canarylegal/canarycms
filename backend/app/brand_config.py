@@ -3,7 +3,7 @@
 Env-backed product identity for the Canary kernel (and forks). Distinct from
 firm *content* (letterheads, trading name, portal logo) in ``FirmSettings``.
 
-Resolution for support inbox and portal powered-by:
+Resolution for support inbox:
 
 1. Non-empty Admin override on ``FirmSettings`` (when a DB row is supplied)
 2. ``CANARY_BRAND_*`` environment (with legacy aliases)
@@ -16,13 +16,11 @@ Core installs keep the Canary product name; forks override via env.
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
 from typing import Any
 
 # Built-in defaults for the upstream Canary product.
 DEFAULT_PRODUCT_NAME = "Canary"
 DEFAULT_VENDOR_URL = "https://canarylegalsoftware.co.uk"
-DEFAULT_POWERED_BY_LABEL = "Powered by Canary Legal Software"
 DEFAULT_SUPPORT_INBOX = "colin@canarylegalsoftware.co.uk"
 DEFAULT_TOTP_ISSUER = "Canary"
 DEFAULT_WEBAUTHN_RP_NAME = "Canary"
@@ -43,15 +41,6 @@ def _env(*names: str, default: str = "") -> str:
     return default
 
 
-def _env_bool(*names: str, default: bool = False) -> bool:
-    for name in names:
-        raw = os.getenv(name)
-        if raw is None or not str(raw).strip():
-            continue
-        return str(raw).strip().lower() in ("1", "true", "yes", "on")
-    return default
-
-
 def product_name() -> str:
     """Staff/product chrome name. Env-only; not an Admin setting."""
     return _env("CANARY_BRAND_PRODUCT_NAME", default=DEFAULT_PRODUCT_NAME) or DEFAULT_PRODUCT_NAME
@@ -59,18 +48,6 @@ def product_name() -> str:
 
 def vendor_url() -> str:
     return _env("CANARY_BRAND_VENDOR_URL", default=DEFAULT_VENDOR_URL) or DEFAULT_VENDOR_URL
-
-
-def env_powered_by_label() -> str:
-    return _env("CANARY_BRAND_POWERED_BY_LABEL", default=DEFAULT_POWERED_BY_LABEL) or DEFAULT_POWERED_BY_LABEL
-
-
-def env_powered_by_url() -> str:
-    return _env("CANARY_BRAND_POWERED_BY_URL", "CANARY_BRAND_VENDOR_URL", default=DEFAULT_VENDOR_URL) or DEFAULT_VENDOR_URL
-
-
-def env_powered_by_hide() -> bool:
-    return _env_bool("CANARY_BRAND_POWERED_BY_HIDE", default=False)
 
 
 def env_support_inbox() -> str:
@@ -100,30 +77,6 @@ def thunderbird_update_base_url() -> str:
     )
 
 
-@dataclass(frozen=True)
-class PoweredBy:
-    label: str
-    url: str
-    hide: bool
-
-
-def resolve_powered_by(firm: Any | None = None) -> PoweredBy:
-    """Effective portal powered-by after Admin overrides."""
-    hide = env_powered_by_hide()
-    label = env_powered_by_label()
-    url = env_powered_by_url()
-    if firm is not None:
-        if bool(getattr(firm, "brand_powered_by_hide", False)):
-            hide = True
-        override_label = (getattr(firm, "brand_powered_by_label", None) or "").strip()
-        if override_label:
-            label = override_label
-        override_url = (getattr(firm, "brand_powered_by_url", None) or "").strip()
-        if override_url:
-            url = override_url
-    return PoweredBy(label=label, url=url, hide=hide)
-
-
 def resolve_support_inbox(firm: Any | None = None) -> str:
     if firm is not None:
         override = (getattr(firm, "brand_support_inbox", None) or "").strip()
@@ -138,9 +91,6 @@ def env_brand_snapshot() -> dict[str, str | bool]:
         "product_name": product_name(),
         "vendor_url": vendor_url(),
         "support_inbox": env_support_inbox(),
-        "powered_by_label": env_powered_by_label(),
-        "powered_by_url": env_powered_by_url(),
-        "powered_by_hide": env_powered_by_hide(),
         "totp_issuer": totp_issuer(),
         "webauthn_rp_name": webauthn_rp_name(),
         "thunderbird_update_base_url": thunderbird_update_base_url(),

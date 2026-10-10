@@ -21,6 +21,7 @@ import {
   revokeContactPortalAccess,
   revokeMatterPortalAccess,
 } from '../portalIdentityGuard'
+import { parsePortalEmailConflict, portalEmailConflictStaffMessage } from '../portalEmailConflict'
 import { ContactSearchPicker } from '../ContactSearchPicker'
 import { SingleSelectDropdown } from '../SingleSelectDropdown'
 import { defaultLetterSalutationForContact, LetterSalutationFields } from '../LetterSalutationFields'
@@ -211,8 +212,8 @@ export function CaseContactsAddDocForm({
             }}
           />
         ) : null}
+        {contactAddErr ? <div className="error" style={{ marginTop: 8 }}>{contactAddErr}</div> : null}
       </div>
-      {contactAddErr ? <div className="error">{contactAddErr}</div> : null}
       <div className="card" style={{ padding: 12 }}>
         <div className="muted" style={{ marginBottom: 8 }}>
           Existing contacts
@@ -386,10 +387,8 @@ export function CaseContactsAddDocForm({
 
       <div className="card" style={{ padding: 12, marginTop: 12 }}>
         <GlobalContactCreateForm
-          key={matterContactType || 'mc'}
           organisationOnly={matterContactType.trim().toLowerCase() === LAWYERS_TYPE_SLUG}
           busy={busy}
-          formError={contactAddErr}
           submitLabel="Create & link"
           intro={<div className="muted" style={{ marginBottom: 8 }}>Create new contact</div>}
           onFieldsChange={(fields) => {
@@ -702,6 +701,9 @@ export function CaseContactsEditDocForm({
           globalContactId={editSnapshot.contact_id}
           contactName={resolvedEditSnapshotName}
           contactEmail={editSnapshot.email}
+          onGlobalContactRelinked={(contactId) => {
+            setEditSnapshot((prev) => (prev ? { ...prev, contact_id: contactId } : prev))
+          }}
         />
       ) : (
         <CaseContactMatterPortalSection
@@ -874,7 +876,10 @@ export function CaseContactsEditDocForm({
               }
               onDone()
             } catch (e: unknown) {
-              const msg = (e as { message?: string })?.message ?? 'Failed to update snapshot'
+              const conflict = parsePortalEmailConflict(e)
+              const msg = conflict
+                ? portalEmailConflictStaffMessage(conflict, 'email_change')
+                : ((e as { message?: string })?.message ?? 'Failed to update snapshot')
               setSaveErr(msg)
               setActionErr(msg)
             } finally {

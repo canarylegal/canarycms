@@ -1,7 +1,6 @@
 import type { CSSProperties, ReactNode } from 'react'
 import { useLayoutEffect } from 'react'
 import { apiUrl } from '../api'
-import { CANARY_ICON_32_SRC } from '../AppBrand'
 
 export type PortalBrandingConfig = {
   firm_name: string
@@ -17,10 +16,6 @@ export type PortalBrandingConfig = {
   portal_font_color?: string | null
   /** When false, custom canvas is login-screen only; signed-in uses product default. */
   portal_background_on_signed_in?: boolean
-  powered_by_label: string
-  powered_by_url: string
-  /** When true, hide the powered-by footer (white-label). */
-  powered_by_hide?: boolean
 }
 
 export function PortalBrandHeader({
@@ -40,25 +35,6 @@ export function PortalBrandHeader({
       <h1 className="portalBrandTitle">{config.portal_title}</h1>
       {subtitle ? <p className="portalBrandSubtitle muted">{subtitle}</p> : null}
     </header>
-  )
-}
-
-export function PortalPoweredBy({ config }: { config: PortalBrandingConfig }) {
-  if (config.powered_by_hide) return null
-  const label = (config.powered_by_label || '').trim()
-  if (!label) return null
-  return (
-    <footer className="portalPoweredBy">
-      <a
-        className="portalPoweredByLink"
-        href={config.powered_by_url}
-        target="_blank"
-        rel="noopener noreferrer"
-      >
-        <img className="portalPoweredByMark" src={CANARY_ICON_32_SRC} alt="" aria-hidden decoding="async" />
-        <span>{label}</span>
-      </a>
-    </footer>
   )
 }
 
@@ -140,13 +116,6 @@ html[data-portal-canvas] .portalBrandSubtitle.muted {
   color: ${ink ? effectiveInk : subtitleFallback} !important;
   opacity: ${ink ? '0.78' : '1'} !important;
 }
-html[data-portal-canvas] .portalPoweredByLink {
-  color: ${effectiveInk} !important;
-  opacity: 0.78;
-}
-html[data-portal-canvas] .portalPoweredByLink:hover {
-  opacity: 0.95;
-}
 html[data-portal-canvas] .portalSignOutBtn {
   color: ${effectiveInk} !important;
   border-color: color-mix(in srgb, ${effectiveInk} 28%, transparent) !important;
@@ -173,7 +142,6 @@ html[data-portal-canvas] .portalSignOutBtn {
           </div>
         )}
       </div>
-      <PortalPoweredBy config={config} />
     </div>
   )
 }

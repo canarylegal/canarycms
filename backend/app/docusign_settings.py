@@ -1,64 +1,26 @@
-"""Load singleton DocuSign integration settings."""
+"""Core shim — DocuSign settings (commercial package when attached)."""
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 from sqlalchemy.orm import Session
 
-from app.email_crypt import decrypt_password
-from app.models import DocusignIntegrationSettings
+from app.commercial_runtime import import_commercial, reexport_commercial
 
+if not reexport_commercial(globals(), "canary_commercial.docusign_settings"):
 
-def get_docusign_settings(db: Session) -> DocusignIntegrationSettings:
-    row = db.get(DocusignIntegrationSettings, 1)
-    if row is None:
-        raise RuntimeError(
-            "docusign_integration_settings row missing — run database migrations (alembic upgrade head).",
-        )
-    return row
+    def get_docusign_settings(db: Session):  # type: ignore[no-redef]
+        return SimpleNamespace(enabled=False)
 
-
-def docusign_configured(db: Session) -> bool:
-    row = get_docusign_settings(db)
-    if not row.enabled:
+    def docusign_configured(db: Session) -> bool:  # type: ignore[no-redef]
         return False
-    return bool(
-        (row.account_id or "").strip()
-        and (row.integration_key or "").strip()
-        and (row.user_id or "").strip()
-        and (row.rsa_private_key_enc or "").strip()
-    )
 
+    def docusign_rsa_private_key(row):  # type: ignore[no-redef]
+        raise RuntimeError("DocuSign is not available (commercial package not attached)")
 
-def docusign_rsa_private_key(row: DocusignIntegrationSettings) -> str:
-    enc = (row.rsa_private_key_enc or "").strip()
-    if not enc:
-        raise RuntimeError("DocuSign RSA private key is not configured")
-    try:
-        return decrypt_password(enc)
-    except Exception as e:
-        raise RuntimeError(
-            "DocuSign RSA private key could not be decrypted — re-enter it in Admin → DocuSign "
-            "(do not copy encrypted values from another server)."
-        ) from e
+    def docusign_connect_hmac_secret(row):  # type: ignore[no-redef]
+        return ""
 
-
-def docusign_connect_hmac_secret(row: DocusignIntegrationSettings) -> str | None:
-    enc = (row.connect_hmac_secret_enc or "").strip()
-    if not enc:
-        return None
-    return decrypt_password(enc)
-
-
-def envelope_cost_pence(row: DocusignIntegrationSettings, level) -> int:
-    """Configured forecast cost for a send; 0 when not set."""
-    from app.models import DocusignSignatureLevel
-
-    if level == DocusignSignatureLevel.wes:
-        raw = row.cost_wes_pence
-    elif level == DocusignSignatureLevel.qes:
-        raw = row.cost_qes_pence
-    else:
-        raw = row.cost_standard_pence
-    if raw is None or raw <= 0:
+    def envelope_cost_pence(row, *args, **kwargs) -> int:  # type: ignore[no-redef]
         return 0
-    return int(raw)

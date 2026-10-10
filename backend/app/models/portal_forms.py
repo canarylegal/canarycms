@@ -50,30 +50,42 @@ class PortalFormTemplate(Base):
     """Firm-wide portal form precedents scoped by matter type (like fee scales)."""
 
     __tablename__ = "portal_form_template"
+    __table_args__ = (
+        UniqueConstraint("reference", name="uq_portal_form_template_reference"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name: Mapped[str] = mapped_column(String(300), nullable=False)
     reference: Mapped[str] = mapped_column(String(200), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     matter_head_type_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("matter_head_type.id", ondelete="RESTRICT"), nullable=True, index=True
+        UUID(as_uuid=True),
+        ForeignKey("matter_head_type.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
     )
     matter_sub_type_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("matter_sub_type.id", ondelete="RESTRICT"), nullable=True, index=True
+        UUID(as_uuid=True),
+        ForeignKey("matter_sub_type.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
     )
     owner_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("user.id", ondelete="RESTRICT"), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
 
-    __table_args__ = (UniqueConstraint("reference", name="uq_portal_form_template_reference"),)
-
 class PortalFormTemplateField(Base):
     __tablename__ = "portal_form_template_field"
-    __table_args__ = (UniqueConstraint("template_id", "field_key", name="uq_portal_form_template_field_key"),)
+    __table_args__ = (
+        UniqueConstraint("template_id", "field_key", name="uq_portal_form_template_field_key"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     template_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("portal_form_template.id", ondelete="CASCADE"), nullable=False, index=True
+        UUID(as_uuid=True),
+        ForeignKey("portal_form_template.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
     )
     field_key: Mapped[str] = mapped_column(String(80), nullable=False)
     label: Mapped[str] = mapped_column(String(500), nullable=False)
@@ -92,7 +104,10 @@ class PortalFormSubmission(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     case_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("case.id", ondelete="CASCADE"), nullable=False, index=True)
     template_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("portal_form_template.id", ondelete="RESTRICT"), nullable=False, index=True
+        UUID(as_uuid=True),
+        ForeignKey("portal_form_template.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
     )
     contact_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("contact.id", ondelete="CASCADE"), nullable=False, index=True

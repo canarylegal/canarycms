@@ -113,7 +113,9 @@ class CalendarEventEmailAlertSubscription(Base):
     all_day: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     title_snapshot: Mapped[str] = mapped_column(String(600), nullable=False, default="")
     matter_template_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("matter_sub_type_event_template.id", ondelete="SET NULL"), nullable=True
+        UUID(as_uuid=True),
+        ForeignKey("matter_sub_type_event_template.id", ondelete="SET NULL"),
+        nullable=True,
     )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)

@@ -30,9 +30,11 @@ CANARY_PRODUCT_VERSION=2.0.0 \
 
 Startup order (backend):
 
-1. `python -m app.firm_module_migrate` — firm SQL (skipped if package incompatible)  
-2. `alembic upgrade head` — core schema  
-3. API process  
+1. `python -m app.firm_module_migrate` — firm module SQL (skipped if package incompatible)  
+2. `alembic upgrade head` — core schema (includes catalogue schema ``firm``)  
+3. API process (boot-merge firm package seeds into ``firm`` when attached)
+
+**Detach** the firm layer (does not happen on unmount alone): see [`FIRM_PACKAGE.md`](./FIRM_PACKAGE.md) — preflight / force via `/firm-package/detach` or `python -m app.firm_detach`.  
 
 ## Compatibility
 

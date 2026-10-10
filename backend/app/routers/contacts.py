@@ -84,6 +84,12 @@ def update_contact(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Contact not found")
 
     data = payload.model_dump(exclude_unset=True)
+    if "email" in data:
+        from app.portal_email_conflict import raise_if_email_conflicts_with_portal_login
+
+        raise_if_email_conflicts_with_portal_login(
+            db, contact_id=contact_id, new_email=data.get("email")
+        )
     for key, value in data.items():
         setattr(contact, key, value)
     ensure_organisation_trading_name(contact.type, contact.trading_name)

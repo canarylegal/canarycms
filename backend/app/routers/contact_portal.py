@@ -15,6 +15,12 @@ from app.alert_dispatch import AlertKind, dispatch_alert, firm_alerts_configured
 from app.portal_notifications import ALERTS_NOT_CONFIGURED_MSG, contact_wants_notification
 from app.portal_case import require_case_portal_enabled
 from app.models import Case, CaseContact, Contact, ContactPortalAccess, ContactPortalGrant, User
+from app.portal_email_conflict import (
+    disable_portal_access_for_conflict,
+    find_active_portal_email_conflict,
+    join_existing_portal_login,
+    require_no_unresolved_portal_email_conflict,
+)
 from app.portal_service import (
     allocate_unique_access_code,
     client_matter_description,
@@ -247,6 +253,44 @@ def create_contact_portal_access(
     existing = db.execute(select(ContactPortalAccess).where(ContactPortalAccess.contact_id == contact_id)).scalar_one_or_none()
     if existing is not None and portal_access_is_active(existing):
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Portal access already exists; rotate the code instead")
+
+    conflict = require_no_unresolved_portal_email_conflict(
+        db, contact_id=contact_id, conflict_resolution=payload.conflict_resolution
+    )
+    if conflict is not None and payload.conflict_resolution == "join_existing":
+        code, matter_relinked = join_existing_portal_login(
+            db,
+            contact_id=contact_id,
+            conflict=conflict,
+            case_id=payload.case_id,
+            actor_user_id=user.id,
+        )
+        db.commit()
+        email_sent = False
+        email_skip_reason: str | None = None
+        if payload.send_email and code:
+            email_sent, email_skip_reason = _notify_portal_access_email(
+                db, conflict.other_contact, code, actor_user_id=user.id
+            )
+        return ContactPortalAccessCreateOut(
+            access_code=code,
+            enabled=True,
+            expires_at=conflict.other_access.expires_at,
+            email_sent=email_sent,
+            email_skip_reason=email_skip_reason,
+            joined_existing=True,
+            joined_contact_id=conflict.other_contact.id,
+            joined_contact_name=contact_display_name(conflict.other_contact),
+            matter_contact_relinked=matter_relinked,
+        )
+    if conflict is not None and payload.conflict_resolution == "revoke_other":
+        disable_portal_access_for_conflict(
+            db,
+            other_contact_id=conflict.other_contact.id,
+            actor_user_id=user.id,
+            superseded_by_contact_id=contact_id,
+        )
+
     code = generate_access_code()
     if existing is None:
         row = ContactPortalAccess(
@@ -274,7 +318,7 @@ def create_contact_portal_access(
     )
     db.commit()
     email_sent = False
-    email_skip_reason: str | None = None
+    email_skip_reason = None
     if payload.send_email:
         email_sent, email_skip_reason = _notify_portal_access_email(db, contact, code, actor_user_id=user.id)
     return ContactPortalAccessCreateOut(
@@ -315,6 +359,46 @@ def rotate_contact_portal_access(
     contact = db.get(Contact, contact_id)
     assert contact is not None
     row = db.execute(select(ContactPortalAccess).where(ContactPortalAccess.contact_id == contact_id)).scalar_one_or_none()
+    # Rotating an already-active login on this contact does not create a second e-mail login.
+    needs_conflict_check = row is None or not portal_access_is_active(row)
+    if needs_conflict_check:
+        conflict = require_no_unresolved_portal_email_conflict(
+            db, contact_id=contact_id, conflict_resolution=payload.conflict_resolution
+        )
+        if conflict is not None and payload.conflict_resolution == "join_existing":
+            code, matter_relinked = join_existing_portal_login(
+                db,
+                contact_id=contact_id,
+                conflict=conflict,
+                case_id=payload.case_id,
+                actor_user_id=user.id,
+            )
+            db.commit()
+            email_sent = False
+            email_skip_reason: str | None = None
+            if payload.send_email and code:
+                email_sent, email_skip_reason = _notify_portal_access_email(
+                    db, conflict.other_contact, code, actor_user_id=user.id
+                )
+            return ContactPortalAccessCreateOut(
+                access_code=code,
+                enabled=True,
+                expires_at=conflict.other_access.expires_at,
+                email_sent=email_sent,
+                email_skip_reason=email_skip_reason,
+                joined_existing=True,
+                joined_contact_id=conflict.other_contact.id,
+                joined_contact_name=contact_display_name(conflict.other_contact),
+                matter_contact_relinked=matter_relinked,
+            )
+        if conflict is not None and payload.conflict_resolution == "revoke_other":
+            disable_portal_access_for_conflict(
+                db,
+                other_contact_id=conflict.other_contact.id,
+                actor_user_id=user.id,
+                superseded_by_contact_id=contact_id,
+            )
+
     code = generate_access_code()
     if row is None:
         row = ContactPortalAccess(
@@ -339,7 +423,7 @@ def rotate_contact_portal_access(
     )
     db.commit()
     email_sent = False
-    email_skip_reason: str | None = None
+    email_skip_reason = None
     if payload.send_email:
         email_sent, email_skip_reason = _notify_portal_access_email(db, contact, code, actor_user_id=user.id)
     return ContactPortalAccessCreateOut(
@@ -360,6 +444,13 @@ def update_contact_portal_access(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Portal access is not set up for this contact")
     data = payload.model_dump(exclude_unset=True)
     disabling = "enabled" in data and data["enabled"] is False and bool(row.enabled)
+    enabling = "enabled" in data and data["enabled"] is True and not portal_access_is_active(row)
+    if enabling:
+        conflict = find_active_portal_email_conflict(db, contact_id=contact_id)
+        if conflict is not None:
+            from app.portal_email_conflict import raise_portal_email_conflict
+
+            raise_portal_email_conflict(conflict)
     for key, value in data.items():
         setattr(row, key, value)
     if disabling:

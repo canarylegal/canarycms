@@ -43,11 +43,15 @@ class PrecedentKind(str, enum.Enum):
 
 class PrecedentCategory(Base):
     __tablename__ = "precedent_category"
-    __table_args__ = (UniqueConstraint("matter_sub_type_id", "name", name="uq_precedent_category_sub_name"),)
+    __table_args__ = (
+        UniqueConstraint("matter_sub_type_id", "name", name="uq_precedent_category_sub_name"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     matter_sub_type_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("matter_sub_type.id", ondelete="RESTRICT"), nullable=False
+        UUID(as_uuid=True),
+        ForeignKey("matter_sub_type.id", ondelete="RESTRICT"),
+        nullable=False,
     )
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
@@ -99,9 +103,6 @@ class FirmSettings(Base):
     portal_background_on_signed_in: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     # Install brand overrides (Phase 2). Null/empty = use CANARY_BRAND_* / built-in defaults.
     brand_support_inbox: Mapped[str | None] = mapped_column(String(320), nullable=True)
-    brand_powered_by_label: Mapped[str | None] = mapped_column(String(200), nullable=True)
-    brand_powered_by_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
-    brand_powered_by_hide: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     default_signature_file_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("file.id", ondelete="SET NULL"), nullable=True
     )
@@ -173,13 +174,21 @@ class Precedent(Base):
     file_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("file.id", ondelete="CASCADE"), nullable=False)
     # Scope: (NULL,NULL,NULL) = all cases; (H,NULL,NULL) = all sub-types under head H; (H,S,NULL) = all categories under sub S; (H,S,C) = one category.
     matter_head_type_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("matter_head_type.id", ondelete="RESTRICT"), nullable=True, index=True
+        UUID(as_uuid=True),
+        ForeignKey("matter_head_type.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
     )
     matter_sub_type_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("matter_sub_type.id", ondelete="RESTRICT"), nullable=True, index=True
+        UUID(as_uuid=True),
+        ForeignKey("matter_sub_type.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
     )
     category_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("precedent_category.id", ondelete="RESTRICT"), nullable=True
+        UUID(as_uuid=True),
+        ForeignKey("precedent_category.id", ondelete="RESTRICT"),
+        nullable=True,
     )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)

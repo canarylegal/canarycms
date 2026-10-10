@@ -7,5 +7,6 @@ export const CASE_MENU_OPTIONS: string[] = [
   'Finance',
   'Property',
   'Tasks',
-  'Quotes',
+  'Searches',
+  'Land Registry',
 ]

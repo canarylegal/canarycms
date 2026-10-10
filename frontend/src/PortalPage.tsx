@@ -36,12 +36,9 @@ const DEFAULT_PORTAL_CONFIG: PortalBrandingConfig = {
   portal_background_url: null,
   portal_font_color: null,
   portal_background_on_signed_in: true,
-  powered_by_label: 'Powered by Canary Legal Software',
-  powered_by_url: 'https://canarylegalsoftware.co.uk',
-  powered_by_hide: false,
 }
 
-type SignInMode = 'code' | 'email'
+type SignInMode = 'code' | 'reset'
 
 function getStoredPortalToken(): string {
   try {
@@ -241,9 +238,9 @@ export default function PortalPage() {
   const [portalConfig, setPortalConfig] = useState<PortalBrandingConfig>(DEFAULT_PORTAL_CONFIG)
   const [signInMode, setSignInMode] = useState<SignInMode>('code')
   const [accessCode, setAccessCode] = useState('')
-  const [otpEmail, setOtpEmail] = useState('')
-  const [otpCode, setOtpCode] = useState('')
-  const [otpSent, setOtpSent] = useState(false)
+  const [resetEmail, setResetEmail] = useState('')
+  const [resetVerifyCode, setResetVerifyCode] = useState('')
+  const [resetCodeSent, setResetCodeSent] = useState(false)
   const [sessionToken, setSessionToken] = useState(() => getStoredPortalToken())
   const [contactName, setContactName] = useState('')
   const [grants, setGrants] = useState<PortalGrantSummaryOut[]>([])
@@ -312,9 +309,6 @@ export default function PortalPage() {
         portal_background_url: cfg.portal_background_url ?? null,
         portal_font_color: cfg.portal_font_color ?? null,
         portal_background_on_signed_in: cfg.portal_background_on_signed_in !== false,
-        powered_by_label: cfg.powered_by_label?.trim() || DEFAULT_PORTAL_CONFIG.powered_by_label,
-        powered_by_url: cfg.powered_by_url?.trim() || DEFAULT_PORTAL_CONFIG.powered_by_url,
-        powered_by_hide: Boolean(cfg.powered_by_hide),
       })
     } catch {
       /* optional */
@@ -691,46 +685,49 @@ export default function PortalPage() {
     }
   }
 
-  async function requestOtp(e: React.FormEvent) {
+  async function requestCodeReset(e: React.FormEvent) {
     e.preventDefault()
     setBusy(true)
     setErr(null)
     setInfo(null)
     try {
-      await portalFetch('/portal/auth/request-otp', { method: 'POST', json: { email: otpEmail.trim() } })
-      setOtpSent(true)
-      setInfo('If this e-mail has portal access, a sign-in code has been sent.')
+      await portalFetch('/portal/auth/request-code-reset', {
+        method: 'POST',
+        json: { email: resetEmail.trim() },
+      })
+      setResetCodeSent(true)
+      setInfo('If this e-mail has portal access, a verification code has been sent.')
     } catch (e: unknown) {
-      setErr((e as { message?: string }).message ?? 'Could not send sign-in code')
+      setErr((e as { message?: string }).message ?? 'Could not send verification code')
     } finally {
       setBusy(false)
     }
   }
 
-  async function verifyOtp(e: React.FormEvent) {
+  async function confirmCodeReset(e: React.FormEvent) {
     e.preventDefault()
     setBusy(true)
     setErr(null)
     setInfo(null)
     try {
-      const out = await portalFetch<PortalAuthOut>('/portal/auth/verify-otp', {
-        method: 'POST',
-        json: { email: otpEmail.trim(), code: otpCode.trim() },
-      })
-      storePortalToken(out.session_token)
-      setSessionToken(out.session_token)
-      setContactName(out.contact_name)
-      setGrants(out.grants)
-      setStaffPreviewSession(Boolean(out.staff_preview))
-      setPortalAudience(out.audience === 'exchange' ? 'exchange' : 'client')
-      setActiveCaseId(null)
-      setActiveGrantId(null)
-      setBrowse(null)
-      setBrowseSubfolder('')
-      setOtpCode('')
-      setOtpSent(false)
+      const out = await portalFetch<{ access_code: string; contact_name: string }>(
+        '/portal/auth/confirm-code-reset',
+        {
+          method: 'POST',
+          json: { email: resetEmail.trim(), code: resetVerifyCode.trim() },
+        },
+      )
+      setAccessCode(out.access_code)
+      setResetVerifyCode('')
+      setResetCodeSent(false)
+      setSignInMode('code')
+      setInfo(
+        out.contact_name
+          ? `A new access code for ${out.contact_name} is ready below (and was e-mailed). Sign in to continue.`
+          : 'A new access code is ready below (and was e-mailed). Sign in to continue.',
+      )
     } catch (e: unknown) {
-      setErr((e as { message?: string }).message ?? 'Sign-in failed')
+      setErr((e as { message?: string }).message ?? 'Could not reset access code')
     } finally {
       setBusy(false)
     }
@@ -1074,110 +1071,111 @@ export default function PortalPage() {
 
   if (!sessionToken) {
     return (
-      <PortalLayout config={portalConfig} wide={false} subtitle="Sign in with your access code or e-mail one-time code.">
+      <PortalLayout config={portalConfig} wide={false} subtitle="Sign in with your access code.">
         {staffPreview ? (
           <div className="notice portalStaffPreviewBanner">
-            Staff preview — choose a contact from the matter Portal panel, or sign in manually with an access code or
-            e-mail code.
+            Staff preview — choose a contact from the matter Portal panel, or sign in manually with an access code.
           </div>
         ) : null}
 
-        <div className="portalSignInTabs row" style={{ gap: 8, marginBottom: 16, marginTop: 16 }}>
-            <button
-              type="button"
-              className={`btn${signInMode === 'code' ? ' primary' : ''}`}
-              onClick={() => {
-                setSignInMode('code')
-                setErr(null)
-                setInfo(null)
-              }}
-            >
-              Access code
-            </button>
-            <button
-              type="button"
-              className={`btn${signInMode === 'email' ? ' primary' : ''}`}
-              onClick={() => {
-                setSignInMode('email')
-                setErr(null)
-                setInfo(null)
-              }}
-            >
-              E-mail code
-            </button>
-          </div>
-
-          {signInMode === 'code' ? (
-            <form className="stack" onSubmit={(e) => void signInWithCode(e)}>
-              <label className="stack" style={{ gap: 6 }}>
-                <span>Access code</span>
-                <input
-                  value={accessCode}
-                  onChange={(e) => setAccessCode(e.target.value)}
-                  autoComplete="off"
-                  autoFocus
-                  placeholder="XXXX-XXXX-XXXX"
-                  disabled={busy}
-                />
-              </label>
-              {err ? <div className="error">{err}</div> : null}
-              {info ? <div className="notice">{info}</div> : null}
+        {signInMode === 'code' ? (
+          <form className="stack portalSignInForm" style={{ marginTop: 16 }} onSubmit={(e) => void signInWithCode(e)}>
+            <label className="stack" style={{ gap: 6 }}>
+              <span>Access code</span>
+              <input
+                value={accessCode}
+                onChange={(e) => setAccessCode(e.target.value)}
+                autoComplete="off"
+                autoFocus
+                placeholder="XXXX-XXXX-XXXX"
+                disabled={busy}
+              />
+            </label>
+            <div className="portalSignInActions">
               <button type="submit" className="btn primary" disabled={busy || !accessCode.trim()}>
                 {busy ? 'Signing in…' : 'Sign in'}
               </button>
-            </form>
-          ) : (
-            <form className="stack" onSubmit={(e) => void (otpSent ? verifyOtp(e) : requestOtp(e))}>
+              <button
+                type="button"
+                className="btn"
+                disabled={busy}
+                onClick={() => {
+                  setSignInMode('reset')
+                  setErr(null)
+                  setInfo(null)
+                  setResetCodeSent(false)
+                  setResetVerifyCode('')
+                }}
+              >
+                E-mail code
+              </button>
+            </div>
+            {err ? <div className="error">{err}</div> : null}
+            {info ? <div className="notice">{info}</div> : null}
+          </form>
+        ) : (
+          <form
+            className="stack portalSignInForm"
+            style={{ marginTop: 16 }}
+            onSubmit={(e) => void (resetCodeSent ? confirmCodeReset(e) : requestCodeReset(e))}
+          >
+            {!resetCodeSent ? (
               <label className="stack" style={{ gap: 6 }}>
                 <span>E-mail address</span>
-                <input
-                  type="email"
-                  value={otpEmail}
-                  onChange={(e) => setOtpEmail(e.target.value)}
-                  autoComplete="email"
-                  autoFocus
-                  disabled={busy || otpSent}
-                />
-              </label>
-              {otpSent ? (
-                <label className="stack" style={{ gap: 6 }}>
-                  <span>Sign-in code</span>
+                <div className="portalSignInFieldRow">
                   <input
-                    value={otpCode}
-                    onChange={(e) => setOtpCode(e.target.value)}
+                    type="email"
+                    value={resetEmail}
+                    onChange={(e) => setResetEmail(e.target.value)}
+                    autoComplete="email"
+                    autoFocus
+                    disabled={busy}
+                  />
+                  <button type="submit" className="btn primary" disabled={busy || !resetEmail.trim()}>
+                    {busy ? 'Sending…' : 'Send code'}
+                  </button>
+                </div>
+              </label>
+            ) : (
+              <label className="stack" style={{ gap: 6 }}>
+                <span>Verification code</span>
+                <div className="portalSignInFieldRow">
+                  <input
+                    value={resetVerifyCode}
+                    onChange={(e) => setResetVerifyCode(e.target.value)}
                     autoComplete="one-time-code"
+                    autoFocus
                     placeholder="123456"
                     disabled={busy}
                   />
-                </label>
-              ) : null}
-              {err ? <div className="error">{err}</div> : null}
-              {info ? <div className="notice">{info}</div> : null}
-              {otpSent ? (
-                <>
-                  <button type="submit" className="btn primary" disabled={busy || !otpCode.trim()}>
-                    {busy ? 'Signing in…' : 'Verify code'}
+                  <button type="submit" className="btn primary" disabled={busy || !resetVerifyCode.trim()}>
+                    {busy ? 'Resetting…' : 'Reset code'}
                   </button>
-                  <button
-                    type="button"
-                    className="btn"
-                    disabled={busy}
-                    onClick={() => {
-                      setOtpSent(false)
-                      setOtpCode('')
-                      setInfo(null)
-                    }}
-                  >
-                    Use a different e-mail
-                  </button>
-                </>
-              ) : (
-                <button type="submit" className="btn primary" disabled={busy || !otpEmail.trim()}>
-                  {busy ? 'Sending…' : 'Send sign-in code'}
-                </button>
-              )}
-            </form>
-          )}
+                </div>
+              </label>
+            )}
+            {err ? <div className="error">{err}</div> : null}
+            {info ? <div className="notice">{info}</div> : null}
+            <button
+              type="button"
+              className="btnLink"
+              disabled={busy}
+              onClick={() => {
+                if (resetCodeSent) {
+                  setResetCodeSent(false)
+                  setResetVerifyCode('')
+                  setInfo(null)
+                } else {
+                  setSignInMode('code')
+                  setErr(null)
+                  setInfo(null)
+                }
+              }}
+            >
+              {resetCodeSent ? 'Use a different e-mail' : 'Back to sign in'}
+            </button>
+          </form>
+        )}
       </PortalLayout>
     )
   }

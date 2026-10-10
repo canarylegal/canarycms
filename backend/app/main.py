@@ -12,12 +12,12 @@ from app.canary_public_url import get_canary_public_base
 from app.calendar_notification_job import start_calendar_notification_job
 from app.event_tracked_task_job import start_event_tracked_task_job
 from app.webdav_cors_middleware import WebdavPublicCORSMiddleware
+from app.commercial_runtime import register_commercial_routers
 from app.routers import (
     admin_audit,
     admin_deploy,
     admin_storage,
     admin_billing,
-    admin_docusign,
     admin_portal_forms,
     admin_email_integration,
     admin_firm_settings,
@@ -44,6 +44,7 @@ from app.routers import (
     case_tasks,
     case_time,
     cases,
+    commercial_package,
     contact_portal,
     matter_portal,
     fee_scales,
@@ -53,7 +54,6 @@ from app.routers import (
     task_menu,
     contacts,
     canary_sign,
-    docusign,
     files,
     matter_contact_types,
     matter_types,
@@ -107,6 +107,13 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         db.rollback()
         _log.warning("Firm matter type seed skipped: %s", e)
+    try:
+        from app.matter_type_snapshot import restore_case_matter_types_from_snapshots
+
+        restore_case_matter_types_from_snapshots(db)
+    except Exception as e:
+        db.rollback()
+        _log.warning("Matter type snapshot restore skipped: %s", e)
     try:
         ensure_builtin_permission_categories(db)
     except Exception as e:
@@ -298,7 +305,8 @@ app.include_router(case_events.router)
 app.include_router(admin_finance.router)
 app.include_router(admin_billing.router)
 app.include_router(admin_email_integration.router)
-app.include_router(admin_docusign.router)
+app.include_router(commercial_package.router)
+register_commercial_routers(app)
 app.include_router(admin_portal_forms.router)
 app.include_router(admin_standard_tasks.router)
 app.include_router(admin_sub_menu_events.router)
@@ -314,8 +322,6 @@ app.include_router(reports.router)
 app.include_router(reconciliations.router)
 app.include_router(quote_portal.router)
 app.include_router(support.router)
-app.include_router(docusign.router)
-app.include_router(docusign.case_router)
 app.include_router(canary_sign.router)
 app.include_router(canary_sign.case_router)
 app.include_router(portal.router)

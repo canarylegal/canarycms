@@ -163,7 +163,10 @@ class MatterSubTypeStandardTask(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     matter_sub_type_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("matter_sub_type.id", ondelete="CASCADE"), nullable=True, index=True
+        UUID(as_uuid=True),
+        ForeignKey("matter_sub_type.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
     )
     title: Mapped[str] = mapped_column(String(300), nullable=False)
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
@@ -195,7 +198,9 @@ class CaseTask(Base):
     )
     due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     standard_task_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("matter_sub_type_standard_task.id", ondelete="SET NULL"), nullable=True
+        UUID(as_uuid=True),
+        ForeignKey("matter_sub_type_standard_task.id", ondelete="SET NULL"),
+        nullable=True,
     )
     assigned_to_user_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("user.id", ondelete="SET NULL"), nullable=True

@@ -10,6 +10,10 @@ import {
   matterHeadIdForSubType,
   matterSubDropdownOptions,
 } from '../matterTypeOptions'
+import {
+  commercialHasProduct,
+  type CommercialPackageStatus,
+} from '../types/commercial'
 import { useExclusiveDropdownOpen } from '../useExclusiveDropdownOpen'
 import { useQuoteAwaitingSave, type QuoteAwaitingSaveContext } from '../quoteAwaitingSave'
 import { type PendingCaseCompose } from '../quoteEmailPrecedent'
@@ -290,6 +294,8 @@ export function CaseDetail({
     accounts: boolean
     tasks: boolean
     property: boolean
+    searches: boolean
+    landRegistry: boolean
     events: boolean
     finance: boolean
   }>(() => ({
@@ -297,11 +303,21 @@ export function CaseDetail({
     accounts: openDocPanel === 'accounts',
     tasks: false,
     property: false,
+    searches: false,
+    landRegistry: false,
     events: false,
     finance: false,
   }))
 
-  type LeftAccordionKey = 'contacts' | 'accounts' | 'tasks' | 'property' | 'events' | 'finance'
+  type LeftAccordionKey =
+    | 'contacts'
+    | 'accounts'
+    | 'tasks'
+    | 'property'
+    | 'searches'
+    | 'landRegistry'
+    | 'events'
+    | 'finance'
   const toggleLeftAccordion = useCallback((key: LeftAccordionKey) => {
     setLeftOpen((prev) => {
       if (prev[key]) {
@@ -312,6 +328,8 @@ export function CaseDetail({
         accounts: key === 'accounts',
         tasks: key === 'tasks',
         property: key === 'property',
+        searches: key === 'searches',
+        landRegistry: key === 'landRegistry',
         events: key === 'events',
         finance: key === 'finance',
       }
@@ -332,6 +350,8 @@ export function CaseDetail({
       accounts: false,
       tasks: false,
       property: false,
+      searches: false,
+      landRegistry: false,
       events: false,
       finance: false,
     })
@@ -563,6 +583,8 @@ export function CaseDetail({
         accounts: true,
         tasks: false,
         property: false,
+        searches: false,
+        landRegistry: false,
         events: false,
         finance: false,
       })
@@ -689,6 +711,40 @@ export function CaseDetail({
     [caseDetail?.matter_menus],
   )
 
+  const [commercial, setCommercial] = useState<CommercialPackageStatus | null>(null)
+  useEffect(() => {
+    let cancelled = false
+    void apiFetch<CommercialPackageStatus>('/commercial-package/status', { token })
+      .then((s) => {
+        if (!cancelled) setCommercial(s)
+      })
+      .catch(() => {
+        if (!cancelled) setCommercial(null)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [token])
+
+  const hasSearchesMenu = useMemo(
+    () =>
+      commercialHasProduct(commercial, 'casera') &&
+      Boolean(caseDetail?.matter_menus?.some((m) => m.name.trim().toLowerCase() === 'searches')),
+    [caseDetail?.matter_menus, commercial],
+  )
+
+  const hasLandRegistryMenu = useMemo(
+    () =>
+      commercialHasProduct(commercial, 'hmlr') &&
+      Boolean(
+        caseDetail?.matter_menus?.some((m) => {
+          const n = m.name.trim().toLowerCase()
+          return n === 'land registry' || n === 'hm land registry' || n === 'hmlr'
+        }),
+      ),
+    [caseDetail?.matter_menus, commercial],
+  )
+
   const hasFinanceMenu = useMemo(
     () => Boolean(caseDetail?.matter_menus?.some((m) => m.name.trim().toLowerCase() === 'finance')),
     [caseDetail?.matter_menus],
@@ -770,6 +826,45 @@ export function CaseDetail({
       cancelled = true
     }
   }, [caseId, token, hasPropertyMenu, leftOpen.property])
+
+  const [searchesPreviewTotalPence, setSearchesPreviewTotalPence] = useState<number | null>(null)
+  const [searchesPreviewCount, setSearchesPreviewCount] = useState<number | null>(null)
+  useEffect(() => {
+    if (!caseId || !hasSearchesMenu || !leftOpen.searches) return
+    let cancelled = false
+    void apiFetch<{ orders: unknown[]; total_pence: number }>(`/cases/${caseId}/searches`, { token })
+      .then((s) => {
+        if (cancelled) return
+        setSearchesPreviewCount(Array.isArray(s.orders) ? s.orders.length : 0)
+        setSearchesPreviewTotalPence(typeof s.total_pence === 'number' ? s.total_pence : 0)
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setSearchesPreviewCount(0)
+          setSearchesPreviewTotalPence(0)
+        }
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [caseId, token, hasSearchesMenu, leftOpen.searches])
+
+  const [landRegistryPreviewCount, setLandRegistryPreviewCount] = useState<number | null>(null)
+  useEffect(() => {
+    if (!caseId || !hasLandRegistryMenu || !leftOpen.landRegistry) return
+    let cancelled = false
+    void apiFetch<{ orders: unknown[] }>(`/cases/${caseId}/land-registry`, { token })
+      .then((s) => {
+        if (cancelled) return
+        setLandRegistryPreviewCount(Array.isArray(s.orders) ? s.orders.length : 0)
+      })
+      .catch(() => {
+        if (!cancelled) setLandRegistryPreviewCount(0)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [caseId, token, hasLandRegistryMenu, leftOpen.landRegistry])
 
   useEffect(() => {
     if (!caseId || !leftOpen.events) return
@@ -1129,6 +1224,11 @@ export function CaseDetail({
             propertyDetails={propertyDetails}
             setPropertyDraft={setPropertyDraft}
             setPropertyBaseline={setPropertyBaseline}
+            hasSearchesMenu={hasSearchesMenu}
+            hasLandRegistryMenu={hasLandRegistryMenu}
+            landRegistryPreviewCount={landRegistryPreviewCount}
+            searchesPreviewTotalPence={searchesPreviewTotalPence}
+            searchesPreviewCount={searchesPreviewCount}
             hasEventsMenu={hasEventsMenu}
             eventsPreview={eventsPreview}
             openCaseEventModal={openCaseEventModal}
@@ -1246,6 +1346,16 @@ export function CaseDetail({
               propertyBaseline={propertyBaseline}
               setPropertyDetails={setPropertyDetails}
               setActionErr={setActionErr}
+              onOpenSearchFile={(fileId) => {
+                const f = files.find((x) => x.id === fileId)
+                if (!f) {
+                  setActionErr('Search document not found — try Sync with Casera, then refresh.')
+                  return
+                }
+                setDocFolder((f.folder_path || 'Searches').trim() || 'Searches')
+                setCaseDocPanel('documents')
+                void openCaseFile(f)
+              }}
               caseContacts={caseContacts}
               contactAddOpen={contactAddOpen}
               setContactAddErr={setContactAddErr}

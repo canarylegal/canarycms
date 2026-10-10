@@ -27,6 +27,13 @@ os.environ.setdefault("MASTER_ADMIN_PASSWORD", "ci-master-pytest-password")
 os.environ.setdefault("MASTER_ADMIN_REQUIRE_2FA", "false")
 os.environ.setdefault("MASTER_ADMIN_TOTP_SECRET", "")
 
+# Commercial package (DocuSign / Casera / HMLR) — sibling checkout when present.
+_commercial = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "..", "..", "..", "canary-commercial")
+)
+if os.path.isdir(os.path.join(_commercial, "python", "canary_commercial")):
+    os.environ.setdefault("COMMERCIAL_PACKAGE_DIR", _commercial)
+
 
 @pytest.fixture
 def db():
