@@ -1,0 +1,93 @@
+name: Commercial contract
+
+# Attach private canary-commercial and prove Core alone vs Core+commercial route split.
+# Requires repo secret CANARY_COMMERCIAL_TOKEN (contents:read on canarylegal/canary-commercial).
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "backend/app/commercial_*.py"
+      - "backend/app/routers/commercial_package.py"
+      - "backend/app/docusign_*.py"
+      - "backend/app/casera_*.py"
+      - "backend/app/hmlr_*.py"
+      - "backend/app/search_settings.py"
+      - "backend/app/main.py"
+      - "backend/app/canary_version.py"
+      - "scripts/smoke-commercial-contract.sh"
+      - ".github/workflows/commercial-contract.yml"
+      - "docker-compose.commercial.example.yml"
+      - "docs/COMMERCIAL_PACKAGE.md"
+  pull_request:
+    paths:
+      - "backend/app/commercial_*.py"
+      - "backend/app/routers/commercial_package.py"
+      - "backend/app/docusign_*.py"
+      - "backend/app/casera_*.py"
+      - "backend/app/hmlr_*.py"
+      - "backend/app/search_settings.py"
+      - "backend/app/main.py"
+      - "backend/app/canary_version.py"
+      - "scripts/smoke-commercial-contract.sh"
+      - ".github/workflows/commercial-contract.yml"
+      - "docker-compose.commercial.example.yml"
+      - "docs/COMMERCIAL_PACKAGE.md"
+
+jobs:
+  commercial-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Check commercial checkout secret
+        id: secret
+        working-directory: .
+        run: |
+          if [ -z "${{ secrets.CANARY_COMMERCIAL_TOKEN }}" ]; then
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            {
+              echo "## Commercial contract skipped"
+              echo ""
+              echo "Create a fine-scoped GitHub PAT with \`contents:read\` on"
+              echo "\`canarylegal/canary-commercial\` and store it as the repo secret"
+              echo "\`CANARY_COMMERCIAL_TOKEN\`."
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::notice::CANARY_COMMERCIAL_TOKEN not set — commercial contract smoke skipped"
+          else
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout canary-commercial
+        if: steps.secret.outputs.present == 'true'
+        uses: actions/checkout@v6
+        with:
+          repository: canarylegal/canary-commercial
+          token: ${{ secrets.CANARY_COMMERCIAL_TOKEN }}
+          path: canary-commercial
+
+      - uses: actions/setup-python@v6
+        if: steps.secret.outputs.present == 'true'
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install backend deps
+        if: steps.secret.outputs.present == 'true'
+        run: pip install -r requirements.txt
+
+      - name: Run commercial attach/detach smoke
+        if: steps.secret.outputs.present == 'true'
+        working-directory: .
+        env:
+          COMMERCIAL_PACKAGE_DIR: ${{ github.workspace }}/canary-commercial
+          PYTHON: python3
+        run: |
+          chmod +x scripts/smoke-commercial-contract.sh
+          ./scripts/smoke-commercial-contract.sh
