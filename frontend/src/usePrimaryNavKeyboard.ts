@@ -4,9 +4,13 @@ import { isCaseContextMenuOpen, isEditableKeyboardTarget, isModalBlockingKeyboar
 
 export type PrimaryNavId = Exclude<AppSidebarView, 'case-menu'>
 
-function buildPrimaryNavItems(canAccessAccounts: boolean, canAdminConsole: boolean, docusignEnabled: boolean): PrimaryNavId[] {
+function buildPrimaryNavItems(
+  canAccessAccounts: boolean,
+  canAdminConsole: boolean,
+  portalSummaryEnabled: boolean,
+): PrimaryNavId[] {
   const items: PrimaryNavId[] = ['main-menu', 'quotes', 'calendar', 'tasks', 'contacts']
-  if (docusignEnabled) items.push('docusign')
+  if (portalSummaryEnabled) items.push('portal-summary')
   if (canAccessAccounts) items.push('accounts')
   items.push('reports', 'user-settings')
   if (canAdminConsole) items.push('admin-console')
@@ -26,7 +30,7 @@ export function usePrimaryNavKeyboard({
   caseMenuQuoteContext = false,
   canAccessAccounts,
   canAdminConsole,
-  docusignEnabled,
+  portalSummaryEnabled,
   onNavigate,
 }: {
   enabled: boolean
@@ -35,7 +39,7 @@ export function usePrimaryNavKeyboard({
   caseMenuQuoteContext?: boolean
   canAccessAccounts: boolean
   canAdminConsole: boolean
-  docusignEnabled: boolean
+  portalSummaryEnabled: boolean
   onNavigate: NavigateHandlers
 }) {
   useEffect(() => {
@@ -46,7 +50,7 @@ export function usePrimaryNavKeyboard({
       if (e.altKey || e.ctrlKey || e.metaKey) return
       if (isEditableKeyboardTarget(e.target) || isModalBlockingKeyboard() || isCaseContextMenuOpen()) return
 
-      const items = buildPrimaryNavItems(canAccessAccounts, canAdminConsole, docusignEnabled)
+      const items = buildPrimaryNavItems(canAccessAccounts, canAdminConsole, portalSummaryEnabled)
       if (items.length === 0) return
 
       const current = resolvePrimaryNavView(view, caseMenuQuoteContext)
@@ -61,5 +65,13 @@ export function usePrimaryNavKeyboard({
 
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [enabled, view, caseMenuQuoteContext, canAccessAccounts, canAdminConsole, docusignEnabled, onNavigate])
+  }, [
+    enabled,
+    view,
+    caseMenuQuoteContext,
+    canAccessAccounts,
+    canAdminConsole,
+    portalSummaryEnabled,
+    onNavigate,
+  ])
 }
