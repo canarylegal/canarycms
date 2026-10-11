@@ -282,12 +282,13 @@ def create_case_email_draft_m365(
         return _create_case_email_draft_m365_body(case_id, body, user, db)
     except HTTPException:
         raise
-    except Exception as e:
-        log.exception("M365 email draft failed")
+    except Exception:
+        ref = uuid.uuid4().hex[:12]
+        log.exception("M365 email draft failed ref=%s case_id=%s", ref, case_id)
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"{type(e).__name__}: {e}",
-        ) from e
+            detail=f"Could not create Outlook draft. Reference: {ref}.",
+        ) from None
 
 
 @router.get("", response_model=list[dict])

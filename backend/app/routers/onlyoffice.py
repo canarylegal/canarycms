@@ -150,13 +150,13 @@ def _decode_callback_payload(request: Request, body: Any) -> dict[str, Any]:
             log.warning("ONLYOFFICE callback JWT failed: %s", e)
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
 
-    # OO DS 7.5 does not include an outbox JWT in callbacks despite local.json configuration.
-    # Accept plain callbacks when the body contains the expected OO DS fields (key + status),
-    # unless ONLYOFFICE_CALLBACK_REQUIRE_JWT=1 (recommended for production / DS 8+).
+    # Unsigned fallback for legacy Document Server builds that omit outbox JWT.
+    # Default is require JWT (see onlyoffice_callback_require_jwt). Set
+    # ONLYOFFICE_CALLBACK_REQUIRE_JWT=0 only for those legacy installs.
     if isinstance(body, dict) and "status" in body and "key" in body:
         if onlyoffice_callback_require_jwt():
             log.warning(
-                "onlyoffice_callback: unsigned payload rejected (ONLYOFFICE_CALLBACK_REQUIRE_JWT=1; key=%s status=%s)",
+                "onlyoffice_callback: unsigned payload rejected (JWT required by default; key=%s status=%s)",
                 body.get("key"),
                 body.get("status"),
             )
@@ -166,7 +166,7 @@ def _decode_callback_payload(request: Request, body: Any) -> dict[str, Any]:
             )
         log.warning(
             "onlyoffice_callback: no JWT in callback body — accepting plain payload "
-            "(OO DS outbox JWT not sent by this version; key=%s status=%s)",
+            "(ONLYOFFICE_CALLBACK_REQUIRE_JWT=0; key=%s status=%s)",
             body.get("key"),
             body.get("status"),
         )

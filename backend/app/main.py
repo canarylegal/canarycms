@@ -214,8 +214,8 @@ def _cors_allow_origins() -> list[str]:
     return merged
 
 
-# LAN / Tailscale HTTP origins (private IPv4). Public HTTPS domains use CANARY_PUBLIC_URL /
-# CANARY_CORS_ORIGINS and/or CANARY_CORS_ORIGIN_REGEX.
+# Optional LAN / Tailscale HTTP origins (private IPv4 + CGNAT). Off by default — enable with
+# CANARY_CORS_ALLOW_PRIVATE_HTTP=1. Prefer explicit CANARY_PUBLIC_URL / CANARY_CORS_ORIGINS.
 _LAN_HTTP_ORIGIN_REGEX = (
     r"^http://(192\.168\.\d{1,3}\.\d{1,3}|10\.\d{1,3}\.\d{1,3}\.\d{1,3}|"
     r"172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}|"
@@ -223,11 +223,21 @@ _LAN_HTTP_ORIGIN_REGEX = (
 )
 
 
-def _cors_allow_origin_regex() -> str:
+def _env_truthy(name: str, default: str = "") -> bool:
+    return (os.getenv(name, default) or "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def _cors_allow_origin_regex() -> str | None:
+    """Return an Origin regex, or None when only the explicit allow-list applies."""
+    parts: list[str] = []
+    if _env_truthy("CANARY_CORS_ALLOW_PRIVATE_HTTP"):
+        parts.append(f"(?:{_LAN_HTTP_ORIGIN_REGEX})")
     extra = os.getenv("CANARY_CORS_ORIGIN_REGEX", "").strip()
     if extra:
-        return f"(?:{_LAN_HTTP_ORIGIN_REGEX})|(?:{extra})"
-    return _LAN_HTTP_ORIGIN_REGEX
+        parts.append(f"(?:{extra})")
+    if not parts:
+        return None
+    return "|".join(parts)
 
 
 def _install_proxy_headers_middleware(application: FastAPI) -> None:
@@ -248,14 +258,16 @@ def _install_proxy_headers_middleware(application: FastAPI) -> None:
 
 app = FastAPI(title="Case Management Backend", lifespan=lifespan)
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=_cors_allow_origins(),
-    allow_origin_regex=_cors_allow_origin_regex(),
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+_cors_kwargs: dict = {
+    "allow_origins": _cors_allow_origins(),
+    "allow_credentials": True,
+    "allow_methods": ["*"],
+    "allow_headers": ["*"],
+}
+_cors_origin_regex = _cors_allow_origin_regex()
+if _cors_origin_regex:
+    _cors_kwargs["allow_origin_regex"] = _cors_origin_regex
+app.add_middleware(CORSMiddleware, **_cors_kwargs)
 # After CORS: append WebDAV-specific headers (token auth; no cookies). Helps ONLYOFFICE Desktop
 # embedded views that enforce CORS on PROPFIND/GET.
 app.add_middleware(WebdavPublicCORSMiddleware)

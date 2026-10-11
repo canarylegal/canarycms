@@ -36,6 +36,16 @@ def test_plain_callback_rejected_by_default(monkeypatch: pytest.MonkeyPatch) -> 
     assert exc.value.status_code == 401
 
 
+def test_plain_callback_rejected_when_env_empty_string(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Compose ``${VAR:-1}`` unset is fine; empty ``VAR=`` must still require JWT."""
+    monkeypatch.setenv("ONLYOFFICE_JWT_SECRET", "test-onlyoffice-secret")
+    monkeypatch.setenv("ONLYOFFICE_CALLBACK_REQUIRE_JWT", "")
+    body = {"status": 2, "key": "abc123"}
+    with pytest.raises(HTTPException) as exc:
+        _decode_callback_payload(_request(), body)
+    assert exc.value.status_code == 401
+
+
 def test_plain_callback_rejected_when_jwt_required(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("ONLYOFFICE_JWT_SECRET", "test-onlyoffice-secret")
     monkeypatch.setenv("ONLYOFFICE_CALLBACK_REQUIRE_JWT", "1")

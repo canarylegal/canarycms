@@ -86,7 +86,9 @@ services:
       FILES_ROOT: /data/files
       CANARY_PUBLIC_URL: ${CANARY_PUBLIC_URL:-http://localhost:8000}
       CANARY_CORS_ORIGINS: ${CANARY_CORS_ORIGINS:-}
-      # Optional extra regex for browser Origin (e.g. https://app.example.com). See .env.example.
+      # Off by default. Set to 1 only for LAN/Tailscale HTTP Origins not listed in CANARY_CORS_ORIGINS.
+      CANARY_CORS_ALLOW_PRIVATE_HTTP: ${CANARY_CORS_ALLOW_PRIVATE_HTTP:-0}
+      # Optional extra regex for browser Origin. See .env.example.
       CANARY_CORS_ORIGIN_REGEX: ${CANARY_CORS_ORIGIN_REGEX:-}
       # Trust X-Forwarded-Proto / client IP from these networks (Docker bridge + loopback). Set to * only if you understand the tradeoff.
       CANARY_BEHIND_REVERSE_PROXY: ${CANARY_BEHIND_REVERSE_PROXY:-1}
@@ -128,7 +130,8 @@ services:
       CANARY_SYNC_CALDAV_EVENT_CATEGORIES: ${CANARY_SYNC_CALDAV_EVENT_CATEGORIES:-1}
       # Document Server major version: ``auto`` (probe) or e.g. ``9``. See onlyoffice_ds_version.py.
       ONLYOFFICE_DS_MAJOR: ${ONLYOFFICE_DS_MAJOR:-auto}
-      ONLYOFFICE_CALLBACK_REQUIRE_JWT: ${ONLYOFFICE_CALLBACK_REQUIRE_JWT:-}
+      # Default on (reject unsigned save callbacks). Set 0 only for legacy Document Server.
+      ONLYOFFICE_CALLBACK_REQUIRE_JWT: ${ONLYOFFICE_CALLBACK_REQUIRE_JWT:-1}
     volumes:
       - ./data/files:/data/files
       - radicale-data:/radicale-data

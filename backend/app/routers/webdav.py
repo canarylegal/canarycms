@@ -24,6 +24,7 @@ from app.file_eml_service import convert_case_upload_msg_to_eml_if_applicable, r
 from app.audit import log_event
 from app.canary_public_url import get_canary_public_base
 from app.docx_util import ensure_docx_proofing_language_en_gb_bytes, finalize_stored_docx_bytes
+from app.upload_limits import max_upload_bytes
 
 router = APIRouter(prefix="/webdav", tags=["webdav"])
 log = logging.getLogger(__name__)
@@ -43,6 +44,36 @@ _SUPPORTED_LOCK_XML = """
 
 def _etag_for_file(frow: DbFile) -> str:
     return f'"{frow.version}-{frow.size_bytes}-{frow.id.hex[:12]}"'
+
+
+def _redact_webdav_path(path: str) -> str:
+    """Strip the capability token from WebDAV paths before logging."""
+    parts = (path or "").split("/")
+    try:
+        idx = parts.index("sessions")
+    except ValueError:
+        return path or ""
+    if idx + 1 < len(parts) and parts[idx + 1]:
+        parts[idx + 1] = "<redacted>"
+    return "/".join(parts)
+
+
+def _etag_matches_if_match(if_match: str, etag: str) -> bool:
+    """Return True when ``If-Match`` allows the write (``*`` or matching ETag)."""
+    raw = (if_match or "").strip()
+    if not raw:
+        return True
+    if raw == "*":
+        return True
+    want = etag.strip()
+    want_bare = want.strip('"')
+    for part in raw.split(","):
+        cand = part.strip()
+        if cand.startswith("W/"):
+            cand = cand[2:].strip()
+        if cand == want or cand.strip('"') == want_bare:
+            return True
+    return False
 
 
 def _http_range_interval(range_header: str | None, total_len: int) -> tuple[int, int] | None | str:
@@ -320,7 +351,7 @@ def webdav_file_options(token: str, filename: str) -> Response:
 def webdav_propfind_collection(request: Request, token: str, db: Session = Depends(get_db)) -> Response:
     log.info(
         "webdav PROPFIND collection %s depth=%s origin=%s ua=%s",
-        request.url.path,
+        _redact_webdav_path(request.url.path),
         request.headers.get("depth", "-"),
         (request.headers.get("origin") or "-")[:80],
         (request.headers.get("user-agent") or "-")[:100],
@@ -373,7 +404,7 @@ def webdav_propfind_file(
 ) -> Response:
     log.info(
         "webdav PROPFIND file %s depth=%s origin=%s ua=%s",
-        request.url.path,
+        _redact_webdav_path(request.url.path),
         request.headers.get("depth", "-"),
         (request.headers.get("origin") or "-")[:80],
         (request.headers.get("user-agent") or "-")[:100],
@@ -498,6 +529,41 @@ def webdav_get_file(
     return Response(content=body, status_code=status_code, media_type=media_type, headers=base_headers)
 
 
+async def _stream_request_to_partial(request: Request, tmp: Path, *, max_bytes: int) -> int:
+    """Stream the request body into ``tmp``; raise 413 if over ``max_bytes``."""
+    cl_raw = (request.headers.get("content-length") or "").strip()
+    if cl_raw:
+        try:
+            if int(cl_raw) > max_bytes:
+                raise HTTPException(
+                    status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                    detail="Upload exceeds maximum size",
+                )
+        except ValueError:
+            pass
+
+    size = 0
+    try:
+        with tmp.open("wb") as out:
+            async for chunk in request.stream():
+                if not chunk:
+                    continue
+                size += len(chunk)
+                if size > max_bytes:
+                    raise HTTPException(
+                        status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                        detail="Upload exceeds maximum size",
+                    )
+                out.write(chunk)
+        return size
+    except Exception:
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
+
+
 @router.api_route("/sessions/{token}/{filename}", methods=["PUT"], response_model=None)
 async def webdav_put_file(
     request: Request,
@@ -515,34 +581,47 @@ async def webdav_put_file(
     if frow.category == FileCategory.system:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
 
+    # Optimistic concurrency: when clients send If-Match, reject stale writes (412).
+    if_match = request.headers.get("if-match")
+    if if_match is not None and not _etag_matches_if_match(if_match, _etag_for_file(frow)):
+        raise HTTPException(
+            status_code=status.HTTP_412_PRECONDITION_FAILED,
+            detail="Precondition Failed",
+            headers={"ETag": _etag_for_file(frow)},
+        )
+
     ensure_files_root()
     abs_path = (FILES_ROOT / frow.storage_path).resolve()
     if not path_is_under_files_root(abs_path):
         raise HTTPException(status_code=500, detail="Invalid storage path")
 
     abs_path.parent.mkdir(parents=True, exist_ok=True)
-    with abs_path.open("wb") as out:
-        async for chunk in request.stream():
-            if chunk:
-                out.write(chunk)
+    max_bytes = max_upload_bytes()
+    tmp = abs_path.with_name(abs_path.name + ".partial")
+    try:
+        await _stream_request_to_partial(request, tmp, max_bytes=max_bytes)
 
-    if frow.original_filename.lower().endswith(".docx") or (
-        (frow.mime_type or "").split(";", 1)[0].strip().lower()
-        == "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-    ):
-        raw = abs_path.read_bytes()
-        patched = finalize_stored_docx_bytes(
-            raw,
-            filename=frow.original_filename,
-            mime_type=frow.mime_type,
+        is_docx = frow.original_filename.lower().endswith(".docx") or (
+            (frow.mime_type or "").split(";", 1)[0].strip().lower()
+            == "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         )
-        if patched != raw:
-            abs_path.write_bytes(patched)
-            new_size = len(patched)
-        else:
-            new_size = abs_path.stat().st_size
-    else:
-        new_size = abs_path.stat().st_size
+        if is_docx:
+            raw = tmp.read_bytes()
+            patched = finalize_stored_docx_bytes(
+                raw,
+                filename=frow.original_filename,
+                mime_type=frow.mime_type,
+            )
+            if patched != raw:
+                tmp.write_bytes(patched)
+
+        os.replace(tmp, abs_path)
+    except Exception:
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
 
     paths_wrap = StoredFilePaths(abs_path=abs_path, rel_path=frow.storage_path, folder_path=frow.folder_path or "")
     prev_name = frow.original_filename
@@ -576,15 +655,26 @@ async def webdav_put_file(
         entity_id=str(frow.id),
         meta={"case_id": str(frow.case_id), "version": frow.version, "size_bytes": frow.size_bytes},
     )
-    return Response(status_code=204)
+    log.info(
+        "webdav PUT file_id=%s version=%s size=%s path=%s",
+        frow.id,
+        frow.version,
+        frow.size_bytes,
+        _redact_webdav_path(request.url.path),
+    )
+    return Response(status_code=204, headers={"ETag": _etag_for_file(frow)})
 
 
 @router.api_route("/sessions/{token}/{filename}", methods=["LOCK"], response_model=None)
 def webdav_lock(token: str, filename: str, request: Request, db: Session = Depends(get_db)) -> Response:
-    """Return a trivial lock so picky clients accept the resource as writable."""
+    """Advisory lock token for clients that require LOCK before write.
+
+    Lock ownership is not persisted or enforced server-side. Concurrent writers should
+    send ``If-Match`` with the current ETag; mismatched PUTs receive 412.
+    """
     log.info(
         "webdav LOCK %s ua=%s",
-        request.url.path,
+        _redact_webdav_path(request.url.path),
         (request.headers.get("user-agent") or "-")[:100],
     )
     loaded = _load_session(db, token)

@@ -65,6 +65,8 @@ COMPOSE_PROJECT_NAME=canary
 
 CANARY_PUBLIC_URL=https://canary.yourfirm.co.uk
 CANARY_CORS_ORIGINS=https://canary.yourfirm.co.uk
+# Leave private-HTTP CORS off in production; list any Tailscale Origin explicitly in CANARY_CORS_ORIGINS instead.
+# CANARY_CORS_ALLOW_PRIVATE_HTTP=1
 ONLYOFFICE_DS_PUBLIC_URL=https://canary.yourfirm.co.uk/office-ds
 CANARY_CALDAV_PUBLIC_URL=https://canary.yourfirm.co.uk
 ONLYOFFICE_CALLBACK_REQUIRE_JWT=1
@@ -236,7 +238,7 @@ WAF and in-app rate limits **complement** each other.
 ### Public URLs & auth
 - [ ] `CANARY_PUBLIC_URL`, `CANARY_CORS_ORIGINS`, `ONLYOFFICE_DS_PUBLIC_URL`, `CANARY_CALDAV_PUBLIC_URL` are the live HTTPS origins
 - [ ] `WEBAUTHN_RP_ID` matches the hostname staff open (no port)
-- [ ] `ONLYOFFICE_CALLBACK_REQUIRE_JWT=1` for production (ONLYOFFICE 9.x sends signed callbacks)
+- [ ] `ONLYOFFICE_CALLBACK_REQUIRE_JWT=1` (Compose default; ONLYOFFICE 9.x sends signed callbacks — set `0` only for legacy DS)
 - [ ] Behind TLS terminator: `CANARY_BEHIND_REVERSE_PROXY=1` and tight `CANARY_PROXY_TRUSTED_HOSTS`
 
 ### Access control & ops
@@ -456,7 +458,7 @@ Restart the backend after changes. Canary user email should match the M365 mailb
 | Encryption key split | `DATA_ENCRYPTION_KEY` vs `JWT_SECRET` |
 | Staff login lockout | 5 failures / 15 min (default); see `STAFF_LOGIN_*` in `.env.example` |
 | Permission categories | Required for staff users; “Standard fee earner” seeded by migration |
-| ONLYOFFICE callback JWT | `ONLYOFFICE_CALLBACK_REQUIRE_JWT=1` in `.env` (default in `.env.example`; requires Document Server 8+ / 9.x) |
+| ONLYOFFICE callback JWT | Required by default (`ONLYOFFICE_CALLBACK_REQUIRE_JWT=1` in Compose / `.env.example`). Set `0` only for legacy Document Server that cannot sign callbacks. |
 
 ---
 

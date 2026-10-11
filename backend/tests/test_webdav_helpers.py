@@ -7,7 +7,9 @@ from types import SimpleNamespace
 from app.desktop_edit_session import webdav_session_hours
 from app.routers.webdav import (
     _effective_webdav_media_type,
+    _etag_matches_if_match,
     _http_range_interval,
+    _redact_webdav_path,
     _session_path_matches_filename,
 )
 
@@ -72,3 +74,22 @@ def test_webdav_session_hours_clamp(monkeypatch) -> None:
     assert webdav_session_hours() == 8
     monkeypatch.delenv("WEBDAV_SESSION_HOURS", raising=False)
     assert webdav_session_hours() == 8
+
+
+def test_redact_webdav_path_strips_capability_token() -> None:
+    assert (
+        _redact_webdav_path("/webdav/sessions/supersecrettoken/Letter.docx")
+        == "/webdav/sessions/<redacted>/Letter.docx"
+    )
+    assert _redact_webdav_path("/webdav/sessions/supersecrettoken/") == "/webdav/sessions/<redacted>/"
+    assert _redact_webdav_path("/webdav/sessions/supersecrettoken") == "/webdav/sessions/<redacted>"
+    assert _redact_webdav_path("/other/path") == "/other/path"
+
+
+def test_etag_matches_if_match() -> None:
+    etag = '"3-1024-abcdef123456"'
+    assert _etag_matches_if_match("*", etag) is True
+    assert _etag_matches_if_match(etag, etag) is True
+    assert _etag_matches_if_match(f"W/{etag}", etag) is True
+    assert _etag_matches_if_match('"other", ' + etag, etag) is True
+    assert _etag_matches_if_match('"stale-tag"', etag) is False
