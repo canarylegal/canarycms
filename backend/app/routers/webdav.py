@@ -9,6 +9,7 @@ import html
 import logging
 import mimetypes
 import os
+import uuid
 from datetime import datetime, timezone
 from email.utils import format_datetime
 from pathlib import Path
@@ -597,7 +598,8 @@ async def webdav_put_file(
 
     abs_path.parent.mkdir(parents=True, exist_ok=True)
     max_bytes = max_upload_bytes()
-    tmp = abs_path.with_name(abs_path.name + ".partial")
+    # Unique per upload so concurrent PUTs cannot clobber a shared ``.partial``.
+    tmp = abs_path.with_name(f"{abs_path.name}.partial.{uuid.uuid4().hex}")
     try:
         await _stream_request_to_partial(request, tmp, max_bytes=max_bytes)
 

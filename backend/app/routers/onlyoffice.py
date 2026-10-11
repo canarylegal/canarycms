@@ -52,6 +52,22 @@ log = logging.getLogger(__name__)
 _OO_INTERNAL_HOSTS = {"onlyoffice", "canary-onlyoffice"}
 
 
+def _safe_url_for_log(url: str | None) -> str:
+    """Log scheme/host/path only — drop query, fragment, and userinfo (DS tokens)."""
+    raw = (url or "").strip()
+    if not raw:
+        return "-"
+    try:
+        p = urlparse(raw)
+        host = p.hostname or "-"
+        if p.port:
+            host = f"{host}:{p.port}"
+        path = p.path or "/"
+        return f"{p.scheme or 'http'}://{host}{path}"
+    except Exception:
+        return "<unparseable-url>"
+
+
 def _strip_ds_reverse_proxy_prefix(path: str) -> str:
     """Strip the public site path prefix where DS is mounted (e.g. /office-ds).
 
@@ -99,7 +115,11 @@ def _rewrite_oo_download_url(url: str) -> str:
         if host in known:
             out = urlunparse((p.scheme, p.netloc, path_norm, p.params, p.query, p.fragment))
             if out != url:
-                log.info("_rewrite_oo_download_url (internal host): %s → %s", url, out)
+                log.info(
+                    "_rewrite_oo_download_url (internal host): %s → %s",
+                    _safe_url_for_log(url),
+                    _safe_url_for_log(out),
+                )
             return out
 
         base = urlparse(oo_internal)
@@ -113,10 +133,14 @@ def _rewrite_oo_download_url(url: str) -> str:
                 p.fragment,
             )
         )
-        log.info("_rewrite_oo_download_url: %s → %s", url, rewritten)
+        log.info(
+            "_rewrite_oo_download_url: %s → %s",
+            _safe_url_for_log(url),
+            _safe_url_for_log(rewritten),
+        )
         return rewritten
     except Exception as exc:
-        log.warning("_rewrite_oo_download_url failed for %r: %s", url, exc)
+        log.warning("_rewrite_oo_download_url failed for %s: %s", _safe_url_for_log(url), exc)
         return url
 
 
@@ -247,7 +271,7 @@ def _internal_fetch_url_from_browser(browser_url: str) -> str:
     except HTTPException:
         raise
     except Exception as exc:
-        log.warning("print-stage: bad URL %r: %s", rewritten, exc)
+        log.warning("print-stage: bad URL %s: %s", _safe_url_for_log(rewritten), exc)
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="invalid URL") from exc
     return rewritten
 
@@ -261,9 +285,9 @@ def _callback_fetch_url_or_reject(download_url: str) -> str | None:
     norm_path = _normalized_ds_path_for_print_allowlist(fetch_url)
     if not _is_allowed_onlyoffice_ds_fetch_path(norm_path):
         log.warning(
-            "onlyoffice_callback: rejected download path %r (rewritten=%r)",
+            "onlyoffice_callback: rejected download path %r (rewritten=%s)",
             norm_path,
-            fetch_url,
+            _safe_url_for_log(fetch_url),
         )
         return None
     return fetch_url
@@ -285,13 +309,17 @@ async def _download_oo_document_bytes(fetch_url: str, *, max_bytes: int) -> byte
                         log.warning(
                             "onlyoffice_callback: download exceeded max_bytes=%s url=%s",
                             max_bytes,
-                            fetch_url,
+                            _safe_url_for_log(fetch_url),
                         )
                         return None
                     buf.write(chunk)
                 return buf.getvalue()
     except Exception as e:
-        log.exception("ONLYOFFICE save download failed (url=%s): %s", fetch_url, e)
+        log.exception(
+            "ONLYOFFICE save download failed (url=%s): %s",
+            _safe_url_for_log(fetch_url),
+            e,
+        )
         return None
 
 
@@ -360,7 +388,7 @@ async def _fetch_onlyoffice_download_bytes(browser_url: str, *, log_label: str) 
     except HTTPException:
         raise
     except Exception as e:
-        log.exception("%s: fetch failed url=%s", log_label, fetch_url)
+        log.exception("%s: fetch failed url=%s", log_label, _safe_url_for_log(fetch_url))
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail="Could not fetch document from Document Server",
@@ -645,7 +673,7 @@ async def onlyoffice_print_stage(
     except HTTPException:
         raise
     except Exception as e:
-        log.exception("print-stage: fetch failed url=%s", fetch_url)
+        log.exception("print-stage: fetch failed url=%s", _safe_url_for_log(fetch_url))
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail="Could not fetch PDF from Document Server",
@@ -829,8 +857,8 @@ async def onlyoffice_callback(
     download_url = _callback_download_url(payload)
 
     log.warning(
-        "onlyoffice_callback: file_id=%s status=%s url=%r keys=%s",
-        file_id, st, download_url, list(payload.keys()),
+        "onlyoffice_callback: file_id=%s status=%s url=%s keys=%s",
+        file_id, st, _safe_url_for_log(download_url), list(payload.keys()),
     )
 
     if st is None:

@@ -8,7 +8,11 @@ from unittest.mock import MagicMock
 import pytest
 
 from app.desktop_edit_session import ensure_session_document_key, session_matches_document_key
-from app.routers.onlyoffice import _callback_fetch_url_or_reject, _is_allowed_onlyoffice_ds_fetch_path
+from app.routers.onlyoffice import (
+    _callback_fetch_url_or_reject,
+    _is_allowed_onlyoffice_ds_fetch_path,
+    _safe_url_for_log,
+)
 
 
 def test_session_matches_document_key() -> None:
@@ -17,6 +21,25 @@ def test_session_matches_document_key() -> None:
     assert session_matches_document_key(sess, "other") is False
     assert session_matches_document_key(SimpleNamespace(document_key=None), "file_1_abc") is False
     assert session_matches_document_key(sess, "") is False
+
+
+def test_callback_key_for_file_b_rejected_on_session_for_file_a() -> None:
+    """A→B binding: active session for file A must not accept file B's document key."""
+    sess_a = SimpleNamespace(document_key="file_A_v3_deadbeef")
+    key_b = "file_B_v1_cafebabe"
+    assert session_matches_document_key(sess_a, "file_A_v3_deadbeef") is True
+    assert session_matches_document_key(sess_a, key_b) is False
+
+
+def test_safe_url_for_log_strips_query_fragment_and_userinfo() -> None:
+    assert (
+        _safe_url_for_log(
+            "https://user:secret@onlyoffice:8080/cache/files/x.bin?md5=tok&expires=1#frag"
+        )
+        == "https://onlyoffice:8080/cache/files/x.bin"
+    )
+    assert _safe_url_for_log(None) == "-"
+    assert _safe_url_for_log("") == "-"
 
 
 def test_ensure_session_document_key_reuses_existing() -> None:
