@@ -29,7 +29,7 @@ _ALLOWED_VENDOR_ALEMBIC = frozenset(
 )
 
 _VENDOR_ALEMBIC_HINT = re.compile(
-    r"\b(casera|hmlr|docusign|search_integration|search_provider)\b",
+    r"\b(casera|hmlr|docusign|sdlt|search_integration|search_provider)\b",
     re.IGNORECASE,
 )
 
@@ -138,7 +138,7 @@ def main() -> int:
         for item in failures:
             print(f"  - {item}", file=sys.stderr)
         print(
-            "\nSee docs/COMMERCIAL_PACKAGE.md — future DocuSign/Casera/HMLR work "
+            "\nSee docs/COMMERCIAL_PACKAGE.md — future DocuSign/Casera/HMLR/SDLT work "
             "belongs in canary-commercial.",
             file=sys.stderr,
         )

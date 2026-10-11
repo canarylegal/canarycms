@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# Fail the commit if commercial vendor ownership drifts into Core.
+# Enable once per clone:  git config core.hooksPath scripts/git-hooks
+set -euo pipefail
+# Resolve Core root from this script (scripts/git-hooks/…), not from cwd.
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+exec python3 "$ROOT/scripts/check_commercial_boundary.py"

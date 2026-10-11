@@ -1,6 +1,6 @@
 # Commercial package (Level C)
 
-Private product layer for paid connectors (DocuSign, Casera / Searches, HMLR).  
+Private product layer for paid connectors (DocuSign, Casera / Searches, HMLR, SDLT).  
 Core attaches the package at `/commercial`; without it, Core boots and those products are omitted (no routers, no UI bundle).
 
 ## Layout (`canarylegal/canary-commercial`)
@@ -29,9 +29,27 @@ Core attaches the package at `/commercial`; without it, Core boots and those pro
 | New vendor tables / columns | `canary-commercial/module/migrations/versions/*.sql` |
 | Core attach sockets, slot hosts, portal/files enrichment | Core (`commercial_hooks` only) |
 
-Do **not** add Core Alembic revisions for vendor DDL, reintroduce Admin/matter DocuSign–Searches–HMLR components under `frontend/src/`, add `*casera*` / `*hmlr*` / `*docusign*` routers under `backend/app/routers/`, or resurrect deleted `app.docusign_*` / `app.casera_*` / `app.hmlr_*` shim modules.
+Do **not** add Core Alembic revisions for vendor DDL, reintroduce Admin/matter DocuSign–Searches–HMLR–SDLT components under `frontend/src/`, add `*casera*` / `*hmlr*` / `*docusign*` / `*sdlt*` routers under `backend/app/routers/`, or resurrect deleted `app.docusign_*` / `app.casera_*` / `app.hmlr_*` shim modules.
 
-CI enforces this via `scripts/check_commercial_boundary.py` (job `commercial-boundary`).
+## Boundary enforcement (layered)
+
+| When | Gate |
+|------|------|
+| While editing (Cursor) | Project rule `.cursor/rules/commercial-boundary.mdc` + after-edit hook |
+| Before commit (local) | `scripts/git-hooks/pre-commit` → `check_commercial_boundary.py` |
+| On PR / push | CI job `commercial-boundary` |
+
+Enable the git hook once per clone:
+
+```bash
+git config core.hooksPath scripts/git-hooks
+```
+
+Or run manually anytime:
+
+```bash
+python3 scripts/check_commercial_boundary.py
+```
 
 ## Attach
 

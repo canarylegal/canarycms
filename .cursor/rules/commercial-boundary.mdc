@@ -1,0 +1,33 @@
+---
+description: Keep DocuSign / Casera / HMLR / SDLT vendor work out of Core
+alwaysApply: true
+---
+
+# Commercial boundary (Core)
+
+Paid connectors live in **canary-commercial**, not this repo.
+
+## Never do in Core
+
+- New Alembic revisions for Casera / HMLR / DocuSign / SDLT / search-provider tables or columns
+- Product UI under `frontend/src` (AdminCasera, MatterSdltPanel, etc.)
+- Connector routers under `backend/app/routers/*{casera,hmlr,docusign,sdlt,searches}*`
+- Resurrect deleted `app.docusign_*` / `app.casera_*` / `app.hmlr_*` shims
+
+## Do this instead
+
+| Change | Put it in |
+|--------|-----------|
+| New vendor DDL | `canary-commercial/module/migrations/versions/00N_*.sql` |
+| Routers / clients / services | `canary-commercial/python/canary_commercial/` |
+| Admin / matter UI | `canary-commercial/module/ui/` + `module/manifest.json` slot |
+
+Core may only add **slot hosts**, menu chrome, and thin re-exports. Historical Alembic vendor files listed in `scripts/check_commercial_boundary.py` are frozen — do not add to that allow-list.
+
+Before finishing vendor-related work, run:
+
+```bash
+python3 scripts/check_commercial_boundary.py
+```
+
+See `docs/COMMERCIAL_PACKAGE.md` and `backend/alembic/COMMERCIAL_SCHEMA.md`.

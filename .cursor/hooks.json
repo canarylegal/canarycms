@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "hooks": {
+    "afterFileEdit": [
+      {
+        "command": ".cursor/hooks/commercial-boundary-after-edit.sh",
+        "matcher": "Write|StrReplace|EditNotebook|Delete"
+      }
+    ]
+  }
+}
