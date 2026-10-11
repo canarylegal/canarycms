@@ -52,6 +52,8 @@ export function CaseViewRoute({
   const [opening, setOpening] = useState(true)
   const caseIdRef = useRef(caseId)
   caseIdRef.current = caseId
+  const onCaseDetailChangeRef = useRef(onCaseDetailChange)
+  onCaseDetailChangeRef.current = onCaseDetailChange
 
   const refreshCaseFiles = useCallback(
     async (id: string) => {
@@ -79,7 +81,7 @@ export function CaseViewRoute({
         ])
         if (String(id) !== String(caseIdRef.current)) return
         setCaseDetail(c)
-        onCaseDetailChange(c)
+        onCaseDetailChangeRef.current(c)
         setNotes(Array.isArray(n) ? n : [])
         setTasks(Array.isArray(t) ? t : [])
         setFiles(Array.isArray(f) ? f : [])
@@ -87,27 +89,51 @@ export function CaseViewRoute({
       } catch (e: unknown) {
         if (String(id) !== String(caseIdRef.current)) return
         setCaseDetail(null)
-        onCaseDetailChange(null)
+        onCaseDetailChangeRef.current(null)
         setDetailErr((e as { message?: string }).message ?? 'Failed to load case')
       }
     },
-    [onCaseDetailChange, token],
+    [token],
   )
 
   useEffect(() => {
     let cancelled = false
     setOpening(true)
     setCaseDetail(null)
-    onCaseDetailChange(null)
+    onCaseDetailChangeRef.current(null)
     setDetailErr(null)
     void (async () => {
-      await refreshCaseDetail(caseId)
-      if (!cancelled) setOpening(false)
+      // Inline fetch so this effect depends only on caseId — soft refreshes must not
+      // remount CaseDetail (that reset the doc panel to Overview after Sync with Casera).
+      setDetailErr(null)
+      try {
+        const [c, n, t, f, cc] = await Promise.all([
+          apiFetch<CaseOut>(`/cases/${caseId}`, { token }),
+          apiFetch<CaseNoteOut[]>(`/cases/${caseId}/notes`, { token }),
+          apiFetch<CaseTaskOut[]>(`/cases/${caseId}/tasks`, { token }),
+          apiFetch<FileSummary[]>(`/cases/${caseId}/files`, { token }),
+          apiFetch<CaseContactOut[]>(`/cases/${caseId}/contacts`, { token }),
+        ])
+        if (cancelled || String(caseId) !== String(caseIdRef.current)) return
+        setCaseDetail(c)
+        onCaseDetailChangeRef.current(c)
+        setNotes(Array.isArray(n) ? n : [])
+        setTasks(Array.isArray(t) ? t : [])
+        setFiles(Array.isArray(f) ? f : [])
+        setCaseContacts(Array.isArray(cc) ? cc : [])
+      } catch (e: unknown) {
+        if (cancelled || String(caseId) !== String(caseIdRef.current)) return
+        setCaseDetail(null)
+        onCaseDetailChangeRef.current(null)
+        setDetailErr((e as { message?: string }).message ?? 'Failed to load case')
+      } finally {
+        if (!cancelled) setOpening(false)
+      }
     })()
     return () => {
       cancelled = true
     }
-  }, [caseId, onCaseDetailChange, refreshCaseDetail])
+  }, [caseId, token])
 
   useEffect(() => {
     function onMsg(e: MessageEvent) {

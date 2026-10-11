@@ -1439,20 +1439,28 @@ label:has(> input[type='checkbox']:focus-visible) {
   border-radius: 10px;
   background: transparent;
   color: #d5deee;
-  padding: 8px 10px;
-  min-height: 36px;
-  font-weight: 650;
-  font-size: 0.88rem;
+  padding: 6px 10px;
+  min-height: 32px;
+  font-weight: 600;
+  /* Prefer the compact rail size; beat base .accHead (1rem) and .caseLeft > .card .muted. */
+  font-size: 0.8rem !important;
+  line-height: 1.25;
   display: flex;
   align-items: center;
   justify-content: flex-start;
   gap: 8px;
 }
 
+.caseLeft.caseLeft--rail .accHead > span {
+  font-size: inherit !important;
+  font-weight: inherit;
+  line-height: inherit;
+}
+
 .caseLeft.caseLeft--rail .caseLeftNavIcon {
   flex-shrink: 0;
-  width: 16px;
-  height: 16px;
+  width: 15px;
+  height: 15px;
   opacity: 0.88;
   color: inherit;
 }
@@ -1485,7 +1493,8 @@ label:has(> input[type='checkbox']:focus-visible) {
 .caseLeft.caseLeft--rail .accHead .muted {
   margin-left: auto;
   color: #8b9bb8;
-  font-size: 0.85rem;
+  font-size: inherit !important;
+  font-weight: 500;
 }
 
 .caseLeft.caseLeft--rail .accBody {
@@ -1497,14 +1506,19 @@ label:has(> input[type='checkbox']:focus-visible) {
   box-sizing: border-box;
   width: 100%;
   color: #c7d0e0;
+  font-size: 0.78rem;
+  line-height: 1.35;
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
 
 /* Preview / status lines use .muted elsewhere; on the dark rail keep them readable (not slate-grey). */
-.caseLeft.caseLeft--rail .accBody .muted {
+.caseLeft.caseLeft--rail .accBody .muted,
+.caseLeft.caseLeft--rail > .card .muted {
   color: #c7d0e0;
+  font-size: 0.78rem !important;
+  line-height: 1.35;
 }
 
 .caseLeft.caseLeft--rail .accBody strong {

@@ -6,7 +6,11 @@ import type { apiFetch } from '../api'
 export type CommercialModuleSlots = {
   admin_integrations?: boolean
   matter_searches?: boolean
+  matter_searches_rail?: boolean
   matter_land_registry?: boolean
+  matter_land_registry_rail?: boolean
+  matter_sdlt?: boolean
+  matter_sdlt_rail?: boolean
   app_docusign?: boolean
   modal_send_docusign?: boolean
 }
@@ -41,6 +45,14 @@ export type CommercialModuleBundle = {
     onPlaced: () => void
     onRefresh?: () => void
     onOpenSearchFile?: (fileId: string) => void
+    isAdmin?: boolean
+  }>
+  MatterSearchesRail?: ComponentType<{
+    caseId: string
+    token: string
+    apiFetch: typeof apiFetch
+    busy: boolean
+    onOpenPanel: () => void
   }>
   MatterLandRegistryPanel?: ComponentType<{
     caseId: string
@@ -52,6 +64,31 @@ export type CommercialModuleBundle = {
     backToDocuments: () => void
     onRefresh?: () => void
     onOpenFile?: (fileId: string) => void
+    isAdmin?: boolean
+  }>
+  MatterLandRegistryRail?: ComponentType<{
+    caseId: string
+    token: string
+    apiFetch: typeof apiFetch
+    busy: boolean
+    onOpenPanel: () => void
+  }>
+  MatterSdltPanel?: ComponentType<{
+    caseId: string
+    token: string
+    apiFetch: typeof apiFetch
+    busy: boolean
+    setBusy: (v: boolean) => void
+    setActionErr: (v: string | null) => void
+    backToDocuments: () => void
+    onRefresh?: () => void
+  }>
+  MatterSdltRail?: ComponentType<{
+    caseId: string
+    token: string
+    apiFetch: typeof apiFetch
+    busy: boolean
+    onOpenPanel: () => void
   }>
   DocusignPage?: ComponentType<{
     token: string

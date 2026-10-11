@@ -72,6 +72,7 @@ export type CaseLeftMenuIconName =
   | 'property'
   | 'searches'
   | 'land-registry'
+  | 'sdlt'
   | 'events'
   | 'finance'
 
@@ -137,6 +138,15 @@ export function CaseLeftMenuIcon({ name }: { name: CaseLeftMenuIconName }) {
           fill="none"
         />
         <path d="M9 20v-6h6v6" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" fill="none" />
+      </svg>
+    )
+  }
+  if (name === 'sdlt') {
+    return (
+      <svg {...common}>
+        <rect x="4" y="5" width="16" height="14" rx="1.5" stroke="currentColor" strokeWidth="2" />
+        <path d="M8 10h8M8 13.5h5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+        <path d="M15.5 16.5h2.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
       </svg>
     )
   }

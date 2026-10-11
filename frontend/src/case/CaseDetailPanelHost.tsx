@@ -1,17 +1,18 @@
 import type { Dispatch, SetStateAction } from 'react'
 import type { ConfirmOptions } from '../DialogProvider'
 import type { UserUiPreferences } from '../userUiPreferences'
-import type {
-  CaseContactOut,
-  CaseEventsOut,
-  CaseOut,
-  CasePropertyDetailsOut,
-  CasePropertyPayload,
-  CaseWorkflowStatus,
-  FinanceOut,
-  TaskMenuRow,
-  UserPublic,
-  UserSummary,
+import {
+  userCanAccessAdminConsole,
+  type CaseContactOut,
+  type CaseEventsOut,
+  type CaseOut,
+  type CasePropertyDetailsOut,
+  type CasePropertyPayload,
+  type CaseWorkflowStatus,
+  type FinanceOut,
+  type TaskMenuRow,
+  type UserPublic,
+  type UserSummary,
 } from '../types'
 import {
   CaseDetailAccountsPanel,
@@ -26,6 +27,7 @@ import {
 } from './CaseDetailDocPanels'
 import {
   CommercialMatterLandRegistrySlot,
+  CommercialMatterSdltSlot,
   CommercialMatterSearchesSlot,
 } from '../commercial/CommercialSlotHosts'
 import { FirmModulePanelSlot } from '../firm/FirmModulePanelSlot'
@@ -351,6 +353,7 @@ export function CaseDetailPanelHost(props: CaseDetailPanelHostProps) {
             backToDocuments={backToDocuments}
             onRefresh={onRefresh}
             onOpenSearchFile={onOpenSearchFile}
+            isAdmin={userCanAccessAdminConsole(currentUser)}
             onPlaced={() => {
               onRefresh()
             }}
@@ -364,12 +367,23 @@ export function CaseDetailPanelHost(props: CaseDetailPanelHostProps) {
             setActionErr={setActionErr}
             backToDocuments={backToDocuments}
             onRefresh={onRefresh}
+            isAdmin={userCanAccessAdminConsole(currentUser)}
             onOpenFile={(fileId) => {
               if (onOpenSearchFile) {
                 onOpenSearchFile(fileId)
                 return
               }
             }}
+          />
+        ) : caseDocPanel === 'sdlt' && caseId ? (
+          <CommercialMatterSdltSlot
+            caseId={caseId}
+            token={token}
+            busy={busy}
+            setBusy={setBusy}
+            setActionErr={setActionErr}
+            backToDocuments={backToDocuments}
+            onRefresh={onRefresh}
           />
         ) : caseDocPanel === 'contacts' && caseId && (contactAddOpen || editSnapshot) ? (
           <CaseDetailContactsPanel

@@ -74,7 +74,7 @@ function caseEventToFullCalendar(ev: CaseEventOut): EventInput | null {
       start: ev.calendar_block_start,
       end: ev.calendar_block_end,
       extendedProps: { caseEvent: ev },
-      backgroundColor: ev.track_in_calendar ? 'var(--primary)' : 'var(--border)',
+      backgroundColor: ev.track_in_calendar ? '#2563eb' : 'var(--border)',
       borderColor: 'transparent',
       textColor: ev.track_in_calendar ? '#fff' : 'var(--text)',
     }
@@ -92,7 +92,7 @@ function caseEventToFullCalendar(ev: CaseEventOut): EventInput | null {
     start: d,
     end: endExclusive,
     extendedProps: { caseEvent: ev },
-    backgroundColor: ev.track_in_calendar ? 'var(--primary)' : 'var(--border)',
+    backgroundColor: ev.track_in_calendar ? '#2563eb' : 'var(--border)',
     borderColor: 'transparent',
     textColor: ev.track_in_calendar ? '#fff' : 'var(--text)',
   }

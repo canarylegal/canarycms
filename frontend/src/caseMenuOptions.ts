@@ -9,4 +9,5 @@ export const CASE_MENU_OPTIONS: string[] = [
   'Tasks',
   'Searches',
   'Land Registry',
+  'SDLT',
 ]

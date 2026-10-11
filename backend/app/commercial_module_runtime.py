@@ -13,6 +13,7 @@ log = logging.getLogger(__name__)
 SLOT_ADMIN_INTEGRATIONS = "admin_integrations"
 SLOT_MATTER_SEARCHES = "matter_searches"
 SLOT_MATTER_LAND_REGISTRY = "matter_land_registry"
+SLOT_MATTER_SDLT = "matter_sdlt"
 SLOT_APP_DOCUSIGN = "app_docusign"
 SLOT_MODAL_SEND_DOCUSIGN = "modal_send_docusign"
 
@@ -20,6 +21,7 @@ _ALL_SLOTS = (
     SLOT_ADMIN_INTEGRATIONS,
     SLOT_MATTER_SEARCHES,
     SLOT_MATTER_LAND_REGISTRY,
+    SLOT_MATTER_SDLT,
     SLOT_APP_DOCUSIGN,
     SLOT_MODAL_SEND_DOCUSIGN,
 )

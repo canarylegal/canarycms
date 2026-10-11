@@ -4321,21 +4321,23 @@ select {
   font-size: 12px;
 }
 
-/* FullCalendar (in-app calendar) — theme aligned with Canary UI */
+/* FullCalendar (in-app calendar) — selection/today use main-menu blue, not brand yellow */
 .canaryCalendar .fc {
+  --canary-cal-select-rgb: 37, 99, 235;
   --fc-border-color: var(--border);
   --fc-page-bg-color: transparent;
   --fc-neutral-bg-color: var(--panel2);
-  --fc-list-event-hover-bg-color: var(--panel2);
-  --fc-today-bg-color: rgba(var(--primary-rgb), 0.1);
-  --fc-now-indicator-color: var(--primary);
+  --fc-list-event-hover-bg-color: rgba(var(--canary-cal-select-rgb), 0.06);
+  --fc-today-bg-color: rgba(var(--canary-cal-select-rgb), 0.1);
+  --fc-highlight-bg-color: rgba(var(--canary-cal-select-rgb), 0.14);
+  --fc-now-indicator-color: rgb(var(--canary-cal-select-rgb));
   /* Use theme surfaces so dark mode is not light text on hard-coded white (see html.dark --panel). */
   --fc-button-bg-color: var(--panel);
   --fc-button-border-color: var(--border);
   --fc-button-text-color: var(--text);
   --fc-button-hover-bg-color: var(--panel2);
-  --fc-button-active-bg-color: rgba(var(--primary-rgb), 0.18);
-  --fc-event-bg-color: rgba(var(--primary-rgb), 0.9);
+  --fc-button-active-bg-color: rgba(var(--canary-cal-select-rgb), 0.18);
+  --fc-event-bg-color: rgb(var(--canary-cal-select-rgb));
   --fc-event-border-color: transparent;
   --fc-event-text-color: #fff;
   color: var(--text);
@@ -5817,26 +5819,29 @@ html.dark .ledgerRow--pending td .btn {
 }
 
 .ledgerInvoiceActionsCell {
-  vertical-align: top;
+  vertical-align: middle;
+  white-space: nowrap;
 }
 
 .ledgerInvoiceActions {
   display: flex;
-  flex-direction: column;
-  gap: 8px;
-  align-items: stretch;
-  width: 100%;
-  max-width: 240px;
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  justify-content: flex-end;
+  width: auto;
+  max-width: none;
 }
 
 .ledgerInvoiceActions .ledgerInvoiceActionBtn {
   display: inline-flex !important;
   align-items: center;
   justify-content: center;
-  width: 100% !important;
+  width: auto !important;
   box-sizing: border-box !important;
-  min-height: 40px !important;
-  padding: 8px 12px !important;
+  min-height: 32px !important;
+  padding: 4px 10px !important;
   border-radius: 8px !important;
   font-size: 13px !important;
   font-weight: 500 !important;

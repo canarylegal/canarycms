@@ -613,7 +613,7 @@ export function AccountsPage({ token, me, onOpenCase, onOpenReportsReconcile }: 
                                       {canApprovePendingRow(r) ? (
                                         <button
                                           type="button"
-                                          className="btn btn--small primary"
+                                          className="btn btn--small"
                                           disabled={actionBusy}
                                           onClick={() => void approveLedgerPosting(caseId, r.pair_id)}
                                         >
@@ -685,13 +685,13 @@ export function AccountsPage({ token, me, onOpenCase, onOpenReportsReconcile }: 
                               {canApproveInvoices ? (
                                 <button
                                   type="button"
-                                  className="btn btn--small primary"
+                                  className="btn btn--small"
                                   disabled={actionBusy}
                                   onClick={() => void approveInvoice(r.case_id, r.invoice_id)}
                                 >
                                   Approve
                                 </button>
-                        ) : null}
+                              ) : null}
                       </div>
                     </td>
                   </tr>

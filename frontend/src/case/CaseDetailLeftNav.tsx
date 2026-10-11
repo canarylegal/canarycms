@@ -8,6 +8,11 @@ import type {
   LedgerOut,
   TaskMenuRow,
 } from '../types'
+import {
+  CommercialMatterLandRegistryRailSlot,
+  CommercialMatterSdltRailSlot,
+  CommercialMatterSearchesRailSlot,
+} from '../commercial/CommercialSlotHosts'
 import { CaseLeftMenuIcon } from './caseDetailChrome'
 import { ledgerSignedGb } from './caseDetailHelpers'
 import { financeCaseTotals, penceGb } from './financeTotals'
@@ -21,6 +26,7 @@ export type CaseDetailLeftDocPanel =
   | 'property'
   | 'searches'
   | 'land-registry'
+  | 'sdlt'
   | 'tasks'
   | 'contacts'
   | 'edit-details'
@@ -36,6 +42,7 @@ export type CaseDetailLeftOpen = {
   property: boolean
   searches: boolean
   landRegistry: boolean
+  sdlt: boolean
   events: boolean
   finance: boolean
 }
@@ -73,10 +80,11 @@ type Props = {
   setPropertyDraft: (d: CasePropertyPayload) => void
   setPropertyBaseline: (d: CasePropertyPayload) => void
   hasSearchesMenu: boolean
-  searchesPreviewTotalPence: number | null
-  searchesPreviewCount: number | null
   hasLandRegistryMenu: boolean
-  landRegistryPreviewCount: number | null
+  hasSdltMenu: boolean
+  /** Staff JWT for commercial rail slots (Searches, Land Registry, SDLT). */
+  token: string
+  caseId: string
   hasEventsMenu: boolean
   eventsPreview: CaseEventsOut | null
   openCaseEventModal: () => void
@@ -117,10 +125,10 @@ export function CaseDetailLeftNav({
   setPropertyDraft,
   setPropertyBaseline,
   hasSearchesMenu,
-  searchesPreviewTotalPence,
-  searchesPreviewCount,
   hasLandRegistryMenu,
-  landRegistryPreviewCount,
+  hasSdltMenu,
+  token,
+  caseId,
   hasEventsMenu,
   eventsPreview,
   openCaseEventModal,
@@ -462,26 +470,12 @@ export function CaseDetailLeftNav({
             </button>
             {leftOpen.searches ? (
               <div className="accBody">
-                <div className="caseLeftRailPreview">
-                  {searchesPreviewCount == null
-                    ? 'Loading…'
-                    : searchesPreviewCount === 0
-                      ? 'No search orders yet.'
-                      : `${searchesPreviewCount} order(s)${
-                          searchesPreviewTotalPence != null
-                            ? ` · £${(searchesPreviewTotalPence / 100).toFixed(2)}`
-                            : ''
-                        }`}
-                </div>
-                <button
-                  type="button"
-                  className="btn primary"
-                  style={{ marginTop: 8, width: '100%', boxSizing: 'border-box' }}
-                  disabled={busy}
-                  onClick={() => setCaseDocPanel('searches')}
-                >
-                  View searches
-                </button>
+                <CommercialMatterSearchesRailSlot
+                  caseId={caseId}
+                  token={token}
+                  busy={busy}
+                  onOpenPanel={() => setCaseDocPanel('searches')}
+                />
               </div>
             ) : null}
           </div>
@@ -503,22 +497,39 @@ export function CaseDetailLeftNav({
             </button>
             {leftOpen.landRegistry ? (
               <div className="accBody">
-                <div className="caseLeftRailPreview">
-                  {landRegistryPreviewCount == null
-                    ? 'Loading…'
-                    : landRegistryPreviewCount === 0
-                      ? 'No official copies yet.'
-                      : `${landRegistryPreviewCount} order(s)`}
-                </div>
-                <button
-                  type="button"
-                  className="btn primary"
-                  style={{ marginTop: 8, width: '100%', boxSizing: 'border-box' }}
-                  disabled={busy}
-                  onClick={() => setCaseDocPanel('land-registry')}
-                >
-                  View Land Registry
-                </button>
+                <CommercialMatterLandRegistryRailSlot
+                  caseId={caseId}
+                  token={token}
+                  busy={busy}
+                  onOpenPanel={() => setCaseDocPanel('land-registry')}
+                />
+              </div>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+
+      {hasSdltMenu ? (
+        <div className="card">
+          <div className="accordion">
+            <button
+              className={`accHead${caseDocPanel === 'sdlt' ? ' is-active' : ''}`}
+              aria-expanded={leftOpen.sdlt}
+              aria-current={caseDocPanel === 'sdlt' ? 'page' : undefined}
+              onClick={() => toggleLeftAccordion('sdlt')}
+            >
+              <CaseLeftMenuIcon name="sdlt" />
+              <span>SDLT</span>
+              <span className="muted">{leftOpen.sdlt ? '▾' : '▸'}</span>
+            </button>
+            {leftOpen.sdlt ? (
+              <div className="accBody">
+                <CommercialMatterSdltRailSlot
+                  caseId={caseId}
+                  token={token}
+                  busy={busy}
+                  onOpenPanel={() => setCaseDocPanel('sdlt')}
+                />
               </div>
             ) : null}
           </div>
@@ -552,7 +563,7 @@ export function CaseDetailLeftNav({
                               🔔
                             </span>
                           ) : null}
-                          <strong style={{ color: 'var(--text)' }}>{ev.name}</strong>
+                          <strong>{ev.name}</strong>
                           {ev.event_date
                             ? ` · ${new Date(ev.event_date).toLocaleDateString('en-GB')}`
                             : ' · No date'}

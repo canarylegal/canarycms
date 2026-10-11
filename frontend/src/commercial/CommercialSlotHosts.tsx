@@ -52,6 +52,7 @@ export function CommercialMatterSearchesSlot(props: {
   onPlaced: () => void
   onRefresh?: () => void
   onOpenSearchFile?: (fileId: string) => void
+  isAdmin?: boolean
 }) {
   const [Comp, setComp] = useState<ComponentType<typeof props & { apiFetch: typeof apiFetch }> | null>(null)
   const [err, setErr] = useState<string | null>(null)
@@ -87,6 +88,37 @@ export function CommercialMatterSearchesSlot(props: {
   return <Comp {...props} apiFetch={apiFetch} />
 }
 
+export function CommercialMatterSearchesRailSlot(props: {
+  caseId: string
+  token: string
+  busy: boolean
+  onOpenPanel: () => void
+}) {
+  const [Comp, setComp] = useState<ComponentType<typeof props & { apiFetch: typeof apiFetch }> | null>(null)
+  const [err, setErr] = useState<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    void loadExport(props.token, 'matter_searches_rail', 'MatterSearchesRail')
+      .then((c) => {
+        if (!cancelled) {
+          if (!c) setErr('Commercial Searches menu not attached')
+          else setComp(() => c)
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setErr('Could not load Searches menu')
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [props.token])
+
+  if (err) return <div className="muted" style={{ fontSize: 12 }}>{err}</div>
+  if (!Comp) return <div className="muted" style={{ fontSize: 12 }}>Loading…</div>
+  return <Comp {...props} apiFetch={apiFetch} />
+}
+
 export function CommercialMatterLandRegistrySlot(props: {
   caseId: string
   token: string
@@ -96,6 +128,7 @@ export function CommercialMatterLandRegistrySlot(props: {
   backToDocuments: () => void
   onRefresh?: () => void
   onOpenFile?: (fileId: string) => void
+  isAdmin?: boolean
 }) {
   const [Comp, setComp] = useState<ComponentType<typeof props & { apiFetch: typeof apiFetch }> | null>(null)
   const [err, setErr] = useState<string | null>(null)
@@ -128,6 +161,111 @@ export function CommercialMatterLandRegistrySlot(props: {
     )
   }
   if (!Comp) return <div className="muted" style={{ padding: 12 }}>Loading Land Registry…</div>
+  return <Comp {...props} apiFetch={apiFetch} />
+}
+
+export function CommercialMatterLandRegistryRailSlot(props: {
+  caseId: string
+  token: string
+  busy: boolean
+  onOpenPanel: () => void
+}) {
+  const [Comp, setComp] = useState<ComponentType<typeof props & { apiFetch: typeof apiFetch }> | null>(null)
+  const [err, setErr] = useState<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    void loadExport(props.token, 'matter_land_registry_rail', 'MatterLandRegistryRail')
+      .then((c) => {
+        if (!cancelled) {
+          if (!c) setErr('Commercial Land Registry menu not attached')
+          else setComp(() => c)
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setErr('Could not load Land Registry menu')
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [props.token])
+
+  if (err) return <div className="muted" style={{ fontSize: 12 }}>{err}</div>
+  if (!Comp) return <div className="muted" style={{ fontSize: 12 }}>Loading…</div>
+  return <Comp {...props} apiFetch={apiFetch} />
+}
+
+export function CommercialMatterSdltSlot(props: {
+  caseId: string
+  token: string
+  busy: boolean
+  setBusy: (v: boolean) => void
+  setActionErr: (v: string | null) => void
+  backToDocuments: () => void
+  onRefresh?: () => void
+}) {
+  const [Comp, setComp] = useState<ComponentType<typeof props & { apiFetch: typeof apiFetch }> | null>(null)
+  const [err, setErr] = useState<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    void loadExport(props.token, 'matter_sdlt', 'MatterSdltPanel')
+      .then((c) => {
+        if (!cancelled) {
+          if (!c) setErr('Commercial SDLT UI not attached')
+          else setComp(() => c)
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setErr('Could not load SDLT UI')
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [props.token])
+
+  if (err) {
+    return (
+      <div className="stack" style={{ padding: 12 }}>
+        <div className="error">{err}</div>
+        <button type="button" className="btn" onClick={props.backToDocuments}>
+          Back
+        </button>
+      </div>
+    )
+  }
+  if (!Comp) return <div className="muted" style={{ padding: 12 }}>Loading SDLT…</div>
+  return <Comp {...props} apiFetch={apiFetch} />
+}
+
+export function CommercialMatterSdltRailSlot(props: {
+  caseId: string
+  token: string
+  busy: boolean
+  onOpenPanel: () => void
+}) {
+  const [Comp, setComp] = useState<ComponentType<typeof props & { apiFetch: typeof apiFetch }> | null>(null)
+  const [err, setErr] = useState<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    void loadExport(props.token, 'matter_sdlt_rail', 'MatterSdltRail')
+      .then((c) => {
+        if (!cancelled) {
+          if (!c) setErr('Commercial SDLT menu not attached')
+          else setComp(() => c)
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setErr('Could not load SDLT menu')
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [props.token])
+
+  if (err) return <div className="muted" style={{ fontSize: 12 }}>{err}</div>
+  if (!Comp) return <div className="muted" style={{ fontSize: 12 }}>Loading…</div>
   return <Comp {...props} apiFetch={apiFetch} />
 }
 

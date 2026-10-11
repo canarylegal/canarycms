@@ -296,6 +296,7 @@ export function CaseDetail({
     property: boolean
     searches: boolean
     landRegistry: boolean
+    sdlt: boolean
     events: boolean
     finance: boolean
   }>(() => ({
@@ -305,6 +306,7 @@ export function CaseDetail({
     property: false,
     searches: false,
     landRegistry: false,
+    sdlt: false,
     events: false,
     finance: false,
   }))
@@ -316,6 +318,7 @@ export function CaseDetail({
     | 'property'
     | 'searches'
     | 'landRegistry'
+    | 'sdlt'
     | 'events'
     | 'finance'
   const toggleLeftAccordion = useCallback((key: LeftAccordionKey) => {
@@ -330,6 +333,7 @@ export function CaseDetail({
         property: key === 'property',
         searches: key === 'searches',
         landRegistry: key === 'landRegistry',
+        sdlt: key === 'sdlt',
         events: key === 'events',
         finance: key === 'finance',
       }
@@ -352,6 +356,7 @@ export function CaseDetail({
       property: false,
       searches: false,
       landRegistry: false,
+      sdlt: false,
       events: false,
       finance: false,
     })
@@ -585,6 +590,7 @@ export function CaseDetail({
         property: false,
         searches: false,
         landRegistry: false,
+        sdlt: false,
         events: false,
         finance: false,
       })
@@ -602,6 +608,7 @@ export function CaseDetail({
         property: false,
         searches: false,
         landRegistry: false,
+        sdlt: false,
         events: false,
         finance: false,
       })
@@ -762,6 +769,18 @@ export function CaseDetail({
     [caseDetail?.matter_menus, commercial],
   )
 
+  const hasSdltMenu = useMemo(
+    () =>
+      commercialHasProduct(commercial, 'sdlt') &&
+      Boolean(
+        caseDetail?.matter_menus?.some((m) => {
+          const n = m.name.trim().toLowerCase()
+          return n === 'sdlt' || n === 'stamp duty' || n === 'stamp duty land tax'
+        }),
+      ),
+    [caseDetail?.matter_menus, commercial],
+  )
+
   const hasFinanceMenu = useMemo(
     () => Boolean(caseDetail?.matter_menus?.some((m) => m.name.trim().toLowerCase() === 'finance')),
     [caseDetail?.matter_menus],
@@ -843,48 +862,6 @@ export function CaseDetail({
       cancelled = true
     }
   }, [caseId, token, hasPropertyMenu, leftOpen.property])
-
-  const [searchesPreviewTotalPence, setSearchesPreviewTotalPence] = useState<number | null>(null)
-  const [searchesPreviewCount, setSearchesPreviewCount] = useState<number | null>(null)
-  useEffect(() => {
-    if (!caseId || !hasSearchesMenu || !leftOpen.searches) return
-    let cancelled = false
-    void apiFetch<{ orders: { placed_at?: string | null }[]; total_pence: number }>(`/cases/${caseId}/searches`, {
-      token,
-    })
-      .then((s) => {
-        if (cancelled) return
-        const placed = Array.isArray(s.orders) ? s.orders.filter((o) => Boolean(o?.placed_at)) : []
-        setSearchesPreviewCount(placed.length)
-        setSearchesPreviewTotalPence(typeof s.total_pence === 'number' ? s.total_pence : 0)
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setSearchesPreviewCount(0)
-          setSearchesPreviewTotalPence(0)
-        }
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [caseId, token, hasSearchesMenu, leftOpen.searches])
-
-  const [landRegistryPreviewCount, setLandRegistryPreviewCount] = useState<number | null>(null)
-  useEffect(() => {
-    if (!caseId || !hasLandRegistryMenu || !leftOpen.landRegistry) return
-    let cancelled = false
-    void apiFetch<{ orders: unknown[] }>(`/cases/${caseId}/land-registry`, { token })
-      .then((s) => {
-        if (cancelled) return
-        setLandRegistryPreviewCount(Array.isArray(s.orders) ? s.orders.length : 0)
-      })
-      .catch(() => {
-        if (!cancelled) setLandRegistryPreviewCount(0)
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [caseId, token, hasLandRegistryMenu, leftOpen.landRegistry])
 
   useEffect(() => {
     if (!caseId || !leftOpen.events) return
@@ -1246,9 +1223,9 @@ export function CaseDetail({
             setPropertyBaseline={setPropertyBaseline}
             hasSearchesMenu={hasSearchesMenu}
             hasLandRegistryMenu={hasLandRegistryMenu}
-            landRegistryPreviewCount={landRegistryPreviewCount}
-            searchesPreviewTotalPence={searchesPreviewTotalPence}
-            searchesPreviewCount={searchesPreviewCount}
+            hasSdltMenu={hasSdltMenu}
+            token={token}
+            caseId={caseId ?? ''}
             hasEventsMenu={hasEventsMenu}
             eventsPreview={eventsPreview}
             openCaseEventModal={openCaseEventModal}

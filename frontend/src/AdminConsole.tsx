@@ -64,7 +64,7 @@ export function AdminConsole({ token, refreshMe }: { token: string; refreshMe: (
       : activeTab === 'email'
       ? 'Org-wide e-mail integration (mailto vs Microsoft 365).'
       : activeTab === 'integrations'
-        ? 'Commercial connectors (DocuSign, Searches, Land Registry).'
+        ? 'Commercial connectors (DocuSign, Searches, Land Registry, SDLT).'
         : activeTab === 'portalForms'
           ? 'Portal form templates sent manually to clients.'
           : activeTab === 'deploy'

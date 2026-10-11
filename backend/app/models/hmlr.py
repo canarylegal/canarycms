@@ -48,13 +48,16 @@ class HmlrCaseLink(Base):
 
 
 class HmlrOrder(Base):
-    """Official Copy (title known) request for a matter."""
+    """Land Registry product request for a matter (official copies, searches, registration, …)."""
 
     __tablename__ = "hmlr_order"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     case_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("case.id", ondelete="CASCADE"), nullable=False)
-    title_number: Mapped[str] = mapped_column(String(32), nullable=False)
+    # official_copies | priority | full | bankruptcy | registration
+    product: Mapped[str] = mapped_column(String(32), nullable=False, default="official_copies")
+    # Title number(s) and/or party summary for hub display.
+    title_number: Mapped[str] = mapped_column(String(256), nullable=False)
     external_reference: Mapped[str] = mapped_column(String(128), nullable=False, default="")
     want_register: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     want_title_plan: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
