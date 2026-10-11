@@ -2,16 +2,20 @@
 
 from __future__ import annotations
 
+import uuid
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
 
 from app.desktop_edit_session import ensure_session_document_key, session_matches_document_key
+from app.models import AuditEvent
 from app.routers.onlyoffice import (
+    _audit_oo_callback_persist_refused,
     _callback_fetch_url_or_reject,
     _is_allowed_onlyoffice_ds_fetch_path,
     _safe_url_for_log,
+    _truncate_doc_key_for_audit,
 )
 
 
@@ -29,6 +33,47 @@ def test_callback_key_for_file_b_rejected_on_session_for_file_a() -> None:
     key_b = "file_B_v1_cafebabe"
     assert session_matches_document_key(sess_a, "file_A_v3_deadbeef") is True
     assert session_matches_document_key(sess_a, key_b) is False
+
+
+def test_audit_oo_callback_key_mismatch_records_event() -> None:
+    """A→B refuse path must emit a security audit row (no download URL in meta)."""
+    adds: list[object] = []
+    commits = {"n": 0}
+
+    class FakeDb:
+        def add(self, obj) -> None:
+            adds.append(obj)
+
+        def flush(self) -> None:
+            pass
+
+        def commit(self) -> None:
+            commits["n"] += 1
+
+    file_id = uuid.uuid4()
+    case_id = uuid.uuid4()
+    key_b = "file_B_v1_cafebabe_extra_long_suffix"
+    _audit_oo_callback_persist_refused(
+        FakeDb(),
+        file_id=file_id,
+        action="onlyoffice_callback_key_mismatch",
+        reason="document_key_mismatch",
+        callback_key=key_b,
+        session_key="file_A_v3_deadbeef",
+        case_id=case_id,
+    )
+    assert commits["n"] == 1
+    assert len(adds) == 1
+    ev = adds[0]
+    assert isinstance(ev, AuditEvent)
+    assert ev.action == "onlyoffice_callback_key_mismatch"
+    assert ev.entity_id == str(file_id)
+    assert ev.meta_json is not None
+    assert "document_key_mismatch" in ev.meta_json
+    assert "file_A_v3_deadbeef" in ev.meta_json
+    assert _truncate_doc_key_for_audit(key_b) in ev.meta_json
+    assert "http" not in ev.meta_json
+    assert "url" not in ev.meta_json
 
 
 def test_safe_url_for_log_strips_query_fragment_and_userinfo() -> None:

@@ -208,10 +208,15 @@ def _decode_callback_payload(request: Request, body: Any) -> dict[str, Any]:
 
 _PRINT_STAGING_TTL_SECONDS = int(os.getenv("ONLYOFFICE_PRINT_STAGE_TTL_SECONDS", "900"))
 _PRINT_STAGING_MAX_BYTES = int(os.getenv("ONLYOFFICE_PRINT_STAGE_MAX_BYTES", str(50 * 1024 * 1024)))
+_PRINT_STAGING_MAX_TOTAL_BYTES = int(
+    os.getenv("ONLYOFFICE_PRINT_STAGE_MAX_TOTAL_BYTES", str(250 * 1024 * 1024))
+)
+_PRINT_STAGING_MAX_PER_USER = int(os.getenv("ONLYOFFICE_PRINT_STAGE_MAX_PER_USER", "4"))
 _PRINT_JWT_ALG = "HS256"
 _PRINT_JWT_PURPOSE = "oo_print_staged"
 _PRINT_STORE_LOCK = threading.Lock()
-_PRINT_STORE: dict[str, tuple[bytes, float]] = {}
+# sid -> (pdf_bytes, expires_at_epoch, owner_user_id)
+_PRINT_STORE: dict[str, tuple[bytes, float, str]] = {}
 
 
 def _print_stage_secret_raw() -> str:
@@ -219,9 +224,26 @@ def _print_stage_secret_raw() -> str:
 
 
 def _gc_print_store_unlocked(now: float) -> None:
-    dead = [k for k, (_, exp) in _PRINT_STORE.items() if exp <= now]
+    dead = [k for k, (_, exp, _) in _PRINT_STORE.items() if exp <= now]
     for k in dead:
         _PRINT_STORE.pop(k, None)
+
+
+def _print_store_total_bytes_unlocked() -> int:
+    return sum(len(data) for data, _, _ in _PRINT_STORE.values())
+
+
+def _print_store_user_count_unlocked(user_id: str) -> int:
+    return sum(1 for _, _, uid in _PRINT_STORE.values() if uid == user_id)
+
+
+def _print_store_accepts_unlocked(*, user_id: str, new_bytes: int) -> str | None:
+    """Return a reject reason, or None if the staged PDF fits budget/quotas."""
+    if _print_store_user_count_unlocked(user_id) >= max(1, _PRINT_STAGING_MAX_PER_USER):
+        return "per_user_limit"
+    if _print_store_total_bytes_unlocked() + new_bytes > max(1, _PRINT_STAGING_MAX_TOTAL_BYTES):
+        return "aggregate_limit"
+    return None
 
 
 def _normalized_ds_path_for_print_allowlist(url: str) -> str:
@@ -662,7 +684,7 @@ class PrintStageIn(BaseModel):
 @router.post("/print-stage")
 async def onlyoffice_print_stage(
     body: PrintStageIn,
-    _user: User = Depends(get_current_user),
+    user: User = Depends(get_current_user),
 ) -> dict[str, str]:
     fetch_url = _internal_fetch_url_from_browser(body.browser_url)
     try:
@@ -689,9 +711,21 @@ async def onlyoffice_print_stage(
 
     sid = uuid.uuid4().hex
     exp = time.time() + _PRINT_STAGING_TTL_SECONDS
+    owner = str(user.id)
     with _PRINT_STORE_LOCK:
         _gc_print_store_unlocked(time.time())
-        _PRINT_STORE[sid] = (data, exp)
+        reject = _print_store_accepts_unlocked(user_id=owner, new_bytes=len(data))
+        if reject == "per_user_limit":
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="Too many staged print PDFs for this user",
+            )
+        if reject == "aggregate_limit":
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Print staging memory budget exceeded",
+            )
+        _PRINT_STORE[sid] = (data, exp, owner)
 
     t = _encode_print_staging_jwt(sid=sid)
     return {"sid": sid, "t": t}
@@ -709,7 +743,7 @@ async def onlyoffice_print_staged_pdf(
         entry = _PRINT_STORE.get(sid)
         if not entry:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Print session expired or not found")
-        data, exp = entry
+        data, exp, _owner = entry
         if exp <= time.time():
             _PRINT_STORE.pop(sid, None)
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Print session expired")
@@ -782,6 +816,52 @@ def _oo_save_audit_action_meta(
     if precedent_id is not None:
         return "precedent.onlyoffice_save", {"precedent_id": str(precedent_id)}
     return "case.file.onlyoffice_save", {"case_id": str(case_id)}
+
+
+def _truncate_doc_key_for_audit(key: str | None, *, n: int = 24) -> str | None:
+    s = (key or "").strip()
+    if not s:
+        return None
+    if len(s) <= n:
+        return s
+    return s[:n] + "…"
+
+
+def _audit_oo_callback_persist_refused(
+    db: Session,
+    *,
+    file_id: uuid.UUID,
+    action: str,
+    reason: str,
+    callback_key: str | None,
+    session_key: str | None = None,
+    case_id: uuid.UUID | None = None,
+    precedent_id: uuid.UUID | None = None,
+    firm_letterhead_kind: str | None = None,
+    commit: bool = True,
+) -> None:
+    """Record a security audit row when callback persist is refused (binding / session)."""
+    meta: dict[str, Any] = {
+        "reason": reason,
+        "callback_key": _truncate_doc_key_for_audit(callback_key),
+        "session_key": _truncate_doc_key_for_audit(session_key),
+    }
+    if case_id is not None:
+        meta["case_id"] = str(case_id)
+    if precedent_id is not None:
+        meta["precedent_id"] = str(precedent_id)
+    if firm_letterhead_kind:
+        meta["firm_letterhead_kind"] = firm_letterhead_kind
+    log_event(
+        db,
+        actor_user_id=None,
+        action=action,
+        entity_type="file",
+        entity_id=str(file_id),
+        meta=meta,
+    )
+    if commit:
+        db.commit()
 
 
 def _oo_ack_unchanged_force_save(
@@ -918,6 +998,17 @@ async def onlyoffice_callback(
                 file_id,
                 row.oo_force_save_pending,
             )
+            _audit_oo_callback_persist_refused(
+                db,
+                file_id=file_id,
+                action="onlyoffice_callback_no_session",
+                reason="no_active_session",
+                callback_key=cb_key or None,
+                case_id=case_id,
+                precedent_id=precedent_id,
+                firm_letterhead_kind=firm_letterhead_kind,
+                commit=not row.oo_force_save_pending,
+            )
             if row.oo_force_save_pending:
                 _oo_ack_unchanged_force_save(
                     db,
@@ -935,6 +1026,18 @@ async def onlyoffice_callback(
                 file_id,
                 cb_key or None,
                 getattr(active_sess, "document_key", None),
+            )
+            _audit_oo_callback_persist_refused(
+                db,
+                file_id=file_id,
+                action="onlyoffice_callback_key_mismatch",
+                reason="document_key_mismatch",
+                callback_key=cb_key or None,
+                session_key=getattr(active_sess, "document_key", None),
+                case_id=case_id,
+                precedent_id=precedent_id,
+                firm_letterhead_kind=firm_letterhead_kind,
+                commit=not row.oo_force_save_pending,
             )
             if row.oo_force_save_pending:
                 _oo_ack_unchanged_force_save(
