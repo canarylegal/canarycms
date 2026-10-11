@@ -497,7 +497,7 @@ def get_precedent_onlyoffice_config(
     """Return an OnlyOffice editor config for editing a precedent template (admin or any user)."""
     import jwt as pyjwt  # PyJWT — same alias used in files.py
 
-    from app.desktop_edit_session import acquire_file_edit_session
+    from app.desktop_edit_session import acquire_file_edit_session, ensure_session_document_key
     from app.canary_public_url import onlyoffice_browser_public_base
     from app.onlyoffice_ssrf_url import default_internal_base_for_ds, normalize_onlyoffice_ssrf_base
     from app.feature_flags import onlyoffice_editor_customization
@@ -547,7 +547,11 @@ def get_precedent_onlyoffice_config(
     _plain_base = onlyoffice_browser_public_base(request)
     doc_url_for_browser = f"{_plain_base}/webdav/sessions/{sess.token}/{enc}"
 
-    doc_key = f"prec_{precedent_id}_{row.version or 1}_{secrets.token_hex(6)}"
+    doc_key = ensure_session_document_key(
+        db,
+        sess,
+        candidate=f"prec_{precedent_id}_{row.version or 1}_{secrets.token_hex(6)}",
+    )
     jwt_payload: dict = {
         "documentType": doc_type,
         "document": {

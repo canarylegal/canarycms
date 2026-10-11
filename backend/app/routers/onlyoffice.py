@@ -32,7 +32,14 @@ from sqlalchemy.orm import Session
 
 from app.db import get_db
 from app.deps import get_current_user
-from app.file_storage import FILES_ROOT, case_file_paths, commit_keeping_stored_file, ensure_files_root, path_is_under_files_root
+from app.file_storage import (
+    FILES_ROOT,
+    case_file_paths,
+    commit_keeping_stored_file,
+    ensure_files_root,
+    path_is_under_files_root,
+    write_bytes_atomic,
+)
 from app.models import FeeScale, File as DbFile, FileCategory, Precedent, User
 from app.audit import log_event
 from app.feature_flags import onlyoffice_callback_require_jwt
@@ -246,6 +253,46 @@ def _internal_fetch_url_from_browser(browser_url: str) -> str:
 
 
 _OO_PERSIST_MAX_BYTES = int(os.getenv("ONLYOFFICE_PERSIST_MAX_BYTES", str(100 * 1024 * 1024)))
+
+
+def _callback_fetch_url_or_reject(download_url: str) -> str | None:
+    """Rewrite to internal DS and require /cache/files/ or /printfile/ paths."""
+    fetch_url = _rewrite_oo_download_url(str(download_url))
+    norm_path = _normalized_ds_path_for_print_allowlist(fetch_url)
+    if not _is_allowed_onlyoffice_ds_fetch_path(norm_path):
+        log.warning(
+            "onlyoffice_callback: rejected download path %r (rewritten=%r)",
+            norm_path,
+            fetch_url,
+        )
+        return None
+    return fetch_url
+
+
+async def _download_oo_document_bytes(fetch_url: str, *, max_bytes: int) -> bytes | None:
+    """Stream Document Server bytes with a hard size cap."""
+    try:
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            async with client.stream("GET", fetch_url) as resp:
+                resp.raise_for_status()
+                buf = BytesIO()
+                size = 0
+                async for chunk in resp.aiter_bytes():
+                    if not chunk:
+                        continue
+                    size += len(chunk)
+                    if size > max_bytes:
+                        log.warning(
+                            "onlyoffice_callback: download exceeded max_bytes=%s url=%s",
+                            max_bytes,
+                            fetch_url,
+                        )
+                        return None
+                    buf.write(chunk)
+                return buf.getvalue()
+    except Exception as e:
+        log.exception("ONLYOFFICE save download failed (url=%s): %s", fetch_url, e)
+        return None
 
 
 def fix_pdf_form_need_appearances(data: bytes) -> bytes:
@@ -827,20 +874,39 @@ async def onlyoffice_callback(
         db.refresh(row)
         file_id = row.id
 
-        # CL-18: never persist Document Server bytes without an active authorised edit session.
-        # Force-save pending alone used to bypass this and let Save Changes write after release-edit.
-        # If a force-save was armed, metadata-ack so /oo-force-save waiters do not HTTP 504.
+        # CL-18: never persist Document Server bytes without an active authorised edit session
+        # bound to this callback's document key.
         from app.desktop_edit_session import (
             get_active_edit_session_for_file,
+            session_matches_document_key,
             session_owner_still_authorized,
         )
 
+        cb_key = str(payload.get("key") or "").strip()
         active_sess = get_active_edit_session_for_file(db, file_id)
         if active_sess is None:
             log.warning(
                 "onlyoffice_callback: NO active session for file %s — refusing byte persist (pending=%s)",
                 file_id,
                 row.oo_force_save_pending,
+            )
+            if row.oo_force_save_pending:
+                _oo_ack_unchanged_force_save(
+                    db,
+                    row,
+                    precedent_id=precedent_id,
+                    case_id=case_id,
+                    firm_letterhead_kind=firm_letterhead_kind,
+                    status_code=st,
+                )
+            return {"error": 0}
+
+        if not session_matches_document_key(active_sess, cb_key):
+            log.warning(
+                "onlyoffice_callback: document key mismatch for file %s (callback=%r session=%r) — refusing persist",
+                file_id,
+                cb_key or None,
+                getattr(active_sess, "document_key", None),
             )
             if row.oo_force_save_pending:
                 _oo_ack_unchanged_force_save(
@@ -873,7 +939,11 @@ async def onlyoffice_callback(
                 db.commit()
             return {"error": 0}
 
-        log.warning("onlyoffice_callback: active session found, proceeding to save file %s", file_id)
+        log.warning(
+            "onlyoffice_callback: active session+key ok, downloading for file %s key=%s",
+            file_id,
+            cb_key,
+        )
 
         ensure_files_root()
         abs_path = (FILES_ROOT / row.storage_path).resolve()
@@ -881,15 +951,37 @@ async def onlyoffice_callback(
             log.error("Invalid storage path for file %s", file_id)
             return {"error": 1}
 
-        fetch_url = _rewrite_oo_download_url(str(download_url))
-        try:
-            async with httpx.AsyncClient(timeout=120.0) as client:
-                r = await client.get(fetch_url)
-                r.raise_for_status()
-                data = r.content
-        except Exception as e:
-            log.exception("ONLYOFFICE save download failed (url=%s): %s", fetch_url, e)
+        fetch_url = _callback_fetch_url_or_reject(str(download_url))
+        if not fetch_url:
             return {"error": 1}
+
+        data = await _download_oo_document_bytes(fetch_url, max_bytes=_OO_PERSIST_MAX_BYTES)
+        if data is None:
+            return {"error": 1}
+
+        # Re-validate after the download — revoke / key change must win over in-flight fetches.
+        db.refresh(active_sess)
+        active_after = get_active_edit_session_for_file(db, file_id)
+        if (
+            active_after is None
+            or active_after.id != active_sess.id
+            or not session_matches_document_key(active_after, cb_key)
+            or session_owner_still_authorized(db, active_after) is None
+        ):
+            log.warning(
+                "onlyoffice_callback: session no longer valid after download for file %s — discarding bytes",
+                file_id,
+            )
+            if row.oo_force_save_pending:
+                _oo_ack_unchanged_force_save(
+                    db,
+                    row,
+                    precedent_id=precedent_id,
+                    case_id=case_id,
+                    firm_letterhead_kind=firm_letterhead_kind,
+                    status_code=st,
+                )
+            return {"error": 0}
 
         data = finalize_stored_docx_bytes(
             data,
@@ -897,8 +989,11 @@ async def onlyoffice_callback(
             mime_type=row.mime_type,
         )
 
-        abs_path.parent.mkdir(parents=True, exist_ok=True)
-        abs_path.write_bytes(data)
+        try:
+            write_bytes_atomic(abs_path, data)
+        except Exception:
+            log.exception("onlyoffice_callback: atomic write failed for file %s", file_id)
+            return {"error": 1}
 
         # Remove pre-edit backup now that the new version is saved.
         backup_path = Path(str(abs_path) + ".oo_backup")

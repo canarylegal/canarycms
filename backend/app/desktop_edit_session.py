@@ -133,6 +133,35 @@ def get_active_edit_session_for_file(db: Session, file_id: uuid.UUID) -> FileEdi
     )
 
 
+def ensure_session_document_key(db: Session, sess: FileEditSession, *, candidate: str) -> str:
+    """Return the session's ONLYOFFICE document key, storing ``candidate`` if unset.
+
+    When the same user re-acquires (Strict Mode / duplicate config), reuse the existing key so
+    the Document Server JWT and callback stay aligned with the WebDAV session token.
+    """
+    existing = (getattr(sess, "document_key", None) or "").strip()
+    if existing:
+        return existing
+    key = (candidate or "").strip()
+    if not key:
+        raise ValueError("document_key candidate must be non-empty")
+    if len(key) > 128:
+        key = key[:128]
+    sess.document_key = key
+    db.add(sess)
+    db.commit()
+    db.refresh(sess)
+    return key
+
+
+def session_matches_document_key(sess: FileEditSession, document_key: str | None) -> bool:
+    expected = (getattr(sess, "document_key", None) or "").strip()
+    got = (document_key or "").strip()
+    if not expected or not got:
+        return False
+    return expected == got
+
+
 def require_user_active_edit_session(db: Session, file_id: uuid.UUID, user: User) -> FileEditSession:
     """Require an active edit session owned by ``user`` before staff-initiated save paths (CL-18)."""
     now = _utcnow()

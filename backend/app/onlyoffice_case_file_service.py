@@ -22,7 +22,7 @@ from app.audit import log_event
 from app.canary_public_url import canary_public_url, onlyoffice_browser_public_base
 from app.case_file_mutate_service import _erase_case_file_tree
 from app.deps import require_case_access
-from app.desktop_edit_session import acquire_file_edit_session
+from app.desktop_edit_session import acquire_file_edit_session, ensure_session_document_key
 from app.feature_flags import onlyoffice_editor_customization, open_pdf_in_onlyoffice
 from app.file_storage import FILES_ROOT, ensure_files_root
 from app.models import File as DbFile, FileEditSession, User
@@ -223,7 +223,11 @@ def get_onlyoffice_editor_config(
             row.id,
             internal,
         )
-    doc_key = f"{file_id}_{row.version or 1}_{secrets.token_hex(6)}"
+    doc_key = ensure_session_document_key(
+        db,
+        sess,
+        candidate=f"{file_id}_{row.version or 1}_{secrets.token_hex(6)}",
+    )
 
     # JWT must mirror the browser config (document + editorConfig + documentType). Omitting
     # documentType breaks PDF opens when JWT is enabled — DocsAPI reports invalid documentType.
