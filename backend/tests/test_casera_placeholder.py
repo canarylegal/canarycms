@@ -43,3 +43,29 @@ def test_normalize_risk_badges_bool_map() -> None:
     radon = next(b for b in badges if b.key == "radon")
     assert radon.label == "Radon"
     assert radon.product_ids == ["p1"]
+
+
+def test_normalize_risk_badges_skips_none_and_uses_suggested() -> None:
+    from canary_commercial.casera_service import build_risk_badges_from_available
+
+    badges = normalize_risk_badges(
+        {"COAL": "NONE", "FLOOD": "LEVEL_UNKNOWN", "RADON": "NONE"},
+        suggested_products=[
+            {"risk": "FLOOD", "products": [{"id": "homescreen", "name": "Homescreen"}]},
+            {"risk": "COAL", "products": [{"id": "con29m", "name": "CON29M"}]},
+        ],
+    )
+    assert [b.key for b in badges] == ["FLOOD"]
+    assert badges[0].level == "LEVEL_UNKNOWN"
+    assert badges[0].product_ids == ["homescreen"]
+
+    from_avail = build_risk_badges_from_available(
+        {
+            "risks": {"COAL": "HIGH", "FLOOD": "NONE"},
+            "suggestedProducts": [
+                {"risk": "COAL", "products": [{"id": "c1"}, {"id": "c2"}]},
+            ],
+        }
+    )
+    assert [b.key for b in from_avail] == ["COAL"]
+    assert from_avail[0].product_ids == ["c1", "c2"]

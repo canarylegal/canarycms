@@ -2,11 +2,15 @@ export type CaseraIntegrationSettingsOut = {
   enabled: boolean
   sandbox: boolean
   client_id?: string | null
+  developer_key?: string | null
   access_token_configured: boolean
+  refresh_token_configured: boolean
+  developer_secret_configured: boolean
   webhook_secret_configured: boolean
   webhook_path_token?: string | null
   webhook_url?: string | null
   api_base_uri?: string | null
+  access_token_expires_at?: string | null
   post_anticipated_disbursement?: boolean
   add_to_completion_statement?: boolean
   email_on_result_ready?: boolean
@@ -71,6 +75,7 @@ export type CaseraConveyancingDetails = {
   county?: string | null
   postcode?: string | null
   uprn?: string | null
+  /** Not collected in Canary — Casera map iframe is not embeddable. */
   centroid?: number[] | null
   polygons?: number[][][] | null
   hectares?: number | null
@@ -78,6 +83,7 @@ export type CaseraConveyancingDetails = {
   local_authority?: string | null
   water_authority?: string | null
   drainage_authority?: string | null
+  plan_file_ids?: string[]
 }
 
 export type CaseraPrefillOut = {
@@ -94,6 +100,47 @@ export type CaseraAvailableProductOut = {
   subcategory?: string | null
   description?: string | null
   group?: string | null
+  product_form_id?: number | null
+  estimated_return_days?: number | null
+  /** Casera ``mitigatesRisks`` keys (e.g. FLOOD, RADON). */
+  mitigates_risks?: string[]
+  is_favourite?: boolean
+  requires_quote?: boolean
+  supplier_name?: string | null
+  supplier_logo_url?: string | null
+  card_file_url?: string | null
+  sample_file_url?: string | null
+  card_file_id?: string | null
+  card_file_name?: string | null
+  sample_file_id?: string | null
+  sample_file_name?: string | null
+  information_url?: string | null
+  features?: string[]
+}
+
+export type CaseraAmlPerson = {
+  first_name: string
+  other_names: string
+  email?: string | null
+  phone_number?: string | null
+  date_of_birth?: string | null
+  address_line1?: string | null
+  address_line2?: string | null
+  city?: string | null
+  county?: string | null
+  postcode?: string | null
+}
+
+export type CaseraCompany = {
+  name?: string | null
+  numbers: string[]
+}
+
+export type CaseraBankAccount = {
+  company_name: string
+  sort_code: string
+  account_number: string
+  transient_id?: string | null
 }
 
 export type CaseraAvailablePackOut = {
@@ -102,6 +149,8 @@ export type CaseraAvailablePackOut = {
   price_pence?: number | null
   product_ids: string[]
   product_names?: string[]
+  requires_quote?: boolean
+  tbc?: boolean
 }
 
 export type CaseraCreateOrderOut = {

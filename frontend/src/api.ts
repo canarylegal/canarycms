@@ -174,9 +174,15 @@ export function applyAuthHeaders(headers: Headers, authTrimmed: string): void {
 
 export async function apiFetch<T>(
   path: string,
-  opts: RequestInit & { token?: string; json?: unknown; timeoutMs?: number } = {},
+  opts: RequestInit & {
+    token?: string
+    json?: unknown
+    timeoutMs?: number
+    /** When true, return a Blob instead of parsing JSON. */
+    blob?: boolean
+  } = {},
 ): Promise<T> {
-  const { token, json, timeoutMs = 120_000, signal: callerSignal, ...rest } = opts
+  const { token, json, timeoutMs = 120_000, signal: callerSignal, blob: asBlob, ...rest } = opts
   const headers = new Headers(rest.headers ?? {})
   /** Starlette HTTPBearer treats ``Bearer `` with no token as *missing* auth — avoid sending that. */
   const auth = token != null ? String(token).trim() : ''
@@ -255,16 +261,19 @@ export async function apiFetch<T>(
         }
       }
     }
-    const body = await parseJsonSafe(res)
+    const errBody = await parseJsonSafe(res)
     const statusFallback = (res.statusText || '').trim() || `HTTP ${res.status}`
     const resolvedUrl =
       typeof window !== 'undefined'
         ? new URL(apiUrl(path), window.location.origin).href
         : apiUrl(path)
-    const msg = (formatApiErrorDetail(body, statusFallback, resolvedUrl).trim() || statusFallback)
-    const err: ApiError = { status: res.status, message: msg, body }
+    const msg = (formatApiErrorDetail(errBody, statusFallback, resolvedUrl).trim() || statusFallback)
+    const err: ApiError = { status: res.status, message: msg, body: errBody }
     throw err
   }
 
+  if (asBlob) {
+    return (await res.blob()) as T
+  }
   return (await parseJsonSafe(res)) as T
 }
