@@ -2711,6 +2711,36 @@ select {
   margin-bottom: 0;
 }
 
+/* Beat base `.modal { width: min(720px, 100%) }` so Edit user can use two columns. */
+.modalOverlay > .modal.adminEditUserModal,
+.modalOverlay > .card.modal.adminEditUserModal {
+  width: min(880px, 96vw) !important;
+  max-width: min(880px, 96vw) !important;
+}
+
+.adminEditUserGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 16px;
+  align-items: start;
+}
+
+.adminEditUserGrid .field,
+.adminEditUserGrid .singleSelectDropdownField {
+  margin-bottom: 0;
+  min-width: 0;
+}
+
+.adminEditUserGrid .singleSelectDropdownField {
+  width: 100%;
+}
+
+@media (max-width: 640px) {
+  .adminEditUserGrid {
+    grid-template-columns: 1fr;
+  }
+}
+
 .reportsReportSelect {
   max-width: min(100%, 420px);
 }

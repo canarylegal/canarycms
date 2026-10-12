@@ -634,15 +634,15 @@ export function AdminUsers({ token, embedded }: { token: string; embedded?: bool
           onClick={() => !busy && setEditingUser(null)}
         >
           <div
-            className="modal card modal--scrollBody"
-            style={{ maxWidth: 520, width: 'min(520px, 94vw)' }}
+            className="modal card modal--scrollBody adminEditUserModal"
+            style={{ maxWidth: 880, width: 'min(880px, 96vw)' }}
             onClick={(e) => e.stopPropagation()}
           >
             <div className="paneHead">
               <div>
                 <h2 id="admin-edit-user-title">Edit user</h2>
                 <div className="muted" style={{ fontSize: 13 }}>
-                  Same fields as create user. Under Sign-in security you can reset authenticator 2FA or set a new password (min 12 characters). Setting a new password clears their authenticator enrolment.
+                  Profile, role, and sign-in security. A new password (min 12 characters) clears authenticator enrolment.
                 </div>
               </div>
               <button type="button" className="btn" disabled={busy} onClick={() => setEditingUser(null)}>
@@ -655,66 +655,68 @@ export function AdminUsers({ token, embedded }: { token: string; embedded?: bool
                   {err}
                 </div>
               ) : null}
-              <label className="field" style={{ marginBottom: 0 }}>
-                <span>Email</span>
-                <input value={editEmail} onChange={(e) => setEditEmail(e.target.value)} disabled={busy} autoComplete="off" />
-              </label>
-              <label className="field" style={{ marginBottom: 0 }}>
-                <span>Display name</span>
-                <input value={editDisplayName} onChange={(e) => setEditDisplayName(e.target.value)} disabled={busy} />
-              </label>
-              <label className="field" style={{ marginBottom: 0 }}>
-                <span>Initials (unique)</span>
-                <input
-                  value={editInitials ?? ''}
-                  onChange={(e) => setEditInitials(e.target.value)}
+              <div className="adminEditUserGrid">
+                <label className="field" style={{ marginBottom: 0 }}>
+                  <span>Email</span>
+                  <input value={editEmail} onChange={(e) => setEditEmail(e.target.value)} disabled={busy} autoComplete="off" />
+                </label>
+                <label className="field" style={{ marginBottom: 0 }}>
+                  <span>Display name</span>
+                  <input value={editDisplayName} onChange={(e) => setEditDisplayName(e.target.value)} disabled={busy} />
+                </label>
+                <label className="field" style={{ marginBottom: 0 }}>
+                  <span>Initials (unique)</span>
+                  <input
+                    value={editInitials ?? ''}
+                    onChange={(e) => setEditInitials(e.target.value)}
+                    disabled={busy}
+                    title="Letters, digits, dot, underscore, hyphen; 1–12 characters"
+                  />
+                </label>
+                <label className="field" style={{ marginBottom: 0 }}>
+                  <span>Job title (optional)</span>
+                  <input value={editJobTitle} onChange={(e) => setEditJobTitle(e.target.value)} disabled={busy} placeholder="Optional" />
+                </label>
+                <label className="field" style={{ marginBottom: 0 }}>
+                  <span>Charge rate (£/hour, optional — for time / WIP)</span>
+                  <input
+                    className="input inputNoSpinner"
+                    inputMode="decimal"
+                    value={editChargeRateStr}
+                    onChange={(e) => setEditChargeRateStr(e.target.value.replace(/[^\d.]/g, ''))}
+                    disabled={busy}
+                    placeholder="e.g. 250.00"
+                  />
+                </label>
+                <SingleSelectDropdown
+                  label="Role"
+                  options={[
+                    { value: 'user', label: 'User' },
+                    { value: 'admin', label: 'Admin' },
+                  ]}
+                  value={editRole}
+                  onChange={(v) => setEditRole(v as 'admin' | 'user')}
                   disabled={busy}
-                  title="Letters, digits, dot, underscore, hyphen; 1–12 characters"
                 />
-              </label>
-              <label className="field" style={{ marginBottom: 0 }}>
-                <span>Job title (optional)</span>
-                <input value={editJobTitle} onChange={(e) => setEditJobTitle(e.target.value)} disabled={busy} placeholder="Optional" />
-              </label>
-              <label className="field" style={{ marginBottom: 0 }}>
-                <span>Charge rate (£/hour, optional — for time / WIP)</span>
-                <input
-                  className="input inputNoSpinner"
-                  inputMode="decimal"
-                  value={editChargeRateStr}
-                  onChange={(e) => setEditChargeRateStr(e.target.value.replace(/[^\d.]/g, ''))}
+                <SingleSelectDropdown
+                  label={`Permission category${editRole === 'user' ? '' : ' (optional for admins)'}`}
+                  options={editPermissionCategoryOptions}
+                  value={editCategoryId}
+                  onChange={setEditCategoryId}
                   disabled={busy}
-                  placeholder="e.g. 250.00"
+                  placeholder={editRole === 'admin' ? '— None —' : '— Select category —'}
                 />
-              </label>
-              <SingleSelectDropdown
-                label="Role"
-                options={[
-                  { value: 'user', label: 'User' },
-                  { value: 'admin', label: 'Admin' },
-                ]}
-                value={editRole}
-                onChange={(v) => setEditRole(v as 'admin' | 'user')}
-                disabled={busy}
-              />
-              <SingleSelectDropdown
-                label={`Permission category${editRole === 'user' ? '' : ' (optional for admins)'}`}
-                options={editPermissionCategoryOptions}
-                value={editCategoryId}
-                onChange={setEditCategoryId}
-                disabled={busy}
-                placeholder={editRole === 'admin' ? '— None —' : '— Select category —'}
-              />
-              <SingleSelectDropdown
-                label="Supervisor"
-                options={supervisorOptionsForEdit}
-                value={editSupervisorUserId}
-                onChange={setEditSupervisorUserId}
-                disabled={busy}
-                placeholder="— None —"
-              />
+                <SingleSelectDropdown
+                  label="Supervisor"
+                  options={supervisorOptionsForEdit}
+                  value={editSupervisorUserId}
+                  onChange={setEditSupervisorUserId}
+                  disabled={busy}
+                  placeholder="— None —"
+                />
+              </div>
               <p className="muted" style={{ margin: 0, fontSize: 13 }}>
-                Used for merge codes <code>[SUPERVISOR]</code>, <code>[SUPERVISOR_JOB_TITLE]</code>, and{' '}
+                Supervisor is used for merge codes <code>[SUPERVISOR]</code>, <code>[SUPERVISOR_JOB_TITLE]</code>, and{' '}
                 <code>[SUPERVISOR_INITIALS]</code> when this user is the matter fee earner.
               </p>
               <label className="row" style={{ gap: 8, cursor: 'pointer' }}>
@@ -722,91 +724,95 @@ export function AdminUsers({ token, embedded }: { token: string; embedded?: bool
                 <span>Account active</span>
               </label>
 
-              <h4 style={{ margin: '16px 0 8px', fontSize: '1rem', fontWeight: 600 }}>Sign-in security</h4>
+              <h4 style={{ margin: '8px 0 0', fontSize: '1rem', fontWeight: 600 }}>Sign-in security</h4>
               <p className="muted" style={{ marginTop: 0, fontSize: 13 }}>
                 Authenticator status:{' '}
                 <strong>{editingUser.is_2fa_enabled ? 'Enabled' : 'Not enabled'}</strong>. Reset removes their app enrolment so
                 they must set up 2FA again in User settings (existing passkeys are unchanged).
               </p>
-              <button
-                type="button"
-                className="btn danger"
-                disabled={busy}
-                onClick={() =>
-                  void (async () => {
-                    if (!editingUser) return
-                    const ok = await askConfirm({
-                      title: 'Reset authenticator (2FA)',
-                      message:
-                        `Clear authenticator enrolment for ${editingUser.email}? They will need to set up 2FA again under User settings before it applies at sign-in.`,
-                      danger: true,
-                      confirmLabel: 'Reset 2FA',
-                    })
-                    if (!ok) return
-                    setBusy(true)
-                    setErr(null)
-                    try {
-                      await apiFetch<null>(`/admin/users/${editingUser.id}/disable-2fa`, { method: 'POST', token })
-                      const list = await load()
-                      const nu = list?.find((x) => x.id === editingUser.id)
-                      if (nu) setEditingUser(nu)
-                    } catch (e: unknown) {
-                      setErr((e as ApiError).message ?? 'Could not reset 2FA')
-                    } finally {
-                      setBusy(false)
-                    }
-                  })()
-                }
-              >
-                Reset authenticator (2FA)
-              </button>
-              <button
-                type="button"
-                className="btn"
-                disabled={busy}
-                onClick={() =>
-                  void (async () => {
-                    if (!editingUser) return
-                    setBusy(true)
-                    setErr(null)
-                    try {
-                      const res = await apiFetch<AdminSendPasswordResetResponse>(
-                        `/admin/users/${editingUser.id}/send-password-reset-email`,
-                        { method: 'POST', token },
-                      )
-                      await showAlert(res.message ?? 'Password reset e-mail sent.', 'E-mail sent')
-                    } catch (e: unknown) {
-                      setErr((e as ApiError).message ?? 'Could not send password reset e-mail')
-                    } finally {
-                      setBusy(false)
-                    }
-                  })()
-                }
-              >
-                Send password reset e-mail
-              </button>
+              <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
+                <button
+                  type="button"
+                  className="btn danger"
+                  disabled={busy}
+                  onClick={() =>
+                    void (async () => {
+                      if (!editingUser) return
+                      const ok = await askConfirm({
+                        title: 'Reset authenticator (2FA)',
+                        message:
+                          `Clear authenticator enrolment for ${editingUser.email}? They will need to set up 2FA again under User settings before it applies at sign-in.`,
+                        danger: true,
+                        confirmLabel: 'Reset 2FA',
+                      })
+                      if (!ok) return
+                      setBusy(true)
+                      setErr(null)
+                      try {
+                        await apiFetch<null>(`/admin/users/${editingUser.id}/disable-2fa`, { method: 'POST', token })
+                        const list = await load()
+                        const nu = list?.find((x) => x.id === editingUser.id)
+                        if (nu) setEditingUser(nu)
+                      } catch (e: unknown) {
+                        setErr((e as ApiError).message ?? 'Could not reset 2FA')
+                      } finally {
+                        setBusy(false)
+                      }
+                    })()
+                  }
+                >
+                  Reset authenticator (2FA)
+                </button>
+                <button
+                  type="button"
+                  className="btn"
+                  disabled={busy}
+                  onClick={() =>
+                    void (async () => {
+                      if (!editingUser) return
+                      setBusy(true)
+                      setErr(null)
+                      try {
+                        const res = await apiFetch<AdminSendPasswordResetResponse>(
+                          `/admin/users/${editingUser.id}/send-password-reset-email`,
+                          { method: 'POST', token },
+                        )
+                        await showAlert(res.message ?? 'Password reset e-mail sent.', 'E-mail sent')
+                      } catch (e: unknown) {
+                        setErr((e as ApiError).message ?? 'Could not send password reset e-mail')
+                      } finally {
+                        setBusy(false)
+                      }
+                    })()
+                  }
+                >
+                  Send password reset e-mail
+                </button>
+              </div>
 
-              <label className="field" style={{ marginBottom: 0, marginTop: 14 }}>
-                <span>New password (optional, min 12 characters)</span>
-                <input
-                  type="password"
-                  value={editPw}
-                  onChange={(e) => setEditPw(e.target.value)}
-                  disabled={busy}
-                  autoComplete="new-password"
-                  placeholder="Leave blank to keep current password"
-                />
-              </label>
-              <label className="field" style={{ marginBottom: 0 }}>
-                <span>Confirm new password</span>
-                <input
-                  type="password"
-                  value={editPw2}
-                  onChange={(e) => setEditPw2(e.target.value)}
-                  disabled={busy}
-                  autoComplete="new-password"
-                />
-              </label>
+              <div className="adminEditUserGrid">
+                <label className="field" style={{ marginBottom: 0 }}>
+                  <span>New password (optional, min 12 characters)</span>
+                  <input
+                    type="password"
+                    value={editPw}
+                    onChange={(e) => setEditPw(e.target.value)}
+                    disabled={busy}
+                    autoComplete="new-password"
+                    placeholder="Leave blank to keep current password"
+                  />
+                </label>
+                <label className="field" style={{ marginBottom: 0 }}>
+                  <span>Confirm new password</span>
+                  <input
+                    type="password"
+                    value={editPw2}
+                    onChange={(e) => setEditPw2(e.target.value)}
+                    disabled={busy}
+                    autoComplete="new-password"
+                  />
+                </label>
+              </div>
               <p className="muted" style={{ marginTop: 0, fontSize: 13 }}>
                 When you set a new password here, this user’s authenticator 2FA and passkeys are cleared — they sign in with the
                 new password until they enrol again.
