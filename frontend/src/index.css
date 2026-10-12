@@ -530,9 +530,9 @@ button.appSidebarBrand--fault:focus-visible .appSidebarBrandName {
   max-height: min(420px, calc(100vh - 16px));
   display: flex;
   flex-direction: column;
-  background: var(--surface, #fff);
+  background: var(--panel, #fff);
   color: var(--text, #1e293b);
-  border: 1px solid color-mix(in srgb, var(--text) 12%, transparent);
+  border: 1px solid var(--border, color-mix(in srgb, var(--text) 12%, transparent));
   border-radius: 12px;
   box-shadow: 0 12px 40px color-mix(in srgb, #0f172a 22%, transparent);
   overflow: hidden;
@@ -1691,14 +1691,13 @@ html.dark .topbar--content .btn:not(.primary):not(.danger) {
     minmax(0, 10fr);
 }
 
-/* Portal summary desk: Kind · Reference · Client · Title · Recipients · Status · Sent */
+/* Portal summary desk: Type · Reference · Description · Recipients · Status · Sent */
 .mainMenuShell--mainMenu .portalSummaryTableScroll .tr {
   grid-template-columns:
     minmax(0, 10fr)
     minmax(0, 8fr)
-    minmax(0, 18fr)
-    minmax(0, 22fr)
-    minmax(0, 18fr)
+    minmax(0, 28fr)
+    minmax(0, 20fr)
     minmax(0, 8fr)
     minmax(0, 12fr);
 }

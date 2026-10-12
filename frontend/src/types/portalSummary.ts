@@ -20,6 +20,8 @@ export type PortalSummaryRowOut = {
   contact_or_recipients?: string
   sent_by_display_name?: string | null
   created_at?: string | null
+  /** Present for quote rows — used to call quote-portal resend. */
+  file_id?: string | null
 }
 
 export type PortalSummaryOut = {

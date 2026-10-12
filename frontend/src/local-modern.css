@@ -706,6 +706,10 @@ html.dark .modalOverlay > .card.modal {
   color: #334155;
 }
 
+html.dark .confirmModalMessage {
+  color: var(--muted);
+}
+
 .confirmModalActions {
   display: flex;
   justify-content: flex-end;

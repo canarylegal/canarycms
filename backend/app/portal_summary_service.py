@@ -56,6 +56,7 @@ def _row(
     contact_or_recipients: str = "",
     sent_by_display_name: str | None = None,
     created_at: datetime | None = None,
+    file_id: uuid.UUID | None = None,
 ) -> PortalSummaryRowOut:
     return PortalSummaryRowOut(
         kind=kind,
@@ -69,6 +70,7 @@ def _row(
         contact_or_recipients=contact_or_recipients,
         sent_by_display_name=sent_by_display_name,
         created_at=created_at,
+        file_id=file_id,
     )
 
 
@@ -137,6 +139,7 @@ def _collect_quotes(
                 contact_or_recipients=contact_display_name(contact) if contact else "",
                 sent_by_display_name=senders.get(delivery.sent_by_user_id) if delivery.sent_by_user_id else None,
                 created_at=delivery.sent_at,
+                file_id=delivery.file_id,
             )
         )
     return out

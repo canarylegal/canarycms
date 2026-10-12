@@ -35,6 +35,8 @@ class PortalSummaryRowOut(BaseModel):
     contact_or_recipients: str = ""
     sent_by_display_name: str | None = None
     created_at: datetime | None = None
+    # Source file for quote rows (needed to resend via quote-portal).
+    file_id: uuid.UUID | None = None
 
 
 class PortalSummaryOut(BaseModel):

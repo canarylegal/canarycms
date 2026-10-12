@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { apiFetch, type ApiError } from './api'
+import { useDialogs } from './DialogProvider'
+import { useNotifications } from './NotificationsProvider'
 import { SearchInput } from './SearchInput'
 import { SingleSelectDropdown } from './SingleSelectDropdown'
 import type {
@@ -15,7 +17,7 @@ type Props = {
 }
 
 const KIND_OPTIONS: { value: string; label: string }[] = [
-  { value: '', label: 'All kinds' },
+  { value: '', label: 'All types' },
   { value: 'quote', label: 'Quote' },
   { value: 'form', label: 'Form' },
   { value: 'canary_sign', label: 'Canary Sign' },
@@ -23,10 +25,9 @@ const KIND_OPTIONS: { value: string; label: string }[] = [
 ]
 
 const PORTAL_COLUMNS = [
-  ['kind', 'Kind'],
+  ['kind', 'Type'],
   ['reference', 'Reference'],
-  ['client', 'Client'],
-  ['title', 'Title'],
+  ['title', 'Description'],
   ['recipients', 'Recipients'],
   ['status', 'Status'],
   ['sent', 'Sent'],
@@ -68,13 +69,22 @@ function formatWhen(iso: string | null | undefined): string {
   return Number.isNaN(d.getTime()) ? iso : d.toLocaleString()
 }
 
+function canResend(r: PortalSummaryRowOut, bucket: PortalSummaryBucket): boolean {
+  if (bucket !== 'outstanding') return false
+  if (r.kind === 'quote' && !r.file_id) return false
+  return true
+}
+
 export function PortalSummaryPage({ token, onSelectCase }: Props) {
+  const { askConfirm } = useDialogs()
+  const { push: pushNotification } = useNotifications()
   const [bucket, setBucket] = useState<PortalSummaryBucket>('outstanding')
   const [kind, setKind] = useState<'' | PortalSummaryKind>('')
   const [kindOpen, setKindOpen] = useState(false)
   const [search, setSearch] = useState('')
   const [rows, setRows] = useState<PortalSummaryRowOut[]>([])
   const [busy, setBusy] = useState(false)
+  const [resendBusy, setResendBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const [focusKey, setFocusKey] = useState<string | null>(null)
   const [ctx, setCtx] = useState<null | { x: number; y: number; row: PortalSummaryRowOut }>(null)
@@ -145,16 +155,63 @@ export function PortalSummaryPage({ token, onSelectCase }: Props) {
     [onSelectCase],
   )
 
-  const copyReference = useCallback(async (r: PortalSummaryRowOut) => {
-    setCtx(null)
-    const text = (r.case_number || '').trim()
-    if (!text) return
-    try {
-      await navigator.clipboard.writeText(text)
-    } catch {
-      // ignore clipboard failures (permissions / insecure context)
-    }
-  }, [])
+  const resend = useCallback(
+    async (r: PortalSummaryRowOut) => {
+      setCtx(null)
+      if (!canResend(r, bucket)) return
+      const ok = await askConfirm({
+        title: 'Resend portal link?',
+        message:
+          'The recipient will receive another e-mail with a link to open this item in the portal (where appropriate).',
+        confirmLabel: 'Resend',
+      })
+      if (!ok) return
+      setResendBusy(true)
+      setErr(null)
+      try {
+        if (r.kind === 'quote') {
+          const out = await apiFetch<{ email_sent?: boolean; email_skip_reason?: string | null }>(
+            `/cases/${r.case_id}/files/${r.file_id}/quote-portal/resend`,
+            { token, method: 'POST' },
+          )
+          if (out.email_sent === false) {
+            pushNotification(out.email_skip_reason || 'Still available, but the notification e-mail was not sent.')
+          } else {
+            pushNotification('Quote link resent.')
+          }
+        } else if (r.kind === 'form') {
+          const out = await apiFetch<{ email_sent?: boolean; email_skip_reason?: string | null }>(
+            `/cases/${r.case_id}/portal/forms/submissions/${r.id}/resend`,
+            { token, method: 'POST' },
+          )
+          if (out.email_sent === false) {
+            pushNotification(out.email_skip_reason || 'Still available, but the notification e-mail was not sent.')
+          } else {
+            pushNotification('Form link resent.')
+          }
+        } else if (r.kind === 'canary_sign') {
+          await apiFetch(`/cases/${r.case_id}/canary-sign/requests/${r.id}/remind`, {
+            token,
+            method: 'POST',
+            json: {},
+          })
+          pushNotification('Signing reminder sent.')
+        } else {
+          await apiFetch(`/cases/${r.case_id}/docusign/requests/${r.id}/resend`, {
+            token,
+            method: 'POST',
+          })
+          pushNotification('DocuSign link resent.')
+        }
+        await load()
+      } catch (e) {
+        setErr((e as ApiError).message ?? 'Could not resend')
+      } finally {
+        setResendBusy(false)
+      }
+    },
+    [askConfirm, bucket, load, pushNotification, token],
+  )
 
   return (
     <div className="mainMenuShell mainMenuShell--mainMenu">
@@ -165,7 +222,7 @@ export function PortalSummaryPage({ token, onSelectCase }: Props) {
             <button
               type="button"
               className={`btn${bucket === 'outstanding' ? ' primary' : ''}`}
-              disabled={busy}
+              disabled={busy || resendBusy}
               onClick={() => setBucket('outstanding')}
             >
               Outstanding
@@ -173,25 +230,25 @@ export function PortalSummaryPage({ token, onSelectCase }: Props) {
             <button
               type="button"
               className={`btn${bucket === 'completed' ? ' primary' : ''}`}
-              disabled={busy}
+              disabled={busy || resendBusy}
               onClick={() => setBucket('completed')}
             >
               Completed
             </button>
             <div className="tasksToolbarLayoutGroup">
-              <span className="tasksToolbarLayoutLabel">Kind</span>
+              <span className="tasksToolbarLayoutLabel">Type</span>
               <SingleSelectDropdown
                 hideLabel
-                label="Kind filter"
+                label="Type filter"
                 options={KIND_OPTIONS}
                 value={kind}
-                disabled={busy}
+                disabled={busy || resendBusy}
                 onChange={(v) => setKind(v as '' | PortalSummaryKind)}
                 open={kindOpen}
                 onOpenChange={setKindOpen}
               />
             </div>
-            <button type="button" className="btn" disabled={busy} onClick={() => void load()}>
+            <button type="button" className="btn" disabled={busy || resendBusy} onClick={() => void load()}>
               Refresh
             </button>
           </div>
@@ -258,14 +315,6 @@ export function PortalSummaryPage({ token, onSelectCase }: Props) {
                     <span className={kindBadgeClass(r.kind)}>{kindLabel(r.kind)}</span>
                   </div>
                   <div className="td">{r.case_number || '—'}</div>
-                  <div
-                    className="td"
-                    title={
-                      [r.client_name, r.matter_description].filter(Boolean).join(' — ') || undefined
-                    }
-                  >
-                    {r.client_name || '—'}
-                  </div>
                   <div className="td" title={r.title || undefined}>
                     {r.title}
                   </div>
@@ -300,20 +349,20 @@ export function PortalSummaryPage({ token, onSelectCase }: Props) {
           >
             Open matter
           </div>
-          {ctx.row.case_number?.trim() ? (
+          {canResend(ctx.row, bucket) ? (
             <div
               className="docContextItem"
               role="menuitem"
               tabIndex={0}
-              onClick={() => void copyReference(ctx.row)}
+              onClick={() => void resend(ctx.row)}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' || e.key === ' ') {
                   e.preventDefault()
-                  void copyReference(ctx.row)
+                  void resend(ctx.row)
                 }
               }}
             >
-              Copy reference
+              Resend
             </div>
           ) : null}
         </div>
