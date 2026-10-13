@@ -656,7 +656,12 @@ export function CaseContactsEditDocForm({
         />
       ) : null}
       <div className="muted" style={{ fontSize: 12 }}>
-        Name and email below are the case snapshot; they can be pushed to the global card only when linked.
+        <strong style={{ color: 'var(--text)', fontWeight: 600 }}>Details for this matter</strong>
+        {' — '}
+        these values stay on the matter even if the firm directory differs.
+        {editSnapshot.contact_id
+          ? ' Tick below only if you also want to update the shared contact card.'
+          : ''}
       </div>
       <ContactPersonOrgAddressFields
         busy={busy}
@@ -689,7 +694,7 @@ export function CaseContactsEditDocForm({
       {editSnapshot.contact_id ? (
         <label className="row" style={{ alignItems: 'center' }}>
           <input type="checkbox" checked={pushToGlobal} onChange={(e) => setPushToGlobal(e.target.checked)} disabled={busy} />
-          <span className="muted">Also update global contact</span>
+          <span className="muted">Also update the firm&apos;s contact directory</span>
         </label>
       ) : null}
       {(editSnapshot.matter_contact_type || '').trim().toLowerCase() === CLIENT_TYPE_SLUG ||

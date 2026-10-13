@@ -461,7 +461,7 @@ export function CasePortalPanel({ token, caseId, onFilesChanged }: Props) {
       <div>
         <h3 style={{ margin: 0, marginBottom: 6 }}>Client portal</h3>
         <p className="muted" style={{ margin: 0 }}>
-          Share folders from Documents (right-click → Portal → Share). Clients sign in at{' '}
+          Share folders from Documents (⋯ actions or right-click → Portal → Share). Clients sign in at{' '}
           <a href={portalUrl} target="_blank" rel="noreferrer">
             {portalUrl}
           </a>

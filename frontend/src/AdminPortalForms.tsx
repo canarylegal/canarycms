@@ -99,6 +99,8 @@ export function AdminPortalForms({ token }: { token: string }) {
   const [headId, setHeadId] = useState('')
   const [subId, setSubId] = useState('')
   const [fields, setFields] = useState<FieldDraft[]>([emptyField(0)])
+  const [selectedFieldIndex, setSelectedFieldIndex] = useState(0)
+  const [showClientPreview, setShowClientPreview] = useState(false)
   const [headOpen, setHeadOpen] = useState(false)
   const [subOpen, setSubOpen] = useState(false)
   const [saveOk, setSaveOk] = useState(false)
@@ -153,6 +155,8 @@ export function AdminPortalForms({ token }: { token: string }) {
     setHeadId('')
     setSubId('')
     setFields([emptyField(0)])
+    setSelectedFieldIndex(0)
+    setShowClientPreview(false)
     setSaveOk(false)
     setErr(null)
   }
@@ -175,6 +179,8 @@ export function AdminPortalForms({ token }: { token: string }) {
       setHeadId(scope.headId)
       setSubId(scope.subId)
       setFields(fieldsFromDetail(detail).length > 0 ? fieldsFromDetail(detail) : [emptyField(0)])
+      setSelectedFieldIndex(0)
+      setShowClientPreview(false)
       setEditorOpen(true)
       setSaveOk(false)
     } catch (e) {
@@ -414,21 +420,116 @@ export function AdminPortalForms({ token }: { token: string }) {
               ) : null}
 
               <div>
-                <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, gap: 8, flexWrap: 'wrap' }}>
                   <h3 style={{ margin: 0, fontSize: 16 }}>Fields</h3>
-                  <button
-                    type="button"
-                    className="btn"
-                    disabled={busy}
-                    onClick={() => setFields((prev) => [...prev, emptyField(prev.length)])}
-                  >
-                    Add field
-                  </button>
+                  <div className="row" style={{ gap: 8 }}>
+                    <button
+                      type="button"
+                      className="btn"
+                      disabled={busy}
+                      onClick={() => setShowClientPreview((v) => !v)}
+                    >
+                      {showClientPreview ? 'Hide client preview' : 'Client preview'}
+                    </button>
+                    <button
+                      type="button"
+                      className="btn"
+                      disabled={busy}
+                      onClick={() => {
+                        setFields((prev) => {
+                          const next = [...prev, emptyField(prev.length)]
+                          setSelectedFieldIndex(next.length - 1)
+                          return next
+                        })
+                      }}
+                    >
+                      Add field
+                    </button>
+                  </div>
                 </div>
-                <div className="stack" style={{ gap: 10 }}>
-                  {fields.map((f, index) => (
-                    <div key={`${f.id ?? 'new'}-${index}`} className="card" style={{ padding: 12 }}>
-                      <div className="stack" style={{ gap: 8 }}>
+                {showClientPreview ? (
+                  <div className="card" style={{ padding: 12, marginBottom: 10, background: 'var(--panel2, rgba(15,23,42,0.03))' }}>
+                    <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>
+                      Client view (labels and help only — not interactive)
+                    </div>
+                    <div className="stack" style={{ gap: 10 }}>
+                      {description.trim() ? <p style={{ margin: 0 }}>{description.trim()}</p> : null}
+                      {fields.map((f, i) =>
+                        f.field_type === 'section' ? (
+                          <h4 key={`prev-${i}`} style={{ margin: '8px 0 0' }}>
+                            {f.label || 'Section'}
+                          </h4>
+                        ) : (
+                          <label key={`prev-${i}`} className="field">
+                            <span>
+                              {f.label || 'Untitled field'}
+                              {f.required ? ' *' : ''}
+                            </span>
+                            {f.help_text ? <div className="muted" style={{ fontSize: 12 }}>{f.help_text}</div> : null}
+                            <div className="input" style={{ opacity: 0.55, minHeight: 32 }} />
+                          </label>
+                        ),
+                      )}
+                    </div>
+                  </div>
+                ) : null}
+                <div className="row" style={{ gap: 12, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+                  <div className="stack" style={{ gap: 4, flex: '0 1 180px', minWidth: 140 }}>
+                    <div className="muted" style={{ fontSize: 12 }}>Outline</div>
+                    {fields.map((f, index) => (
+                      <button
+                        key={`outline-${f.id ?? 'new'}-${index}`}
+                        type="button"
+                        className={`btn${selectedFieldIndex === index ? ' primary' : ''}`}
+                        style={{ justifyContent: 'flex-start', textAlign: 'left', fontSize: 12 }}
+                        disabled={busy}
+                        onClick={() => setSelectedFieldIndex(index)}
+                      >
+                        {f.field_type === 'section' ? '§ ' : ''}
+                        {f.label.trim() || `Field ${index + 1}`}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="stack" style={{ gap: 10, flex: '1 1 280px', minWidth: 0 }}>
+                  {fields.map((f, index) => {
+                    const selected = selectedFieldIndex === index
+                    return (
+                    <div
+                      key={`${f.id ?? 'new'}-${index}`}
+                      className="card"
+                      style={{
+                        padding: 12,
+                        outline: selected ? '2px solid rgba(var(--primary-rgb), 0.45)' : undefined,
+                      }}
+                    >
+                      <button
+                        type="button"
+                        className="row"
+                        style={{
+                          width: '100%',
+                          justifyContent: 'space-between',
+                          gap: 8,
+                          border: 0,
+                          background: 'transparent',
+                          padding: 0,
+                          cursor: 'pointer',
+                          textAlign: 'left',
+                          color: 'inherit',
+                          font: 'inherit',
+                        }}
+                        onClick={() => setSelectedFieldIndex(index)}
+                      >
+                        <strong style={{ fontSize: 14 }}>
+                          {f.field_type === 'section' ? 'Section: ' : ''}
+                          {f.label.trim() || `Field ${index + 1}`}
+                          {f.required ? ' *' : ''}
+                        </strong>
+                        <span className="muted" style={{ fontSize: 12 }}>
+                          {FIELD_TYPE_OPTIONS.find((o) => o.value === f.field_type)?.label ?? f.field_type}
+                        </span>
+                      </button>
+                      {selected ? (
+                      <div className="stack" style={{ gap: 8, marginTop: 10 }}>
                         <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
                           <label className="field" style={{ flex: '2 1 160px' }}>
                             <span>Label</span>
@@ -467,26 +568,15 @@ export function AdminPortalForms({ token }: { token: string }) {
                           </label>
                         </div>
                         {f.field_type !== 'section' ? (
-                          <div className="row" style={{ gap: 8, flexWrap: 'wrap', alignItems: 'flex-end' }}>
-                            <label className="field" style={{ flex: '1 1 160px' }}>
-                              <span>Field key</span>
-                              <input
-                                className="input"
-                                value={f.field_key}
-                                onChange={(e) => updateField(index, { field_key: e.target.value })}
-                                disabled={busy}
-                              />
-                            </label>
-                            <label className="field row" style={{ gap: 6, alignItems: 'center', paddingBottom: 8 }}>
-                              <input
-                                type="checkbox"
-                                checked={f.required}
-                                onChange={(e) => updateField(index, { required: e.target.checked })}
-                                disabled={busy}
-                              />
-                              <span>Required</span>
-                            </label>
-                          </div>
+                          <label className="field row" style={{ gap: 6, alignItems: 'center' }}>
+                            <input
+                              type="checkbox"
+                              checked={f.required}
+                              onChange={(e) => updateField(index, { required: e.target.checked })}
+                              disabled={busy}
+                            />
+                            <span>Required</span>
+                          </label>
                         ) : null}
                         <label className="field">
                           <span>Help text (optional)</span>
@@ -540,6 +630,21 @@ export function AdminPortalForms({ token }: { token: string }) {
                             </button>
                           </div>
                         ) : null}
+                        {f.field_type !== 'section' ? (
+                          <details>
+                            <summary style={{ cursor: 'pointer', fontSize: 13 }}>Advanced — field key</summary>
+                            <label className="field" style={{ marginTop: 8 }}>
+                              <span>Field key</span>
+                              <input
+                                className="input"
+                                value={f.field_key}
+                                onChange={(e) => updateField(index, { field_key: e.target.value })}
+                                disabled={busy}
+                                placeholder={slugFieldKey(f.label) || 'auto from label'}
+                              />
+                            </label>
+                          </details>
+                        ) : null}
                         <div className="row" style={{ gap: 6 }}>
                           <button type="button" className="btn" disabled={busy || index === 0} onClick={() => moveField(index, -1)}>
                             ↑
@@ -552,13 +657,24 @@ export function AdminPortalForms({ token }: { token: string }) {
                           >
                             ↓
                           </button>
-                          <button type="button" className="btn" disabled={busy} onClick={() => removeField(index)}>
+                          <button
+                            type="button"
+                            className="btn"
+                            disabled={busy}
+                            onClick={() => {
+                              removeField(index)
+                              setSelectedFieldIndex((prev) => Math.max(0, Math.min(prev, fields.length - 2)))
+                            }}
+                          >
                             Remove
                           </button>
                         </div>
                       </div>
+                      ) : null}
                     </div>
-                  ))}
+                    )
+                  })}
+                  </div>
                 </div>
               </div>
 

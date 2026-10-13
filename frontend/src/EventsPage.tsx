@@ -265,6 +265,13 @@ export function EventsPage({
     return data.events.filter((e) => !toInputDate(e.event_date ?? undefined))
   }, [data?.events])
 
+  const hasUnsavedChanges = useMemo(() => {
+    if (!data || !baseline) return false
+    const baseEv = new Map(baseline.events.map((e) => [e.id, e]))
+    if (data.events.length !== baseline.events.length) return true
+    return data.events.some((ev) => eventRowChanged(baseEv.get(ev.id), ev))
+  }, [data, baseline])
+
   function discard() {
     if (baseline) {
       setData(JSON.parse(JSON.stringify(baseline)) as CaseEventsOut)
@@ -355,7 +362,12 @@ export function EventsPage({
           }}
         >
           <div className="muted" style={{ fontSize: 13, flex: '1 1 200px' }}>
-            Click an event to edit details; use the calendar header for month, week, day, or list. Save when done.
+            Click an event to edit. Edits are staged here until you Save and close.
+            {hasUnsavedChanges ? (
+              <span style={{ marginLeft: 8, color: 'var(--text)', fontWeight: 600 }}>Unsaved changes</span>
+            ) : (
+              <span style={{ marginLeft: 8 }}>All changes saved</span>
+            )}
           </div>
           <div className="row" style={{ gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
             {onRequestNewEvent ? (
@@ -382,9 +394,12 @@ export function EventsPage({
           <div>
             <h2 style={{ margin: 0, fontSize: 18 }}>Calendar</h2>
             <div className="muted" style={{ marginTop: 4 }}>
-              Set dates and optionally track in your calendar. When you track an event (with a date), Canary adds a task for
-              the fee earner with higher priority when the date is within five UK working days or overdue. Save and close to
-              apply.
+              Matter events always appear on this calendar. Optionally sync to your external calendar (CalDAV) — that also
+              creates a fee-earner task when the date is within five UK working days or overdue. Edits are staged until you
+              Save and close.
+              {hasUnsavedChanges ? (
+                <span style={{ marginLeft: 8, color: 'var(--text)', fontWeight: 600 }}>Unsaved changes</span>
+              ) : null}
             </div>
           </div>
           <div className="row" style={{ gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -566,9 +581,12 @@ export function EventsPage({
                       )
                     }
                   />
+                  <span className="muted" style={{ fontSize: 12, marginTop: 4, display: 'block' }}>
+                    Matter milestones use a start time only (not a meeting end time).
+                  </span>
                 </label>
               ) : null}
-              <label className="row" style={{ gap: 8, alignItems: 'center', cursor: 'pointer' }}>
+              <label className="row" style={{ gap: 8, alignItems: 'flex-start', cursor: 'pointer' }}>
                 <input
                   type="checkbox"
                   checked={eventDetail.track_in_calendar ?? false}
@@ -576,8 +594,15 @@ export function EventsPage({
                   onChange={(e) =>
                     setEventDetail((prev) => (prev ? { ...prev, track_in_calendar: e.target.checked } : prev))
                   }
+                  style={{ marginTop: 3 }}
                 />
-                <span>Track in calendar</span>
+                <span>
+                  Sync to my external calendar
+                  <span className="muted" style={{ display: 'block', fontSize: 12, lineHeight: 1.35 }}>
+                    Always shown on this matter calendar. When checked, also syncs via CalDAV and can create a fee-earner
+                    task.
+                  </span>
+                </span>
               </label>
               <label className="row" style={{ gap: 8, alignItems: 'center', cursor: 'pointer' }}>
                 <input
@@ -593,12 +618,15 @@ export function EventsPage({
                 <span>E-mail reminders (requires Admin → E-mail → SMTP)</span>
               </label>
             </div>
-            <div className="row" style={{ justifyContent: 'flex-end', gap: 8, marginTop: 20 }}>
+            <div className="muted" style={{ fontSize: 12, marginTop: 14 }}>
+              Done stages this edit. Use Save and close on the calendar to persist, or Discard changes to abandon.
+            </div>
+            <div className="row" style={{ justifyContent: 'flex-end', gap: 8, marginTop: 12 }}>
               <button type="button" className="btn" onClick={() => setEventDetail(null)}>
-                Cancel
+                Back
               </button>
               <button type="button" className="btn primary" onClick={applyEventDetailFromModal}>
-                Apply
+                Done
               </button>
             </div>
           </div>

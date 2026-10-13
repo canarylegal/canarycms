@@ -471,17 +471,21 @@ export function FinancePage({ caseId, token, onSaved, embedded = false }: Props)
         {showTotals ? (
           <div className="finTotals">
             <div className="finTotalCard">
-              <span className="finTotalLabel">Total debits</span>
+              <span className="finTotalLabel">Total debits (inc VAT)</span>
               <span className="finTotalValue finTotalDr">{pence(grandDr)}</span>
             </div>
             <div className="finTotalCard">
-              <span className="finTotalLabel">Total credits</span>
+              <span className="finTotalLabel">Total credits (inc VAT)</span>
               <span className="finTotalValue finTotalCr">{pence(grandCr)}</span>
             </div>
             <div className="finTotalCard">
-              <span className="finTotalLabel">Balance</span>
+              <span className="finTotalLabel">
+                {balance > 0 ? 'Due to client (inc VAT)' : balance < 0 ? 'Owed by client (inc VAT)' : 'Balance (inc VAT)'}
+              </span>
               <span className={`finTotalValue${balance < 0 ? ' finTotalDr' : ' finTotalCr'}`}>
-                {balance === 0 ? '£0.00' : `${pence(Math.abs(balance))}${balance > 0 ? ' CR' : ''}`}
+                {balance === 0
+                  ? '£0.00'
+                  : `${pence(Math.abs(balance))}${balance > 0 ? ' CR' : ' DR'}`}
               </span>
             </div>
           </div>

@@ -1110,7 +1110,7 @@ export function LedgerPage({ caseId, token, currentUserId, onCaseChanged }: Prop
                         {canApproveInvoices && inv.status !== 'voided' ? (
                           <button
                             type="button"
-                            className="btn ledgerInvoiceActionBtn ledgerInvoiceActionBtnDanger"
+                            className="btn danger ledgerInvoiceActionBtn ledgerInvoiceActionBtnDanger"
                             disabled={busy}
                             onClick={() =>
                               setVoidInvoiceTarget({ id: inv.id, pending })
@@ -1535,11 +1535,11 @@ export function LedgerPage({ caseId, token, currentUserId, onCaseChanged }: Prop
             </p>
             <div className="ledgerPostLabel">
               <span>
-                Credit <span aria-hidden>*</span>
+                Fee earner credited <span aria-hidden>*</span>
               </span>
               <SingleSelectDropdown
                 hideLabel
-                label="Credit"
+                label="Fee earner credited"
                 options={invCreditUserOptions}
                 value={invCreditUserId}
                 disabled={invBusy || !(invBillingDefaults?.users.length)}

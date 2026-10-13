@@ -396,9 +396,10 @@ export function TasksTable({
                           ? 'taskMenuRow--high'
                           : ''
                     return (
-                      <button
+                      <div
                         key={r.id}
-                        type="button"
+                        role="button"
+                        tabIndex={0}
                         className={`btn taskKanbanCard ${rowCls}`}
                         style={{
                           display: 'block',
@@ -406,11 +407,15 @@ export function TasksTable({
                           textAlign: 'left',
                           whiteSpace: 'normal',
                           padding: 10,
+                          cursor: 'pointer',
                         }}
                         onClick={() => setTaskRowFocusId(r.id)}
-                        onDoubleClick={() => {
-                          if (suppressCaseOpen) return
-                          onSelectCase(r.case_id)
+                        onDoubleClick={() => void openEdit(r)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault()
+                            void openEdit(r)
+                          }
                         }}
                         onContextMenu={(e) => {
                           e.preventDefault()
@@ -418,7 +423,18 @@ export function TasksTable({
                           setCtx({ x: e.clientX, y: e.clientY, row: r })
                         }}
                       >
-                        <div style={{ fontWeight: 600, marginBottom: 4 }}>{r.task_title}</div>
+                        <div style={{ fontWeight: 600, marginBottom: 4 }}>
+                          <button
+                            type="button"
+                            className="taskTitleOpenBtn"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              void openEdit(r)
+                            }}
+                          >
+                            {r.task_title}
+                          </button>
+                        </div>
                         <div className="muted" style={{ fontSize: 12 }}>
                           {formatTaskMenuDate(r.date)} · {priorityLabel(r.priority ?? 'normal')}
                           {r.assigned_display_name ? ` · ${r.assigned_display_name}` : ''}
@@ -429,7 +445,7 @@ export function TasksTable({
                             {r.matter_description ? ` · ${r.matter_description}` : ''}
                           </div>
                         ) : null}
-                      </button>
+                      </div>
                     )
                   })}
                 </div>
@@ -485,15 +501,19 @@ export function TasksTable({
                   : ''
             const rowActive = taskRowFocusId === r.id
             return (
-              <button
+              <div
                 key={r.id}
-                type="button"
+                role="button"
+                tabIndex={0}
                 className={`tr rowbtn taskMenuRow ${rowCls} ${rowActive ? 'active' : ''}`}
                 style={{ gridTemplateColumns: listGrid }}
                 onClick={() => setTaskRowFocusId(r.id)}
-                onDoubleClick={() => {
-                  if (suppressCaseOpen) return
-                  onSelectCase(r.case_id)
+                onDoubleClick={() => void openEdit(r)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault()
+                    void openEdit(r)
+                  }
                 }}
                 onContextMenu={(e) => {
                   e.preventDefault()
@@ -505,13 +525,22 @@ export function TasksTable({
                 <div className="td">{priorityLabel(r.priority ?? 'normal')}</div>
                 <div className="td">{r.assigned_display_name ?? '—'}</div>
                 <div className="td">
-                  {r.task_title}
-                  {r.is_private ? <span className="muted"> (private)</span> : null}
+                  <button
+                    type="button"
+                    className="taskTitleOpenBtn"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      void openEdit(r)
+                    }}
+                  >
+                    {r.task_title}
+                    {r.is_private ? <span className="muted"> (private)</span> : null}
+                  </button>
                 </div>
                 <div className="td">{r.matter_description ?? '—'}</div>
                 <div className="td">{r.client_name ?? '—'}</div>
                 <div className="td mono">{r.case_number}</div>
-              </button>
+              </div>
             )
           })}
           {visible.length === 0 ? (

@@ -1287,7 +1287,7 @@ html.dark .topbar--content .btn:not(.primary):not(.danger) {
 .accountsTabBtn--active {
   background: var(--primary);
   border-color: var(--primary);
-  color: #f8fafc;
+  color: var(--text-on-primary);
 }
 
 .accountsPageBody {
@@ -1656,6 +1656,35 @@ html.dark .topbar--content .btn:not(.primary):not(.danger) {
 .taskMenuRow--done {
   background: rgba(22, 163, 74, 0.15) !important;
 }
+
+
+
+.taskTitleOpenBtn {
+  appearance: none;
+  border: none;
+  background: transparent;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: transparent;
+  text-underline-offset: 2px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.taskTitleOpenBtn:hover {
+  text-decoration-color: currentColor;
+  color: var(--primary);
+}
+
+
+
 
 .caseDocsCard--dragOver {
   outline: 2px solid rgba(37, 99, 235, 0.55);
@@ -3126,7 +3155,7 @@ select {
   --docs-file-icon-size: calc(18px * 1.2);
   display: grid;
   /* Description shrinks; Size / Modified / User stay fixed width (no horizontal scroll on the panel). */
-  grid-template-columns: minmax(0, 1fr) minmax(76px, 76px) minmax(104px, 104px) minmax(92px, 92px);
+  grid-template-columns: minmax(0, 1fr) minmax(76px, 76px) minmax(132px, 132px) minmax(92px, 92px);
   gap: var(--canary-table-row-gap);
   padding: var(--canary-table-row-padding);
   border-bottom: 1px solid var(--border);
@@ -3946,7 +3975,7 @@ select {
 .caseDocLedgerEmbed .ledgerTableWrap {
   min-height: 0;
   flex: 1;
-  overflow: hidden;
+  overflow: auto;
 }
 
 .accordion {
@@ -4218,11 +4247,22 @@ select {
   padding-right: 2px;
 }
 
-.field span {
+.field > span,
+.field > label > span {
   display: block;
   margin-bottom: 6px;
   color: var(--muted);
   font-size: 13px;
+}
+
+/* Keep required asterisks on the same line as the label text. */
+.field span > span[aria-hidden],
+.ledgerPostLabel span > span[aria-hidden] {
+  display: inline;
+  margin: 0;
+  color: inherit;
+  font-size: inherit;
+  white-space: nowrap;
 }
 
 /* Inner height is measured for FullCalendar (pixel height from ResizeObserver). */
@@ -4659,43 +4699,56 @@ select {
 
 .ledgerTable--fixed {
   table-layout: fixed;
+  /* Prefer horizontal scroll over colliding clipped columns at narrow widths */
+  min-width: 920px;
 }
 
-.ledgerColW7 { width: 7%; }
-.ledgerColW8 { width: 8%; }
-.ledgerColW9 { width: 9%; }
-.ledgerColW10 { width: 10%; }
-.ledgerColW11 { width: 11%; }
-.ledgerColW12 { width: 12%; }
-.ledgerColW22 { width: 22%; }
-.ledgerColW36 { width: 36%; }
+.ledgerTable--fixed.ledgerTable--fourAmt {
+  min-width: 1100px;
+}
+
+.ledgerColW7 { width: 7%; min-width: 72px; }
+.ledgerColW8 { width: 8%; min-width: 84px; }
+.ledgerColW9 { width: 9%; min-width: 96px; }
+.ledgerColW10 { width: 10%; min-width: 104px; }
+.ledgerColW11 { width: 11%; min-width: 112px; }
+.ledgerColW12 { width: 12%; min-width: 120px; }
+.ledgerColW22 { width: 22%; min-width: 160px; }
+.ledgerColW36 { width: 36%; min-width: 220px; }
 
 .ledgerColDate {
   width: 96px;
+  min-width: 96px;
 }
 
 .ledgerColParty {
   width: 28%;
+  min-width: 120px;
 }
 
 .ledgerColDebit {
   width: 11%;
+  min-width: 96px;
 }
 
 .ledgerColCredit {
   width: 11%;
+  min-width: 96px;
 }
 
 .ledgerColDesc {
   width: auto;
+  min-width: 180px;
 }
 
 .ledgerColRef {
   width: 100px;
+  min-width: 88px;
 }
 
 .ledgerColAcct {
   width: 88px;
+  min-width: 80px;
 }
 
 .ledgerTable--fourAmt .ledgerColOfficeDr,
@@ -4705,11 +4758,23 @@ select {
 .ledgerTable--fourAmt .ledgerColOfficeBal,
 .ledgerTable--fourAmt .ledgerColClientBal {
   width: 10%;
+  min-width: 104px;
   text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 
 .ledgerTable--fourAmt th.ledgerAmtCol {
   text-align: right;
+  white-space: normal;
+  line-height: 1.2;
+  vertical-align: bottom;
+}
+
+.ledgerTable td.ledgerAmtCol,
+.ledgerTable th.ledgerAmtCol {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
 }
 
 .ledgerFootTotalsLabel {

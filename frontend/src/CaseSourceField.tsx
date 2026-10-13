@@ -67,13 +67,15 @@ export function CaseSourceField({
     onOpenChange?.(next)
   }
 
-  const options = useMemo(
-    () => [
-      ...sources.map((s) => ({ value: s.id, label: s.name })),
+  const options = useMemo(() => {
+    const sorted = [...sources].sort((a, b) =>
+      a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }),
+    )
+    return [
+      ...sorted.map((s) => ({ value: s.id, label: s.name })),
       { value: CASE_SOURCE_CUSTOM, label: 'Other (type below)…' },
-    ],
-    [sources],
-  )
+    ]
+  }, [sources])
 
   return (
     <>

@@ -829,7 +829,9 @@ export function CaseDetail({
 
   const [sidebarTaskRows, setSidebarTaskRows] = useState<TaskMenuRow[]>([])
   useEffect(() => {
-    if (!caseId || !leftOpen.tasks || !hasTasksMenu) return
+    if (!caseId) return
+    const needTasks = hasTasksMenu && leftOpen.tasks
+    if (!needTasks) return
     let cancelled = false
     void apiFetch<TaskMenuRow[]>(`/tasks?case_id=${encodeURIComponent(caseId)}`, { token })
       .then((data) => {
@@ -841,7 +843,7 @@ export function CaseDetail({
     return () => {
       cancelled = true
     }
-  }, [caseId, leftOpen.tasks, hasTasksMenu, token])
+  }, [caseId, leftOpen.tasks, hasTasksMenu, token, caseDocPanel])
 
   useEffect(() => {
     if (!caseId || !hasPropertyMenu || !leftOpen.property) return
@@ -864,7 +866,8 @@ export function CaseDetail({
   }, [caseId, token, hasPropertyMenu, leftOpen.property])
 
   useEffect(() => {
-    if (!caseId || !leftOpen.events) return
+    if (!caseId) return
+    if (!leftOpen.events) return
     let cancelled = false
     void apiFetch<CaseEventsOut>(`/cases/${caseId}/events`, { token })
       .then((d) => {
@@ -1237,7 +1240,7 @@ export function CaseDetail({
         </div>
 
         <div className="caseRight">
-          {caseDocPanel === 'documents' ? (
+          {caseDocPanel === 'documents' || caseDocPanel === 'overview' ? (
             <CaseDetailDocuments
               busy={busy}
               portalEnabled={portalEnabled}

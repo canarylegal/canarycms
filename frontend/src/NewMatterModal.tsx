@@ -3,7 +3,12 @@ import { apiFetch } from './api'
 import { useDialogs } from './DialogProvider'
 import { GlobalContactCreateForm } from './GlobalContactCreateForm'
 import { ContactSearchPicker } from './ContactSearchPicker'
-import { CaseSourceField, resolveCaseSourcePayload, useCaseSources } from './CaseSourceField'
+import {
+  CASE_SOURCE_CUSTOM,
+  CaseSourceField,
+  resolveCaseSourcePayload,
+  useCaseSources,
+} from './CaseSourceField'
 import { PropertyDetailsForm } from './case/PropertyDetailsForm'
 import {
   blankPropertyPayload,
@@ -46,7 +51,8 @@ export function NewMatterModal({
   const [newMatterStatus, setNewMatterStatus] = useState<'open' | 'quote'>(defaultStatus)
   const [portalEnabled, setPortalEnabled] = useState(false)
   const [firmPortalProductOn, setFirmPortalProductOn] = useState(true)
-  const [step, setStep] = useState<'details' | 'property' | 'description' | 'contacts'>('details')
+  type WizardStep = 'details' | 'property' | 'description' | 'contacts' | 'review'
+  const [step, setStep] = useState<WizardStep>('details')
   const [propertyDraft, setPropertyDraft] = useState<CasePropertyPayload | null>(null)
   const [users, setUsers] = useState<UserSummary[]>([])
   const [matterHeadTypes, setMatterHeadTypes] = useState<MatterHeadTypeOut[]>([])
@@ -69,6 +75,23 @@ export function NewMatterModal({
     if (!practiceArea) return null
     return matterHeadTypes.flatMap((h) => h.sub_types).find((s) => s.id === practiceArea) ?? null
   }, [practiceArea, matterHeadTypes])
+
+  const wizardSteps = useMemo(() => {
+    const withProperty = Boolean(selectedSubType && subTypeHasPropertyMenu(selectedSubType))
+    const steps: { id: WizardStep; label: string }[] = [{ id: 'details', label: 'Details' }]
+    if (withProperty || step === 'property') steps.push({ id: 'property', label: 'Property' })
+    steps.push(
+      { id: 'description', label: 'Description' },
+      { id: 'contacts', label: 'Contacts' },
+      { id: 'review', label: 'Review' },
+    )
+    return steps
+  }, [selectedSubType, step])
+
+  const wizardStepIndex = Math.max(
+    0,
+    wizardSteps.findIndex((s) => s.id === step),
+  )
 
   const matterHeadOptions = useMemo(
     () => matterHeadTypes.map((head) => ({ value: head.id, label: head.name })),
@@ -184,6 +207,25 @@ export function NewMatterModal({
           </button>
         </div>
         <div className="modalBodyScroll">
+        <nav className="newMatterStepStrip" aria-label="Matter creation steps">
+          {wizardSteps.map((s, i) => (
+            <span
+              key={s.id}
+              className={
+                i === wizardStepIndex
+                  ? 'newMatterStep newMatterStep--current'
+                  : i < wizardStepIndex
+                    ? 'newMatterStep newMatterStep--done'
+                    : 'newMatterStep'
+              }
+            >
+              <span className="newMatterStepNum" aria-hidden>
+                {i + 1}
+              </span>
+              {s.label}
+            </span>
+          ))}
+        </nav>
         {step === 'details' ? (
         <div className="stack" style={{ marginTop: 12 }}>
           <SingleSelectDropdown
@@ -433,7 +475,7 @@ export function NewMatterModal({
             <div className="paneHead" style={{ padding: 0, marginBottom: 12 }}>
               <div>
                 <h2 style={{ margin: 0, fontSize: 18 }}>Contacts</h2>
-                <div className="muted">Link at least one client contact, then finish to create the matter.</div>
+                <div className="muted">Link at least one client contact, then continue to review.</div>
               </div>
               <button className="btn" onClick={() => setStep('description')} disabled={busy}>
                 Back
@@ -560,57 +602,123 @@ export function NewMatterModal({
                 <button
                   className="btn primary"
                   disabled={busy || !hasClientOnMatter}
-                  onClick={async () => {
+                  onClick={() => {
                     if (!hasClientOnMatter) return
                     if (!feeEarner) {
                       setErr('Select a fee earner.')
                       return
                     }
-                    setBusy(true)
                     setErr(null)
                     setContactErr(null)
-                    try {
-                      const created = await apiFetch<CaseOut>('/cases', {
-                        token,
-                        json: {
-                          matter_description: matterDescription.trim(),
-                          status: newMatterStatus,
-                          matter_sub_type_id: practiceArea || null,
-                          fee_earner_user_id: feeEarner,
-                          portal_enabled: portalEnabled,
-                          ...resolveCaseSourcePayload(caseSources, sourceId, sourceCustomName),
-                        },
-                      })
-                      for (const p of pendingClientLinks) {
-                        await apiFetch(`/cases/${created.id}/contacts`, {
-                          token,
-                          json: {
-                            contact_id: p.contact_id,
-                            matter_contact_type: 'client',
-                            matter_contact_reference: null,
-                          },
-                        })
-                      }
-                      if (selectedSubType && subTypeHasPropertyMenu(selectedSubType) && propertyDraft) {
-                        const lines = [...propertyDraft.free_lines]
-                        while (lines.length < 6) lines.push('')
-                        await apiFetch(`/cases/${created.id}/property-details`, {
-                          token,
-                          method: 'PUT',
-                          json: { ...propertyDraft, free_lines: lines.slice(0, 6) },
-                        })
-                      }
-                      onCreated(created)
-                    } catch (e: any) {
-                      setErr(e?.message ?? 'Could not create matter')
-                    } finally {
-                      setBusy(false)
-                    }
+                    setStep('review')
                   }}
                 >
-                  Finish
+                  Continue to review
                 </button>
               </div>
+            </div>
+          </div>
+        ) : null}
+
+        {step === 'review' ? (
+          <div className="stack" style={{ marginTop: 12 }}>
+            <div className="paneHead" style={{ padding: 0, marginBottom: 8 }}>
+              <div>
+                <h2 style={{ margin: 0, fontSize: 18 }}>Review</h2>
+                <div className="muted">Check the details, then create the matter.</div>
+              </div>
+              <button className="btn" onClick={() => setStep('contacts')} disabled={busy}>
+                Back
+              </button>
+            </div>
+            <dl className="caseDetailsList" style={{ margin: 0 }}>
+              <div className="caseDetailRow">
+                <dt>Matter type</dt>
+                <dd>
+                  {matterHeadTypes.find((h) => h.id === matterHeadTypeId)?.name ?? '—'}
+                  {selectedSubType ? ` · ${selectedSubType.name}` : ''}
+                </dd>
+              </div>
+              <div className="caseDetailRow">
+                <dt>Description</dt>
+                <dd>{matterDescription.trim() || '—'}</dd>
+              </div>
+              <div className="caseDetailRow">
+                <dt>Fee earner</dt>
+                <dd>{users.find((u) => u.id === feeEarner)?.display_name ?? '—'}</dd>
+              </div>
+              <div className="caseDetailRow">
+                <dt>Source</dt>
+                <dd>
+                  {sourceId === CASE_SOURCE_CUSTOM
+                    ? sourceCustomName.trim() || 'Other'
+                    : caseSources.find((s) => s.id === sourceId)?.name ?? '—'}
+                </dd>
+              </div>
+              <div className="caseDetailRow">
+                <dt>Status</dt>
+                <dd>{newMatterStatus === 'quote' ? 'Quote' : 'Active'}</dd>
+              </div>
+              <div className="caseDetailRow">
+                <dt>Clients</dt>
+                <dd>{pendingClientLinks.map((c) => c.name).join(', ') || '—'}</dd>
+              </div>
+            </dl>
+            {err ? <div className="error">{err}</div> : null}
+            <div className="row" style={{ justifyContent: 'flex-end', marginTop: 12 }}>
+              <button
+                className="btn primary"
+                disabled={busy || !hasClientOnMatter}
+                onClick={async () => {
+                  if (!hasClientOnMatter) return
+                  if (!feeEarner) {
+                    setErr('Select a fee earner.')
+                    return
+                  }
+                  setBusy(true)
+                  setErr(null)
+                  setContactErr(null)
+                  try {
+                    const created = await apiFetch<CaseOut>('/cases', {
+                      token,
+                      json: {
+                        matter_description: matterDescription.trim(),
+                        status: newMatterStatus,
+                        matter_sub_type_id: practiceArea || null,
+                        fee_earner_user_id: feeEarner,
+                        portal_enabled: portalEnabled,
+                        ...resolveCaseSourcePayload(caseSources, sourceId, sourceCustomName),
+                      },
+                    })
+                    for (const p of pendingClientLinks) {
+                      await apiFetch(`/cases/${created.id}/contacts`, {
+                        token,
+                        json: {
+                          contact_id: p.contact_id,
+                          matter_contact_type: 'client',
+                          matter_contact_reference: null,
+                        },
+                      })
+                    }
+                    if (selectedSubType && subTypeHasPropertyMenu(selectedSubType) && propertyDraft) {
+                      const lines = [...propertyDraft.free_lines]
+                      while (lines.length < 6) lines.push('')
+                      await apiFetch(`/cases/${created.id}/property-details`, {
+                        token,
+                        method: 'PUT',
+                        json: { ...propertyDraft, free_lines: lines.slice(0, 6) },
+                      })
+                    }
+                    onCreated(created)
+                  } catch (e: any) {
+                    setErr(e?.message ?? 'Could not create matter')
+                  } finally {
+                    setBusy(false)
+                  }
+                }}
+              >
+                Create matter
+              </button>
             </div>
           </div>
         ) : null}

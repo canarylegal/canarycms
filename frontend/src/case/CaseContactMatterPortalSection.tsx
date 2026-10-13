@@ -166,7 +166,7 @@ export function CaseContactMatterPortalSection({
       <h4 style={{ margin: 0 }}>Matter document exchange</h4>
       <p className="muted" style={{ margin: 0, lineHeight: 1.5 }}>
         This matter only — for third parties (other solicitors, lenders, brokers). Not a global client login. Share
-        folders via Documents → right-click folder → Portal → Share.
+        folders via Documents → folder ⋯ actions (or right-click) → Portal → Share.
       </p>
       {err ? <div className="error">{err}</div> : null}
       {notice ? <div className="notice">{notice}</div> : null}

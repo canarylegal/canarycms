@@ -4,7 +4,7 @@ import type { FeeEarnerPick } from './types'
 export function formatMoneyPence(p: number): string {
   const neg = p < 0
   const a = Math.abs(p)
-  const s = (a / 100).toFixed(2)
+  const s = (a / 100).toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
   return `${neg ? '-' : ''}£${s}`
 }
 

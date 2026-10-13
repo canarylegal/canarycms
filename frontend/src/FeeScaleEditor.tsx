@@ -529,11 +529,15 @@ export function FeeScaleEditor({ token, scaleId, draftCreate, draftInitialDetail
 
       <div className="card stack" style={{ padding: 12 }}>
         <h4 style={{ margin: 0 }}>VAT rate</h4>
+        <p className="muted" style={{ margin: 0, fontSize: 13 }}>
+          Applies this rate on the scale. Use <strong>Save VAT rate</strong> to store it now, or include it when you
+          choose <strong>Save &amp; close</strong> above.
+        </p>
         <div className="row" style={{ gap: 8, alignItems: 'center' }}>
           <input className="input" style={{ width: 80 }} value={vatPct} onChange={(e) => setVatPct(e.target.value)} />
           <span className="muted">%</span>
           <button type="button" className="btn" disabled={busy} onClick={() => void saveVat()}>
-            Save
+            Save VAT rate
           </button>
         </div>
       </div>

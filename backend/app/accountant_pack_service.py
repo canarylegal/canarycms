@@ -467,7 +467,7 @@ def _build_workbook(
                 "Fee earner",
                 "Invoice",
                 "Approved (UTC)",
-                "Invoice total (£)",
+                "Outstanding (£)",
                 "Office balance (£)",
             ],
             data,

@@ -66,6 +66,7 @@ export const CASE_DOCS_TOOLBAR_ICONS = {
 
 export type CaseLeftMenuIconName =
   | 'overview'
+  | 'documents'
   | 'contacts'
   | 'accounts'
   | 'tasks'
@@ -110,6 +111,20 @@ export function CaseLeftMenuIcon({ name }: { name: CaseLeftMenuIconName }) {
         <rect x="13" y="4" width="7" height="7" rx="1.5" stroke="currentColor" strokeWidth="2" />
         <rect x="4" y="13" width="7" height="7" rx="1.5" stroke="currentColor" strokeWidth="2" />
         <rect x="13" y="13" width="7" height="7" rx="1.5" stroke="currentColor" strokeWidth="2" />
+      </svg>
+    )
+  }
+  if (name === 'documents') {
+    return (
+      <svg {...common}>
+        <path
+          d="M7 3.5h7l4 4V20a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4.5a1 1 0 0 1 1-1Z"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinejoin="round"
+        />
+        <path d="M14 3.5V8h4" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
+        <path d="M9 12h6M9 15.5h4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
       </svg>
     )
   }

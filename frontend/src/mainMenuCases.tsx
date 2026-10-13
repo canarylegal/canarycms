@@ -365,16 +365,23 @@ export function CasesTable({
           const rowActive = caseListFocusId === c.id
           const rowInactive = c.status === 'closed' || c.status === 'archived'
           return (
-            <button
+            <div
               key={c.id}
-              type="button"
+              role="row"
               data-case-row-id={c.id}
               className={['tr', 'rowbtn', rowActive ? 'active' : '', rowInactive ? 'casesRowInactive' : '']
                 .filter(Boolean)
                 .join(' ')}
               style={gridTemplateColumns ? { gridTemplateColumns } : undefined}
+              tabIndex={0}
               onClick={() => onCaseRowFocus(c.id)}
               onDoubleClick={() => onSelect(c.id)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault()
+                  onSelect(c.id)
+                }
+              }}
               onContextMenu={(e) => {
                 e.preventDefault()
                 onCaseRowFocus(c.id)
@@ -401,10 +408,10 @@ export function CasesTable({
                   </span>
                 </div>
               )}
-            </button>
+            </div>
           )
         })}
-        {rows.length === 0 ? <div className="muted" style={{ padding: 12 }}>No cases match.</div> : null}
+        {rows.length === 0 ? <div className="muted" style={{ padding: 12 }}>No matters match.</div> : null}
         </div>
       </div>
       {caseCtx ? (

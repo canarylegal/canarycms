@@ -42,6 +42,7 @@ export function AdminPrecedents({ token }: { token: string }) {
   const [kind, setKind] = useState<'letter' | 'email' | 'document'>('letter')
   const [file, setFile] = useState<File | null>(null)
   const [firmSettings, setFirmSettings] = useState<FirmSettingsOut | null>(null)
+  const [precedentsTab, setPrecedentsTab] = useState<'library' | 'upload' | 'templates'>('library')
 
   const matterTypeOptions = useMemo(
     () => matterHeads.map((h) => ({ id: h.id, label: h.name })),
@@ -180,35 +181,67 @@ export function AdminPrecedents({ token }: { token: string }) {
       </div>
       {err ? <div className="error">{err}</div> : null}
 
-      <AdminLetterheadPanel
-        token={token}
-        firmSettings={firmSettings}
-        onReload={load}
-        onFirmSettings={setFirmSettings}
-        onError={setErr}
-      />
-      <AdminSignaturePanel
-        token={token}
-        firmSettings={firmSettings}
-        onReload={load}
-        onFirmSettings={setFirmSettings}
-        onError={setErr}
-      />
+      <div className="adminTabStrip" role="tablist" aria-label="Precedents sections">
+        {(
+          [
+            ['library', 'Library'],
+            ['upload', 'Upload'],
+            ['templates', 'Letterhead & templates'],
+          ] as const
+        ).map(([id, label]) => (
+          <button
+            key={id}
+            type="button"
+            role="tab"
+            aria-selected={precedentsTab === id}
+            className={`adminTab${precedentsTab === id ? ' is-active' : ''}`}
+            onClick={() => setPrecedentsTab(id)}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
 
+      {precedentsTab === 'templates' ? (
+        <>
+          <AdminLetterheadPanel
+            token={token}
+            firmSettings={firmSettings}
+            onReload={load}
+            onFirmSettings={setFirmSettings}
+            onError={setErr}
+          />
+          <AdminSignaturePanel
+            token={token}
+            firmSettings={firmSettings}
+            onReload={load}
+            onFirmSettings={setFirmSettings}
+            onError={setErr}
+          />
+          <AdminMergeCodesPanel token={token} onError={setErr} />
+          <details className="card" style={{ padding: 12 }}>
+            <summary style={{ cursor: 'pointer', fontWeight: 650 }}>Help — system templates</summary>
+            <div className="muted" style={{ marginTop: 8 }}>
+              Universal templates (e.g. <strong>Blank (no precedent)</strong> for letters,{' '}
+              <strong>Blank e-mail (no precedent)</strong> for e-mails, <strong>Invoice template</strong>,{' '}
+              <strong>Completion statement template</strong>) ship with Canary and appear in the Library tab. Edit them
+              in OnlyOffice like any other precedent. Firm-specific letterheads are configured above.
+            </div>
+          </details>
+        </>
+      ) : null}
+
+      {precedentsTab === 'upload' ? (
       <div className="card" style={{ padding: 12 }}>
-        <div className="muted" style={{ marginBottom: 8 }}>
-          Universal templates (e.g. <strong>Blank (no precedent)</strong> for letters,{' '}
-          <strong>Blank e-mail (no precedent)</strong> for e-mails, <strong>Invoice template</strong>,{' '}
-          <strong>Completion statement template</strong>) ship with Canary and are always shown at the top of the
-          precedent library below. Edit them in OnlyOffice like any other precedent. Firm-specific letterheads are
-          configured in the cards above.
-        </div>
-        <div className="muted" style={{ marginBottom: 8 }}>
+        <details style={{ marginBottom: 8 }}>
+          <summary style={{ cursor: 'pointer', fontWeight: 650 }}>Help — upload scope</summary>
+          <div className="muted" style={{ marginTop: 8 }}>
           Upload a template. Choose <strong>Global</strong> at any level to widen availability: <strong>Matter type</strong>{' '}
           Global = all cases; <strong>Sub-type</strong> Global = all sub-types under the chosen matter type;{' '}
           <strong>Precedent category</strong> Global = all categories under the chosen sub-type. Otherwise pick a specific
           value. Add named categories under <strong>Admin → Matters</strong> if you need a specific category.
-        </div>
+          </div>
+        </details>
         {uploadCatsFetchErr ? <div className="error" style={{ marginBottom: 8 }}>{uploadCatsFetchErr}</div> : null}
         <div className="stack">
           <label className="field">
@@ -401,8 +434,9 @@ export function AdminPrecedents({ token }: { token: string }) {
           </button>
         </div>
       </div>
+      ) : null}
 
-      <AdminMergeCodesPanel token={token} onError={setErr} />
+      {precedentsTab === 'library' ? (
       <AdminPrecedentLibraryPanel
         token={token}
         items={items}
@@ -412,6 +446,7 @@ export function AdminPrecedents({ token }: { token: string }) {
         onReload={load}
         onError={setErr}
       />
+      ) : null}
     </div>
   )
 }

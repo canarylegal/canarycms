@@ -161,6 +161,19 @@ def format_audit_summary(
         fn = _quote(m.get("filename"))
         return f"Discarded composed document {fn}" if fn else "Discarded composed document"
 
+    if action == "case.file.onlyoffice_open":
+        fn = _quote(m.get("filename") or m.get("original_filename"))
+        return f"Opened document in editor {fn}" if fn else "Opened document in editor"
+    if action == "case.file.onlyoffice_callback":
+        fn = _quote(m.get("filename") or m.get("original_filename"))
+        return f"Saved document from editor {fn}" if fn else "Saved document from editor"
+    if action == "case.file.download":
+        fn = _quote(m.get("filename") or m.get("original_filename"))
+        return f"Downloaded file {fn}" if fn else "Downloaded a file"
+    if action == "case.file.open":
+        fn = _quote(m.get("filename") or m.get("original_filename"))
+        return f"Opened file {fn}" if fn else "Opened a file"
+
     if action == "case.task.create":
         title = _quote(m.get("title"))
         return f"Created task {title}" if title else "Created a task"

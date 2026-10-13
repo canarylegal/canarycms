@@ -201,7 +201,7 @@ export function CalendarEventDraftModal({
                     onChange={(e) => setDraft({ ...draft, trackInCalendar: e.target.checked })}
                   />
                   <span className="muted" style={{ lineHeight: 1.4 }}>
-                    Track in calendar — shows on this calendar and creates a fee-earner task when appropriate.
+                    Sync to my external calendar — shows here and can create a fee-earner task when appropriate.
                   </span>
                 </label>
               ) : null}
@@ -227,7 +227,7 @@ export function CalendarEventDraftModal({
                     onChange={(e) => setDraft({ ...draft, trackInCalendar: e.target.checked })}
                   />
                   <span className="muted" style={{ lineHeight: 1.4 }}>
-                    Track in calendar — shows on this calendar and creates a fee-earner task when appropriate.
+                    Sync to my external calendar — shows here and can create a fee-earner task when appropriate.
                   </span>
                 </label>
               ) : null}

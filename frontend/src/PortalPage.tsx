@@ -257,6 +257,7 @@ export default function PortalPage() {
   const [formExchangeBusy, setFormExchangeBusy] = useState(false)
   const [canaryExchangeBusy, setCanaryExchangeBusy] = useState(false)
   const [quoteDelivery, setQuoteDelivery] = useState<PortalQuoteDeliveryViewOut | null>(null)
+  const [quotePreviewFailed, setQuotePreviewFailed] = useState(false)
   const [quoteDeclineOpen, setQuoteDeclineOpen] = useState(false)
   const [quoteDeclineReason, setQuoteDeclineReason] = useState('')
   const [quoteRespondBusy, setQuoteRespondBusy] = useState(false)
@@ -1441,6 +1442,7 @@ export default function PortalPage() {
                 onClick={() => {
                   const caseId = quoteDelivery.case_id
                   setQuoteDelivery(null)
+                  setQuotePreviewFailed(false)
                   setQuoteDeclineOpen(false)
                   setQuoteDeclineReason('')
                   if (caseId) setActiveCaseId(caseId)
@@ -1458,21 +1460,34 @@ export default function PortalPage() {
                   fetchUrl={quoteDeliveryFileUrl(quoteDelivery.id, false)}
                   portalToken={sessionToken}
                   title={quoteDelivery.original_filename}
+                  onPreviewStateChange={(s) => {
+                    if (!s.loading) setQuotePreviewFailed(Boolean(s.error))
+                  }}
                 />
               </div>
             ) : (
               <p className="muted" style={{ marginTop: 0, marginBottom: 16 }}>
-                Download the quote to view it in Word, Google Docs, or your device&apos;s files app.
+                Download the quote to view it in Word, Google Docs, or your device&apos;s files app. Review the
+                downloaded file before accepting.
               </p>
             )}
+            {quoteDelivery.can_respond && quotePreviewFailed ? (
+              <p className="muted" style={{ marginTop: 0, marginBottom: 12, fontSize: 13 }}>
+                Preview could not be shown. Download the quote, review it, then accept if you are happy to proceed.
+              </p>
+            ) : null}
             {quoteDelivery.can_respond && !quoteDeclineOpen ? (
               <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
-                <button type="button" className="btn" onClick={() => void downloadQuoteFile()}>
+                <button
+                  type="button"
+                  className={quotePreviewFailed ? 'btn primary' : 'btn'}
+                  onClick={() => void downloadQuoteFile()}
+                >
                   Download
                 </button>
                 <button
                   type="button"
-                  className="btn primary"
+                  className={quotePreviewFailed ? 'btn' : 'btn primary'}
                   disabled={quoteRespondBusy}
                   onClick={() => void respondToQuote(true)}
                 >

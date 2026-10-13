@@ -7,7 +7,10 @@ export function formatDocModified(s: string) {
   const now = new Date()
   const sameDay =
     d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate()
-  return sameDay ? d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : d.toLocaleDateString()
+  const time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  // Always include time so same-name uploads on one day remain distinguishable.
+  if (sameDay) return time
+  return `${d.toLocaleDateString('en-GB')} ${time}`
 }
 
 /** Canary ``created_at`` for sorting/display, or e-mail ``Date`` header when present (root .eml only). */

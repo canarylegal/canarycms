@@ -15,11 +15,12 @@ import {
 } from '../commercial/CommercialSlotHosts'
 import { CaseLeftMenuIcon } from './caseDetailChrome'
 import { ledgerSignedGb } from './caseDetailHelpers'
-import { financeCaseTotals, penceGb } from './financeTotals'
+import { financeBalanceLabel, financeCaseTotals, penceGb } from './financeTotals'
 import { matterContactTypeLabel } from './matterLabels'
 import { propertyTenureLabel } from './propertyLabels'
 
 export type CaseDetailLeftDocPanel =
+  | 'overview'
   | 'documents'
   | 'events'
   | 'finance'
@@ -141,8 +142,8 @@ export function CaseDetailLeftNav({
       <div className="card caseMatterSections">
         <button
           type="button"
-          className={`accHead caseLeftNavItem${caseDocPanel === 'documents' ? ' is-active' : ''}`}
-          aria-current={caseDocPanel === 'documents' ? 'page' : undefined}
+          className={`accHead caseLeftNavItem${caseDocPanel === 'documents' || caseDocPanel === 'overview' ? ' is-active' : ''}`}
+          aria-current={caseDocPanel === 'documents' || caseDocPanel === 'overview' ? 'page' : undefined}
           onClick={goToOverview}
         >
           <CaseLeftMenuIcon name="overview" />
@@ -271,7 +272,10 @@ export function CaseDetailLeftNav({
             className={`accHead${caseDocPanel === 'accounts' ? ' is-active' : ''}`}
             aria-expanded={leftOpen.accounts}
             aria-current={caseDocPanel === 'accounts' ? 'page' : undefined}
-            onClick={() => toggleLeftAccordion('accounts')}
+            onClick={() => {
+              toggleLeftAccordion('accounts')
+              setCaseDocPanel('accounts')
+            }}
           >
             <CaseLeftMenuIcon name="accounts" />
             <span>Accounts</span>
@@ -291,18 +295,13 @@ export function CaseDetailLeftNav({
                     Office balance:{' '}
                     <strong>{ledgerSignedGb(accountsPreview.office.balance_pence)}</strong>
                   </div>
+                  <div className="muted" style={{ fontSize: 12 }}>
+                    Ledger and time recording
+                  </div>
                 </div>
               ) : (
                 <div className="muted">Loading…</div>
               )}
-              <button
-                type="button"
-                className="btn primary"
-                disabled={busy}
-                onClick={() => setCaseDocPanel('accounts')}
-              >
-                View accounts
-              </button>
             </div>
           ) : null}
         </div>
@@ -315,7 +314,10 @@ export function CaseDetailLeftNav({
               className={`accHead${caseDocPanel === 'tasks' ? ' is-active' : ''}`}
               aria-expanded={leftOpen.tasks}
               aria-current={caseDocPanel === 'tasks' ? 'page' : undefined}
-              onClick={() => toggleLeftAccordion('tasks')}
+              onClick={() => {
+                toggleLeftAccordion('tasks')
+                setCaseDocPanel('tasks')
+              }}
             >
               <CaseLeftMenuIcon name="tasks" />
               <span>Tasks</span>
@@ -324,17 +326,15 @@ export function CaseDetailLeftNav({
             {leftOpen.tasks ? (
               <div className="accBody">
                 <div className="caseLeftRailPreview">
-                  {sidebarTaskRows.length === 0 ? 'No tasks yet.' : `${sidebarTaskRows.length} task(s).`}
+                  {(() => {
+                    if (sidebarTaskRows.length === 0) return 'No tasks yet.'
+                    const outstanding = sidebarTaskRows.filter((t) => t.status !== 'done').length
+                    const completed = sidebarTaskRows.length - outstanding
+                    if (outstanding === 0) return `${completed} completed`
+                    if (completed === 0) return `${outstanding} outstanding`
+                    return `${outstanding} outstanding · ${completed} completed`
+                  })()}
                 </div>
-                <button
-                  type="button"
-                  className="btn primary"
-                  style={{ marginTop: 8, width: '100%', boxSizing: 'border-box' }}
-                  disabled={busy}
-                  onClick={() => setCaseDocPanel('tasks')}
-                >
-                  View tasks
-                </button>
               </div>
             ) : null}
           </div>
@@ -462,7 +462,10 @@ export function CaseDetailLeftNav({
               className={`accHead${caseDocPanel === 'searches' ? ' is-active' : ''}`}
               aria-expanded={leftOpen.searches}
               aria-current={caseDocPanel === 'searches' ? 'page' : undefined}
-              onClick={() => toggleLeftAccordion('searches')}
+              onClick={() => {
+                toggleLeftAccordion('searches')
+                setCaseDocPanel('searches')
+              }}
             >
               <CaseLeftMenuIcon name="searches" />
               <span>Searches</span>
@@ -489,7 +492,10 @@ export function CaseDetailLeftNav({
               className={`accHead${caseDocPanel === 'land-registry' ? ' is-active' : ''}`}
               aria-expanded={leftOpen.landRegistry}
               aria-current={caseDocPanel === 'land-registry' ? 'page' : undefined}
-              onClick={() => toggleLeftAccordion('landRegistry')}
+              onClick={() => {
+                toggleLeftAccordion('landRegistry')
+                setCaseDocPanel('land-registry')
+              }}
             >
               <CaseLeftMenuIcon name="land-registry" />
               <span>Land Registry</span>
@@ -516,7 +522,10 @@ export function CaseDetailLeftNav({
               className={`accHead${caseDocPanel === 'sdlt' ? ' is-active' : ''}`}
               aria-expanded={leftOpen.sdlt}
               aria-current={caseDocPanel === 'sdlt' ? 'page' : undefined}
-              onClick={() => toggleLeftAccordion('sdlt')}
+              onClick={() => {
+                toggleLeftAccordion('sdlt')
+                setCaseDocPanel('sdlt')
+              }}
             >
               <CaseLeftMenuIcon name="sdlt" />
               <span>SDLT</span>
@@ -543,7 +552,10 @@ export function CaseDetailLeftNav({
               className={`accHead${caseDocPanel === 'events' ? ' is-active' : ''}`}
               aria-expanded={leftOpen.events}
               aria-current={caseDocPanel === 'events' ? 'page' : undefined}
-              onClick={() => toggleLeftAccordion('events')}
+              onClick={() => {
+                toggleLeftAccordion('events')
+                setCaseDocPanel('events')
+              }}
             >
               <CaseLeftMenuIcon name="events" />
               <span>Calendar</span>
@@ -559,7 +571,7 @@ export function CaseDetailLeftNav({
                       eventsPreview.events.slice(0, 6).map((ev) => (
                         <div key={ev.id} className="muted" style={{ fontSize: 13 }}>
                           {ev.track_in_calendar ? (
-                            <span title="Tracked in calendar" aria-hidden style={{ marginRight: 4 }}>
+                            <span title="Synced to external calendar" aria-hidden style={{ marginRight: 4 }}>
                               🔔
                             </span>
                           ) : null}
@@ -583,14 +595,6 @@ export function CaseDetailLeftNav({
                   <button type="button" className="btn" disabled={busy} onClick={() => openCaseEventModal()}>
                     New event
                   </button>
-                  <button
-                    type="button"
-                    className="btn primary"
-                    disabled={busy}
-                    onClick={() => setCaseDocPanel('events')}
-                  >
-                    View
-                  </button>
                 </div>
               </div>
             ) : null}
@@ -605,26 +609,29 @@ export function CaseDetailLeftNav({
               className={`accHead${caseDocPanel === 'finance' ? ' is-active' : ''}`}
               aria-expanded={leftOpen.finance}
               aria-current={caseDocPanel === 'finance' ? 'page' : undefined}
-              onClick={() => toggleLeftAccordion('finance')}
+              onClick={() => {
+                toggleLeftAccordion('finance')
+                setCaseDocPanel('finance')
+              }}
             >
               <CaseLeftMenuIcon name="finance" />
-              <span>Finance</span>
+              <span>Finances</span>
               <span className="muted">{leftOpen.finance ? '▾' : '▸'}</span>
             </button>
             {leftOpen.finance ? (
               <div className="accBody">
                 {financePreview ? (
                   (() => {
-                    const { dr, cr } = financeCaseTotals(financePreview)
+                    const { dr, cr } = financeCaseTotals(financePreview, { includeVat: true })
                     const net = cr - dr
                     const creditBal = net >= 0
                     return (
                       <div className="stack caseLeftRailPreview">
                         <div>
-                          Credits: <strong>{penceGb(cr)}</strong>
+                          Credits (inc VAT): <strong>{penceGb(cr)}</strong>
                         </div>
                         <div>
-                          Debits: <strong>{penceGb(dr)}</strong>
+                          Debits (inc VAT): <strong>{penceGb(dr)}</strong>
                         </div>
                         <div
                           className={
@@ -633,8 +640,14 @@ export function CaseDetailLeftNav({
                               : 'caseFinanceBalance caseFinanceBalance--dr'
                           }
                         >
-                          Balance:{' '}
-                          <strong>{creditBal ? penceGb(net) : `-${penceGb(-net)}`}</strong>
+                          {financeBalanceLabel(net)}:{' '}
+                          <strong>
+                            {net === 0
+                              ? penceGb(0)
+                              : creditBal
+                                ? `${penceGb(net)} CR`
+                                : `${penceGb(-net)} DR`}
+                          </strong>
                         </div>
                       </div>
                     )
@@ -642,14 +655,6 @@ export function CaseDetailLeftNav({
                 ) : (
                   <div className="muted">Loading…</div>
                 )}
-                <button
-                  type="button"
-                  className="btn primary"
-                  disabled={busy}
-                  onClick={() => setCaseDocPanel('finance')}
-                >
-                  Edit
-                </button>
               </div>
             ) : null}
           </div>

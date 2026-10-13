@@ -221,7 +221,7 @@ export function CaseContactPortalSection({
             </div>
           )}
           <p className="muted" style={{ margin: 0 }}>
-            Share folders on this matter via Documents → right-click folder → Portal → Share.
+            Share folders on this matter via Documents → folder ⋯ actions (or right-click) → Portal → Share.
           </p>
         </div>
       )}

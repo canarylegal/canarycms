@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { apiFetch, apiUrl, applyAuthHeaders, type ApiError } from './api'
 import type {
   BankReconciliationOut,
@@ -14,6 +14,14 @@ import { defaultPeriodEndDate, formatMoneyPence, parsePoundsToPence } from './re
 
 function pence(p: number) {
   return formatMoneyPence(p)
+}
+
+function formatLegLabel(u: UnpresentedLedgerLegOut): string {
+  const date = u.posted_at.slice(0, 10)
+  const matter = u.case_number || u.case_id.slice(0, 8)
+  const amt = `${u.direction === 'debit' ? '-' : '+'}${pence(u.amount_pence)}`
+  const desc = (u.description || '').trim() || 'Ledger entry'
+  return `${date} · ${matter} · ${desc} · ${amt}`
 }
 
 export function AccountsBankingPanel({
@@ -48,6 +56,11 @@ export function AccountsBankingPanel({
   const [journalAmt, setJournalAmt] = useState('')
   const [journalDesc, setJournalDesc] = useState('')
   const [msg, setMsg] = useState<string | null>(null)
+
+  const selectedLeg = useMemo(
+    () => unpresented.find((u) => u.pair_id === matchPairId) ?? null,
+    [unpresented, matchPairId],
+  )
 
   const load = useCallback(async () => {
     setErr(null)
@@ -127,7 +140,7 @@ export function AccountsBankingPanel({
 
   async function matchLine(lineId: string) {
     if (!matchPairId.trim()) {
-      setErr('Enter a ledger pair id to match')
+      setErr('Select a ledger transaction to match')
       return
     }
     setBusy(true)
@@ -148,9 +161,10 @@ export function AccountsBankingPanel({
   }
 
   async function createRecon() {
-    const pence = parsePoundsToPence(bankPounds)
-    if (pence === null || !bankId) {
-      setErr('Enter statement balance')
+    if (!bankId) return
+    const bal = parsePoundsToPence(bankPounds)
+    if (bal == null) {
+      setErr('Enter a valid statement balance')
       return
     }
     setBusy(true)
@@ -162,13 +176,12 @@ export function AccountsBankingPanel({
         json: {
           firm_bank_account_id: bankId,
           period_end_date: periodEnd,
-          statement_balance_pence: pence,
+          statement_balance_pence: bal,
         },
       })
-      setMsg('Reconciliation draft saved')
       await load()
     } catch (e) {
-      setErr((e as ApiError).message ?? 'Could not create reconciliation')
+      setErr((e as ApiError).message ?? 'Reconciliation failed')
     } finally {
       setBusy(false)
     }
@@ -176,6 +189,7 @@ export function AccountsBankingPanel({
 
   async function approveRecon(id: string) {
     setBusy(true)
+    setErr(null)
     try {
       await apiFetch(`/accounts/banking/reconciliations/${id}/approve`, { token, method: 'POST' })
       await load()
@@ -191,34 +205,17 @@ export function AccountsBankingPanel({
     setBusy(true)
     setErr(null)
     try {
-      const row = await apiFetch<ClientAccountEomOut>('/accounts/banking/eom', {
+      await apiFetch('/accounts/banking/eom', {
         token,
         method: 'POST',
         json: { firm_bank_account_id: bankId, period_end_date: periodEnd },
       })
-      setMsg(`EOM pack ready: ${row.filename}`)
       await load()
     } catch (e) {
       setErr((e as ApiError).message ?? 'EOM failed')
     } finally {
       setBusy(false)
     }
-  }
-
-  async function downloadEom(id: string, filename: string) {
-    const headers = new Headers()
-    applyAuthHeaders(headers, token)
-    const res = await fetch(apiUrl(`/accounts/banking/eom/${id}/download`), { headers })
-    if (!res.ok) {
-      setErr('Download failed')
-      return
-    }
-    const blob = await res.blob()
-    const a = document.createElement('a')
-    a.href = URL.createObjectURL(blob)
-    a.download = filename
-    a.click()
-    URL.revokeObjectURL(a.href)
   }
 
   async function createJournal() {
@@ -228,6 +225,7 @@ export function AccountsBankingPanel({
       return
     }
     setBusy(true)
+    setErr(null)
     try {
       await apiFetch('/accounts/banking/journals', {
         token,
@@ -302,6 +300,22 @@ export function AccountsBankingPanel({
     URL.revokeObjectURL(a.href)
   }
 
+  async function downloadEom(id: string, filename: string) {
+    const headers = new Headers()
+    applyAuthHeaders(headers, token)
+    const res = await fetch(apiUrl(`/accounts/banking/eom/${id}/download`), { headers })
+    if (!res.ok) {
+      setErr('Download failed')
+      return
+    }
+    const blob = await res.blob()
+    const a = document.createElement('a')
+    a.href = URL.createObjectURL(blob)
+    a.download = filename
+    a.click()
+    URL.revokeObjectURL(a.href)
+  }
+
   if (!active) return null
 
   return (
@@ -336,20 +350,47 @@ export function AccountsBankingPanel({
       </div>
 
       <section className="stack" style={{ gap: 8 }}>
-        <h3 style={{ margin: 0 }}>Statement lines</h3>
-        <label className="stack" style={{ gap: 4, maxWidth: 420 }}>
-          <span>Ledger pair id for match</span>
-          <input className="input" value={matchPairId} onChange={(e) => setMatchPairId(e.target.value)} />
+        <h3 style={{ margin: 0 }}>Match ledger transaction</h3>
+        <p className="muted" style={{ margin: 0 }}>
+          Choose the ledger entry that corresponds to a bank statement line, then click Match on that line.
+        </p>
+        <label className="stack" style={{ gap: 4, maxWidth: 720 }}>
+          <span>Selected ledger entry</span>
+          <select
+            className="input"
+            value={matchPairId}
+            onChange={(e) => setMatchPairId(e.target.value)}
+            disabled={busy}
+          >
+            <option value="">Select by date, matter, description and amount…</option>
+            {unpresented.map((u) => (
+              <option key={u.pair_id + u.posted_at} value={u.pair_id}>
+                {formatLegLabel(u)}
+              </option>
+            ))}
+          </select>
         </label>
-        <div style={{ overflowX: 'auto' }}>
-          <table className="table">
+        {selectedLeg ? (
+          <div className="muted" style={{ fontSize: 13 }}>
+            Selected: {formatLegLabel(selectedLeg)}
+            {selectedLeg.reference ? ` · Ref ${selectedLeg.reference}` : ''}
+          </div>
+        ) : null}
+      </section>
+
+      <section className="stack" style={{ gap: 8 }}>
+        <h3 style={{ margin: 0 }}>Statement lines</h3>
+        <div className="ledgerTableWrap" style={{ flex: 'none', maxHeight: 360 }}>
+          <table className="table reportsTable" style={{ minWidth: 640 }}>
             <thead>
               <tr>
-                <th>Date</th>
-                <th>Description</th>
-                <th>Amount</th>
-                <th>Status</th>
-                <th />
+                <th scope="col">Date</th>
+                <th scope="col">Description</th>
+                <th scope="col" style={{ textAlign: 'right' }}>
+                  Amount
+                </th>
+                <th scope="col">Status</th>
+                <th scope="col">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -357,13 +398,17 @@ export function AccountsBankingPanel({
                 <tr key={l.id}>
                   <td>{l.statement_date}</td>
                   <td>{l.description}</td>
-                  <td>{pence(l.amount_pence)}</td>
+                  <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{pence(l.amount_pence)}</td>
                   <td>
-                    {l.ignored ? 'ignored' : l.matched_pair_id ? `matched ${l.matched_pair_id.slice(0, 8)}…` : 'open'}
+                    {l.ignored
+                      ? 'Ignored'
+                      : l.matched_pair_id
+                        ? 'Matched'
+                        : 'Open'}
                   </td>
                   <td className="row" style={{ gap: 6 }}>
                     {!l.matched_pair_id && !l.ignored ? (
-                      <button type="button" className="btn" disabled={busy} onClick={() => void matchLine(l.id)}>
+                      <button type="button" className="btn primary" disabled={busy} onClick={() => void matchLine(l.id)}>
                         Match
                       </button>
                     ) : null}
@@ -399,42 +444,50 @@ export function AccountsBankingPanel({
 
       <section className="stack" style={{ gap: 8 }}>
         <h3 style={{ margin: 0 }}>Unpresented ledger</h3>
-        <table className="table">
-          <thead>
-            <tr>
-              <th>Date</th>
-              <th>Matter</th>
-              <th>Description</th>
-              <th>Amount</th>
-              <th>Pair</th>
-            </tr>
-          </thead>
-          <tbody>
-            {unpresented.slice(0, 40).map((u) => (
-              <tr key={u.pair_id + u.posted_at}>
-                <td>{u.posted_at.slice(0, 10)}</td>
-                <td>{u.case_number || u.case_id.slice(0, 8)}</td>
-                <td>{u.description}</td>
-                <td>
-                  {u.direction === 'debit' ? '-' : '+'}
-                  {pence(u.amount_pence)}
-                </td>
-                <td>
-                  <button type="button" className="btn" onClick={() => setMatchPairId(u.pair_id)}>
-                    Use
-                  </button>
-                </td>
-              </tr>
-            ))}
-            {unpresented.length === 0 ? (
+        <div className="ledgerTableWrap" style={{ flex: 'none', maxHeight: 320 }}>
+          <table className="table reportsTable" style={{ minWidth: 640 }}>
+            <thead>
               <tr>
-                <td colSpan={5} className="muted">
-                  None
-                </td>
+                <th scope="col">Date</th>
+                <th scope="col">Matter</th>
+                <th scope="col">Description</th>
+                <th scope="col" style={{ textAlign: 'right' }}>
+                  Amount
+                </th>
+                <th scope="col">Select</th>
               </tr>
-            ) : null}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {unpresented.slice(0, 40).map((u) => (
+                <tr key={u.pair_id + u.posted_at} className={matchPairId === u.pair_id ? 'active' : undefined}>
+                  <td>{u.posted_at.slice(0, 10)}</td>
+                  <td>{u.case_number || u.case_id.slice(0, 8)}</td>
+                  <td>{u.description}</td>
+                  <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+                    {u.direction === 'debit' ? '-' : '+'}
+                    {pence(u.amount_pence)}
+                  </td>
+                  <td>
+                    <button
+                      type="button"
+                      className={`btn${matchPairId === u.pair_id ? ' primary' : ''}`}
+                      onClick={() => setMatchPairId(u.pair_id)}
+                    >
+                      {matchPairId === u.pair_id ? 'Selected' : 'Select'}
+                    </button>
+                  </td>
+                </tr>
+              ))}
+              {unpresented.length === 0 ? (
+                <tr>
+                  <td colSpan={5} className="muted">
+                    None
+                  </td>
+                </tr>
+              ) : null}
+            </tbody>
+          </table>
+        </div>
       </section>
 
       <section className="stack" style={{ gap: 8 }}>
@@ -505,16 +558,15 @@ export function AccountsBankingPanel({
             placeholder="Description"
             value={journalDesc}
             onChange={(e) => setJournalDesc(e.target.value)}
-            style={{ minWidth: 220 }}
           />
-          <button type="button" className="btn" disabled={busy} onClick={() => void createJournal()}>
+          <button type="button" className="btn primary" disabled={busy} onClick={() => void createJournal()}>
             Post journal
           </button>
         </div>
         <ul style={{ margin: 0, paddingLeft: 18 }}>
-          {journals.slice(0, 10).map((j) => (
+          {journals.slice(0, 20).map((j) => (
             <li key={j.id}>
-              {j.created_at.slice(0, 10)} — {pence(j.amount_pence)} — {j.description}
+              {pence(j.amount_pence)} — {j.description} ({j.from_case_id.slice(0, 8)} → {j.to_case_id.slice(0, 8)})
             </li>
           ))}
         </ul>

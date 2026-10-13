@@ -535,7 +535,7 @@ function ContactEditor({
           </button>
           {onDeleted ? (
             <button
-              className="btn"
+              className="btn danger"
               disabled={busy}
               onClick={async () => {
                 const ok = await askConfirm({

@@ -9,9 +9,15 @@ type Props = {
   fetchUrl: string
   portalToken: string
   title?: string
+  onPreviewStateChange?: (state: { loading: boolean; error: string | null }) => void
 }
 
-export function PortalQuotePdfViewer({ fetchUrl, portalToken, title = 'Quote preview' }: Props) {
+export function PortalQuotePdfViewer({
+  fetchUrl,
+  portalToken,
+  title = 'Quote preview',
+  onPreviewStateChange,
+}: Props) {
   const hostRef = useRef<HTMLDivElement>(null)
   const [err, setErr] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
@@ -24,14 +30,17 @@ export function PortalQuotePdfViewer({ fetchUrl, portalToken, title = 'Quote pre
     host.replaceChildren()
     setErr(null)
     setLoading(true)
+    onPreviewStateChange?.({ loading: true, error: null })
 
     void (async () => {
+      let nextErr: string | null = null
       try {
         const headers = new Headers()
         applyAuthHeaders(headers, portalToken)
         const res = await fetch(fetchUrl, { headers })
         if (!res.ok) {
-          if (!cancelled) setErr('Could not load quote preview.')
+          nextErr = 'Could not load quote preview.'
+          if (!cancelled) setErr(nextErr)
           return
         }
         const buf = await res.arrayBuffer()
@@ -58,7 +67,8 @@ export function PortalQuotePdfViewer({ fetchUrl, portalToken, title = 'Quote pre
 
           const ctx = canvas.getContext('2d')
           if (!ctx) {
-            if (!cancelled) setErr('Canvas is unavailable in this browser.')
+            nextErr = 'Canvas is unavailable in this browser.'
+            if (!cancelled) setErr(nextErr)
             return
           }
           canvas.width = viewport.width
@@ -69,21 +79,32 @@ export function PortalQuotePdfViewer({ fetchUrl, portalToken, title = 'Quote pre
           host.appendChild(canvas)
         }
       } catch {
-        if (!cancelled) setErr('Could not render quote preview.')
+        nextErr = 'Could not render quote preview.'
+        if (!cancelled) setErr(nextErr)
       } finally {
-        if (!cancelled) setLoading(false)
+        if (!cancelled) {
+          setLoading(false)
+          onPreviewStateChange?.({ loading: false, error: nextErr })
+        }
       }
     })()
 
     return () => {
       cancelled = true
     }
-  }, [fetchUrl, portalToken])
+  }, [fetchUrl, portalToken, onPreviewStateChange])
 
   return (
     <div className="portalQuotePdfViewer" aria-label={title}>
       {loading ? <div className="muted portalQuotePdfStatus">Loading preview…</div> : null}
-      {err ? <div className="error portalQuotePdfStatus">{err}</div> : null}
+      {err ? (
+        <div className="error portalQuotePdfStatus" style={{ textAlign: 'left', maxWidth: 420, margin: '0 auto' }}>
+          <div>{err}</div>
+          <div className="muted" style={{ marginTop: 8, fontSize: 13 }}>
+            Download the quote and review it on your device before accepting.
+          </div>
+        </div>
+      ) : null}
       <div ref={hostRef} className="portalQuotePdfPages" />
     </div>
   )

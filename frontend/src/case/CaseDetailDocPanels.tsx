@@ -88,7 +88,7 @@ type FinancePanelProps = {
 export function CaseDetailFinancePanel({ caseId, token, backToDocuments, setFinancePreview }: FinancePanelProps) {
   return (
     <div className="caseDocPanelInset caseDocPanelHost stack">
-      <CaseDocPanelChrome title="Finance" onClose={backToDocuments} />
+      <CaseDocPanelChrome title="Finances" onClose={backToDocuments} />
       <CaseDocPanelScroll>
         <FinancePage
           caseId={caseId}

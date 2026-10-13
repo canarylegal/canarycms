@@ -8,6 +8,7 @@ import { formatMoneyPence } from './utils'
 type Preview = {
   rows?: {
     invoice_id: string
+    case_id: string
     case_number: string
     client_name?: string | null
     matter_description: string
@@ -54,7 +55,7 @@ export function AgedDebtReportFilters({ state, chrome }: { state: State; chrome:
           <input type="date" value={state.agedDebtAsOf} onChange={(e) => state.setAgedDebtAsOf(e.target.value)} />
         </label>
         <p className="muted" style={{ margin: '4px 0 0', fontSize: 12 }}>
-          Leave empty to use today. Age buckets are measured from invoice approval date.
+          Leave empty to use today. Age buckets are measured from invoice approval date to the as-of date.
         </p>
       </div>
     </FilterDropdown>
@@ -68,7 +69,7 @@ export function AgedDebtReportBody({ shared, state }: { shared: ReportSectionSha
       <p className="muted" style={{ marginTop: 0 }}>
         Approved invoices that are not fully allocated, on matters whose office balance is still debit
         (client owes). Fully paid invoices (Paid on the matter ledger, or allocations covering the total)
-        are excluded.
+        are excluded. Outstanding is the invoice total less allocations.
       </p>
       <div className="row" style={{ gap: 8, marginTop: 10 }}>
         <button
@@ -109,8 +110,8 @@ export function AgedDebtReportBody({ shared, state }: { shared: ReportSectionSha
                 <th>Invoice</th>
                 <th>Fee earner</th>
                 <th>Approved</th>
-                <th>Invoice total</th>
-                <th>Office balance</th>
+                <th style={{ textAlign: 'right' }}>Outstanding</th>
+                <th style={{ textAlign: 'right' }}>Office balance</th>
               </tr>
             </thead>
             <tbody>
@@ -118,13 +119,25 @@ export function AgedDebtReportBody({ shared, state }: { shared: ReportSectionSha
                 <tr key={r.invoice_id}>
                   <td>{r.age_bucket}</td>
                   <td>{r.age_days}</td>
-                  <td>{r.case_number}</td>
+                  <td>
+                    {r.case_id ? (
+                      <a href={`/case/${r.case_id}`} title="Open matter">
+                        {r.case_number}
+                      </a>
+                    ) : (
+                      r.case_number
+                    )}
+                  </td>
                   <td>{r.client_name ?? ''}</td>
                   <td>{r.invoice_number}</td>
                   <td>{r.fee_earner_name}</td>
                   <td>{r.approved_at?.slice(0, 10) ?? ''}</td>
-                  <td>{formatMoneyPence(r.invoice_total_pence)}</td>
-                  <td>{formatMoneyPence(r.office_balance_pence)}</td>
+                  <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+                    {formatMoneyPence(r.invoice_total_pence)}
+                  </td>
+                  <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+                    {formatMoneyPence(r.office_balance_pence)}
+                  </td>
                 </tr>
               ))}
             </tbody>

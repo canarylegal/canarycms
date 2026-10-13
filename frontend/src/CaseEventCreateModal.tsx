@@ -36,6 +36,7 @@ export function CaseEventCreateModal({
   const [allDay, setAllDay] = useState(true)
   const [startTime, setStartTime] = useState('09:00')
   const [track, setTrack] = useState(false)
+  const [emailAlert, setEmailAlert] = useState(false)
   const dropdown = useExclusiveDropdownOpen<'category'>()
 
   const categoryOptions = useMemo(
@@ -66,6 +67,7 @@ export function CaseEventCreateModal({
         setAllDay(true)
         setStartTime('09:00')
         setTrack(false)
+        setEmailAlert(false)
       })
       .catch((e: unknown) => {
         if (!cancel) setErr((e as ApiError).message ?? 'Failed to load events')
@@ -84,6 +86,7 @@ export function CaseEventCreateModal({
     if (!row) return
     setName(row.name)
     setTrack(Boolean(row.track_in_calendar))
+    setEmailAlert(Boolean(row.email_alert_enabled))
     const d = row.event_date?.slice(0, 10) ?? ''
     setEventDate(d || new Date().toISOString().slice(0, 10))
     setAllDay(row.event_all_day !== false)
@@ -100,6 +103,7 @@ export function CaseEventCreateModal({
     if (v === 'custom') {
       setName('')
       setTrack(false)
+      setEmailAlert(false)
       setEventDate(new Date().toISOString().slice(0, 10))
       setAllDay(true)
       setStartTime('09:00')
@@ -129,6 +133,7 @@ export function CaseEventCreateModal({
         event_date: datePart,
         event_all_day: allDay,
         track_in_calendar: track,
+        email_alert: emailAlert,
       }
       if (!allDay) bodyBase.event_start_time = timeToApi(startTime)
       else bodyBase.event_start_time = null
@@ -203,14 +208,32 @@ export function CaseEventCreateModal({
             <label className="field">
               <span>Start time</span>
               <input type="time" value={startTime} disabled={busy} onChange={(e) => setStartTime(e.target.value)} />
+              <span className="muted" style={{ fontSize: 12, marginTop: 4, display: 'block' }}>
+                Matter milestones use a start time only (not a meeting end time).
+              </span>
             </label>
           ) : null}
           <label className="row" style={{ gap: 8, alignItems: 'flex-start' }}>
             <input type="checkbox" checked={track} disabled={busy} onChange={(e) => setTrack(e.target.checked)} />
             <span className="muted" style={{ lineHeight: 1.4 }}>
-              Track in calendar — adds the event to your CalDAV calendar and creates a fee-earner task when appropriate.
+              Sync to my external calendar — always shown on this matter calendar; when checked, also syncs via CalDAV and
+              can create a fee-earner task.
             </span>
           </label>
+          <label className="row" style={{ gap: 8, alignItems: 'flex-start' }}>
+            <input
+              type="checkbox"
+              checked={emailAlert}
+              disabled={busy}
+              onChange={(e) => setEmailAlert(e.target.checked)}
+            />
+            <span className="muted" style={{ lineHeight: 1.4 }}>
+              E-mail reminders (requires Admin → E-mail → SMTP)
+            </span>
+          </label>
+          <div className="muted" style={{ fontSize: 12 }}>
+            Save event stores this immediately. Later edits on the calendar are staged until you Save and close.
+          </div>
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
             <button type="button" className="btn primary" disabled={busy} onClick={() => void submit()}>
               {busy ? 'Saving…' : 'Save event'}

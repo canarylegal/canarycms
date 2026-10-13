@@ -275,7 +275,7 @@ export function ContactPortalPanel({ token, contactId, contactName, contactEmail
         <h3 style={{ margin: 0 }}>Client portal access</h3>
         <p className="muted" style={{ margin: '6px 0 0' }}>
           Global client login for {contactName}. One access code across all matters. Share folders from each matter
-          (Documents → right-click folder → Portal → Share).
+          (Documents → folder ⋯ actions or right-click → Portal → Share).
         </p>
       </div>
       {err ? <div className="error">{err}</div> : null}

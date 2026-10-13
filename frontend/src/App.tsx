@@ -110,7 +110,7 @@ type View =
 function canaryViewTitleSegment(view: View, caseDetail: CaseOut | null): string {
   switch (view) {
     case 'main-menu':
-      return 'Cases'
+      return 'Matters'
     case 'quotes':
       return 'Quotes'
     case 'case-menu': {
@@ -249,7 +249,7 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
   )
 
   const setView = useCallback(
-    async (next: View, opts?: { skipExitConfirm?: boolean }): Promise<boolean> => {
+    async (next: View, _opts?: { skipExitConfirm?: boolean }): Promise<boolean> => {
       if (next === 'admin-console' && !canAdminConsoleRef.current) {
         next = 'main-menu'
       }
@@ -259,20 +259,12 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
       if (next === 'portal-summary' && portalSummaryEnabledRef.current !== true) {
         next = 'main-menu'
       }
-      if (viewRef.current === 'case-menu' && next !== 'case-menu' && !opts?.skipExitConfirm) {
-        const ok = await askConfirm({
-          title: 'Exit matter',
-          message: 'Are you sure you want to exit this matter?',
-          confirmLabel: 'Exit matter',
-          cancelLabel: 'Stay here',
-        })
-        if (!ok) return false
-      }
+      // Matter exit no longer prompts on every leave; reserve confirms for unsaved/destructive flows.
       setViewState(next)
       syncNavFromState({ view: next, caseId: next === 'case-menu' ? selectedCaseIdRef.current : null })
       return true
     },
-    [askConfirm, syncNavFromState],
+    [syncNavFromState],
   )
 
   const goMainMenu = useCallback(async (opts?: { skipExitConfirm?: boolean }) => {
@@ -953,6 +945,16 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
             />
               </div>
             </div>
+          </div>
+          <div className="taskColourLegend" aria-label="Task row colours">
+            <span className="taskColourLegendItem">
+              <span className="taskColourSwatch taskColourSwatch--high" aria-hidden />
+              Red tint — high priority
+            </span>
+            <span className="taskColourLegendItem">
+              <span className="taskColourSwatch taskColourSwatch--done" aria-hidden />
+              Green tint — completed
+            </span>
           </div>
           <TasksTable
             token={token}

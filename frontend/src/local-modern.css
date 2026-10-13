@@ -1198,8 +1198,8 @@ label:has(> input[type='checkbox']:focus-visible) {
 }
 
 .caseShell {
-  /* ~20% narrower than prior 340px local width */
-  --case-sidebar-width: 272px;
+  /* Compact rail so ledger/docs keep workable width at 1280×720 */
+  --case-sidebar-width: 228px;
   /* Match .appShell--sidebar gap between side ribbon and main column */
   --case-main-gap: 14px;
   gap: 0;
@@ -1258,7 +1258,7 @@ label:has(> input[type='checkbox']:focus-visible) {
 }
 
 .caseLeft.caseLeft--rail > .caseMatterHero {
-  padding: 14px 14px 12px !important;
+  padding: 10px 12px 10px !important;
   margin: 0;
   border-bottom: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 0;
@@ -1266,7 +1266,7 @@ label:has(> input[type='checkbox']:focus-visible) {
 }
 
 .caseMatterHero {
-  padding: 14px 14px 12px;
+  padding: 10px 12px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.1);
   background: var(--local-chrome);
 }
@@ -1275,8 +1275,8 @@ label:has(> input[type='checkbox']:focus-visible) {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
-  margin-bottom: 10px;
+  gap: 8px;
+  margin-bottom: 6px;
 }
 
 .caseMatterHeroRef {
@@ -1353,21 +1353,65 @@ label:has(> input[type='checkbox']:focus-visible) {
 
 .caseMatterHeroClient {
   margin: 0;
-  font-size: 1rem;
-  line-height: 1.25;
+  font-size: 0.92rem;
+  line-height: 1.2;
   font-weight: 800;
   letter-spacing: -0.03em;
   color: #fff;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 .caseMatterHeroType {
-  margin: 8px 0 0;
+  margin: 4px 0 0;
   color: #9aabc8;
-  font-size: 0.86rem;
+  font-size: 0.78rem;
   font-weight: 600;
+  line-height: 1.25;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
-/* Client / Source / Lock — same label–value rows as the old case details card */
+.caseMatterHeroMeta {
+  margin-top: 6px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 0;
+  font-size: 0.74rem;
+  font-weight: 600;
+  color: #c5d0e6;
+  line-height: 1.35;
+}
+
+.caseMatterHeroMetaSep {
+  margin: 0 5px;
+  color: #6b7c99;
+}
+
+.caseMatterHeroMeta .caseMatterHeroStatusText--open {
+  color: #86efac;
+}
+
+.caseMatterHeroMeta .caseMatterHeroStatusText--post_completion {
+  color: #93c5fd;
+}
+
+.caseMatterHeroMeta .caseMatterHeroStatusText--quote {
+  color: #fde68a;
+}
+
+.caseMatterHeroMeta .caseMatterHeroStatusText--closed,
+.caseMatterHeroMeta .caseMatterHeroStatusText--quote_closed,
+.caseMatterHeroMeta .caseMatterHeroStatusText--archived {
+  color: #94a3b8;
+}
+
+/* Case details list on the dark rail (light text — not page --text). */
 .caseMatterHeroDetails {
   margin-top: 10px;
   gap: 4px;
@@ -1388,9 +1432,11 @@ label:has(> input[type='checkbox']:focus-visible) {
   font-size: 0.86rem;
   font-weight: 600;
   color: #edf2fb;
+  overflow-wrap: break-word;
+  word-break: normal;
+  hyphens: none;
 }
 
-/* Status colour on the dark rail (same palette as before, without the meta boxes). */
 .caseMatterHeroDetails .caseDetailRow dd.caseMatterHeroStatusText--open {
   color: #86efac;
 }
@@ -1427,6 +1473,114 @@ label:has(> input[type='checkbox']:focus-visible) {
 /* Equal space above/below the hero separator (must beat `.caseLeft… > .card` padding). */
 .caseLeft.caseLeft--rail > .card.caseMatterSections {
   padding: 10px 10px 0 !important;
+}
+
+
+
+
+
+
+
+.newMatterStepStrip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  margin: 4px 0 14px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.newMatterStep {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.newMatterStep--current {
+  color: var(--text);
+}
+
+.newMatterStep--done {
+  color: var(--text);
+  opacity: 0.85;
+}
+
+.newMatterStepNum {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.35rem;
+  height: 1.35rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.newMatterStep--current .newMatterStepNum {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: var(--text-on-primary);
+}
+
+.newMatterStep--done .newMatterStepNum {
+  background: rgba(var(--primary-rgb), 0.18);
+  border-color: transparent;
+}
+
+
+
+
+.docsRowActionsBtn {
+  width: 28px;
+  height: 28px;
+  min-width: 28px;
+  padding: 0 !important;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px !important;
+  font-size: 1.1rem;
+  line-height: 1;
+  letter-spacing: 0.05em;
+}
+
+.docsTr > .docsActionsCell {
+  justify-self: end;
+  padding-right: 8px;
+}
+
+.taskColourLegend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  margin: 0 0 10px;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.taskColourLegendItem {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.taskColourSwatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  border: 1px solid var(--border);
+}
+
+.taskColourSwatch--high {
+  background: rgba(220, 38, 38, 0.35);
+}
+
+.taskColourSwatch--done {
+  background: rgba(22, 163, 74, 0.4);
 }
 
 .caseLeft.caseLeft--rail .accordion {
@@ -2168,6 +2322,23 @@ html.dark .btn:not(.primary):not(.danger):not(.btnCaseChrome) {
 html.dark .btn:not(.primary):not(.danger):not(.btnCaseChrome):hover:not(:disabled) {
   background: #475569;
   border-color: rgba(148, 163, 184, 0.4);
+  color: #fff;
+}
+
+/*
+ * Case sub-panel bodies (SDLT, HMLR scroll area, etc.) sit on --local-surface-raised (#334155).
+ * Recess secondary buttons like HMLR ActionTiles (var(--panel) / #1e293b), not lighter panel2 chips.
+ */
+html.dark .caseDocPanelScrollHost .btn:not(.primary):not(.danger):not(.btnCaseChrome) {
+  background: var(--panel);
+  border-color: rgba(148, 163, 184, 0.28);
+  color: #f1f5f9;
+  box-shadow: none;
+}
+
+html.dark .caseDocPanelScrollHost .btn:not(.primary):not(.danger):not(.btnCaseChrome):hover:not(:disabled) {
+  background: color-mix(in srgb, var(--panel) 78%, #000);
+  border-color: rgba(148, 163, 184, 0.42);
   color: #fff;
 }
 

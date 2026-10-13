@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { actorLabel } from './auditDisplay'
+import { actionLabel, actorLabel } from './auditDisplay'
 import { apiFetch } from './api'
 import { MatterSearchPicker } from './MatterSearchPicker'
 import { SingleSelectDropdown } from './SingleSelectDropdown'
@@ -252,7 +252,13 @@ export function AdminAudit({ token, embedded }: Props) {
                   ) : null}
                 </div>
                 <div className="td auditColAction">
-                  <code className="auditActionCode">{e.action}</code>
+                  <span title={e.action}>{actionLabel(e.action)}</span>
+                  <details className="auditMetaDetails">
+                    <summary className="muted" style={{ fontSize: 12 }}>
+                      Technical id
+                    </summary>
+                    <code className="auditActionCode">{e.action}</code>
+                  </details>
                 </div>
               </div>
             ))}

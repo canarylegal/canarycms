@@ -151,7 +151,7 @@ export function PropertyDetailsForm({
       <div style={{ fontWeight: 600, marginTop: 8 }}>Existing lender</div>
       {!caseId || !token ? (
         <div className="muted" style={{ fontSize: 13 }}>
-          Save the matter first, then open Property to link an existing lender contact.
+          After you create the matter, open Property on the matter to link an existing lender contact.
         </div>
       ) : (
         <>

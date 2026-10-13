@@ -797,7 +797,7 @@ def post_aged_debt_report(
             "Fee earner",
             "Invoice",
             "Approved (UTC)",
-            "Invoice total (£)",
+            "Outstanding (£)",
             "Office balance (£)",
         ]
     )
