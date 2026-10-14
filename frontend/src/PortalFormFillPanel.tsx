@@ -573,7 +573,7 @@ async function portalDownloadFile(path: string, portalToken: string, fallbackNam
   }
   const blob = await res.blob()
   const cd = res.headers.get('Content-Disposition') || ''
-  const match = /filename\*?=(?:UTF-8''|")?([^\";]+)/i.exec(cd)
+  const match = /filename\*?=(?:UTF-8''|")?([^";]+)/i.exec(cd)
   const name = match ? decodeURIComponent(match[1].replace(/"/g, '')) : fallbackName
   triggerBlobDownload(blob, name || fallbackName)
 }
