@@ -1014,10 +1014,12 @@ def portal_signing_view(
         "status_detail": req.status_detail,
         "order_mode": req.order_mode.value,
         "expires_at": req.expires_at.isoformat() if req.expires_at else None,
+        "completed_at": req.completed_at.isoformat() if req.completed_at else None,
         "can_sign": _recipient_can_sign_now(db, req, mine),
         "recipient_id": str(mine.id),
         "recipient_name": mine.name,
         "recipient_status": mine.status.value,
+        "recipient_signed_at": mine.signed_at.isoformat() if mine.signed_at else None,
         "sign_token": mine.sign_token,
         "matter_label": client_matter_description(case) if case else "",
         "case_id": str(req.case_id),
@@ -1042,6 +1044,17 @@ def portal_signing_view(
             and mine.status not in (CanarySignRecipientStatus.signed, CanarySignRecipientStatus.declined)
             and _form_gate_allows(req, mine)
         ),
+        "has_signed_document": bool(req.signed_file_id),
+        "has_certificate": bool(req.certificate_file_id),
+        "signers": [
+            {
+                "name": r.name,
+                "email": r.email or "",
+                "status": r.status.value,
+                "signed_at": r.signed_at.isoformat() if r.signed_at else None,
+            }
+            for r in recipients
+        ],
     }
 
 
@@ -1508,6 +1521,7 @@ def list_signing_menu_rows(
                 "status": req.status.value,
                 "status_detail": req.status_detail,
                 "order_mode": req.order_mode.value,
+                "sent_by_user_id": req.sent_by_user_id,
                 "sent_by_display_name": sender_map.get(req.sent_by_user_id) if req.sent_by_user_id else None,
                 "recipients_summary": _recipients_summary(recips),
                 "expires_at": req.expires_at,
@@ -1534,14 +1548,38 @@ def list_case_requests(db: Session, case_id: uuid.UUID) -> list[CanarySignReques
     return rows
 
 
-def read_snapshot_pdf_bytes(db: Session, req: CanarySignRequest) -> bytes:
-    if not req.snapshot_pdf_file_id:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Snapshot PDF not available")
-    row = db.get(DbFile, req.snapshot_pdf_file_id)
+def _read_case_pdf_bytes(db: Session, file_id: uuid.UUID | None, *, missing: str) -> tuple[bytes, str]:
+    if not file_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=missing)
+    row = db.get(DbFile, file_id)
     if row is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Snapshot PDF not available")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=missing)
     ensure_files_root()
     abs_path = (FILES_ROOT / row.storage_path).resolve()
     if not abs_path.is_file():
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Snapshot PDF missing on disk")
-    return abs_path.read_bytes()
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=missing)
+    return abs_path.read_bytes(), row.original_filename or "document.pdf"
+
+
+def read_snapshot_pdf_bytes(db: Session, req: CanarySignRequest) -> bytes:
+    raw, _name = _read_case_pdf_bytes(db, req.snapshot_pdf_file_id, missing="Snapshot PDF not available")
+    return raw
+
+
+def read_portal_preview_pdf(db: Session, req: CanarySignRequest) -> tuple[bytes, str]:
+    """Prefer the signed PDF once complete; otherwise the signing snapshot."""
+    if req.signed_file_id:
+        try:
+            return _read_case_pdf_bytes(db, req.signed_file_id, missing="Signed PDF not available")
+        except HTTPException:
+            pass
+    raw = read_snapshot_pdf_bytes(db, req)
+    return raw, f"{(req.subject or 'document')[:80]}.pdf"
+
+
+def read_signed_pdf_bytes(db: Session, req: CanarySignRequest) -> tuple[bytes, str]:
+    return _read_case_pdf_bytes(db, req.signed_file_id, missing="Signed PDF not available yet")
+
+
+def read_certificate_pdf_bytes(db: Session, req: CanarySignRequest) -> tuple[bytes, str]:
+    return _read_case_pdf_bytes(db, req.certificate_file_id, missing="Certificate not available yet")

@@ -54,7 +54,10 @@ def _row(
     title: str,
     status: str,
     contact_or_recipients: str = "",
+    sent_by_user_id: uuid.UUID | None = None,
     sent_by_display_name: str | None = None,
+    fee_earner_user_id: uuid.UUID | None = None,
+    fee_earner_display_name: str | None = None,
     created_at: datetime | None = None,
     file_id: uuid.UUID | None = None,
 ) -> PortalSummaryRowOut:
@@ -68,7 +71,10 @@ def _row(
         title=title,
         status=status,
         contact_or_recipients=contact_or_recipients,
+        sent_by_user_id=sent_by_user_id,
         sent_by_display_name=sent_by_display_name,
+        fee_earner_user_id=fee_earner_user_id if fee_earner_user_id is not None else case.fee_earner_user_id,
+        fee_earner_display_name=fee_earner_display_name,
         created_at=created_at,
         file_id=file_id,
     )
@@ -121,13 +127,18 @@ def _collect_quotes(
         return []
     contact_ids = {d.contact_id for d, _ in rows if d.contact_id}
     contacts = _contact_map(db, contact_ids)
-    sender_ids = {d.sent_by_user_id for d, _ in rows if d.sent_by_user_id}
-    senders = _sender_map(db, sender_ids)
+    user_ids = {d.sent_by_user_id for d, _ in rows if d.sent_by_user_id}
     out: list[PortalSummaryRowOut] = []
+    accessible_quotes: list[tuple[QuotePortalDelivery, File, Case]] = []
     for delivery, frow in rows:
         case = _accessible_case(db, user, delivery.case_id, case_cache)
         if case is None:
             continue
+        accessible_quotes.append((delivery, frow, case))
+        if case.fee_earner_user_id:
+            user_ids.add(case.fee_earner_user_id)
+    names = _sender_map(db, user_ids)
+    for delivery, frow, case in accessible_quotes:
         contact = contacts.get(delivery.contact_id)
         out.append(
             _row(
@@ -137,7 +148,9 @@ def _collect_quotes(
                 title=(frow.original_filename or "Quote").strip() or "Quote",
                 status=delivery.status.value,
                 contact_or_recipients=contact_display_name(contact) if contact else "",
-                sent_by_display_name=senders.get(delivery.sent_by_user_id) if delivery.sent_by_user_id else None,
+                sent_by_user_id=delivery.sent_by_user_id,
+                sent_by_display_name=names.get(delivery.sent_by_user_id) if delivery.sent_by_user_id else None,
+                fee_earner_display_name=names.get(case.fee_earner_user_id) if case.fee_earner_user_id else None,
                 created_at=delivery.sent_at,
                 file_id=delivery.file_id,
             )
@@ -166,13 +179,18 @@ def _collect_forms(
         return []
     contact_ids = {s.contact_id for s, _ in rows if s.contact_id}
     contacts = _contact_map(db, contact_ids)
-    sender_ids = {s.sent_by_user_id for s, _ in rows if s.sent_by_user_id}
-    senders = _sender_map(db, sender_ids)
+    user_ids = {s.sent_by_user_id for s, _ in rows if s.sent_by_user_id}
     out: list[PortalSummaryRowOut] = []
+    accessible_forms: list[tuple[PortalFormSubmission, PortalFormTemplate, Case]] = []
     for sub, template in rows:
         case = _accessible_case(db, user, sub.case_id, case_cache)
         if case is None:
             continue
+        accessible_forms.append((sub, template, case))
+        if case.fee_earner_user_id:
+            user_ids.add(case.fee_earner_user_id)
+    names = _sender_map(db, user_ids)
+    for sub, template, case in accessible_forms:
         contact = contacts.get(sub.contact_id)
         out.append(
             _row(
@@ -182,7 +200,9 @@ def _collect_forms(
                 title=(template.name or "Form").strip() or "Form",
                 status=sub.status.value,
                 contact_or_recipients=contact_display_name(contact) if contact else "",
-                sent_by_display_name=senders.get(sub.sent_by_user_id) if sub.sent_by_user_id else None,
+                sent_by_user_id=sub.sent_by_user_id,
+                sent_by_display_name=names.get(sub.sent_by_user_id) if sub.sent_by_user_id else None,
+                fee_earner_display_name=names.get(case.fee_earner_user_id) if case.fee_earner_user_id else None,
                 created_at=sub.sent_at,
             )
         )
@@ -194,11 +214,27 @@ def _collect_canary_sign(
     *,
     user: User,
     bucket: PortalSummaryBucket,
+    case_cache: dict[uuid.UUID, Case | None],
 ) -> list[PortalSummaryRowOut]:
     status = CanarySignStatus.pending if bucket == "outstanding" else CanarySignStatus.completed
     rows = list_signing_menu_rows(db, user=user, status_filter=status)
-    out: list[PortalSummaryRowOut] = []
+    user_ids: set[uuid.UUID] = set()
+    prepared: list[tuple[dict, Case]] = []
     for r in rows:
+        case = _accessible_case(db, user, r["case_id"], case_cache)
+        if case is None:
+            continue
+        prepared.append((r, case))
+        sid = r.get("sent_by_user_id")
+        if sid:
+            user_ids.add(sid if isinstance(sid, uuid.UUID) else uuid.UUID(str(sid)))
+        if case.fee_earner_user_id:
+            user_ids.add(case.fee_earner_user_id)
+    names = _sender_map(db, user_ids)
+    out: list[PortalSummaryRowOut] = []
+    for r, case in prepared:
+        sid = r.get("sent_by_user_id")
+        sent_id = sid if isinstance(sid, uuid.UUID) else (uuid.UUID(str(sid)) if sid else None)
         out.append(
             PortalSummaryRowOut(
                 kind="canary_sign",
@@ -210,7 +246,10 @@ def _collect_canary_sign(
                 title=(r.get("subject") or "Document to sign").strip() or "Document to sign",
                 status=str(r.get("status") or ""),
                 contact_or_recipients=(r.get("recipients_summary") or "").strip(),
-                sent_by_display_name=r.get("sent_by_display_name"),
+                sent_by_user_id=sent_id,
+                sent_by_display_name=r.get("sent_by_display_name") or (names.get(sent_id) if sent_id else None),
+                fee_earner_user_id=case.fee_earner_user_id,
+                fee_earner_display_name=names.get(case.fee_earner_user_id) if case.fee_earner_user_id else None,
                 created_at=r.get("created_at"),
             )
         )
@@ -222,13 +261,37 @@ def _collect_docusign(
     *,
     user: User,
     bucket: PortalSummaryBucket,
+    case_cache: dict[uuid.UUID, Case | None],
 ) -> list[PortalSummaryRowOut]:
     if not docusign_enabled(db):
         return []
     status = "pending" if bucket == "outstanding" else "completed"
     rows = list_docusign_menu_rows(db, user=user, status_filter=status)
-    out: list[PortalSummaryRowOut] = []
+    user_ids: set[uuid.UUID] = set()
+    prepared: list[tuple[dict, Case]] = []
     for r in rows:
+        case = _accessible_case(db, user, r["case_id"], case_cache)
+        if case is None:
+            continue
+        prepared.append((r, case))
+        sid = r.get("sent_by_user_id")
+        if sid:
+            try:
+                user_ids.add(sid if isinstance(sid, uuid.UUID) else uuid.UUID(str(sid)))
+            except ValueError:
+                pass
+        if case.fee_earner_user_id:
+            user_ids.add(case.fee_earner_user_id)
+    names = _sender_map(db, user_ids)
+    out: list[PortalSummaryRowOut] = []
+    for r, case in prepared:
+        sid = r.get("sent_by_user_id")
+        sent_id: uuid.UUID | None = None
+        if sid:
+            try:
+                sent_id = sid if isinstance(sid, uuid.UUID) else uuid.UUID(str(sid))
+            except ValueError:
+                sent_id = None
         out.append(
             PortalSummaryRowOut(
                 kind="docusign",
@@ -240,7 +303,10 @@ def _collect_docusign(
                 title=(r.get("envelope_subject") or "Document to sign").strip() or "Document to sign",
                 status=str(r.get("status") or ""),
                 contact_or_recipients=(r.get("recipients_summary") or "").strip(),
-                sent_by_display_name=r.get("sent_by_display_name"),
+                sent_by_user_id=sent_id,
+                sent_by_display_name=r.get("sent_by_display_name") or (names.get(sent_id) if sent_id else None),
+                fee_earner_user_id=case.fee_earner_user_id,
+                fee_earner_display_name=names.get(case.fee_earner_user_id) if case.fee_earner_user_id else None,
                 created_at=r.get("created_at"),
             )
         )
@@ -268,10 +334,10 @@ def list_portal_summary(
             rows.extend(_collect_forms(db, user=user, bucket=bucket, case_cache=case_cache))
     if kind is None or kind == "canary_sign":
         if opts.canary_sign_enabled:
-            rows.extend(_collect_canary_sign(db, user=user, bucket=bucket))
+            rows.extend(_collect_canary_sign(db, user=user, bucket=bucket, case_cache=case_cache))
     if kind is None or kind == "docusign":
         if opts.docusign_enabled:
-            rows.extend(_collect_docusign(db, user=user, bucket=bucket))
+            rows.extend(_collect_docusign(db, user=user, bucket=bucket, case_cache=case_cache))
 
     def sort_key(row: PortalSummaryRowOut) -> tuple[float, str]:
         ts = row.created_at.timestamp() if row.created_at is not None else 0.0

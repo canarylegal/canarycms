@@ -33,7 +33,10 @@ class PortalSummaryRowOut(BaseModel):
     title: str
     status: str
     contact_or_recipients: str = ""
+    sent_by_user_id: uuid.UUID | None = None
     sent_by_display_name: str | None = None
+    fee_earner_user_id: uuid.UUID | None = None
+    fee_earner_display_name: str | None = None
     created_at: datetime | None = None
     # Source file for quote rows (needed to resend via quote-portal).
     file_id: uuid.UUID | None = None

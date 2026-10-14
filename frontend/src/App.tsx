@@ -110,7 +110,7 @@ type View =
 function canaryViewTitleSegment(view: View, caseDetail: CaseOut | null): string {
   switch (view) {
     case 'main-menu':
-      return 'Matters'
+      return 'Cases'
     case 'quotes':
       return 'Quotes'
     case 'case-menu': {
@@ -219,6 +219,9 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
   const [quotesFilterMatterTypes, setQuotesFilterMatterTypes] = useState<string[]>([])
   const [quotesFilterFeeEarnerUserIds, setQuotesFilterFeeEarnerUserIds] = useState<string[]>([])
   const [quotesFilterCaseStatuses, setQuotesFilterCaseStatuses] = useState<MainMenuCaseStatusFilter[]>(['quote'])
+  const [portalFilterKinds, setPortalFilterKinds] = useState<string[]>([])
+  const [portalFilterSenderUserIds, setPortalFilterSenderUserIds] = useState<string[]>([])
+  const [portalFilterFeeEarnerUserIds, setPortalFilterFeeEarnerUserIds] = useState<string[]>([])
   const [quotesSubPanel, setQuotesSubPanel] = useState<'list' | 'fee-scales' | 'sources'>(bootNav.quotesSubPanel)
   const [quoteWizardOpen, setQuoteWizardOpen] = useState(false)
   const [newMatterFromQuotes, setNewMatterFromQuotes] = useState(false)
@@ -358,6 +361,24 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
       setUiPreference('main_menu_filter_matter_types', matterTypes)
       setUiPreference('main_menu_filter_fee_earner_user_ids', feeEarnerUserIds)
       setUiPreference('main_menu_filter_case_statuses', caseStatuses)
+    },
+    [setUiPreference],
+  )
+
+  const onPortalFilterKindsChange = useCallback((value: string[]) => {
+    setPortalFilterKinds(value)
+  }, [])
+  const onPortalFilterSenderIdsChange = useCallback((value: string[]) => {
+    setPortalFilterSenderUserIds(value)
+  }, [])
+  const onPortalFilterFeeEarnerIdsChange = useCallback((value: string[]) => {
+    setPortalFilterFeeEarnerUserIds(value)
+  }, [])
+  const persistPortalFilters = useCallback(
+    (kinds: string[], senderUserIds: string[], feeEarnerUserIds: string[]) => {
+      setUiPreference('portal_summary_filter_kinds', kinds)
+      setUiPreference('portal_summary_filter_sender_user_ids', senderUserIds)
+      setUiPreference('portal_summary_filter_fee_earner_user_ids', feeEarnerUserIds)
     },
     [setUiPreference],
   )
@@ -611,7 +632,8 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
         setUiPreference('main_menu_sort_dir', uiPrefs.main_menu_sort_dir === 'asc' ? 'desc' : 'asc')
       } else {
         setUiPreference('main_menu_sort_key', k)
-        setUiPreference('main_menu_sort_dir', 'asc')
+        // Chronological columns: newest / highest reference first on first click.
+        setUiPreference('main_menu_sort_dir', k === 'created' || k === 'reference' ? 'desc' : 'asc')
       }
     },
     [setUiPreference, uiPrefs.main_menu_sort_dir, uiPrefs.main_menu_sort_key],
@@ -721,6 +743,9 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
     setMainMenuFilterMatterTypes(saved.main_menu_filter_matter_types)
     setMainMenuFilterFeeEarnerUserIds(saved.main_menu_filter_fee_earner_user_ids)
     setMainMenuFilterCaseStatuses(saved.main_menu_filter_case_statuses.filter((s) => s !== 'quote' && s !== 'quote_closed'))
+    setPortalFilterKinds(saved.portal_summary_filter_kinds)
+    setPortalFilterSenderUserIds(saved.portal_summary_filter_sender_user_ids)
+    setPortalFilterFeeEarnerUserIds(saved.portal_summary_filter_fee_earner_user_ids)
   }, [auth.me?.id])
 
   function renderMainContent() {
@@ -759,7 +784,15 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
         <Suspense fallback={<LazyFallback />}>
           <PortalSummaryPage
             token={token}
-            onSelectCase={(caseId) => onMainMenuSelectCase(caseId, { docPanel: 'portal-hub' })}
+            users={caseListUsers}
+            filterKinds={portalFilterKinds}
+            filterSenderUserIds={portalFilterSenderUserIds}
+            filterFeeEarnerUserIds={portalFilterFeeEarnerUserIds}
+            onFilterKindsChange={onPortalFilterKindsChange}
+            onFilterSenderIdsChange={onPortalFilterSenderIdsChange}
+            onFilterFeeEarnerIdsChange={onPortalFilterFeeEarnerIdsChange}
+            onPersistFilters={persistPortalFilters}
+            onSelectCase={(caseId) => onMainMenuSelectCase(caseId)}
           />
         </Suspense>
       )
@@ -948,8 +981,8 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
           </div>
           <div className="taskColourLegend" aria-label="Task row colours">
             <span className="taskColourLegendItem">
-              <span className="taskColourSwatch taskColourSwatch--high" aria-hidden />
-              Red tint — high priority
+              <span className="taskColourSwatch taskColourSwatch--overdue" aria-hidden />
+              Red tint — overdue
             </span>
             <span className="taskColourLegendItem">
               <span className="taskColourSwatch taskColourSwatch--done" aria-hidden />

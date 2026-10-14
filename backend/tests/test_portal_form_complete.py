@@ -31,7 +31,7 @@ from app.models import (
     QuotePortalDeliveryStatus,
     User,
 )
-from app.portal_form_service import _validate_responses, complete_submission
+from app.portal_form_service import _format_date_response, _validate_responses, complete_submission
 from app.quote_portal_service import respond_to_quote_delivery
 
 
@@ -123,6 +123,30 @@ def _select_field(*, options: list[str], required: bool = True) -> PortalFormTem
         sort_order=1,
         select_options=options,
     )
+
+
+def test_format_date_response_uk() -> None:
+    assert _format_date_response("2026-10-13") == "13/10/2026"
+    assert _format_date_response("") == "—"
+    assert _format_date_response(None) == "—"
+
+
+def test_validate_responses_accepts_iso_date() -> None:
+    field = PortalFormTemplateField(
+        id=uuid.uuid4(),
+        template_id=uuid.uuid4(),
+        field_key="pref_date",
+        label="Preferred date",
+        field_type=PortalFormFieldType.date,
+        required=True,
+        sort_order=0,
+        select_options=[],
+    )
+    clean = _validate_responses([field], {"pref_date": "2026-10-13"})
+    assert clean == {"pref_date": "2026-10-13"}
+    with pytest.raises(HTTPException) as ei:
+        _validate_responses([field], {"pref_date": "13/10/2026"})
+    assert ei.value.status_code == 422
 
 
 def test_validate_responses_requires_fields() -> None:

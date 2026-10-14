@@ -1,4 +1,12 @@
-import { useEffect, useRef, useState, type CSSProperties, type ChangeEvent, type MouseEvent } from 'react'
+import {
+  useEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type ChangeEvent,
+  type MouseEvent,
+  type MutableRefObject,
+} from 'react'
 import * as pdfjsLib from 'pdfjs-dist'
 import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import { applyAuthHeaders } from './api'
@@ -36,6 +44,8 @@ export type CanarySignFormWidget = {
   multiline?: boolean
   value: string | boolean
   editable: boolean
+  /** On-state for one widget in a multi-option button group (Included / Excluded / None). */
+  export_value?: string
 }
 
 export type SignatureStyle = {
@@ -48,11 +58,12 @@ export type SignatureStyle = {
 }
 
 export const SIGNATURE_STYLES: SignatureStyle[] = [
-  { id: 'great-vibes', label: 'Great Vibes', family: 'Great Vibes', file: 'GreatVibes-Regular.ttf' },
-  { id: 'allura', label: 'Allura', family: 'Allura', file: 'Allura-Regular.ttf' },
-  { id: 'sacramento', label: 'Sacramento', family: 'Sacramento', file: 'Sacramento-Regular.ttf' },
-  { id: 'homemade-apple', label: 'Homemade Apple', family: 'Homemade Apple', file: 'HomemadeApple-Regular.ttf' },
+  // Lead with a restrained hand; decorative fonts remain available via Next style.
   { id: 'satisfy', label: 'Satisfy', family: 'Satisfy', file: 'Satisfy-Regular.ttf' },
+  { id: 'sacramento', label: 'Sacramento', family: 'Sacramento', file: 'Sacramento-Regular.ttf' },
+  { id: 'allura', label: 'Allura', family: 'Allura', file: 'Allura-Regular.ttf' },
+  { id: 'homemade-apple', label: 'Homemade Apple', family: 'Homemade Apple', file: 'HomemadeApple-Regular.ttf' },
+  { id: 'great-vibes', label: 'Great Vibes', family: 'Great Vibes', file: 'GreatVibes-Regular.ttf' },
 ]
 
 /** DocuSign-like distinct signer colours (border + translucent fill). */
@@ -74,6 +85,12 @@ type PageView = {
   dataUrl: string
 }
 
+export type CanarySignPdfDocumentHandle = {
+  scrollToPage: (page: number) => void
+  pageCount: number
+  visiblePage: number
+}
+
 type Props = {
   pdfUrl: string
   authToken: string
@@ -92,7 +109,9 @@ type Props = {
   ) => void
   /** Fired when the document fails to load or render (friendly message). */
   onError?: (message: string) => void
+  onVisiblePageChange?: (page: number, pageCount: number) => void
   className?: string
+  documentRef?: MutableRefObject<CanarySignPdfDocumentHandle | null>
 }
 
 type DragState = {
@@ -141,18 +160,41 @@ export function CanarySignPdfDocument({
   onOverlayMove,
   onOverlayResize,
   onError,
+  onVisiblePageChange,
   className,
+  documentRef,
 }: Props) {
   const hostRef = useRef<HTMLDivElement>(null)
   const dragRef = useRef<DragState | null>(null)
   const onErrorRef = useRef(onError)
   onErrorRef.current = onError
+  const onVisiblePageChangeRef = useRef(onVisiblePageChange)
+  onVisiblePageChangeRef.current = onVisiblePageChange
   const [pages, setPages] = useState<PageView[]>([])
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState<string | null>(null)
   const [draggingId, setDraggingId] = useState<string | null>(null)
   const [retryKey, setRetryKey] = useState(0)
   const [visiblePage, setVisiblePage] = useState(1)
+
+  useEffect(() => {
+    if (!documentRef) return
+    documentRef.current = {
+      scrollToPage: (page: number) => {
+        const el = hostRef.current?.querySelector(`.canarySignPdfPage[data-page="${page}"]`) as HTMLElement | null
+        el?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      },
+      pageCount: pages.length,
+      visiblePage,
+    }
+    return () => {
+      documentRef.current = null
+    }
+  }, [documentRef, pages.length, visiblePage])
+
+  useEffect(() => {
+    onVisiblePageChangeRef.current?.(visiblePage, pages.length)
+  }, [visiblePage, pages.length])
 
   function reportError(message: string) {
     setErr(message)
@@ -452,12 +494,18 @@ export function CanarySignPdfDocument({
                 fontSize: 'clamp(9px, 1.6vw, 12px)',
                 lineHeight: 1.2,
               }
-              if (w.field_type === 'checkbox') {
+              if (w.field_type === 'checkbox' || (w.field_type === 'radio' && w.export_value)) {
+                const exportValue = (w.export_value || '').trim()
+                const checked = exportValue
+                  ? String(w.value ?? '') === exportValue ||
+                    (w.value === true && exportValue.toLowerCase() === 'included')
+                  : Boolean(w.value)
+                const widgetKey = exportValue ? `${w.name}::${exportValue}` : w.name
                 return (
                   <label
-                    key={w.name}
+                    key={widgetKey}
                     className="canarySignFormWidget canarySignFormWidget--checkbox"
-                    title={w.label || w.name}
+                    title={w.label || exportValue || w.name}
                     style={{
                       ...commonStyle,
                       display: 'flex',
@@ -471,11 +519,19 @@ export function CanarySignPdfDocument({
                     onClick={(e) => e.stopPropagation()}
                   >
                     <input
-                      type="checkbox"
-                      checked={Boolean(w.value)}
+                      type={exportValue ? 'radio' : 'checkbox'}
+                      name={exportValue ? `acro:${w.name}` : undefined}
+                      checked={checked}
                       disabled={!w.editable}
-                      aria-label={w.label || w.name}
-                      onChange={(e) => onFormWidgetChange?.(w.name, e.target.checked)}
+                      aria-label={w.label || exportValue || w.name}
+                      onChange={(e) => {
+                        if (!onFormWidgetChange) return
+                        if (exportValue) {
+                          onFormWidgetChange(w.name, e.target.checked ? exportValue : '')
+                        } else {
+                          onFormWidgetChange(w.name, e.target.checked)
+                        }
+                      }}
                       style={{ width: '70%', height: '70%', margin: 0, cursor: w.editable ? 'pointer' : 'default' }}
                     />
                   </label>
@@ -586,7 +642,11 @@ export function CanarySignPdfDocument({
                       key={`${o.id}-${o.previewImageB64.slice(0, 48)}`}
                       src={`data:image/png;base64,${o.previewImageB64}`}
                       alt=""
-                      style={{ width: '100%', height: '100%', objectFit: 'contain', pointerEvents: 'none' }}
+                      className={
+                        o.textStyle === 'script'
+                          ? 'canarySignFieldOverlay__img canarySignFieldOverlay__img--signature'
+                          : 'canarySignFieldOverlay__img'
+                      }
                     />
                   ) : o.previewText ? (
                     <span
@@ -618,17 +678,18 @@ export function CanarySignPdfDocument({
 export function defaultFieldSize(fieldType: string): { w_pct: number; h_pct: number } {
   switch (fieldType) {
     case 'signature':
-      return { w_pct: 32, h_pct: 9 }
+      // Wider than tall — matches typical signature lines and avoids stamp stretch.
+      return { w_pct: 28, h_pct: 4.5 }
     case 'initials':
-      return { w_pct: 12, h_pct: 6 }
+      return { w_pct: 10, h_pct: 4 }
     case 'printed_name':
-      return { w_pct: 30, h_pct: 6 }
+      return { w_pct: 28, h_pct: 4 }
     case 'date':
-      return { w_pct: 24, h_pct: 6 }
+      return { w_pct: 18, h_pct: 4 }
     case 'checkbox':
-      return { w_pct: 5, h_pct: 5 }
+      return { w_pct: 4, h_pct: 3.5 }
     default:
-      return { w_pct: 25, h_pct: 5 }
+      return { w_pct: 22, h_pct: 4 }
   }
 }
 

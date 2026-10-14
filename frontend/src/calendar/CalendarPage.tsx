@@ -494,15 +494,8 @@ export function CalendarPage({
       className="mainMenuShell mainMenuShell--surface"
       style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}
     >
-      <div className="paneHead">
-        <div>
-          <h2 style={{ margin: 0 }}>Calendar</h2>
-          <div className="muted" style={{ marginTop: 4 }}>
-            In Canary you see your calendars plus any shared with you or subscribed from the directory. External CalDAV
-            apps (Outlook, Apple Calendar, etc.) only sync calendars under your own login — not colleagues&apos; shared
-            calendars.
-          </div>
-        </div>
+      <div className="paneHead" style={{ alignItems: 'center' }}>
+        <h2 style={{ margin: 0 }}>Calendar</h2>
         <div className="row" style={{ gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
           <button
             type="button"

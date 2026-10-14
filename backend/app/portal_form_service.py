@@ -17,7 +17,15 @@ from sqlalchemy.orm import Session
 from app.alert_dispatch import AlertKind, dispatch_alert, firm_alerts_configured, portal_public_url
 from app.audit import log_event
 from app.fee_scale_service import fee_scale_matches_case
-from app.file_storage import FILES_ROOT, case_file_paths, ensure_files_root, unlink_stored_file, write_bytes_atomic
+from app.file_storage import (
+    FILES_ROOT,
+    case_file_paths,
+    ensure_files_root,
+    path_is_under_files_root,
+    unlink_stored_file,
+    write_bytes_atomic,
+)
+from app.upload_limits import content_disposition_for_mime
 from app.timeutil import utcnow
 from app.models import (
     Case,
@@ -511,6 +519,64 @@ def _coerce_checkbox_value(raw: Any) -> bool | None:
     return None
 
 
+def _format_date_response(val: Any) -> str:
+    """Render stored ISO dates as UK DD/MM/YYYY for the matter DOCX snapshot."""
+    if val in (None, ""):
+        return "—"
+    s = str(val).strip()
+    m = re.fullmatch(r"(\d{4})-(\d{2})-(\d{2})", s)
+    if m:
+        return f"{m.group(3)}/{m.group(2)}/{m.group(1)}"
+    return s
+
+
+def download_submission_snapshot(
+    db: Session,
+    *,
+    submission_id: uuid.UUID,
+    contact: Contact,
+) -> Any:
+    """Return a FileResponse for the completed form DOCX owned by ``contact``."""
+    from fastapi.responses import FileResponse
+
+    sub = get_submission_for_contact(db, submission_id, contact.id)
+    if sub.status != PortalFormSubmissionStatus.completed:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Form is not completed")
+    if not sub.snapshot_file_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Completed form file not available")
+    row = db.get(File, sub.snapshot_file_id)
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Completed form file not available")
+    ensure_files_root()
+    abs_path = (FILES_ROOT / row.storage_path).resolve()
+    if not path_is_under_files_root(abs_path) or not abs_path.is_file():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Completed form file missing on disk")
+    log_event(
+        db,
+        actor_user_id=None,
+        action="portal.form.snapshot_download",
+        entity_type="portal_form_submission",
+        entity_id=str(sub.id),
+        meta={"contact_id": str(contact.id), "case_id": str(sub.case_id), "file_id": str(row.id)},
+    )
+    log_portal_activity(
+        db,
+        case_id=sub.case_id,
+        contact_id=contact.id,
+        grant_id=None,
+        action="portal.form.snapshot_download",
+        summary=f"{contact_display_name(contact)} downloaded completed form {row.original_filename}",
+    )
+    db.commit()
+    mime = row.mime_type or "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    return FileResponse(
+        path=str(abs_path),
+        media_type=mime,
+        filename=row.original_filename or "completed-form.docx",
+        content_disposition_type=content_disposition_for_mime(mime, download=True),
+    )
+
+
 def _validate_responses(fields: list[PortalFormTemplateField], responses: dict[str, Any]) -> dict[str, Any]:
     clean: dict[str, Any] = {}
     for field in fields:
@@ -568,6 +634,14 @@ def _validate_responses(fields: list[PortalFormTemplateField], responses: dict[s
                     )
                 continue
             clean[key] = items
+        elif field.field_type == PortalFormFieldType.date:
+            val = str(raw).strip()
+            if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", val):
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail=f"Invalid date for {field.label}",
+                )
+            clean[key] = val
         else:
             clean[key] = str(raw).strip()
     return clean
@@ -608,6 +682,8 @@ def _render_submission_docx(
                 display = "No"
             else:
                 display = "—"
+        elif field.field_type == PortalFormFieldType.date:
+            display = _format_date_response(val)
         else:
             display = str(val) if val not in (None, "") else "—"
         doc.add_paragraph(f"{field.label}: {display}")

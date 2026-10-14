@@ -375,7 +375,26 @@ export function useCaseDocFileHandlers({
         return
       }
       if (isOfficeLikeFile(file)) {
-        openOnlyOfficeCaseEditor(caseId, file.id)
+        const win = openOnlyOfficeCaseEditor(caseId, file.id)
+        if (win) {
+          try {
+            win.focus()
+          } catch {
+            /* ignore */
+          }
+          return
+        }
+        // Popup blocked — fall back to blob preview / download so Open is never silent.
+        setBusy(true)
+        setActionErr(null)
+        try {
+          await openCaseFileBlobInTab(caseId, file, token)
+          pushNotification('Pop-ups are blocked, so the file was opened here instead of the editor.')
+        } catch (e: unknown) {
+          setActionErr(formatFileOpError(e, 'Open failed — allow pop-ups for this site, then try again.'))
+        } finally {
+          setBusy(false)
+        }
         return
       }
 

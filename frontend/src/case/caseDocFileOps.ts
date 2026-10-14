@@ -41,10 +41,16 @@ export function triggerBlobDownload(blob: Blob, filename: string): void {
   window.setTimeout(() => URL.revokeObjectURL(url), 120_000)
 }
 
-export function openBlobInNewTab(blob: Blob): void {
+/** Open a blob in a new tab. Returns false if the browser blocked the popup (caller may download instead). */
+export function openBlobInNewTab(blob: Blob): boolean {
   const url = URL.createObjectURL(blob)
-  window.open(url, '_blank', 'noopener,noreferrer')
+  const win = window.open(url, '_blank', 'noopener,noreferrer')
+  if (!win) {
+    URL.revokeObjectURL(url)
+    return false
+  }
   window.setTimeout(() => URL.revokeObjectURL(url), 120_000)
+  return true
 }
 
 export async function downloadCaseFileBlob(
@@ -188,7 +194,10 @@ export async function openCaseFileBlobInTab(
   if (!res.ok) throw new Error((await res.text()) || res.statusText)
   const blob = await res.blob()
   const typed = file.mime_type ? new Blob([blob], { type: file.mime_type }) : blob
-  openBlobInNewTab(typed)
+  if (openBlobInNewTab(typed)) return
+  // Popup blocked — still deliver the file via download so Open is never a no-op.
+  const safeName = file.original_filename.replace(/[/\\]/g, '_').replace(/^\.+/, '') || 'document.pdf'
+  triggerBlobDownload(typed, safeName)
 }
 
 /** True when the Canary Thunderbird content-script bridge is present in this page. */

@@ -188,24 +188,6 @@ class InterMatterJournalOut(BaseModel):
     created_at: datetime
 
 
-class FinanceLedgerBridgeIn(BaseModel):
-    """Post selected Finance worksheet debit lines as anticipated office (or client) disbursements."""
-
-    item_ids: list[uuid.UUID] = Field(min_length=1)
-    ledger_account: Literal["office", "client"] = "office"
-    anticipated: bool = True
-    anticipated_for_date: date | None = None
-    firm_bank_account_id: uuid.UUID | None = None
-    payment_method: PaymentMethod | None = None
-
-    model_config = {"extra": "forbid"}
-
-
-class FinanceLedgerBridgeOut(BaseModel):
-    posted_count: int
-    pair_ids: list[uuid.UUID]
-
-
 class XeroSettingsOut(BaseModel):
     enabled: bool
     tenant_name: str | None = None

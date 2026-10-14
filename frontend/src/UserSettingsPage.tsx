@@ -395,7 +395,7 @@ export function UserSettingsPage({
               ? 'Enter your current password and choose a new one to continue.'
               : securitySetupOnly
                 ? 'Your organisation requires an authenticator app (2FA) or at least one passkey. Complete either option below.'
-                : 'Profile, appearance, security, and integrations for your account.'}
+                : 'Profile, appearance, security, and calendar for your account.'}
           </div>
         </div>
         {!passwordChangeRequiredOnly ? (
@@ -411,7 +411,7 @@ export function UserSettingsPage({
               ['profile', 'Profile'],
               ['appearance', 'Appearance'],
               ['security', 'Security'],
-              ['integrations', 'Integrations'],
+              ['integrations', 'Calendar'],
             ] as const
           ).map(([id, label]) => (
             <button

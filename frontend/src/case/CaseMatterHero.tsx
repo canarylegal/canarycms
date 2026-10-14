@@ -22,7 +22,9 @@ export function CaseMatterHero({
   return (
     <div className="caseMatterHero">
       <div className="caseMatterHeroTop">
-        <span className="caseMatterHeroRef mono">{caseDetail.case_number}</span>
+        <span className="caseMatterHeroRef mono" title={caseDetail.case_number || undefined}>
+          {caseDetail.case_number}
+        </span>
         {onBackToMainMenu ? (
           <button
             type="button"
@@ -57,12 +59,19 @@ export function CaseMatterHero({
           </button>
         ) : null}
       </div>
-      <h2 className="caseMatterHeroClient">{caseDetail.matter_description || 'No description'}</h2>
-      <p className="caseMatterHeroType">{matterTypeDisplayLine(caseDetail)}</p>
+      <h2
+        className="caseMatterHeroClient"
+        title={caseDetail.matter_description || 'No description'}
+      >
+        {caseDetail.matter_description || 'No description'}
+      </h2>
+      <p className="caseMatterHeroType" title={matterTypeDisplayLine(caseDetail)}>
+        {matterTypeDisplayLine(caseDetail)}
+      </p>
       <dl className="caseDetailsList caseMatterHeroDetails">
         <div className="caseDetailRow">
           <dt>Client</dt>
-          <dd>{caseDetail.client_name ?? '—'}</dd>
+          <dd title={caseDetail.client_name ?? undefined}>{caseDetail.client_name ?? '—'}</dd>
         </div>
         <div className="caseDetailRow">
           <dt>Fee earner</dt>
@@ -87,7 +96,7 @@ export function CaseMatterHero({
       </dl>
       <button
         type="button"
-        className="btn primary caseMatterHeroEdit"
+        className="btn caseMatterHeroEdit"
         disabled={busy}
         onClick={onEditMatterDetails}
       >

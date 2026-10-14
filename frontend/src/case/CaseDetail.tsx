@@ -1231,7 +1231,6 @@ export function CaseDetail({
             caseId={caseId ?? ''}
             hasEventsMenu={hasEventsMenu}
             eventsPreview={eventsPreview}
-            openCaseEventModal={openCaseEventModal}
             hasFinanceMenu={hasFinanceMenu}
             financePreview={financePreview}
             firmModuleNavLabel={firmModuleNavLabel}

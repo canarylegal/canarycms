@@ -1649,7 +1649,7 @@ html.dark .topbar--content .btn:not(.primary):not(.danger) {
     minmax(0, 7.311fr);
 }
 
-.taskMenuRow--high {
+.taskMenuRow--overdue {
   background: rgba(220, 38, 38, 0.12) !important;
 }
 
@@ -5404,13 +5404,18 @@ html.dark .ledgerBalanceBand--client {
   text-align: left;
   padding: 7px 12px !important;
   font-size: 0.83rem !important;
+  font-weight: 650 !important;
   border-radius: 0 !important;
   border: none !important;
   border-top: 1px solid var(--border) !important;
   background: transparent !important;
-  color: var(--primary) !important;
+  /* Yellow text on pale rows fails contrast — use dark ink instead. */
+  color: #1e3a8a !important;
 }
-.finAddItemBtn:hover:not(:disabled) { background: var(--hover) !important; }
+.finAddItemBtn:hover:not(:disabled) {
+  background: var(--hover) !important;
+  color: #1e40af !important;
+}
 
 .finAddCatRow {
   display: flex;
@@ -5867,6 +5872,12 @@ html.dark .ledgerBalanceBand--client {
 .ledgerRow--anticipated td {
   color: #64748b;
   background: color-mix(in srgb, var(--panel2) 88%, var(--border));
+}
+
+html.dark .ledgerRow--anticipated td {
+  /* #64748b is light-mode muted slate; too low-contrast on dark panels */
+  color: color-mix(in srgb, var(--text) 88%, var(--muted));
+  background: color-mix(in srgb, var(--panel2) 55%, var(--panel));
 }
 
 .ledgerRow--anticipated td .btn {
@@ -6479,6 +6490,52 @@ html.dark .portalShell {
 .portalFormField {
   overflow: visible;
   min-width: 0;
+}
+
+.portalFormFieldWrap--error .input,
+.portalFormFieldWrap--error .singleSelectDropdownTrigger {
+  border-color: var(--danger, #b91c1c);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--danger, #b91c1c) 35%, transparent);
+}
+
+.portalFormFieldError {
+  margin-top: 4px;
+  font-size: 13px;
+}
+
+.portalFormCheckboxField {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 10px;
+  cursor: pointer;
+  margin: 0;
+}
+
+.portalFormCheckboxField > input[type='checkbox'] {
+  flex: 0 0 auto;
+  margin: 0.2em 0 0;
+  width: 1.05em;
+  height: 1.05em;
+}
+
+.portalFormCheckboxField__text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.portalFormCheckboxField__label {
+  display: block;
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.35;
+}
+
+.portalFormCheckboxField__help {
+  display: block;
+  font-size: 13px;
 }
 
 .portalFormField .singleSelectDropdownField {

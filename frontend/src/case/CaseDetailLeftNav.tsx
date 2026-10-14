@@ -88,7 +88,6 @@ type Props = {
   caseId: string
   hasEventsMenu: boolean
   eventsPreview: CaseEventsOut | null
-  openCaseEventModal: () => void
   hasFinanceMenu: boolean
   financePreview: FinanceOut | null
   /** Phase 4 firm module panel slot (when a firm package module is attached). */
@@ -132,7 +131,6 @@ export function CaseDetailLeftNav({
   caseId,
   hasEventsMenu,
   eventsPreview,
-  openCaseEventModal,
   hasFinanceMenu,
   financePreview,
   firmModuleNavLabel,
@@ -245,7 +243,7 @@ export function CaseDetailLeftNav({
                 ) : null}
                 <button
                   type="button"
-                  className="btn primary caseLeftCompactBtn"
+                  className="btn caseLeftCompactBtn"
                   disabled={busy}
                   onClick={() => {
                     setEditSnapshot(null)
@@ -272,10 +270,7 @@ export function CaseDetailLeftNav({
             className={`accHead${caseDocPanel === 'accounts' ? ' is-active' : ''}`}
             aria-expanded={leftOpen.accounts}
             aria-current={caseDocPanel === 'accounts' ? 'page' : undefined}
-            onClick={() => {
-              toggleLeftAccordion('accounts')
-              setCaseDocPanel('accounts')
-            }}
+            onClick={() => toggleLeftAccordion('accounts')}
           >
             <CaseLeftMenuIcon name="accounts" />
             <span>Accounts</span>
@@ -302,6 +297,14 @@ export function CaseDetailLeftNav({
               ) : (
                 <div className="muted">Loading…</div>
               )}
+              <button
+                type="button"
+                className="btn"
+                disabled={busy}
+                onClick={() => setCaseDocPanel('accounts')}
+              >
+                Open accounts
+              </button>
             </div>
           ) : null}
         </div>
@@ -314,10 +317,7 @@ export function CaseDetailLeftNav({
               className={`accHead${caseDocPanel === 'tasks' ? ' is-active' : ''}`}
               aria-expanded={leftOpen.tasks}
               aria-current={caseDocPanel === 'tasks' ? 'page' : undefined}
-              onClick={() => {
-                toggleLeftAccordion('tasks')
-                setCaseDocPanel('tasks')
-              }}
+              onClick={() => toggleLeftAccordion('tasks')}
             >
               <CaseLeftMenuIcon name="tasks" />
               <span>Tasks</span>
@@ -335,6 +335,9 @@ export function CaseDetailLeftNav({
                     return `${outstanding} outstanding · ${completed} completed`
                   })()}
                 </div>
+                <button type="button" className="btn" disabled={busy} onClick={() => setCaseDocPanel('tasks')}>
+                  Open tasks
+                </button>
               </div>
             ) : null}
           </div>
@@ -363,7 +366,7 @@ export function CaseDetailLeftNav({
                     <div className="muted">No details added</div>
                     <button
                       type="button"
-                      className="btn primary"
+                      className="btn"
                       style={{ marginTop: 8 }}
                       disabled={busy}
                       onClick={() => {
@@ -430,7 +433,7 @@ export function CaseDetailLeftNav({
                     </div>
                     <button
                       type="button"
-                      className="btn primary"
+                      className="btn"
                       style={{ marginTop: 8 }}
                       disabled={busy}
                       onClick={() => {
@@ -462,10 +465,7 @@ export function CaseDetailLeftNav({
               className={`accHead${caseDocPanel === 'searches' ? ' is-active' : ''}`}
               aria-expanded={leftOpen.searches}
               aria-current={caseDocPanel === 'searches' ? 'page' : undefined}
-              onClick={() => {
-                toggleLeftAccordion('searches')
-                setCaseDocPanel('searches')
-              }}
+              onClick={() => toggleLeftAccordion('searches')}
             >
               <CaseLeftMenuIcon name="searches" />
               <span>Searches</span>
@@ -492,10 +492,7 @@ export function CaseDetailLeftNav({
               className={`accHead${caseDocPanel === 'land-registry' ? ' is-active' : ''}`}
               aria-expanded={leftOpen.landRegistry}
               aria-current={caseDocPanel === 'land-registry' ? 'page' : undefined}
-              onClick={() => {
-                toggleLeftAccordion('landRegistry')
-                setCaseDocPanel('land-registry')
-              }}
+              onClick={() => toggleLeftAccordion('landRegistry')}
             >
               <CaseLeftMenuIcon name="land-registry" />
               <span>Land Registry</span>
@@ -522,10 +519,7 @@ export function CaseDetailLeftNav({
               className={`accHead${caseDocPanel === 'sdlt' ? ' is-active' : ''}`}
               aria-expanded={leftOpen.sdlt}
               aria-current={caseDocPanel === 'sdlt' ? 'page' : undefined}
-              onClick={() => {
-                toggleLeftAccordion('sdlt')
-                setCaseDocPanel('sdlt')
-              }}
+              onClick={() => toggleLeftAccordion('sdlt')}
             >
               <CaseLeftMenuIcon name="sdlt" />
               <span>SDLT</span>
@@ -552,10 +546,7 @@ export function CaseDetailLeftNav({
               className={`accHead${caseDocPanel === 'events' ? ' is-active' : ''}`}
               aria-expanded={leftOpen.events}
               aria-current={caseDocPanel === 'events' ? 'page' : undefined}
-              onClick={() => {
-                toggleLeftAccordion('events')
-                setCaseDocPanel('events')
-              }}
+              onClick={() => toggleLeftAccordion('events')}
             >
               <CaseLeftMenuIcon name="events" />
               <span>Calendar</span>
@@ -591,11 +582,9 @@ export function CaseDetailLeftNav({
                 ) : (
                   <div className="muted">Loading…</div>
                 )}
-                <div className="row" style={{ marginTop: 8, gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-                  <button type="button" className="btn" disabled={busy} onClick={() => openCaseEventModal()}>
-                    New event
-                  </button>
-                </div>
+                <button type="button" className="btn" disabled={busy} onClick={() => setCaseDocPanel('events')}>
+                  Open calendar
+                </button>
               </div>
             ) : null}
           </div>
@@ -609,10 +598,7 @@ export function CaseDetailLeftNav({
               className={`accHead${caseDocPanel === 'finance' ? ' is-active' : ''}`}
               aria-expanded={leftOpen.finance}
               aria-current={caseDocPanel === 'finance' ? 'page' : undefined}
-              onClick={() => {
-                toggleLeftAccordion('finance')
-                setCaseDocPanel('finance')
-              }}
+              onClick={() => toggleLeftAccordion('finance')}
             >
               <CaseLeftMenuIcon name="finance" />
               <span>Finances</span>
@@ -655,6 +641,9 @@ export function CaseDetailLeftNav({
                 ) : (
                   <div className="muted">Loading…</div>
                 )}
+                <button type="button" className="btn" disabled={busy} onClick={() => setCaseDocPanel('finance')}>
+                  Open finances
+                </button>
               </div>
             ) : null}
           </div>

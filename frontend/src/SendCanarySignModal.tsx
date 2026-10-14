@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { apiFetch, apiUrl } from './api'
 import {
@@ -6,6 +6,7 @@ import {
   CanarySignPdfDocument,
   defaultFieldSize,
   fieldTypeLabel,
+  type CanarySignPdfDocumentHandle,
 } from './CanarySignPdfDocument'
 import { parsePortalEmailConflict, portalEmailConflictStaffMessage } from './portalEmailConflict'
 import { SingleSelectDropdown } from './SingleSelectDropdown'
@@ -116,7 +117,24 @@ export function SendCanarySignModal({
   const [retainFillableForm, setRetainFillableForm] = useState<boolean | null>(null)
   /** contact_id → currently has active portal access */
   const [portalAccessByContactId, setPortalAccessByContactId] = useState<Record<string, boolean>>({})
+  const pdfDocRef = useRef<CanarySignPdfDocumentHandle | null>(null)
+  const bodyScrollRef = useRef<HTMLDivElement | null>(null)
+  const preservedScrollTop = useRef<number | null>(null)
+  const [pdfPage, setPdfPage] = useState({ visible: 1, count: 0 })
 
+  function runPreservingScroll(fn: () => void) {
+    const el = bodyScrollRef.current
+    if (el) preservedScrollTop.current = el.scrollTop
+    fn()
+  }
+
+  useLayoutEffect(() => {
+    const top = preservedScrollTop.current
+    const el = bodyScrollRef.current
+    if (top == null || !el) return
+    el.scrollTop = top
+    preservedScrollTop.current = null
+  }, [placeType, selectedFieldKey, pdfPage.visible])
 
   const contactOptions = useMemo(
     () =>
@@ -325,16 +343,12 @@ export function SendCanarySignModal({
   }
 
   function placeOrMoveField(page: number, x_pct: number, y_pct: number) {
-    // With a field selected, click repositions it; otherwise place a new field.
+    // With a field selected, click away deselects (drag still moves via overlay handlers).
     if (selectedFieldKey) {
-      setFields((rows) =>
-        rows.map((f) => {
-          if (f.key !== selectedFieldKey) return f
-          const clamped = clampPlace(x_pct, y_pct, f.w_pct, f.h_pct)
-          return { ...f, page, x_pct: clamped.x_pct, y_pct: clamped.y_pct }
-        }),
-      )
-      setErr(null)
+      runPreservingScroll(() => {
+        setSelectedFieldKey(null)
+        setErr(null)
+      })
       return
     }
     const recip = recipients.find((r) => r.key === activeRecipientKey)
@@ -345,25 +359,27 @@ export function SendCanarySignModal({
     const size = defaultFieldSize(placeType)
     const clamped = clampPlace(x_pct, y_pct, size.w_pct, size.h_pct)
     const key = crypto.randomUUID()
-    setFields((rows) => [
-      ...rows,
-      {
-        key,
-        field_type: placeType,
-        recipientKey: recip.key,
-        routing_order: recip.routing_order || 1,
-        label: fieldTypeLabel(placeType),
-        required: true,
-        sort_order: rows.length,
-        page,
-        x_pct: clamped.x_pct,
-        y_pct: clamped.y_pct,
-        w_pct: size.w_pct,
-        h_pct: size.h_pct,
-      },
-    ])
-    setSelectedFieldKey(key)
-    setErr(null)
+    runPreservingScroll(() => {
+      setFields((rows) => [
+        ...rows,
+        {
+          key,
+          field_type: placeType,
+          recipientKey: recip.key,
+          routing_order: recip.routing_order || 1,
+          label: fieldTypeLabel(placeType),
+          required: true,
+          sort_order: rows.length,
+          page,
+          x_pct: clamped.x_pct,
+          y_pct: clamped.y_pct,
+          w_pct: size.w_pct,
+          h_pct: size.h_pct,
+        },
+      ])
+      setSelectedFieldKey(key)
+      setErr(null)
+    })
   }
 
   function moveField(id: string, page: number, x_pct: number, y_pct: number) {
@@ -503,7 +519,7 @@ export function SendCanarySignModal({
     >
       <div
         className="modal card modal--scrollBody"
-        style={{ maxWidth: 980, width: 'min(980px, 96vw)', cursor: busy ? 'wait' : undefined }}
+        style={{ maxWidth: 1100, width: 'min(1100px, 96vw)', cursor: busy ? 'wait' : undefined }}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="paneHead">
@@ -515,7 +531,7 @@ export function SendCanarySignModal({
             Close
           </button>
         </div>
-        <div className="stack modalBodyScroll" style={{ marginTop: 12, gap: 12 }}>
+        <div ref={bodyScrollRef} className="stack modalBodyScroll" style={{ marginTop: 12, gap: 12 }}>
           {err ? <div className="error">{err}</div> : null}
           {notice ? <div className="notice">{notice}</div> : null}
           {formFieldsWarning ? <div className="notice">{formFieldsWarning}</div> : null}
@@ -750,71 +766,124 @@ export function SendCanarySignModal({
             ) : null}
             <strong>Place fields on the document</strong>
             <p className="muted" style={{ margin: '6px 0 10px', fontSize: 13 }}>
-              Choose a field type, then click to place. Drag to move; use the corner handle to resize. Each signer has a
-              distinct colour.
+              Choose a field type from the side panel, then click to place. Drag to move; use the corner handle to
+              resize. Click empty page space to deselect. Each signer has a distinct colour.
             </p>
-            <div className="row" style={{ gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
-              {(
-                [
-                  ['signature', 'Signature'],
-                  ['printed_name', 'Printed name'],
-                  ['date', 'Date'],
-                  ['initials', 'Initials'],
-                  ['checkbox', 'Checkbox'],
-                ] as const
-              ).map(([value, label]) => (
-                <button
-                  key={value}
-                  type="button"
-                  className={`btn${placeType === value && !selectedFieldKey ? ' primary' : ''}`}
-                  disabled={busy}
-                  onClick={() => {
-                    setPlaceType(value)
-                    setSelectedFieldKey(null)
+            <div className="canarySignPlaceLayout">
+              <aside className="canarySignPlaceRail" aria-label="Field types">
+                <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>
+                  Field type
+                </div>
+                <div className="stack" style={{ gap: 6 }}>
+                  {(
+                    [
+                      ['signature', 'Signature'],
+                      ['printed_name', 'Printed name'],
+                      ['date', 'Date'],
+                      ['initials', 'Initials'],
+                      ['checkbox', 'Checkbox'],
+                    ] as const
+                  ).map(([value, label]) => (
+                    <button
+                      key={value}
+                      type="button"
+                      className={`btn${placeType === value && !selectedFieldKey ? ' primary' : ''}`}
+                      disabled={busy}
+                      onClick={() => {
+                        runPreservingScroll(() => {
+                          setPlaceType(value)
+                          setSelectedFieldKey(null)
+                        })
+                      }}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                <div className="stack canarySignPlaceRailActions" style={{ gap: 6, marginTop: 12, minHeight: 76 }}>
+                  {selectedFieldKey ? (
+                    <>
+                      <button
+                        type="button"
+                        className="btn"
+                        disabled={busy}
+                        onClick={() => runPreservingScroll(() => setSelectedFieldKey(null))}
+                      >
+                        Deselect
+                      </button>
+                      <button
+                        type="button"
+                        className="btn"
+                        disabled={busy}
+                        onClick={() => {
+                          runPreservingScroll(() => {
+                            setFields((fs) => fs.filter((f) => f.key !== selectedFieldKey))
+                            setSelectedFieldKey(null)
+                          })
+                        }}
+                      >
+                        Remove field
+                      </button>
+                    </>
+                  ) : null}
+                </div>
+                {pdfPage.count > 1 ? (
+                  <div className="stack" style={{ gap: 6, marginTop: 12 }}>
+                    <div className="muted" style={{ fontSize: 12 }}>
+                      Page {pdfPage.visible} / {pdfPage.count}
+                    </div>
+                    <button
+                      type="button"
+                      className="btn btn--small"
+                      disabled={busy || pdfPage.visible <= 1}
+                      onClick={() =>
+                        runPreservingScroll(() =>
+                          pdfDocRef.current?.scrollToPage(Math.max(1, pdfPage.visible - 1)),
+                        )
+                      }
+                    >
+                      ← Previous page
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn--small"
+                      disabled={busy || pdfPage.visible >= pdfPage.count}
+                      onClick={() =>
+                        runPreservingScroll(() =>
+                          pdfDocRef.current?.scrollToPage(Math.min(pdfPage.count, pdfPage.visible + 1)),
+                        )
+                      }
+                    >
+                      Next page →
+                    </button>
+                  </div>
+                ) : null}
+              </aside>
+              <div className="canarySignPlaceDoc">
+                <CanarySignPdfDocument
+                  pdfUrl={previewPdfUrl}
+                  authToken={token}
+                  documentRef={pdfDocRef}
+                  onVisiblePageChange={(visible, count) => setPdfPage({ visible, count })}
+                  overlays={overlays}
+                  placing={!busy && !selectedFieldKey}
+                  resizable={!busy}
+                  onPageClick={({ page, x_pct, y_pct }) => {
+                    if (busy) return
+                    placeOrMoveField(page, x_pct, y_pct)
                   }}
-                >
-                  {label}
-                </button>
-              ))}
-              {selectedFieldKey ? (
-                <>
-                  <button type="button" className="btn" disabled={busy} onClick={() => setSelectedFieldKey(null)}>
-                    Place new field
-                  </button>
-                  <button
-                    type="button"
-                    className="btn"
-                    disabled={busy}
-                    onClick={() => {
-                      setFields((fs) => fs.filter((f) => f.key !== selectedFieldKey))
-                      setSelectedFieldKey(null)
-                    }}
-                  >
-                    Remove selected field
-                  </button>
-                </>
-              ) : null}
+                  onOverlayClick={(id) => runPreservingScroll(() => setSelectedFieldKey(id))}
+                  onOverlayMove={(id, { page, x_pct, y_pct }) => {
+                    if (busy) return
+                    moveField(id, page, x_pct, y_pct)
+                  }}
+                  onOverlayResize={(id, { page, x_pct, y_pct, w_pct, h_pct }) => {
+                    if (busy) return
+                    resizeField(id, page, x_pct, y_pct, w_pct, h_pct)
+                  }}
+                />
+              </div>
             </div>
-            <CanarySignPdfDocument
-              pdfUrl={previewPdfUrl}
-              authToken={token}
-              overlays={overlays}
-              placing={!busy && !selectedFieldKey}
-              resizable={!busy}
-              onPageClick={({ page, x_pct, y_pct }) => {
-                if (busy) return
-                placeOrMoveField(page, x_pct, y_pct)
-              }}
-              onOverlayClick={(id) => setSelectedFieldKey(id)}
-              onOverlayMove={(id, { page, x_pct, y_pct }) => {
-                if (busy) return
-                moveField(id, page, x_pct, y_pct)
-              }}
-              onOverlayResize={(id, { page, x_pct, y_pct, w_pct, h_pct }) => {
-                if (busy) return
-                resizeField(id, page, x_pct, y_pct, w_pct, h_pct)
-              }}
-            />
           </div>
 
           <div className="row" style={{ justifyContent: 'flex-end', gap: 8 }}>

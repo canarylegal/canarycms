@@ -1,8 +1,8 @@
-import type { Dispatch, SetStateAction } from 'react'
+import { useCallback, useState, type Dispatch, type SetStateAction } from 'react'
 import { apiFetch } from '../api'
 import { CaseTimePanel } from '../CaseTimePanel'
-import { EventsPage } from '../EventsPage'
-import { FinancePage } from '../FinancePage'
+import { EventsPage, type EventsEmbeddedActions } from '../EventsPage'
+import { FinancePage, type FinanceEmbeddedActions } from '../FinancePage'
 import { LedgerPage } from '../LedgerPage'
 import { SearchInput } from '../SearchInput'
 import { SingleSelectDropdown } from '../SingleSelectDropdown'
@@ -20,7 +20,11 @@ import type {
   UserSummary,
 } from '../types'
 import type { UserUiPreferences } from '../userUiPreferences'
-import { CaseContactsAddDocForm, CaseContactsEditDocForm } from './CaseContactsDocForms'
+import {
+  CaseContactsAddDocForm,
+  CaseContactsEditDocForm,
+  type ContactEditPrimaryAction,
+} from './CaseContactsDocForms'
 import { CaseDocPanelChrome, CaseDocPanelScroll } from './caseDetailChrome'
 import { FirmModulePortalSectionSlot } from '../firm/FirmModuleStubSlots'
 import { CasePortalPanel } from './CasePortalPanel'
@@ -53,9 +57,45 @@ export function CaseDetailEventsPanel({
   setCaseDocPanel,
   setEventsPreview,
 }: EventsPanelProps) {
+  const [embeddedActions, setEmbeddedActions] = useState<EventsEmbeddedActions | null>(null)
+  const onEmbeddedActionsChange = useCallback((a: EventsEmbeddedActions | null) => {
+    setEmbeddedActions(a)
+  }, [])
+
   return (
     <div className="caseDocPanelInset caseDocPanelHost stack">
-      <CaseDocPanelChrome title="Calendar" onClose={backToDocuments} />
+      <CaseDocPanelChrome
+        title="Calendar"
+        onClose={backToDocuments}
+        actions={
+          <>
+            <button
+              type="button"
+              className="btn primary"
+              disabled={embeddedActions?.busy}
+              onClick={() => openCaseEventModal()}
+            >
+              New event
+            </button>
+            <button
+              type="button"
+              className="btn"
+              disabled={embeddedActions?.busy}
+              onClick={() => embeddedActions?.discard()}
+            >
+              Discard changes
+            </button>
+            <button
+              type="button"
+              className="btn primary"
+              disabled={embeddedActions?.busy}
+              onClick={() => embeddedActions?.saveAndClose()}
+            >
+              Save and close
+            </button>
+          </>
+        }
+      />
       <CaseDocPanelScroll fillHost>
         <EventsPage
           caseId={caseId}
@@ -63,6 +103,7 @@ export function CaseDetailEventsPanel({
           me={currentUser}
           embedded
           onRequestNewEvent={openCaseEventModal}
+          onEmbeddedActionsChange={onEmbeddedActionsChange}
           caseLabel={
             caseDetail
               ? `${caseDetail.case_number}${caseDetail.matter_description ? ` — ${caseDetail.matter_description}` : ''}`.trim()
@@ -86,14 +127,43 @@ type FinancePanelProps = {
 }
 
 export function CaseDetailFinancePanel({ caseId, token, backToDocuments, setFinancePreview }: FinancePanelProps) {
+  const [embeddedActions, setEmbeddedActions] = useState<FinanceEmbeddedActions | null>(null)
+  const onEmbeddedActionsChange = useCallback((a: FinanceEmbeddedActions | null) => {
+    setEmbeddedActions(a)
+  }, [])
+
   return (
     <div className="caseDocPanelInset caseDocPanelHost stack">
-      <CaseDocPanelChrome title="Finances" onClose={backToDocuments} />
+      <CaseDocPanelChrome
+        title="Finances"
+        onClose={backToDocuments}
+        actions={
+          <>
+            <button
+              type="button"
+              className="btn"
+              disabled={embeddedActions?.busy}
+              onClick={() => embeddedActions?.discard()}
+            >
+              Discard changes
+            </button>
+            <button
+              type="button"
+              className="btn primary"
+              disabled={embeddedActions?.busy}
+              onClick={() => embeddedActions?.save()}
+            >
+              Save
+            </button>
+          </>
+        }
+      />
       <CaseDocPanelScroll>
         <FinancePage
           caseId={caseId}
           token={token}
           embedded
+          onEmbeddedActionsChange={onEmbeddedActionsChange}
           onSaved={() => {
             void apiFetch<FinanceOut>(`/cases/${caseId}/finance`, { token })
               .then(setFinancePreview)
@@ -196,14 +266,14 @@ export function CaseDetailAccountsPanel({
           <>
             <button
               type="button"
-              className={`btn${accountsSubTab === 'ledger' ? ' primary' : ''}`}
+              className={`btn${accountsSubTab === 'ledger' ? ' btn--selected' : ''}`}
               onClick={() => setAccountsSubTab('ledger')}
             >
               Ledger
             </button>
             <button
               type="button"
-              className={`btn${accountsSubTab === 'time' ? ' primary' : ''}`}
+              className={`btn${accountsSubTab === 'time' ? ' btn--selected' : ''}`}
               onClick={() => setAccountsSubTab('time')}
             >
               Time
@@ -769,6 +839,11 @@ export function CaseDetailContactsPanel({
   setPushToGlobal,
   resolvedEditSnapshotName,
 }: ContactsPanelProps) {
+  const [editPrimary, setEditPrimary] = useState<ContactEditPrimaryAction | null>(null)
+  const onPrimaryActionChange = useCallback((a: ContactEditPrimaryAction | null) => {
+    setEditPrimary(a)
+  }, [])
+
   return (
     <div className="caseDocPanelInset caseDocPanelHost stack">
       <CaseDocPanelChrome
@@ -785,9 +860,21 @@ export function CaseDetailContactsPanel({
           backToDocuments()
         }}
         closeDisabled={busy}
+        actions={
+          !contactAddOpen && editSnapshot ? (
+            <button
+              type="button"
+              className="btn primary"
+              disabled={!editPrimary?.canSave}
+              onClick={() => editPrimary?.save()}
+            >
+              Save
+            </button>
+          ) : null
+        }
       />
       <CaseDocPanelScroll>
-        <div className="card caseDocPropertyEmbed" style={{ maxWidth: '100%' }}>
+        <div className="card caseDocPropertyEmbed">
           {contactAddOpen ? (
             <CaseContactsAddDocForm
               token={token}
@@ -828,6 +915,7 @@ export function CaseDetailContactsPanel({
               lawyerLinkableContacts={lawyerLinkableContacts}
               onDone={finishContactsDoc}
               setActionErr={setActionErr}
+              onPrimaryActionChange={onPrimaryActionChange}
             />
           ) : null}
         </div>

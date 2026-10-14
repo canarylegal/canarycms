@@ -1,0 +1,542 @@
+/**
+ * Soft-launch visual discipline overlay (easy revert: drop this import from canary-theme.css).
+ *
+ * Goals:
+ * 1. Yellow = primary actions only (Save / New / create)
+ * 2. Selected tabs/filters = pale blue, not yellow
+ * 3. Case sidebar = pale neutral vs navy app rail
+ * 4. Flatter surfaces; quieter task row tints; clearer status chips
+ * 5. Stronger case identity + form readability
+ */
+
+:root {
+  --select-fill: #dbeafe;
+  --select-fill-strong: #bfdbfe;
+  --select-ink: #1e3a8a;
+  --select-border: #93c5fd;
+  --case-rail-bg: #f4f6fa;
+  --case-rail-raised: #ffffff;
+  --case-rail-border: rgba(15, 23, 42, 0.1);
+  --case-rail-text: #0f172a;
+  /* Darker than page --muted so labels/previews stay readable on the pale rail. */
+  --case-rail-muted: #334155;
+  --case-rail-label: #1e293b;
+  --case-rail-sep: rgba(15, 23, 42, 0.1);
+  --case-rail-hover: rgba(15, 23, 42, 0.05);
+  --case-rail-active: #dbeafe;
+  --shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+  --shadow-soft: 0 1px 2px rgba(15, 23, 42, 0.05);
+  --local-surface-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+  --local-surface-radius: 12px;
+}
+
+/* Dark mode: keep hierarchy (navy app rail → slate case rail → workspace), not the light pale surface. */
+html.dark {
+  --case-rail-bg: #243247;
+  --case-rail-raised: #2f4058;
+  --case-rail-border: rgba(148, 163, 184, 0.22);
+  --case-rail-text: #f1f5f9;
+  --case-rail-muted: #cbd5e1;
+  --case-rail-label: #e2e8f0;
+  --case-rail-sep: rgba(148, 163, 184, 0.18);
+  --case-rail-hover: rgba(255, 255, 255, 0.06);
+  --case-rail-active: rgba(59, 130, 246, 0.28);
+  --select-fill: rgba(59, 130, 246, 0.28);
+  --select-fill-strong: rgba(59, 130, 246, 0.38);
+  --select-ink: #dbeafe;
+  --select-border: rgba(147, 197, 253, 0.45);
+}
+
+/* ── Yellow discipline ─────────────────────────────────────────── */
+
+.btn.primary {
+  background: var(--primary) !important;
+  border-color: color-mix(in srgb, var(--primary) 75%, #0f172a) !important;
+  color: var(--text-on-primary) !important;
+  box-shadow: none !important;
+}
+
+.btn.primary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--primary) 88%, #0f172a) !important;
+  border-color: color-mix(in srgb, var(--primary) 70%, #0f172a) !important;
+  box-shadow: none !important;
+}
+
+/* Selected tab / filter — not yellow */
+.btn--selected,
+.accountsTabBtn--active,
+.ledgerFilterActive,
+.mainMenuFilterBar .btn.btn--selected,
+.caseDocPanelBar .btn.btn--selected,
+.adminTab.is-active {
+  background: var(--select-fill) !important;
+  border-color: var(--select-border) !important;
+  color: var(--select-ink) !important;
+  box-shadow: none !important;
+  font-weight: 650;
+}
+
+.btn--selected:hover:not(:disabled),
+.accountsTabBtn--active:hover:not(:disabled),
+.ledgerFilterActive:hover:not(:disabled),
+.mainMenuFilterBar .btn.btn--selected:hover:not(:disabled),
+.caseDocPanelBar .btn.btn--selected:hover:not(:disabled) {
+  background: var(--select-fill-strong) !important;
+  border-color: var(--select-border) !important;
+  color: var(--select-ink) !important;
+}
+
+/* Creation actions on ledger keep yellow (primary job) */
+.ledgerPostBtn {
+  background: var(--primary) !important;
+  color: var(--text-on-primary) !important;
+  border-color: color-mix(in srgb, var(--primary) 75%, #0f172a) !important;
+  box-shadow: none !important;
+}
+
+.ledgerPostBtn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--primary) 88%, #0f172a) !important;
+  opacity: 1;
+}
+
+/* Matter details = secondary navigation, not a primary CTA */
+.caseMatterHeroEdit.btn,
+.caseMatterHeroEdit.btn.primary {
+  background: var(--case-rail-raised) !important;
+  border: 1px solid var(--case-rail-border) !important;
+  color: var(--case-rail-text) !important;
+  box-shadow: none !important;
+  font-weight: 600 !important;
+}
+
+.caseMatterHeroEdit.btn:hover:not(:disabled),
+.caseMatterHeroEdit.btn.primary:hover:not(:disabled) {
+  background: var(--case-rail-hover) !important;
+  border-color: var(--case-rail-border) !important;
+  color: var(--case-rail-text) !important;
+}
+
+/* Docs “New” stays yellow — only the create affordance */
+.caseDocsToolbar .btn.btnCaseChrome.caseDocsNewMenuBtn {
+  background: var(--primary) !important;
+  border-color: color-mix(in srgb, var(--primary) 75%, #0f172a) !important;
+  color: var(--text-on-primary) !important;
+  box-shadow: none !important;
+}
+
+/* ── Flatten decorative weight ─────────────────────────────────── */
+
+.appSidebar {
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.14) !important;
+  border-radius: 14px !important;
+}
+
+.card {
+  box-shadow: none !important;
+  border-radius: 12px !important;
+}
+
+.mainMenuFilterBar,
+.caseDocsToolbarBar,
+.caseDocsToolbar {
+  border-radius: 14px !important;
+}
+
+.btn {
+  border-radius: 8px !important;
+  box-shadow: none !important;
+}
+
+.btn:hover:not(:disabled) {
+  transform: none !important;
+}
+
+.modal,
+.card.modal,
+.docContextMenu,
+.caseToolbarDropdown,
+.mainMenuFilterDropdown {
+  box-shadow: 0 8px 28px rgba(15, 23, 42, 0.16) !important;
+}
+
+/* ── Pale case sidebar ─────────────────────────────────────────── */
+
+.caseLeft.caseLeft--rail {
+  background: var(--case-rail-bg) !important;
+  color: var(--case-rail-text) !important;
+  border: 1px solid var(--case-rail-border) !important;
+  box-shadow: none !important;
+}
+
+.caseLeft.caseLeft--rail > .caseMatterHero,
+.caseMatterHero {
+  background: var(--case-rail-bg) !important;
+  border-bottom: 1px solid var(--case-rail-sep) !important;
+  color: var(--case-rail-text) !important;
+}
+
+.caseMatterHeroRef {
+  font-size: 0.92rem !important;
+  font-weight: 750 !important;
+  letter-spacing: 0.04em !important;
+  color: var(--case-rail-text) !important;
+}
+
+.caseMatterHeroClient {
+  font-size: 0.88rem !important;
+  font-weight: 650 !important;
+  color: var(--case-rail-text) !important;
+  -webkit-line-clamp: 3;
+}
+
+.caseMatterHeroType {
+  color: var(--case-rail-muted) !important;
+  font-weight: 600 !important;
+}
+
+.caseMatterHeroDetails .caseDetailRow dt {
+  color: var(--case-rail-label) !important;
+  font-weight: 600 !important;
+}
+
+.caseMatterHeroDetails .caseDetailRow dd {
+  color: var(--case-rail-text) !important;
+  font-weight: 550 !important;
+}
+
+.caseMatterHeroBack {
+  background: var(--case-rail-raised) !important;
+  border-color: var(--case-rail-border) !important;
+  color: var(--case-rail-text) !important;
+}
+
+.caseMatterHeroBack:hover:not(:disabled) {
+  background: var(--case-rail-hover) !important;
+  border-color: var(--case-rail-border) !important;
+  color: var(--case-rail-text) !important;
+}
+
+.caseLeft.caseLeft--rail .accHead {
+  color: var(--case-rail-text) !important;
+}
+
+.caseLeft.caseLeft--rail .accHead:hover {
+  background: var(--case-rail-hover) !important;
+}
+
+.caseLeft.caseLeft--rail .accHead[aria-expanded='true']:not(.is-active) {
+  background: rgba(15, 23, 42, 0.03) !important;
+  color: var(--case-rail-text) !important;
+}
+
+.caseLeft.caseLeft--rail .accHead.is-active,
+.caseLeft.caseLeft--rail .accHead[aria-current='page'] {
+  background: var(--case-rail-active) !important;
+  color: var(--select-ink) !important;
+}
+
+.caseLeft.caseLeft--rail .accHead.is-active .caseLeftNavIcon,
+.caseLeft.caseLeft--rail .accHead[aria-current='page'] .caseLeftNavIcon {
+  color: inherit;
+  opacity: 1;
+}
+
+.caseLeft.caseLeft--rail .accHead .muted {
+  color: var(--case-rail-label) !important;
+}
+
+.caseLeft.caseLeft--rail .accBody {
+  background: var(--case-rail-raised) !important;
+  border: 1px solid var(--case-rail-sep) !important;
+  color: var(--case-rail-text) !important;
+}
+
+.caseLeft.caseLeft--rail .muted,
+.caseLeft.caseLeft--rail .accBody .muted,
+.caseLeft.caseLeft--rail > .card .muted,
+.caseLeft.caseLeft--rail .accBody .caseLeftRailPreview,
+.caseLeft.caseLeft--rail .accBody .caseLeftRailPreview .muted,
+.caseLeft.caseLeft--rail .caseLeftContactMeta .muted {
+  color: var(--case-rail-muted) !important;
+  opacity: 1 !important;
+}
+
+.caseLeft.caseLeft--rail .accBody strong,
+.caseLeft.caseLeft--rail .listTitle,
+.caseLeft.caseLeft--rail .caseFinanceBalance,
+.caseLeft.caseLeft--rail .caseFinanceBalance--ok,
+.caseLeft.caseLeft--rail .caseFinanceBalance--ok strong {
+  color: var(--case-rail-text) !important;
+}
+
+.caseLeft.caseLeft--rail .caseFinanceBalance--dr,
+.caseLeft.caseLeft--rail .caseFinanceBalance--dr strong {
+  color: #fca5a5 !important;
+}
+
+html:not(.dark) .caseLeft.caseLeft--rail .caseFinanceBalance--dr,
+html:not(.dark) .caseLeft.caseLeft--rail .caseFinanceBalance--dr strong {
+  color: #b91c1c !important;
+}
+
+.caseLeft.caseLeft--rail .listCard {
+  background: var(--case-rail-raised) !important;
+  border-color: var(--case-rail-sep) !important;
+}
+
+/* Rail actions are secondary — never yellow, even if a button still has .primary. */
+.caseLeft.caseLeft--rail .accBody .btn,
+.caseLeft.caseLeft--rail .accBody .btn.primary,
+.caseLeft.caseLeft--rail .caseLeftCompactBtn,
+.caseLeft.caseLeft--rail .caseLeftCompactBtn.primary {
+  background: var(--case-rail-raised) !important;
+  border-color: var(--case-rail-border) !important;
+  color: var(--case-rail-text) !important;
+  box-shadow: none !important;
+}
+
+.caseLeft.caseLeft--rail .accBody .btn:hover:not(:disabled),
+.caseLeft.caseLeft--rail .accBody .btn.primary:hover:not(:disabled),
+.caseLeft.caseLeft--rail .caseLeftCompactBtn:hover:not(:disabled),
+.caseLeft.caseLeft--rail .caseLeftCompactBtn.primary:hover:not(:disabled) {
+  background: var(--case-rail-hover) !important;
+  border-color: var(--case-rail-border) !important;
+  color: var(--case-rail-text) !important;
+}
+
+.caseLeft.caseLeft--rail > .card.caseMatterSections {
+  border-top: 1px solid var(--case-rail-sep);
+}
+
+/* Contacts rail: flatten nested cards — row + separator, not card-in-card. */
+.caseLeft.caseLeft--rail .caseLeftContactCard.listCard {
+  background: transparent !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  padding: 8px 0 !important;
+  border-bottom: 1px solid var(--case-rail-sep) !important;
+  gap: 8px;
+}
+
+.caseLeft.caseLeft--rail .caseLeftContactsList > .caseLeftContactCard.listCard:last-child {
+  border-bottom: 0 !important;
+}
+
+/* ── Tasks: quieter tint + badge clarity ───────────────────────── */
+
+.taskMenuRow--overdue {
+  background: rgba(220, 38, 38, 0.10) !important;
+}
+
+.taskMenuRow--done {
+  background: rgba(22, 163, 74, 0.12) !important;
+}
+
+.taskPriorityBadge,
+.taskDoneBadge,
+.docStatusChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  line-height: 1.35;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+.taskPriorityBadge--high {
+  background: rgba(220, 38, 38, 0.12);
+  color: #b91c1c;
+}
+
+.taskPriorityBadge--normal {
+  background: rgba(100, 116, 139, 0.12);
+  color: #475569;
+}
+
+.taskPriorityBadge--low {
+  background: rgba(37, 99, 235, 0.12);
+  color: #1d4ed8;
+}
+
+.taskDoneBadge {
+  background: rgba(22, 163, 74, 0.12);
+  color: #15803d;
+  margin-left: 6px;
+}
+
+.docStatusChip--outstanding {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+.docStatusChip--complete {
+  background: #dcfce7;
+  color: #15803d;
+}
+
+.docStatusChip--declined,
+.docStatusChip--cancelled {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+.docStatusChip--expired,
+.docStatusChip--error {
+  background: #ffedd5;
+  color: #c2410c;
+}
+
+.docStatusChip--neutral {
+  background: #e2e8f0;
+  color: #475569;
+}
+
+.docsDescSub.portalQuoteFileStatus {
+  margin-top: 2px;
+}
+
+.taskColourLegend {
+  font-size: 0.72rem;
+}
+
+.taskColourSwatch--overdue {
+  background: rgba(220, 38, 38, 0.18);
+}
+
+.taskColourSwatch--done {
+  background: rgba(22, 163, 74, 0.2);
+}
+
+/* ── Shared segmented controls (Accounts tabs, ledger filters, calendar views) ── */
+
+.accountsTabSelect,
+.ledgerFilterGroup {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 10px;
+  background: #e8eef8;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+}
+
+html.dark .accountsTabSelect,
+html.dark .ledgerFilterGroup {
+  background: rgba(15, 23, 42, 0.45);
+  border-color: rgba(148, 163, 184, 0.22);
+}
+
+.accountsTabBtn,
+.ledgerFilterGroup .btn {
+  border-radius: 8px !important;
+  border: 1px solid transparent !important;
+  background: transparent !important;
+  color: #334155 !important;
+  font-weight: 650 !important;
+  font-size: 0.84rem !important;
+  padding: 6px 12px !important;
+  box-shadow: none !important;
+  min-height: 32px;
+}
+
+html.dark .accountsTabBtn,
+html.dark .ledgerFilterGroup .btn {
+  color: #e2e8f0 !important;
+}
+
+.accountsTabBtn:hover:not(:disabled),
+.ledgerFilterGroup .btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.65) !important;
+  color: var(--local-ink, #0f172a) !important;
+}
+
+html.dark .accountsTabBtn:hover:not(:disabled),
+html.dark .ledgerFilterGroup .btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.08) !important;
+  color: #f1f5f9 !important;
+}
+
+.accountsTabBtn--active,
+.ledgerFilterActive,
+.ledgerFilterGroup .btn.ledgerFilterActive {
+  background: var(--select-fill) !important;
+  border-color: var(--select-border) !important;
+  color: var(--select-ink) !important;
+}
+
+.canaryCalendar .fc .fc-button-group {
+  gap: 4px;
+}
+
+.canaryCalendar .fc .fc-button {
+  border-radius: 8px !important;
+  font-weight: 650 !important;
+  font-size: 0.84rem !important;
+  padding: 6px 12px !important;
+  box-shadow: none !important;
+  text-transform: none !important;
+}
+
+.canaryCalendar .fc .fc-button-primary:not(:disabled).fc-button-active,
+.canaryCalendar .fc .fc-button-primary:not(:disabled).fc-button-active:focus {
+  background: var(--select-fill) !important;
+  border-color: var(--select-border) !important;
+  color: var(--select-ink) !important;
+}
+
+.canaryCalendar .fc .fc-toolbar.fc-header-toolbar {
+  gap: 8px;
+}
+
+/* ── Forms: contrast + constrained width ───────────────────────── */
+
+.caseDocEditEmbed,
+.caseDocPanelHost .card.caseDocEditEmbed,
+.caseDocPropertyEmbed {
+  max-width: 36rem;
+}
+
+html.dark .finAddItemBtn {
+  color: #93c5fd !important;
+}
+html.dark .finAddItemBtn:hover:not(:disabled) {
+  color: #bfdbfe !important;
+}
+
+.caseDocEditEmbed .field,
+.caseDocPanelHost .field {
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.caseDocEditEmbed .field > span,
+.caseDocPanelHost .field > span:first-child,
+.GlobalContactCreateForm .field > span,
+.contactsPage .field > span {
+  color: #334155;
+  font-weight: 600;
+  font-size: 0.84rem;
+}
+
+.caseDocEditEmbed .muted,
+.caseDocPanelHost .muted {
+  color: #475569;
+}
+
+.caseDocEditEmbed .stack > .field + .field,
+.caseDocPanelHost .stack > .field + .field {
+  margin-top: 4px;
+}
+
+/* Column headers: keep existing list uppercase; document history already title-case —
+   no force-change here beyond slightly quieter th weight for consistency. */
+.mainMenuShell--mainMenu .tr.th .thbtn {
+  font-weight: 650;
+  letter-spacing: 0.04em;
+}

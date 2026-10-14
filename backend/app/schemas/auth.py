@@ -119,6 +119,9 @@ class UserUiPreferencesUpdate(BaseModel):
     main_menu_filter_matter_types: list[str] | None = None
     main_menu_filter_fee_earner_user_ids: list[str] | None = None
     main_menu_filter_case_statuses: list[Literal["open", "closed", "archived", "quote", "quote_closed", "post_completion"]] | None = None
+    portal_summary_filter_kinds: list[str] | None = None
+    portal_summary_filter_sender_user_ids: list[str] | None = None
+    portal_summary_filter_fee_earner_user_ids: list[str] | None = None
     tasks_menu_search: str | None = Field(default=None, max_length=500)
     tasks_menu_filter_matter_type: str | None = Field(default=None, max_length=200)
     contacts_search: str | None = Field(default=None, max_length=500)

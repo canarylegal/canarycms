@@ -21,6 +21,7 @@ _TASK_SORT_KEYS = frozenset({"reference", "client", "matter", "task", "date", "a
 _MAIN_MENU_SORT_KEYS = frozenset({"reference", "client", "matter", "feeEarner", "status", "created"})
 _CONTACTS_SORT_KEYS = frozenset({"name", "type", "email", "phone"})
 _CASE_STATUS_FILTERS = frozenset({"", "open", "closed", "archived", "quote", "quote_closed", "post_completion"})
+_PORTAL_SUMMARY_KINDS = frozenset({"quote", "form", "canary_sign", "docusign"})
 _SORT_DIRS = frozenset({"asc", "desc"})
 
 MAIN_MENU_COLUMN_WIDTHS_DEFAULT = [110, 165, 300, 130, 225]
@@ -58,6 +59,9 @@ class UserUiPreferencesOut(BaseModel):
     main_menu_filter_matter_types: list[str] = Field(default_factory=list)
     main_menu_filter_fee_earner_user_ids: list[str] = Field(default_factory=list)
     main_menu_filter_case_statuses: list[CaseStatusFilter] = Field(default_factory=list)
+    portal_summary_filter_kinds: list[str] = Field(default_factory=list)
+    portal_summary_filter_sender_user_ids: list[str] = Field(default_factory=list)
+    portal_summary_filter_fee_earner_user_ids: list[str] = Field(default_factory=list)
     tasks_menu_search: str = ""
     tasks_menu_filter_matter_type: str = ""
     contacts_search: str = ""
@@ -94,6 +98,9 @@ class UserUiPreferencesPatch(BaseModel):
     main_menu_filter_matter_types: list[str] | None = None
     main_menu_filter_fee_earner_user_ids: list[str] | None = None
     main_menu_filter_case_statuses: list[CaseStatusFilter] | None = None
+    portal_summary_filter_kinds: list[str] | None = None
+    portal_summary_filter_sender_user_ids: list[str] | None = None
+    portal_summary_filter_fee_earner_user_ids: list[str] | None = None
     tasks_menu_search: str | None = None
     tasks_menu_filter_matter_type: str | None = None
     contacts_search: str | None = None
@@ -211,6 +218,16 @@ def _pick_case_status_list(raw: Any) -> list[str]:
     return out
 
 
+def _pick_portal_summary_kind_list(raw: Any) -> list[str]:
+    if not isinstance(raw, list):
+        return []
+    out: list[str] = []
+    for item in raw:
+        if isinstance(item, str) and item in _PORTAL_SUMMARY_KINDS and item not in out:
+            out.append(item)
+    return out
+
+
 def _legacy_main_menu_matter_types(data: dict[str, Any]) -> list[str]:
     from_list = _pick_filter_text_list(data.get("main_menu_filter_matter_types"))
     if from_list:
@@ -255,6 +272,13 @@ def user_ui_preferences_out(stored: dict[str, Any] | None) -> UserUiPreferencesO
         main_menu_filter_matter_types=_legacy_main_menu_matter_types(data),
         main_menu_filter_fee_earner_user_ids=_legacy_main_menu_fee_earner_ids(data),
         main_menu_filter_case_statuses=_legacy_main_menu_case_statuses(data),  # type: ignore[arg-type]
+        portal_summary_filter_kinds=_pick_portal_summary_kind_list(data.get("portal_summary_filter_kinds")),
+        portal_summary_filter_sender_user_ids=_pick_fee_earner_id_list(
+            data.get("portal_summary_filter_sender_user_ids")
+        ),
+        portal_summary_filter_fee_earner_user_ids=_pick_fee_earner_id_list(
+            data.get("portal_summary_filter_fee_earner_user_ids")
+        ),
         tasks_menu_search=_pick_search(data.get("tasks_menu_search")),
         tasks_menu_filter_matter_type=_pick_filter_text(data.get("tasks_menu_filter_matter_type")),
         contacts_search=_pick_search(data.get("contacts_search")),
@@ -307,6 +331,19 @@ def merge_ui_preferences_patch(
         )
     if "main_menu_filter_case_statuses" in updates and updates["main_menu_filter_case_statuses"] is not None:
         updates["main_menu_filter_case_statuses"] = _pick_case_status_list(updates["main_menu_filter_case_statuses"])
+    if "portal_summary_filter_kinds" in updates and updates["portal_summary_filter_kinds"] is not None:
+        updates["portal_summary_filter_kinds"] = _pick_portal_summary_kind_list(updates["portal_summary_filter_kinds"])
+    if "portal_summary_filter_sender_user_ids" in updates and updates["portal_summary_filter_sender_user_ids"] is not None:
+        updates["portal_summary_filter_sender_user_ids"] = _pick_fee_earner_id_list(
+            updates["portal_summary_filter_sender_user_ids"]
+        )
+    if (
+        "portal_summary_filter_fee_earner_user_ids" in updates
+        and updates["portal_summary_filter_fee_earner_user_ids"] is not None
+    ):
+        updates["portal_summary_filter_fee_earner_user_ids"] = _pick_fee_earner_id_list(
+            updates["portal_summary_filter_fee_earner_user_ids"]
+        )
     if "calendar_selected_calendar_ids" in updates and updates["calendar_selected_calendar_ids"] is not None:
         updates["calendar_selected_calendar_ids"] = _normalize_id_list(updates["calendar_selected_calendar_ids"])
     if "main_menu_column_widths" in updates and updates["main_menu_column_widths"] is not None:

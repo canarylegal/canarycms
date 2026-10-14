@@ -35,6 +35,9 @@ export type UserUiPreferences = {
   main_menu_filter_matter_types: string[]
   main_menu_filter_fee_earner_user_ids: string[]
   main_menu_filter_case_statuses: MainMenuCaseStatusFilter[]
+  portal_summary_filter_kinds: string[]
+  portal_summary_filter_sender_user_ids: string[]
+  portal_summary_filter_fee_earner_user_ids: string[]
   tasks_menu_search: string
   tasks_menu_filter_matter_type: string
   contacts_search: string
@@ -64,6 +67,9 @@ export const DEFAULT_UI_PREFERENCES: UserUiPreferences = {
   main_menu_filter_matter_types: [],
   main_menu_filter_fee_earner_user_ids: [],
   main_menu_filter_case_statuses: [],
+  portal_summary_filter_kinds: [],
+  portal_summary_filter_sender_user_ids: [],
+  portal_summary_filter_fee_earner_user_ids: [],
   tasks_menu_search: '',
   tasks_menu_filter_matter_type: '',
   contacts_search: '',
@@ -126,6 +132,7 @@ const CASE_STATUS_FILTERS = new Set<CaseStatusFilter>([
   'post_completion',
 ])
 const SORT_DIRS = new Set<SortDir>(['asc', 'desc'])
+const PORTAL_SUMMARY_KINDS = new Set(['quote', 'form', 'canary_sign', 'docusign'])
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
@@ -175,6 +182,15 @@ function pickCaseStatusList(raw: unknown): MainMenuCaseStatusFilter[] {
       const v = item as MainMenuCaseStatusFilter
       if (!out.includes(v)) out.push(v)
     }
+  }
+  return out
+}
+
+function pickPortalSummaryKindList(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return []
+  const out: string[] = []
+  for (const item of raw) {
+    if (typeof item === 'string' && PORTAL_SUMMARY_KINDS.has(item) && !out.includes(item)) out.push(item)
   }
   return out
 }
@@ -243,6 +259,9 @@ export function normalizeUiPreferences(raw: unknown): UserUiPreferences {
     main_menu_filter_matter_types: legacyMainMenuMatterTypes(data),
     main_menu_filter_fee_earner_user_ids: legacyMainMenuFeeEarnerIds(data),
     main_menu_filter_case_statuses: legacyMainMenuCaseStatuses(data),
+    portal_summary_filter_kinds: pickPortalSummaryKindList(data.portal_summary_filter_kinds),
+    portal_summary_filter_sender_user_ids: pickFeeEarnerIdList(data.portal_summary_filter_sender_user_ids),
+    portal_summary_filter_fee_earner_user_ids: pickFeeEarnerIdList(data.portal_summary_filter_fee_earner_user_ids),
     tasks_menu_search: pickSearch(data.tasks_menu_search),
     tasks_menu_filter_matter_type: pickFilterText(data.tasks_menu_filter_matter_type),
     contacts_search: pickSearch(data.contacts_search),

@@ -13,6 +13,12 @@ const FIN_DIRECTION_OPTIONS = [
   { value: 'credit', label: 'Credit' },
 ] as const
 
+export type FinanceEmbeddedActions = {
+  busy: boolean
+  save: () => void
+  discard: () => void
+}
+
 interface Props {
   caseId: string
   token: string
@@ -20,6 +26,11 @@ interface Props {
   onSaved?: () => void
   /** In the case documents panel: show full-page totals and no duplicate modal title bar. */
   embedded?: boolean
+  /**
+   * When set (embedded matter panel), Save/Discard are omitted from the body so the parent
+   * chrome can host them consistently with Property.
+   */
+  onEmbeddedActionsChange?: (actions: FinanceEmbeddedActions | null) => void
 }
 
 type ItemDraft = {
@@ -42,7 +53,7 @@ function pence(p: number): string {
   return `£${(p / 100).toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 }
 
-export function FinancePage({ caseId, token, onSaved, embedded = false }: Props) {
+export function FinancePage({ caseId, token, onSaved, embedded = false, onEmbeddedActionsChange }: Props) {
   const { askConfirm, alert } = useDialogs()
   const [finance, setFinance] = useState<FinanceOut | null>(null)
   const [drafts, setDrafts] = useState<Record<string, ItemDraft>>({})
@@ -304,6 +315,23 @@ export function FinancePage({ caseId, token, onSaved, embedded = false }: Props)
     if (finance) initDrafts(finance)
   }
 
+  const hostChromeActions = Boolean(onEmbeddedActionsChange)
+  const embeddedActionsApi = useMemo<FinanceEmbeddedActions>(
+    () => ({
+      busy,
+      save: () => void save(),
+      discard: discardChanges,
+    }),
+    // Re-bind when draft/busy state changes so chrome Save posts current values.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- save/discard close over latest drafts
+    [busy, finance, drafts, catDrafts, caseId, token, onSaved],
+  )
+  useEffect(() => {
+    if (!onEmbeddedActionsChange) return
+    onEmbeddedActionsChange(embeddedActionsApi)
+    return () => onEmbeddedActionsChange(null)
+  }, [onEmbeddedActionsChange, embeddedActionsApi])
+
   async function generateCompletionStatement() {
     if (!finance) return
     setGenBusy(true); setError(null)
@@ -449,15 +477,14 @@ export function FinancePage({ caseId, token, onSaved, embedded = false }: Props)
         </div>
       ) : null}
 
-      {embedded && onSaved ? (
+      {embedded && onSaved && !hostChromeActions ? (
         <div className="row" style={{ justifyContent: 'flex-end', flexWrap: 'wrap', gap: 8, marginBottom: 4 }}>
           <button type="button" className="btn" disabled={busy} onClick={discardChanges}>
             Discard changes
           </button>
           <button
             type="button"
-            className="btn"
-            style={{ background: 'var(--primary)', color: 'var(--text-on-primary)', borderColor: 'var(--primary)' }}
+            className="btn primary"
             disabled={busy}
             onClick={() => void save()}
           >
@@ -518,52 +545,6 @@ export function FinancePage({ caseId, token, onSaved, embedded = false }: Props)
             title="Save current values and generate a completion statement in Word format"
           >
             {genBusy ? 'Generating…' : 'Generate completion statement'}
-          </button>
-          <button
-            type="button"
-            className="btn"
-            disabled={busy || genBusy || !finance}
-            title="Post debit finance lines with amounts as anticipated office disbursements on the matter ledger"
-            onClick={() =>
-              void (async () => {
-                if (!finance) return
-                const itemIds = finance.categories
-                  .filter((c) => !c.credit_only)
-                  .flatMap((c) => c.items)
-                  .filter((i) => i.direction === 'debit' && (i.amount_pence || 0) > 0)
-                  .map((i) => i.id)
-                if (itemIds.length === 0) {
-                  await alert('No debit lines with amounts to post.', 'Post to ledger')
-                  return
-                }
-                const ok = await askConfirm({
-                  title: 'Post to ledger',
-                  message: `Post ${itemIds.length} debit line(s) to the office ledger as anticipated disbursements?`,
-                  confirmLabel: 'Post',
-                })
-                if (!ok) return
-                setBusy(true)
-                setError(null)
-                try {
-                  await apiFetch(`/cases/${caseId}/finance/post-to-ledger`, {
-                    token,
-                    method: 'POST',
-                    json: {
-                      item_ids: itemIds,
-                      ledger_account: 'office',
-                      anticipated: true,
-                    },
-                  })
-                  await alert('Posted to ledger as anticipated items.', 'Post to ledger')
-                } catch (e) {
-                  setError((e as ApiError).message ?? 'Could not post to ledger')
-                } finally {
-                  setBusy(false)
-                }
-              })()
-            }
-          >
-            Post debits to ledger
           </button>
         </div>
       </div>

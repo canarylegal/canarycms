@@ -74,6 +74,15 @@ export type CanarySignAcroFormFieldOut = {
   options: string[]
   current_value?: string
   multiline?: boolean
+  /** On-state for one widget in a multi-option button group (Included / Excluded / None). */
+  export_value?: string
+}
+
+export type PortalCanarySignSignerSummary = {
+  name: string
+  email?: string
+  status: string
+  signed_at?: string | null
 }
 
 export type PortalCanarySignOut = {
@@ -83,10 +92,12 @@ export type PortalCanarySignOut = {
   status_detail?: string | null
   order_mode?: string
   expires_at?: string | null
+  completed_at?: string | null
   can_sign: boolean
   recipient_id: string
   recipient_name?: string | null
   recipient_status?: string
+  recipient_signed_at?: string | null
   sign_token: string
   matter_label?: string
   case_id?: string | null
@@ -102,6 +113,9 @@ export type PortalCanarySignOut = {
   form_completed?: boolean
   can_edit_form?: boolean
   can_claim_form_lock?: boolean
+  has_signed_document?: boolean
+  has_certificate?: boolean
+  signers?: PortalCanarySignSignerSummary[]
 }
 
 export type PortalClientActionItemOut = {
@@ -113,6 +127,8 @@ export type PortalClientActionItemOut = {
   badge?: string
   href_key?: string
   case_id?: string | null
+  /** Sent / completed / responded timestamp for distinguishing repeats. */
+  occurred_at?: string | null
 }
 
 export type PortalClientActionsOut = {

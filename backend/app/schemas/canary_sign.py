@@ -136,6 +136,15 @@ class CanarySignAcroFormFieldOut(BaseModel):
     options: list[str] = []
     current_value: str = ""
     multiline: bool = False
+    # For radio-style checkbox groups (e.g. Included / Excluded / None kids of one field).
+    export_value: str = ""
+
+class PortalCanarySignSignerSummaryOut(BaseModel):
+    name: str
+    email: str = ""
+    status: str = "pending"
+    signed_at: datetime | None = None
+
 
 class PortalCanarySignOut(BaseModel):
     id: uuid.UUID
@@ -144,10 +153,12 @@ class PortalCanarySignOut(BaseModel):
     status_detail: str | None = None
     order_mode: str = "parallel"
     expires_at: datetime | None = None
+    completed_at: datetime | None = None
     can_sign: bool
     recipient_id: uuid.UUID
     recipient_name: str = ""
     recipient_status: str = "pending"
+    recipient_signed_at: datetime | None = None
     sign_token: str
     matter_label: str = ""
     case_id: uuid.UUID | None = None
@@ -163,6 +174,9 @@ class PortalCanarySignOut(BaseModel):
     form_completed: bool = False
     can_edit_form: bool = False
     can_claim_form_lock: bool = False
+    has_signed_document: bool = False
+    has_certificate: bool = False
+    signers: list[PortalCanarySignSignerSummaryOut] = []
 
 class PortalCanarySignExchangeIn(BaseModel):
     sign_token: str = Field(min_length=10, max_length=128)
@@ -193,6 +207,8 @@ class PortalClientActionItemOut(BaseModel):
     badge: str = ""
     href_key: str = ""
     case_id: uuid.UUID | None = None
+    # Sent / completed / responded time for distinguishing repeats in lists.
+    occurred_at: datetime | None = None
 
 class PortalClientActionsOut(BaseModel):
     outstanding: list[PortalClientActionItemOut] = []

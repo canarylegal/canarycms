@@ -18,7 +18,10 @@ export type PortalSummaryRowOut = {
   title: string
   status: string
   contact_or_recipients?: string
+  sent_by_user_id?: string | null
   sent_by_display_name?: string | null
+  fee_earner_user_id?: string | null
+  fee_earner_display_name?: string | null
   created_at?: string | null
   /** Present for quote rows — used to call quote-portal resend. */
   file_id?: string | null

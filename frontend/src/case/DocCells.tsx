@@ -179,6 +179,23 @@ function canarySignStatusLabel(d: CanarySignSigningRequestOut): string {
   }
 }
 
+function docStatusChipTone(
+  label: string,
+): 'outstanding' | 'complete' | 'declined' | 'cancelled' | 'expired' | 'error' | 'neutral' {
+  const s = label.toLowerCase()
+  if (s.includes('outstanding') || s.includes('awaiting') || s.includes('pending')) return 'outstanding'
+  if (s.includes('complete') || s.includes('signed') || s.includes('accepted')) return 'complete'
+  if (s.includes('declined')) return 'declined'
+  if (s.includes('cancelled') || s.includes('voided')) return 'cancelled'
+  if (s.includes('expired')) return 'expired'
+  if (s.includes('error')) return 'error'
+  return 'neutral'
+}
+
+function DocStatusChip({ label }: { label: string }) {
+  return <span className={`docStatusChip docStatusChip--${docStatusChipTone(label)}`}>{label}</span>
+}
+
 export function DocsFileDescCell({ f, showPin }: { f: FileSummary; showPin: boolean }) {
   const sub = fileMailFromSubline(f)
   const quoteSub = f.quote_portal_delivery ? quotePortalStatusLabel(f.quote_portal_delivery) : null
@@ -208,16 +225,30 @@ export function DocsFileDescCell({ f, showPin }: { f: FileSummary; showPin: bool
           <div className="docsDescTextBlock">
             <span className="docsDescName">{displayName}</span>
             {sub ? <div className="docsDescSub muted">{sub}</div> : null}
-            {quoteSub ? <div className="docsDescSub muted portalQuoteFileStatus">{quoteSub}</div> : null}
-            {formSub && !quoteSub ? <div className="docsDescSub muted portalQuoteFileStatus">{formSub}</div> : null}
+            {quoteSub ? (
+              <div className="docsDescSub portalQuoteFileStatus">
+                <DocStatusChip label={quoteSub} />
+              </div>
+            ) : null}
+            {formSub && !quoteSub ? (
+              <div className="docsDescSub portalQuoteFileStatus">
+                <DocStatusChip label={formSub} />
+              </div>
+            ) : null}
             {canarySub && !quoteSub && !formSub ? (
-              <div className="docsDescSub muted portalQuoteFileStatus">{canarySub}</div>
+              <div className="docsDescSub portalQuoteFileStatus">
+                <DocStatusChip label={canarySub} />
+              </div>
             ) : null}
             {docusignSub && !quoteSub && !formSub && !canarySub ? (
-              <div className="docsDescSub muted portalQuoteFileStatus">{docusignSub}</div>
+              <div className="docsDescSub portalQuoteFileStatus">
+                <DocStatusChip label={docusignSub} />
+              </div>
             ) : null}
             {caseraSub && !quoteSub && !formSub && !canarySub && !docusignSub ? (
-              <div className="docsDescSub muted portalQuoteFileStatus">{caseraSub}</div>
+              <div className="docsDescSub portalQuoteFileStatus">
+                <DocStatusChip label={caseraSub} />
+              </div>
             ) : null}
           </div>
         </div>

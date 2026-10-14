@@ -43,7 +43,9 @@ from app.portal_auth_service import (
 from app.portal_browse_service import (
     browse_grant as browse_grant_service,
     canary_request_for_contact,
+    canary_sign_certificate_pdf as canary_sign_certificate_pdf_service,
     canary_sign_pdf as canary_sign_pdf_service,
+    canary_sign_signed_pdf as canary_sign_signed_pdf_service,
     client_actions as client_actions_service,
     download_file as download_file_service,
     download_grant_zip as download_grant_zip_service,
@@ -319,10 +321,28 @@ def portal_get_form(
     contact: Contact = Depends(get_portal_contact),
     db: Session = Depends(get_db),
 ) -> PortalFormDetailOut:
+    """Return a pending form for completion, or a completed/voided form as read-only."""
     sub = get_submission_for_contact(db, submission_id, contact.id)
-    if sub.status != PortalFormSubmissionStatus.pending:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Form is not pending")
+    if sub.status not in (
+        PortalFormSubmissionStatus.pending,
+        PortalFormSubmissionStatus.completed,
+        PortalFormSubmissionStatus.voided,
+        PortalFormSubmissionStatus.superseded,
+    ):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Form is not available")
     return PortalFormDetailOut.model_validate(portal_form_detail(db, sub))
+
+
+@router.get("/forms/{submission_id}/snapshot")
+def portal_download_form_snapshot(
+    submission_id: uuid.UUID,
+    contact: Contact = Depends(get_portal_contact),
+    db: Session = Depends(get_db),
+) -> FileResponse:
+    """Download the completed-form DOCX snapshot for the submitting contact."""
+    from app.portal_form_service import download_submission_snapshot
+
+    return download_submission_snapshot(db, submission_id=submission_id, contact=contact)
 
 
 @router.post("/forms/{submission_id}/submit", response_model=PortalFormSubmissionOut)
@@ -543,6 +563,24 @@ def portal_canary_sign_pdf(
     db: Session = Depends(get_db),
 ):
     return canary_sign_pdf_service(request_id, contact, db)
+
+
+@router.get("/canary-sign/{request_id}/signed-pdf")
+def portal_canary_sign_signed_pdf(
+    request_id: uuid.UUID,
+    contact: Contact = Depends(get_portal_contact),
+    db: Session = Depends(get_db),
+):
+    return canary_sign_signed_pdf_service(request_id, contact, db)
+
+
+@router.get("/canary-sign/{request_id}/certificate")
+def portal_canary_sign_certificate(
+    request_id: uuid.UUID,
+    contact: Contact = Depends(get_portal_contact),
+    db: Session = Depends(get_db),
+):
+    return canary_sign_certificate_pdf_service(request_id, contact, db)
 
 
 @router.post("/canary-sign/{request_id}/form/lock", response_model=PortalCanarySignOut)

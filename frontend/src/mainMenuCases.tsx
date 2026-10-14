@@ -411,7 +411,7 @@ export function CasesTable({
             </div>
           )
         })}
-        {rows.length === 0 ? <div className="muted" style={{ padding: 12 }}>No matters match.</div> : null}
+        {rows.length === 0 ? <div className="muted" style={{ padding: 12 }}>No cases match.</div> : null}
         </div>
       </div>
       {caseCtx ? (

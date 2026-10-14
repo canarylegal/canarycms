@@ -380,7 +380,7 @@ export function AppSidebar({
           layout="sidebar"
           collapsed={!expanded}
           name="main-menu"
-          label="Matters"
+          label="Cases"
           active={view === 'main-menu' || (view === 'case-menu' && !caseMenuQuoteContext)}
           onClick={goMainMenu}
         />

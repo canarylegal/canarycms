@@ -86,6 +86,9 @@ export type UserUiPreferencesOut = {
   main_menu_filter_matter_types: string[]
   main_menu_filter_fee_earner_user_ids: string[]
   main_menu_filter_case_statuses: Exclude<CaseStatusFilter, ''>[]
+  portal_summary_filter_kinds: string[]
+  portal_summary_filter_sender_user_ids: string[]
+  portal_summary_filter_fee_earner_user_ids: string[]
   tasks_menu_search: string
   tasks_menu_filter_matter_type: string
   contacts_search: string

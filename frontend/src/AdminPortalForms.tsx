@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { apiFetch } from './api'
 import type { ApiError } from './api'
+import { PortalFormLocalPreview } from './PortalFormFillPanel'
 import { SingleSelectDropdown } from './SingleSelectDropdown'
 import {
   GLOBAL_PRECEDENT_SCOPE,
   type MatterHeadTypeOut,
+  type PortalFormFieldOut,
   type PortalFormFieldType,
   type PortalFormTemplateDetailOut,
   type PortalFormTemplateFieldIn,
@@ -100,7 +102,7 @@ export function AdminPortalForms({ token }: { token: string }) {
   const [subId, setSubId] = useState('')
   const [fields, setFields] = useState<FieldDraft[]>([emptyField(0)])
   const [selectedFieldIndex, setSelectedFieldIndex] = useState(0)
-  const [showClientPreview, setShowClientPreview] = useState(false)
+  const [showClientPreview, setShowClientPreview] = useState(true)
   const [headOpen, setHeadOpen] = useState(false)
   const [subOpen, setSubOpen] = useState(false)
   const [saveOk, setSaveOk] = useState(false)
@@ -156,7 +158,7 @@ export function AdminPortalForms({ token }: { token: string }) {
     setSubId('')
     setFields([emptyField(0)])
     setSelectedFieldIndex(0)
-    setShowClientPreview(false)
+    setShowClientPreview(true)
     setSaveOk(false)
     setErr(null)
   }
@@ -180,7 +182,7 @@ export function AdminPortalForms({ token }: { token: string }) {
       setSubId(scope.subId)
       setFields(fieldsFromDetail(detail).length > 0 ? fieldsFromDetail(detail) : [emptyField(0)])
       setSelectedFieldIndex(0)
-      setShowClientPreview(false)
+      setShowClientPreview(true)
       setEditorOpen(true)
       setSaveOk(false)
     } catch (e) {
@@ -448,29 +450,22 @@ export function AdminPortalForms({ token }: { token: string }) {
                   </div>
                 </div>
                 {showClientPreview ? (
-                  <div className="card" style={{ padding: 12, marginBottom: 10, background: 'var(--panel2, rgba(15,23,42,0.03))' }}>
-                    <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>
-                      Client view (labels and help only — not interactive)
-                    </div>
-                    <div className="stack" style={{ gap: 10 }}>
-                      {description.trim() ? <p style={{ margin: 0 }}>{description.trim()}</p> : null}
-                      {fields.map((f, i) =>
-                        f.field_type === 'section' ? (
-                          <h4 key={`prev-${i}`} style={{ margin: '8px 0 0' }}>
-                            {f.label || 'Section'}
-                          </h4>
-                        ) : (
-                          <label key={`prev-${i}`} className="field">
-                            <span>
-                              {f.label || 'Untitled field'}
-                              {f.required ? ' *' : ''}
-                            </span>
-                            {f.help_text ? <div className="muted" style={{ fontSize: 12 }}>{f.help_text}</div> : null}
-                            <div className="input" style={{ opacity: 0.55, minHeight: 32 }} />
-                          </label>
-                        ),
+                  <div style={{ marginBottom: 10 }}>
+                    <PortalFormLocalPreview
+                      title={name.trim() || 'Untitled form'}
+                      description={description}
+                      fields={fields.map(
+                        (f, i): PortalFormFieldOut => ({
+                          field_key: f.field_key.trim() || `preview_${i}`,
+                          label: f.label.trim() || `Field ${i + 1}`,
+                          field_type: f.field_type,
+                          help_text: f.help_text,
+                          required: Boolean(f.required),
+                          sort_order: f.sort_order ?? i,
+                          select_options: f.select_options,
+                        }),
                       )}
-                    </div>
+                    />
                   </div>
                 ) : null}
                 <div className="row" style={{ gap: 12, alignItems: 'flex-start', flexWrap: 'wrap' }}>

@@ -26,6 +26,42 @@ function priorityLabel(p: string): string {
   return 'Normal'
 }
 
+function PriorityBadge({ priority }: { priority: string }) {
+  const p = priority === 'high' || priority === 'low' ? priority : 'normal'
+  return <span className={`taskPriorityBadge taskPriorityBadge--${p}`}>{priorityLabel(p)}</span>
+}
+
+/** UK calendar day as YYYY-MM-DD (Europe/London). */
+function ukTodayYmd(): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Europe/London',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date())
+}
+
+function taskDueYmd(iso: string | null | undefined): string | null {
+  if (!iso) return null
+  const d = String(iso).slice(0, 10)
+  return /^\d{4}-\d{2}-\d{2}$/.test(d) ? d : null
+}
+
+/** Open task with due date before today (UK). Completed tasks are never overdue. */
+function isTaskOverdue(r: Pick<TaskMenuRow, 'status' | 'date'>): boolean {
+  if (r.status === 'done') return false
+  const due = taskDueYmd(r.date)
+  if (!due) return false
+  return due < ukTodayYmd()
+}
+
+/** Row tint: completed wins; else overdue. Priority is badge-only. */
+function taskRowTintClass(r: Pick<TaskMenuRow, 'status' | 'date'>): string {
+  if (r.status === 'done') return 'taskMenuRow--done'
+  if (isTaskOverdue(r)) return 'taskMenuRow--overdue'
+  return ''
+}
+
 export function TasksTable({
   token,
   currentUserId,
@@ -389,12 +425,7 @@ export function TasksTable({
                 <div style={{ fontWeight: 600, marginBottom: 8, fontSize: 14 }}>{col}</div>
                 <div className="stack" style={{ gap: 8 }}>
                   {(kanbanBuckets.get(col) ?? []).map((r) => {
-                    const rowCls =
-                      r.status === 'done'
-                        ? 'taskMenuRow--done'
-                        : (r.priority ?? 'normal') === 'high'
-                          ? 'taskMenuRow--high'
-                          : ''
+                    const rowCls = taskRowTintClass(r)
                     return (
                       <div
                         key={r.id}
@@ -435,9 +466,10 @@ export function TasksTable({
                             {r.task_title}
                           </button>
                         </div>
-                        <div className="muted" style={{ fontSize: 12 }}>
-                          {formatTaskMenuDate(r.date)} · {priorityLabel(r.priority ?? 'normal')}
-                          {r.assigned_display_name ? ` · ${r.assigned_display_name}` : ''}
+                        <div className="muted" style={{ fontSize: 12, display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
+                          <span>{formatTaskMenuDate(r.date)}</span>
+                          <PriorityBadge priority={r.priority ?? 'normal'} />
+                          {r.assigned_display_name ? <span>· {r.assigned_display_name}</span> : null}
                         </div>
                         {!suppressCaseOpen ? (
                           <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
@@ -493,12 +525,7 @@ export function TasksTable({
             ))}
           </div>
           {visible.map((r) => {
-            const rowCls =
-              r.status === 'done'
-                ? 'taskMenuRow--done'
-                : (r.priority ?? 'normal') === 'high'
-                  ? 'taskMenuRow--high'
-                  : ''
+            const rowCls = taskRowTintClass(r)
             const rowActive = taskRowFocusId === r.id
             return (
               <div
@@ -522,7 +549,9 @@ export function TasksTable({
                 }}
               >
                 <div className="td">{formatTaskMenuDate(r.date)}</div>
-                <div className="td">{priorityLabel(r.priority ?? 'normal')}</div>
+                <div className="td">
+                  <PriorityBadge priority={r.priority ?? 'normal'} />
+                </div>
                 <div className="td">{r.assigned_display_name ?? '—'}</div>
                 <div className="td">
                   <button

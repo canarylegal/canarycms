@@ -1,5 +1,5 @@
 import type { Dispatch, SetStateAction } from 'react'
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   GlobalContactCreateForm,
   ContactPersonOrgAddressFields,
@@ -465,6 +465,12 @@ export function CaseContactsAddDocForm({
   )
 }
 
+export type ContactEditPrimaryAction = {
+  busy: boolean
+  canSave: boolean
+  save: () => void
+}
+
 export function CaseContactsEditDocForm({
   token,
   caseId,
@@ -482,6 +488,7 @@ export function CaseContactsEditDocForm({
   lawyerLinkableContacts,
   onDone,
   setActionErr,
+  onPrimaryActionChange,
 }: {
   token: string
   caseId: string
@@ -499,6 +506,8 @@ export function CaseContactsEditDocForm({
   lawyerLinkableContacts: CaseContactOut[]
   onDone: () => void
   setActionErr: (v: string | null) => void
+  /** When set, Save is omitted from the form footer so panel chrome can host it. */
+  onPrimaryActionChange?: (action: ContactEditPrimaryAction | null) => void
 }) {
   const { askConfirm, askConfirmChoice } = useDialogs()
   const [editMatterTypeOpen, setEditMatterTypeOpen] = useState(false)
@@ -546,6 +555,150 @@ export function CaseContactsEditDocForm({
     }
     return base
   }, [matterTypeOptions, editSnapshot.matter_contact_type])
+
+  const canSave =
+    !busy &&
+    Boolean(resolvedEditSnapshotName.trim()) &&
+    !(editSnapshot.type === 'organisation' && !(editSnapshot.trading_name ?? '').trim()) &&
+    Boolean(editSnapshot.matter_contact_type && editSnapshot.matter_contact_type.trim())
+
+  async function runSave() {
+    if (saveInFlightRef.current) return
+    setSaveErr(null)
+    setLawyerClientsErr(null)
+    setActionErr(null)
+    try {
+      const lawyerErr = lawyerClientsValidationError(
+        editSnapshot.matter_contact_type ?? '',
+        editLawyerLinkClientIds,
+      )
+      if (lawyerErr) {
+        setLawyerClientsErr(lawyerErr)
+        setSaveErr(lawyerErr)
+        setActionErr(lawyerErr)
+        return
+      }
+      const payload = contactFieldsModelToPayload(
+        contactOutToFormFields(editSnapshot as unknown as ContactOut),
+        { fallbackName: editSnapshot.name },
+      )
+      if (!payload) {
+        const msg = 'Enter a name (person or organisation fields).'
+        setSaveErr(msg)
+        setActionErr(msg)
+        return
+      }
+      if (editSnapshot.type === 'organisation' && !(editSnapshot.trading_name ?? '').trim()) {
+        const msg = 'Trading name is required for organisations.'
+        setSaveErr(msg)
+        setActionErr(msg)
+        return
+      }
+      const identityChanged = contactIdentityFieldsChanged(identityBaseline, {
+        type: payload.type,
+        first_name: payload.first_name,
+        middle_name: payload.middle_name,
+        last_name: payload.last_name,
+      })
+      let revokePortal = false
+      let revokeClientPortal = false
+      let revokeMatterPortal = false
+      const globalId = editSnapshot.contact_id
+      if (identityChanged && globalId) {
+        const [clientPortal, matterPortal] = await Promise.all([
+          contactHasActivePortalAccess(token, globalId),
+          contactHasActiveMatterPortalAccess(token, caseId, globalId),
+        ])
+        const choice = await choosePortalActionOnIdentityChange(askConfirmChoice, {
+          identityChanged: true,
+          portalAccessActive: clientPortal || matterPortal,
+        })
+        if (choice === 'cancel') {
+          return
+        }
+        revokePortal = choice === 'save_revoke'
+        revokeClientPortal = revokePortal && clientPortal
+        revokeMatterPortal = revokePortal && matterPortal
+      }
+      saveInFlightRef.current = true
+      setBusy(true)
+      const resolvedSalutation = coerceLetterSalutation(
+        editSnapshot.letter_salutation,
+        editSnapshot.matter_contact_type ?? '',
+        editSnapshot.type,
+      )
+      const patchBody: Record<string, unknown> = {
+        type: payload.type,
+        name: payload.name,
+        email: payload.email,
+        phone: payload.phone,
+        title: payload.title,
+        first_name: payload.first_name,
+        middle_name: payload.middle_name,
+        last_name: payload.last_name,
+        company_name: payload.company_name,
+        trading_name: payload.trading_name,
+        address_line1: payload.address_line1,
+        address_line2: payload.address_line2,
+        city: payload.city,
+        county: payload.county,
+        postcode: payload.postcode,
+        country: payload.country,
+        matter_contact_type: editSnapshot.matter_contact_type!.trim(),
+        matter_contact_reference: (editSnapshot.matter_contact_reference ?? '').trim() || null,
+        letter_salutation: resolvedSalutation,
+        letter_salutation_custom:
+          resolvedSalutation === 'custom'
+            ? (editSnapshot.letter_salutation_custom ?? '').trim() || null
+            : null,
+        push_to_global: pushToGlobal,
+      }
+      if ((editSnapshot.matter_contact_type || '').trim().toLowerCase() === LAWYERS_TYPE_SLUG) {
+        patchBody.lawyer_client_ids = editLawyerLinkClientIds
+      }
+      await apiFetch(`/cases/${caseId}/contacts/${editSnapshot.id}`, {
+        token,
+        method: 'PATCH',
+        json: patchBody,
+      })
+      if (revokePortal && globalId) {
+        const revokes: Promise<unknown>[] = []
+        if (revokeClientPortal) revokes.push(revokeContactPortalAccess(token, globalId))
+        if (revokeMatterPortal) revokes.push(revokeMatterPortalAccess(token, caseId, globalId))
+        await Promise.all(revokes)
+      }
+      onDone()
+    } catch (e: unknown) {
+      const conflict = parsePortalEmailConflict(e)
+      const msg = conflict
+        ? portalEmailConflictStaffMessage(conflict, 'email_change')
+        : ((e as { message?: string })?.message ?? 'Failed to update snapshot')
+      setSaveErr(msg)
+      setActionErr(msg)
+    } finally {
+      saveInFlightRef.current = false
+      setBusy(false)
+    }
+  }
+
+  useEffect(() => {
+    if (!onPrimaryActionChange) return
+    onPrimaryActionChange({
+      busy,
+      canSave,
+      save: () => void runSave(),
+    })
+    return () => onPrimaryActionChange(null)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- rebind when edit state changes
+  }, [
+    onPrimaryActionChange,
+    busy,
+    canSave,
+    editSnapshot,
+    editLawyerLinkClientIds,
+    pushToGlobal,
+    resolvedEditSnapshotName,
+  ])
 
   return (
     <div className="stack modalBodyScroll" style={{ marginTop: 12 }}>
@@ -730,7 +883,13 @@ export function CaseContactsEditDocForm({
         />
       ) : null}
       {saveErr ? <div className="error">{saveErr}</div> : null}
-      <div className="row" style={{ justifyContent: 'space-between', marginTop: 8 }}>
+      <div
+        className="row"
+        style={{
+          justifyContent: onPrimaryActionChange ? 'flex-start' : 'space-between',
+          marginTop: 8,
+        }}
+      >
         <button
           type="button"
           className="btn"
@@ -761,140 +920,16 @@ export function CaseContactsEditDocForm({
         >
           Remove from matter
         </button>
-        <button
-          type="button"
-          className="btn primary"
-          disabled={
-            busy ||
-            !resolvedEditSnapshotName.trim() ||
-            (editSnapshot.type === 'organisation' && !(editSnapshot.trading_name ?? '').trim()) ||
-            !(editSnapshot.matter_contact_type && editSnapshot.matter_contact_type.trim())
-          }
-          onClick={async () => {
-            if (saveInFlightRef.current) return
-            setSaveErr(null)
-            setLawyerClientsErr(null)
-            setActionErr(null)
-            try {
-              const lawyerErr = lawyerClientsValidationError(
-                editSnapshot.matter_contact_type ?? '',
-                editLawyerLinkClientIds,
-              )
-              if (lawyerErr) {
-                setLawyerClientsErr(lawyerErr)
-                setSaveErr(lawyerErr)
-                setActionErr(lawyerErr)
-                return
-              }
-              const payload = contactFieldsModelToPayload(
-                contactOutToFormFields(editSnapshot as unknown as ContactOut),
-                { fallbackName: editSnapshot.name },
-              )
-              if (!payload) {
-                const msg = 'Enter a name (person or organisation fields).'
-                setSaveErr(msg)
-                setActionErr(msg)
-                return
-              }
-              if (editSnapshot.type === 'organisation' && !(editSnapshot.trading_name ?? '').trim()) {
-                const msg = 'Trading name is required for organisations.'
-                setSaveErr(msg)
-                setActionErr(msg)
-                return
-              }
-              const identityChanged = contactIdentityFieldsChanged(
-                identityBaseline,
-                {
-                  type: payload.type,
-                  first_name: payload.first_name,
-                  middle_name: payload.middle_name,
-                  last_name: payload.last_name,
-                },
-              )
-              let revokePortal = false
-              let revokeClientPortal = false
-              let revokeMatterPortal = false
-              const globalId = editSnapshot.contact_id
-              if (identityChanged && globalId) {
-                const [clientPortal, matterPortal] = await Promise.all([
-                  contactHasActivePortalAccess(token, globalId),
-                  contactHasActiveMatterPortalAccess(token, caseId, globalId),
-                ])
-                const choice = await choosePortalActionOnIdentityChange(askConfirmChoice, {
-                  identityChanged: true,
-                  portalAccessActive: clientPortal || matterPortal,
-                })
-                if (choice === 'cancel') {
-                  // Abort without saving or revoking — leave portal code untouched.
-                  return
-                }
-                revokePortal = choice === 'save_revoke'
-                revokeClientPortal = revokePortal && clientPortal
-                revokeMatterPortal = revokePortal && matterPortal
-              }
-              saveInFlightRef.current = true
-              setBusy(true)
-              const resolvedSalutation = coerceLetterSalutation(
-                editSnapshot.letter_salutation,
-                editSnapshot.matter_contact_type ?? '',
-                editSnapshot.type,
-              )
-              const patchBody: Record<string, unknown> = {
-                type: payload.type,
-                name: payload.name,
-                email: payload.email,
-                phone: payload.phone,
-                title: payload.title,
-                first_name: payload.first_name,
-                middle_name: payload.middle_name,
-                last_name: payload.last_name,
-                company_name: payload.company_name,
-                trading_name: payload.trading_name,
-                address_line1: payload.address_line1,
-                address_line2: payload.address_line2,
-                city: payload.city,
-                county: payload.county,
-                postcode: payload.postcode,
-                country: payload.country,
-                matter_contact_type: editSnapshot.matter_contact_type!.trim(),
-                matter_contact_reference: (editSnapshot.matter_contact_reference ?? '').trim() || null,
-                letter_salutation: resolvedSalutation,
-                letter_salutation_custom:
-                  resolvedSalutation === 'custom'
-                    ? (editSnapshot.letter_salutation_custom ?? '').trim() || null
-                    : null,
-                push_to_global: pushToGlobal,
-              }
-              if ((editSnapshot.matter_contact_type || '').trim().toLowerCase() === LAWYERS_TYPE_SLUG) {
-                patchBody.lawyer_client_ids = editLawyerLinkClientIds
-              }
-              await apiFetch(`/cases/${caseId}/contacts/${editSnapshot.id}`, {
-                token,
-                method: 'PATCH',
-                json: patchBody,
-              })
-              if (revokePortal && globalId) {
-                const revokes: Promise<unknown>[] = []
-                if (revokeClientPortal) revokes.push(revokeContactPortalAccess(token, globalId))
-                if (revokeMatterPortal) revokes.push(revokeMatterPortalAccess(token, caseId, globalId))
-                await Promise.all(revokes)
-              }
-              onDone()
-            } catch (e: unknown) {
-              const conflict = parsePortalEmailConflict(e)
-              const msg = conflict
-                ? portalEmailConflictStaffMessage(conflict, 'email_change')
-                : ((e as { message?: string })?.message ?? 'Failed to update snapshot')
-              setSaveErr(msg)
-              setActionErr(msg)
-            } finally {
-              saveInFlightRef.current = false
-              setBusy(false)
-            }
-          }}
-        >
-          Save
-        </button>
+        {!onPrimaryActionChange ? (
+          <button
+            type="button"
+            className="btn primary"
+            disabled={!canSave}
+            onClick={() => void runSave()}
+          >
+            Save
+          </button>
+        ) : null}
       </div>
     </div>
   )

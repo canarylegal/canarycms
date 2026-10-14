@@ -245,8 +245,9 @@ def _render_signature_script_png(
     )
     bbox = draw.textbbox((0, 0), text, font=font)
     tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
-    x = max(pad_x, (iw - tw) // 2 - bbox[0])
-    y = max(pad_y, (ih - th) // 2 - bbox[1])
+    # Left-align with modest padding; sit slightly above the bottom so signature lines remain visible.
+    x = pad_x - bbox[0]
+    y = max(pad_y, ih - pad_y - th - bbox[1])
     draw.text((x, y), text, fill=(15, 23, 42, 255), font=font)
     if scale > 1:
         img = img.resize((width, height), Image.Resampling.LANCZOS)
@@ -285,15 +286,44 @@ def _render_checkbox_png(*, width: int, height: int, checked: bool) -> bytes:
     return buf.getvalue()
 
 
-def _png_to_stamp_pdf(png_bytes: bytes, width_pt: float, height_pt: float, *, dpi: int = 144) -> bytes:
-    """Build a one-page PDF containing the PNG sized in points at the given DPI."""
+def _png_to_stamp_pdf(
+    png_bytes: bytes,
+    width_pt: float,
+    height_pt: float,
+    *,
+    dpi: int = 144,
+    align: str = "left",
+) -> bytes:
+    """Build a one-page PDF containing the PNG fitted into the box (contain, no stretch)."""
     pil = Image.open(io.BytesIO(png_bytes)).convert("RGBA")
     tw = max(8, int(width_pt * dpi / 72))
     th = max(8, int(height_pt * dpi / 72))
-    if pil.size != (tw, th):
-        pil = pil.resize((tw, th), Image.Resampling.LANCZOS)
+    # Letterbox into the field so handwriting is not horizontally stretched.
+    src_w, src_h = pil.size
+    if src_w < 1 or src_h < 1:
+        src_w, src_h = 1, 1
+    # Left padding + extra bottom inset so printed signature lines stay visible.
+    pad_x = max(2, tw // 28)
+    pad_top = max(2, th // 20)
+    pad_bottom = max(3, th // 5)
+    avail_w = max(1, tw - pad_x * 2)
+    avail_h = max(1, th - pad_top - pad_bottom)
+    scale = min(avail_w / src_w, avail_h / src_h)
+    nw = max(1, int(src_w * scale))
+    nh = max(1, int(src_h * scale))
+    if (nw, nh) != (src_w, src_h):
+        pil = pil.resize((nw, nh), Image.Resampling.LANCZOS)
+    canvas = Image.new("RGBA", (tw, th), (255, 255, 255, 0))
+    if align == "center":
+        ox = (tw - nw) // 2
+        oy = pad_top + (avail_h - nh) // 2
+    else:
+        ox = pad_x
+        # Sit above the field baseline / underline rather than covering it.
+        oy = max(pad_top, th - pad_bottom - nh)
+    canvas.paste(pil, (ox, oy), pil)
     bg = Image.new("RGB", (tw, th), (255, 255, 255))
-    bg.paste(pil, (0, 0), pil)
+    bg.paste(canvas, (0, 0), canvas)
 
     pdf = pikepdf.Pdf.new()
     page = pdf.add_blank_page(page_size=(width_pt, height_pt))
@@ -364,7 +394,7 @@ def stamp_signed_pdf(pdf_bytes: bytes, stamps: list[PdfStamp]) -> bytes:
                 continue
 
             try:
-                stamp_pdf_bytes = _png_to_stamp_pdf(png, w, h, dpi=216)
+                stamp_pdf_bytes = _png_to_stamp_pdf(png, w, h, dpi=216, align="left")
                 with pikepdf.open(io.BytesIO(stamp_pdf_bytes)) as stamp_pdf:
                     page.add_overlay(
                         stamp_pdf.pages[0],
@@ -617,12 +647,305 @@ def pdf_has_acroform(pdf_bytes: bytes) -> bool:
         return False
 
 
+def _annot_on_state(annot_obj: Any) -> str:
+    """Return the non-Off appearance state name for a widget (e.g. Included), or ''."""
+    try:
+        ap = annot_obj.get("/AP")
+        n = ap.get("/N") if ap is not None else None
+        # Button on-states live in a /N *dictionary*. A stream /N is a single appearance
+        # (typical for text widgets) — do not treat stream keys like /Length as states.
+        if n is None or not isinstance(n, pikepdf.Dictionary):
+            return ""
+        for key in n.keys():
+            label = str(key).lstrip("/")
+            if label and label.lower() != "off":
+                return label
+    except Exception:
+        return ""
+    return ""
+
+
+_MULTILINE_FF = 1 << 12  # PDF Ff bit 13
+_COMB_FF = 1 << 24  # PDF Ff bit 25
+
+
+def _field_ff(field: Any) -> int:
+    try:
+        raw = field.get("/Ff") if hasattr(field, "get") else None
+        if raw is None and hasattr(field, "obj"):
+            raw = field.obj.get("/Ff")
+        return int(raw or 0)
+    except Exception:
+        return 0
+
+
+def _pdf_escape_text(text: str) -> str:
+    return text.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+
+
+def _parse_da(da: str) -> tuple[str, float]:
+    """Return (font_name, size) from a DA string like '/Arial 11 Tf 0 g'."""
+    font = "Helv"
+    size = 10.0
+    try:
+        m = re.search(r"/([A-Za-z][A-Za-z0-9._+-]*)\s+([0-9]+(?:\.[0-9]+)?)\s+Tf", da or "")
+        if m:
+            font = m.group(1)
+            size = float(m.group(2))
+    except Exception:
+        pass
+    return font, size
+
+
+def _approx_text_width(text: str, font_size: float) -> float:
+    # Helvetica/Arial-ish average glyph width; good enough for fit/shrink.
+    return max(0.0, len(text) * font_size * 0.5)
+
+
+def _wrap_text_lines(text: str, font_size: float, max_width: float) -> list[str]:
+    """Word-wrap (and hard-break long tokens) to fit max_width."""
+    paragraphs = (text or "").replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    lines: list[str] = []
+    for para in paragraphs:
+        words = para.split(" ") if para else [""]
+        current = ""
+        for word in words:
+            candidate = word if not current else f"{current} {word}"
+            if _approx_text_width(candidate, font_size) <= max_width or not current:
+                if _approx_text_width(word, font_size) > max_width and not current:
+                    # Hard-break an oversized token.
+                    chunk = ""
+                    for ch in word:
+                        trial = chunk + ch
+                        if chunk and _approx_text_width(trial, font_size) > max_width:
+                            lines.append(chunk)
+                            chunk = ch
+                        else:
+                            chunk = trial
+                    current = chunk
+                else:
+                    current = candidate
+            else:
+                lines.append(current)
+                current = word
+        lines.append(current)
+    return lines or [""]
+
+
+def _widget_rect_size(field_obj: Any) -> tuple[float, float]:
+    """Return (width, height) in points for a field or its first kid widget."""
+    rect = field_obj.get("/Rect")
+    if rect is None or len(rect) < 4:
+        kids = field_obj.get("/Kids")
+        if kids is not None and len(kids) > 0:
+            try:
+                rect = kids[0].get("/Rect")
+            except Exception:
+                rect = None
+    if rect is None or len(rect) < 4:
+        return 0.0, 0.0
+    try:
+        x0, y0, x1, y1 = float(rect[0]), float(rect[1]), float(rect[2]), float(rect[3])
+        return abs(x1 - x0), abs(y1 - y0)
+    except Exception:
+        return 0.0, 0.0
+
+
+def _set_da(field_obj: Any, font: str, size: float) -> None:
+    da = f"/{font} {size:g} Tf 0 g"
+    field_obj["/DA"] = da
+    kids = field_obj.get("/Kids")
+    if kids is not None:
+        for kid in kids:
+            try:
+                kid["/DA"] = da
+            except Exception:
+                pass
+
+
+def _write_text_appearance(
+    pdf: pikepdf.Pdf,
+    field_obj: Any,
+    text: str,
+    *,
+    multiline: bool,
+    comb: bool,
+    max_len: int,
+) -> None:
+    """Replace /AP with a fitted text appearance (wrap / shrink / comb)."""
+    width, height = _widget_rect_size(field_obj)
+    if width <= 1 or height <= 1:
+        return
+
+    da_raw = str(field_obj.get("/DA") or "/Helv 10 Tf 0 g")
+    font, base_size = _parse_da(da_raw)
+    pad_x = 2.0
+    pad_y = 1.5
+    inner_w = max(1.0, width - pad_x * 2)
+    inner_h = max(1.0, height - pad_y * 2)
+    value = "" if text is None else str(text)
+
+    if comb and max_len > 0:
+        # Comb boxes: one glyph per slot; keep spaces so UK postcodes align.
+        chars = list(value[:max_len])
+        while len(chars) < max_len:
+            chars.append("")
+        size = min(base_size, max(6.0, inner_h * 0.72))
+        slot_w = width / float(max_len)
+        parts = [
+            "/Tx BMC",
+            "q",
+            "BT",
+            f"/{font} {size:g} Tf 0 g",
+        ]
+        baseline = max(pad_y, (height - size) * 0.5)
+        # Position each character centred in its slot.
+        for i, ch in enumerate(chars):
+            if not ch:
+                continue
+            glyph_w = _approx_text_width(ch, size)
+            x = i * slot_w + max(0.0, (slot_w - glyph_w) / 2.0)
+            parts.append(f"1 0 0 1 {x:.3f} {baseline:.3f} Tm")
+            parts.append(f"({_pdf_escape_text(ch)}) Tj")
+        parts.extend(["ET", "Q", "EMC"])
+        content = "\n".join(parts) + "\n"
+        _set_da(field_obj, font, size)
+    elif multiline or "\n" in value or "\r" in value or height >= 36:
+        # Fit as many wrapped lines as the box allows; shrink font if needed.
+        size = base_size
+        leading = size * 1.2
+        lines: list[str] = []
+        for _ in range(12):
+            lines = _wrap_text_lines(value, size, inner_w)
+            leading = size * 1.15
+            if len(lines) * leading <= inner_h + 0.5 or size <= 6.0:
+                break
+            size = max(6.0, size - 0.5)
+        # Drop overflowing lines only as a last resort after min font.
+        max_lines = max(1, int(inner_h / max(leading, 1.0)))
+        lines = lines[:max_lines]
+        parts = [
+            "/Tx BMC",
+            "q",
+            "BT",
+            f"/{font} {size:g} Tf 0 g",
+        ]
+        # Start near top of box (PDF y grows upward).
+        y = height - pad_y - size
+        for i, line in enumerate(lines):
+            if i == 0:
+                parts.append(f"1 0 0 1 {pad_x:.3f} {y:.3f} Tm")
+            else:
+                parts.append(f"0 {-leading:.3f} Td")
+            parts.append(f"({_pdf_escape_text(line)}) Tj")
+        parts.extend(["ET", "Q", "EMC"])
+        content = "\n".join(parts) + "\n"
+        _set_da(field_obj, font, size)
+        # Ensure Multiline bit so viewers also wrap if they regenerate.
+        try:
+            field_obj["/Ff"] = int(field_obj.get("/Ff") or 0) | _MULTILINE_FF
+        except Exception:
+            pass
+    else:
+        # Single-line: shrink font until the value fits the width.
+        size = base_size
+        compact = value.replace("\r", " ").replace("\n", " ")
+        while size > 5.5 and _approx_text_width(compact, size) > inner_w:
+            size -= 0.5
+        baseline = max(pad_y, (height - size) * 0.35)
+        content = (
+            "/Tx BMC\n"
+            "q\n"
+            "BT\n"
+            f"/{font} {size:g} Tf 0 g\n"
+            f"1 0 0 1 {pad_x:.3f} {baseline:.3f} Tm\n"
+            f"({_pdf_escape_text(compact)}) Tj\n"
+            "ET\n"
+            "Q\n"
+            "EMC\n"
+        )
+        _set_da(field_obj, font, size)
+
+    stream = pikepdf.Stream(
+        pdf,
+        content.encode("latin-1", errors="replace"),
+        {
+            "/Type": pikepdf.Name.XObject,
+            "/Subtype": pikepdf.Name.Form,
+            "/FormType": 1,
+            "/BBox": pikepdf.Array([0, 0, width, height]),
+            "/Resources": pikepdf.Dictionary({"/Font": pikepdf.Dictionary()}),
+        },
+    )
+    # Reuse document default font resources when present.
+    try:
+        dr = pdf.Root.AcroForm.get("/DR")
+        if dr is not None and "/Font" in dr:
+            stream["/Resources"] = pikepdf.Dictionary({"/Font": dr["/Font"]})
+    except Exception:
+        pass
+
+    ap = pikepdf.Dictionary({"/N": stream})
+    field_obj["/AP"] = ap
+    kids = field_obj.get("/Kids")
+    if kids is not None and len(kids) > 0:
+        for kid in kids:
+            try:
+                kid["/AP"] = ap
+            except Exception:
+                pass
+    else:
+        # Terminal field is also the widget.
+        pass
+
+
+def _improve_text_field_appearances(
+    pdf: pikepdf.Pdf,
+    field_objs: dict[str, Any],
+    responses: dict[str, Any],
+) -> None:
+    """Fix multiline wrap, comb postcodes, and long single-line clipping."""
+    for name, raw in responses.items():
+        key = str(name).strip()
+        field_obj = field_objs.get(key)
+        if field_obj is None:
+            continue
+        try:
+            ft = str(field_obj.get("/FT") or "")
+        except Exception:
+            continue
+        if not ft.endswith("Tx"):
+            continue
+        ff = _field_ff(field_obj)
+        try:
+            max_len = int(field_obj.get("/MaxLen") or 0)
+        except Exception:
+            max_len = 0
+        width, height = _widget_rect_size(field_obj)
+        multiline = bool(ff & _MULTILINE_FF) or height >= 36
+        comb = bool(ff & _COMB_FF) and max_len > 0
+        try:
+            _write_text_appearance(
+                pdf,
+                field_obj,
+                "" if raw is None else str(raw),
+                multiline=multiline,
+                comb=comb,
+                max_len=max_len,
+            )
+        except Exception:
+            log.warning("Could not improve text appearance for %s", key, exc_info=True)
+
+
 def extract_acroform_fields(pdf_bytes: bytes) -> list[dict[str, Any]]:
     """
     Discover fillable AcroForm widgets for portal filling.
 
     Coordinates are top-left percentages (same as Canary Sign overlays).
     Skips pushbuttons and digital-signature fields (signing uses Canary Sign overlays).
+
+    Checkbox *groups* with multiple kids (Included / Excluded / None) emit one portal
+    widget per kid so each column is clickable; ``export_value`` carries the on-state.
     """
     out: list[dict[str, Any]] = []
     try:
@@ -634,7 +957,9 @@ def extract_acroform_fields(pdf_bytes: bytes) -> list[dict[str, Any]]:
     with pdf:
         if not pdf.acroform.exists:
             return out
-        seen: set[str] = set()
+
+        # Pass 1: collect every widget annotation with geometry + on-state.
+        collected: list[dict[str, Any]] = []
         for page_idx, page in enumerate(pdf.pages):
             mediabox = page.mediabox
             left = float(mediabox[0])
@@ -660,10 +985,8 @@ def extract_acroform_fields(pdf_bytes: bytes) -> list[dict[str, Any]]:
                 if ft.endswith("Sig") or ft == "/Sig":
                     continue
                 name = (field.fully_qualified_name or field.partial_name or "").strip()
-                if not name or name in seen:
+                if not name:
                     continue
-                seen.add(name)
-                # pikepdf Annotation exposes .rect (Rectangle), not dict .get("/Rect")
                 try:
                     r = annot.rect
                     x0, y0, x1, y1 = float(r.llx), float(r.lly), float(r.urx), float(r.ury)
@@ -675,7 +998,6 @@ def extract_acroform_fields(pdf_bytes: bytes) -> list[dict[str, Any]]:
                         x0, y0, x1, y1 = float(rect[0]), float(rect[1]), float(rect[2]), float(rect[3])
                     except Exception:
                         continue
-                # Normalize inverted rects
                 rx0, rx1 = min(x0, x1), max(x0, x1)
                 ry0, ry1 = min(y0, y1), max(y0, y1)
                 x_pct = max(0.0, min(100.0, ((rx0 - left) / page_w) * 100.0))
@@ -684,10 +1006,10 @@ def extract_acroform_fields(pdf_bytes: bytes) -> list[dict[str, Any]]:
                 w_pct = max(0.5, min(100.0 - x_pct, ((rx1 - rx0) / page_w) * 100.0))
                 h_pct = max(0.5, min(100.0 - y_pct, ((ry1 - ry0) / page_h) * 100.0))
 
-                if field.is_checkbox:
+                is_button = bool(field.is_checkbox or field.is_radio_button)
+                export_value = _annot_on_state(annot.obj) if is_button else ""
+                if is_button:
                     kind = "checkbox"
-                elif field.is_radio_button:
-                    kind = "radio"
                 elif field.is_choice:
                     kind = "choice"
                 else:
@@ -696,7 +1018,7 @@ def extract_acroform_fields(pdf_bytes: bytes) -> list[dict[str, Any]]:
                 options: list[str] = []
                 try:
                     choices = list(field.choices or [])
-                    options = [str(c) for c in choices if str(c).strip()]
+                    options = [str(c).lstrip("/") for c in choices if str(c).strip()]
                 except Exception:
                     options = []
 
@@ -707,7 +1029,22 @@ def extract_acroform_fields(pdf_bytes: bytes) -> list[dict[str, Any]]:
                 except Exception:
                     current = ""
 
-                out.append(
+                ff = 0
+                try:
+                    ff = _field_ff(annot.obj)
+                    parent = annot.obj.get("/Parent")
+                    if parent is not None:
+                        ff = ff or _field_ff(parent)
+                except Exception:
+                    ff = 0
+                multiline = bool(ff & _MULTILINE_FF) or bool(
+                    getattr(field, "is_multiline", False)
+                )
+                # Tall text widgets behave as multi-line even when Ff is wrong.
+                if kind == "text" and h_pct >= 4.5:
+                    multiline = True
+
+                collected.append(
                     {
                         "name": name,
                         "label": label,
@@ -720,11 +1057,46 @@ def extract_acroform_fields(pdf_bytes: bytes) -> list[dict[str, Any]]:
                         "h_pct": round(h_pct, 4),
                         "options": options,
                         "current_value": current,
-                        "multiline": bool(getattr(field, "is_multiline", False))
-                        if hasattr(field, "is_multiline")
-                        else False,
+                        "multiline": multiline,
+                        "export_value": export_value,
                     }
                 )
+
+        # Pass 2: expand multi-state button groups (Included/Excluded/None) into one widget per kid.
+        by_name: dict[str, list[dict[str, Any]]] = {}
+        for item in collected:
+            by_name.setdefault(item["name"], []).append(item)
+
+        for name, items in by_name.items():
+            export_states = [i["export_value"] for i in items if i.get("export_value")]
+            unique_states = list(dict.fromkeys(export_states))
+            is_button_group = items[0]["field_type"] == "checkbox" and len(unique_states) >= 2
+
+            if is_button_group:
+                for item in items:
+                    if not item.get("export_value"):
+                        continue
+                    out.append(
+                        {
+                            **item,
+                            "field_type": "radio",
+                            "label": item["export_value"],
+                            "options": unique_states,
+                            "current_value": (
+                                item["export_value"]
+                                if str(item.get("current_value") or "").lstrip("/") == item["export_value"]
+                                else ""
+                            ),
+                        }
+                    )
+                continue
+
+            # Single widget (text / plain checkbox / choice): keep first only.
+            first = items[0]
+            if first["field_type"] == "checkbox" and first.get("export_value"):
+                first = {**first, "options": [first["export_value"]] if first["export_value"] else []}
+            out.append(first)
+
     return out
 
 
@@ -800,6 +1172,102 @@ def strip_acroform_fields(pdf_bytes: bytes) -> bytes:
         return out.getvalue()
 
 
+def _walk_acroform_fields(pdf: pikepdf.Pdf) -> list[Any]:
+    """Return terminal/parent field dictionaries that carry a /T name."""
+    root = pdf.Root.get("/AcroForm")
+    if root is None:
+        return []
+    fields = root.get("/Fields")
+    if fields is None:
+        return []
+    out: list[Any] = []
+
+    def walk(arr: Any) -> None:
+        for ref in arr:
+            obj = ref
+            try:
+                if hasattr(ref, "get_object"):
+                    obj = ref.get_object()
+            except Exception:
+                obj = ref
+            if not hasattr(obj, "get"):
+                continue
+            name = obj.get("/T")
+            kids = obj.get("/Kids")
+            if name is not None:
+                out.append(obj)
+            if kids is not None:
+                walk(kids)
+
+    walk(fields)
+    return out
+
+
+def _kid_on_state(kid: Any) -> str:
+    return _annot_on_state(kid)
+
+
+def _resolve_button_target(raw: Any, on_states: list[str]) -> str | None:
+    """Map a stored response to an on-state name, or None for Off."""
+    if raw is None:
+        return None
+    if isinstance(raw, bool):
+        if not raw:
+            return None
+        for preferred in ("Included", "Yes", "On", "1", "True"):
+            if preferred in on_states:
+                return preferred
+        return on_states[0] if on_states else None
+
+    text = str(raw).strip()
+    if not text or text.lower() in ("0", "false", "off", "no", ""):
+        return None
+    if text.lower() in ("1", "true", "yes", "on"):
+        for preferred in ("Included", "Yes", "On", "1", "True"):
+            if preferred in on_states:
+                return preferred
+        return on_states[0] if on_states else None
+
+    cleaned = text.lstrip("/")
+    for state in on_states:
+        if state == cleaned or state.lower() == cleaned.lower():
+            return state
+    return cleaned if cleaned in on_states else None
+
+
+def _set_button_field_value(field_obj: Any, raw: Any) -> bool:
+    """Set /V and kid /AS for a checkbox or radio-style Btn field. Returns True if applied."""
+    kids = field_obj.get("/Kids")
+    widgets: list[Any] = []
+    if kids is not None and len(kids) > 0:
+        widgets = list(kids)
+    else:
+        widgets = [field_obj]
+
+    on_states: list[str] = []
+    for w in widgets:
+        state = _kid_on_state(w)
+        if state and state not in on_states:
+            on_states.append(state)
+
+    target = _resolve_button_target(raw, on_states)
+    try:
+        if target:
+            field_obj["/V"] = pikepdf.Name(f"/{target}")
+        else:
+            field_obj["/V"] = pikepdf.Name("/Off")
+        for w in widgets:
+            on = _kid_on_state(w)
+            if target and on == target:
+                w["/AS"] = pikepdf.Name(f"/{target}")
+            else:
+                w["/AS"] = pikepdf.Name("/Off")
+        return True
+    except Exception:
+        log.warning("Could not set button field value", exc_info=True)
+        return False
+
+
 def fill_acroform(
     pdf_bytes: bytes,
     responses: dict[str, Any] | None,
@@ -810,6 +1278,9 @@ def fill_acroform(
 
     When ``flatten`` is True, widgets are burned into page content (Canary Sign).
     When False, fields stay editable (e.g. Law Society protocol forms after compose prefill).
+
+    Button groups (Included / Excluded / None) are set via /V + kid /AS — pikepdf's
+    ``CheckboxField.checked`` fails when the parent has no /AP (common on Law Society forms).
     """
     responses = responses or {}
     try:
@@ -832,24 +1303,55 @@ def fill_acroform(
             TextField,
         )
 
+        # Index field objects by /T for reliable button-group writes.
+        field_objs: dict[str, Any] = {}
+        for obj in _walk_acroform_fields(pdf):
+            try:
+                name = str(obj.get("/T") or "").strip()
+            except Exception:
+                continue
+            if name and name not in field_objs:
+                field_objs[name] = obj
+
         form = Form(pdf, DefaultAppearanceStreamGenerator)
+        button_writes: list[tuple[Any, Any]] = []
+
         for name, raw in responses.items():
             key = str(name).strip()
             if not key:
                 continue
+
+            field_obj = field_objs.get(key)
+            ft = ""
+            if field_obj is not None:
+                try:
+                    ft = str(field_obj.get("/FT") or "")
+                except Exception:
+                    ft = ""
+
+            # Prefer low-level button handling for /Btn (checkbox groups + plain ticks).
+            if field_obj is not None and ft.endswith("Btn"):
+                if _set_button_field_value(field_obj, raw):
+                    button_writes.append((field_obj, raw))
+                    continue
+
             try:
                 field = form[key]
             except Exception:
                 continue
             try:
                 if isinstance(field, CheckboxField):
-                    field.checked = bool(raw) and str(raw).lower() not in ("0", "false", "off", "no", "")
+                    # Fallback for simple checkboxes when low-level path missed them.
+                    try:
+                        field.checked = bool(raw) and str(raw).lower() not in ("0", "false", "off", "no", "")
+                    except Exception:
+                        if field_obj is not None and _set_button_field_value(field_obj, raw):
+                            button_writes.append((field_obj, raw))
                 elif isinstance(field, ChoiceField):
                     field.value = "" if raw is None else str(raw)
                 elif isinstance(field, TextField):
                     field.value = "" if raw is None else str(raw)
                 else:
-                    # Radio / other — best effort via underlying set_value
                     underlying = getattr(field, "_field", None) or getattr(field, "field", None)
                     if underlying is not None and hasattr(underlying, "set_value"):
                         underlying.set_value(pikepdf.String(str(raw)) if raw is not None else pikepdf.String(""))
@@ -867,6 +1369,16 @@ def fill_acroform(
                     pdf.Root.AcroForm["/NeedAppearances"] = True
                 except Exception:
                     pass
+
+        # Appearance generation can reset kid /AS on multi-state Btn groups — re-apply.
+        for field_obj, raw in button_writes:
+            _set_button_field_value(field_obj, raw)
+
+        # pikepdf's default generator draws multiline/comb as a single Tj — replace those.
+        try:
+            _improve_text_field_appearances(pdf, field_objs, responses)
+        except Exception:
+            log.warning("Text appearance improvement failed", exc_info=True)
 
         if flatten:
             try:

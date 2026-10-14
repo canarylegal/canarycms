@@ -1258,6 +1258,21 @@ export default function PortalPage() {
     }
   }
 
+  function formatActionWhen(iso: string | null | undefined): string {
+    if (!iso) return ''
+    try {
+      return new Date(iso).toLocaleString('en-GB', {
+        day: 'numeric',
+        month: 'short',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      })
+    } catch {
+      return iso
+    }
+  }
+
   function renderActionList(
     bucket: 'outstanding' | 'complete' | 'inactive',
     items: PortalClientActionItemOut[],
@@ -1266,29 +1281,39 @@ export default function PortalPage() {
     const showStatusBadge = bucket === 'inactive'
     return (
       <ul className="portalActionList">
-        {items.map((item) => (
-          <li key={`${item.kind}:${item.id}`}>
-            <button
-              type="button"
-              className="portalActionRow"
-              disabled={busy}
-              onClick={() => void openClientAction(item)}
-            >
-              <span className="portalActionRowMain">
-                {showStatusBadge ? (
-                  <span className={actionStatusBadgeClass(bucket, item.status)}>
-                    {actionStatusLabel(bucket, item.status)}
+        {items.map((item) => {
+          const when = formatActionWhen(item.occurred_at)
+          return (
+            <li key={`${item.kind}:${item.id}`}>
+              <button
+                type="button"
+                className="portalActionRow"
+                disabled={busy}
+                onClick={() => void openClientAction(item)}
+              >
+                <span className="portalActionRowMain">
+                  {showStatusBadge ? (
+                    <span className={actionStatusBadgeClass(bucket, item.status)}>
+                      {actionStatusLabel(bucket, item.status)}
+                    </span>
+                  ) : null}
+                  <span className={actionKindBadgeClass(item)}>{actionKindLabel(item)}</span>
+                  <span className="portalActionRowTitleBlock">
+                    <span className="portalActionRowTitle">{item.title}</span>
+                    {when ? (
+                      <span className="muted portalActionRowWhen">
+                        {bucket === 'complete' ? `Completed ${when}` : when}
+                      </span>
+                    ) : null}
                   </span>
-                ) : null}
-                <span className={actionKindBadgeClass(item)}>{actionKindLabel(item)}</span>
-                <span className="portalActionRowTitle">{item.title}</span>
-              </span>
-              <span className="portalRowChevron" aria-hidden>
-                ›
-              </span>
-            </button>
-          </li>
-        ))}
+                </span>
+                <span className="portalRowChevron" aria-hidden>
+                  ›
+                </span>
+              </button>
+            </li>
+          )
+        })}
       </ul>
     )
   }
@@ -1567,9 +1592,13 @@ export default function PortalPage() {
             previewMode={staffPreview}
             onSigningUpdated={(next) => setActiveCanarySign(next)}
             onBack={() => setActiveCanarySign(null)}
-            onCompleted={() => {
-              setActiveCanarySign(null)
-              setInfo('Thank you — your signature has been submitted.')
+            onCompleted={(next) => {
+              const done = (next.status || '').toLowerCase() === 'completed' || Boolean(next.has_signed_document)
+              setInfo(
+                done
+                  ? 'Thank you — your signature has been submitted. You can download the signed document below.'
+                  : 'Thank you — your signature has been submitted. Waiting for remaining signers before the final document is issued.',
+              )
               const token = sessionToken.trim()
               if (token) {
                 void loadClientActions(token)

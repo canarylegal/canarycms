@@ -21,7 +21,9 @@ from app.canary_sign_service import (
     list_for_contact as list_canary_sign_for_contact,
     list_pending_for_contact as list_pending_canary_sign_for_contact,
     portal_signing_view as canary_portal_signing_view,
-    read_snapshot_pdf_bytes,
+    read_certificate_pdf_bytes,
+    read_portal_preview_pdf,
+    read_signed_pdf_bytes,
 )
 from app.download_headers import content_disposition_headers
 from app.commercial_hooks import (
@@ -672,12 +674,31 @@ def download_quote_delivery_file(
 
 def canary_sign_pdf(request_id: uuid.UUID, contact: Contact, db: Session):
     req, _recip = canary_request_for_contact(db, request_id, contact.id)
-    raw = read_snapshot_pdf_bytes(db, req)
-    filename = f"{(req.subject or 'document')[:80]}.pdf"
+    raw, filename = read_portal_preview_pdf(db, req)
     return Response(
         content=raw,
         media_type="application/pdf",
         headers=content_disposition_headers(filename, disposition="inline"),
+    )
+
+
+def canary_sign_signed_pdf(request_id: uuid.UUID, contact: Contact, db: Session):
+    req, _recip = canary_request_for_contact(db, request_id, contact.id)
+    raw, filename = read_signed_pdf_bytes(db, req)
+    return Response(
+        content=raw,
+        media_type="application/pdf",
+        headers=content_disposition_headers(filename, disposition="attachment"),
+    )
+
+
+def canary_sign_certificate_pdf(request_id: uuid.UUID, contact: Contact, db: Session):
+    req, _recip = canary_request_for_contact(db, request_id, contact.id)
+    raw, filename = read_certificate_pdf_bytes(db, req)
+    return Response(
+        content=raw,
+        media_type="application/pdf",
+        headers=content_disposition_headers(filename, disposition="attachment"),
     )
 
 
@@ -698,6 +719,7 @@ def client_actions(contact: Contact, db: Session) -> PortalClientActionsOut:
                 badge="Quote",
                 href_key=f"quote:{d.id}",
                 case_id=d.case_id,
+                occurred_at=d.sent_at,
             )
         )
 
@@ -717,6 +739,7 @@ def client_actions(contact: Contact, db: Session) -> PortalClientActionsOut:
             badge="Quote",
             href_key=f"quote:{d.id}",
             case_id=d.case_id,
+            occurred_at=d.responded_at or d.sent_at,
         )
         if d.status == QuotePortalDeliveryStatus.accepted:
             complete.append(item)
@@ -735,6 +758,7 @@ def client_actions(contact: Contact, db: Session) -> PortalClientActionsOut:
                 badge="Form",
                 href_key=f"form:{sub.id}",
                 case_id=sub.case_id,
+                occurred_at=sub.sent_at,
             )
         )
     form_all = db.execute(
@@ -753,6 +777,7 @@ def client_actions(contact: Contact, db: Session) -> PortalClientActionsOut:
             badge="Form",
             href_key=f"form:{sub.id}",
             case_id=sub.case_id,
+            occurred_at=sub.completed_at or sub.voided_at or sub.sent_at,
         )
         if sub.status == PortalFormSubmissionStatus.completed:
             complete.append(item)
@@ -770,6 +795,7 @@ def client_actions(contact: Contact, db: Session) -> PortalClientActionsOut:
             badge="Sign",
             href_key=f"canary_sign:{req.id}",
             case_id=req.case_id,
+            occurred_at=req.completed_at or recip.signed_at or req.created_at,
         )
         if req.status == CanarySignStatus.pending and recip.status in (
             CanarySignRecipientStatus.pending,
@@ -798,7 +824,15 @@ def client_actions(contact: Contact, db: Session) -> PortalClientActionsOut:
                 badge="DocuSign",
                 href_key=f"docusign:{req.id}",
                 case_id=req.case_id,
+                occurred_at=getattr(req, "created_at", None),
             )
         )
+
+    def _sort_key(item: PortalClientActionItemOut):
+        return item.occurred_at or datetime.min.replace(tzinfo=timezone.utc)
+
+    outstanding.sort(key=_sort_key, reverse=True)
+    complete.sort(key=_sort_key, reverse=True)
+    inactive.sort(key=_sort_key, reverse=True)
 
     return PortalClientActionsOut(outstanding=outstanding, complete=complete, inactive=inactive)

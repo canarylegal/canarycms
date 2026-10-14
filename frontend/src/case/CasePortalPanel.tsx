@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { apiFetch } from '../api'
 import { useDialogs } from '../DialogProvider'
 import { MainMenuFilterCheckboxDropdown } from '../MainMenuFilterCheckboxDropdown'
+import { SendPortalFormModal } from '../SendPortalFormModal'
 import { SendQuoteViaPortalModal } from '../SendQuoteViaPortalModal'
 import { SingleSelectDropdown } from '../SingleSelectDropdown'
 import { CaseFileSelectDropdown } from './CaseFileSelectDropdown'
@@ -89,6 +90,7 @@ export function CasePortalPanel({ token, caseId, onFilesChanged }: Props) {
   const [quoteFileId, setQuoteFileId] = useState('')
   const [formSubmissions, setFormSubmissions] = useState<PortalFormSubmissionOut[]>([])
   const [formActionBusyId, setFormActionBusyId] = useState<string | null>(null)
+  const [formSendOpen, setFormSendOpen] = useState(false)
   const [canaryRequests, setCanaryRequests] = useState<CanarySignSigningRequestOut[]>([])
   const [quoteResendBusyId, setQuoteResendBusyId] = useState<string | null>(null)
   const [signActionBusyId, setSignActionBusyId] = useState<string | null>(null)
@@ -627,15 +629,19 @@ export function CasePortalPanel({ token, caseId, onFilesChanged }: Props) {
       </section>
 
       <section className="stack" style={{ gap: 8 }}>
-        <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+        <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
           <h4 style={{ margin: 0 }}>Portal forms</h4>
-          <button type="button" className="btn" disabled={busy} onClick={() => void loadFormSubmissions()}>
-            Refresh
-          </button>
+          <div className="row" style={{ gap: 8 }}>
+            <button type="button" className="btn primary" disabled={busy} onClick={() => setFormSendOpen(true)}>
+              Send form
+            </button>
+            <button type="button" className="btn" disabled={busy} onClick={() => void loadFormSubmissions()}>
+              Refresh
+            </button>
+          </div>
         </div>
         <p className="muted" style={{ margin: 0 }}>
-          Send forms from Documents → New → Portal form. Submissions appear here with status; you can resend or void
-          pending forms.
+          Send a form to a matter contact, then track status here. You can resend or void pending forms.
         </p>
         {formSubmissions.length === 0 ? (
           <div className="muted">No portal forms sent on this matter yet.</div>
@@ -831,6 +837,20 @@ export function CasePortalPanel({ token, caseId, onFilesChanged }: Props) {
         onClose={() => setPortalQuoteSend(null)}
         onSent={() => {
           void loadFiles()
+          onFilesChanged?.()
+        }}
+      />
+    ) : null}
+
+    {formSendOpen ? (
+      <SendPortalFormModal
+        token={token}
+        caseId={caseId}
+        open={formSendOpen}
+        onClose={() => setFormSendOpen(false)}
+        onSent={() => {
+          setFormSendOpen(false)
+          void loadFormSubmissions()
           onFilesChanged?.()
         }}
       />

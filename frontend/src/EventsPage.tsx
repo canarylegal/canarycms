@@ -11,6 +11,13 @@ import { CALENDAR_LIST_YEAR_VIEW } from './calendarListView'
 import { useUserUiPreferences, type CalendarView } from './useUserUiPreferences'
 import type { CalendarEventOut, CaseEventOut, CaseEventsOut, UserPublic } from './types'
 
+export type EventsEmbeddedActions = {
+  busy: boolean
+  hasUnsavedChanges: boolean
+  discard: () => void
+  saveAndClose: () => void
+}
+
 interface Props {
   caseId: string
   token: string
@@ -22,6 +29,11 @@ interface Props {
   embedded?: boolean
   /** Open the parent “New case event” popup (Documents / Calendar toolbar). */
   onRequestNewEvent?: () => void
+  /**
+   * When set (embedded matter panel), Save/Discard/New event are omitted from the body so the
+   * parent chrome can host them consistently with Property.
+   */
+  onEmbeddedActionsChange?: (actions: EventsEmbeddedActions | null) => void
 }
 
 function toInputDate(iso: string | null | undefined): string {
@@ -205,6 +217,7 @@ export function EventsPage({
   onClose,
   embedded = false,
   onRequestNewEvent,
+  onEmbeddedActionsChange,
 }: Props) {
   const calRef = useRef<FullCalendar>(null)
   const { prefs, setPreference } = useUserUiPreferences(me, token)
@@ -272,6 +285,8 @@ export function EventsPage({
     return data.events.some((ev) => eventRowChanged(baseEv.get(ev.id), ev))
   }, [data, baseline])
 
+  const hostChromeActions = Boolean(onEmbeddedActionsChange)
+
   function discard() {
     if (baseline) {
       setData(JSON.parse(JSON.stringify(baseline)) as CaseEventsOut)
@@ -325,6 +340,22 @@ export function EventsPage({
     }
   }
 
+  const embeddedActionsApi = useMemo<EventsEmbeddedActions>(
+    () => ({
+      busy,
+      hasUnsavedChanges,
+      discard,
+      saveAndClose: () => void saveAllAndClose(),
+    }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- close over latest event edits
+    [busy, hasUnsavedChanges, data, baseline, caseId, token, caseLabel, onClose],
+  )
+  useEffect(() => {
+    if (!onEmbeddedActionsChange) return
+    onEmbeddedActionsChange(embeddedActionsApi)
+    return () => onEmbeddedActionsChange(null)
+  }, [onEmbeddedActionsChange, embeddedActionsApi])
+
   function onFcEventClick(arg: EventClickArg) {
     const raw = arg.event.extendedProps.caseEvent as CaseEventOut | undefined
     if (raw) setEventDetail({ ...raw })
@@ -350,7 +381,16 @@ export function EventsPage({
         ...(embedded ? { flex: 1, minHeight: 0, height: '100%' } : {}),
       }}
     >
-      {embedded ? (
+      {embedded && hostChromeActions ? (
+        <div className="muted" style={{ fontSize: 13, marginBottom: 8 }}>
+          Click an event to edit. Edits are staged here until you Save and close.
+          {hasUnsavedChanges ? (
+            <span style={{ marginLeft: 8, color: 'var(--text)', fontWeight: 600 }}>Unsaved changes</span>
+          ) : (
+            <span style={{ marginLeft: 8 }}>All changes saved</span>
+          )}
+        </div>
+      ) : embedded ? (
         <div
           className="row"
           style={{
@@ -380,8 +420,7 @@ export function EventsPage({
             </button>
             <button
               type="button"
-              className="btn"
-              style={{ background: 'var(--primary)', color: 'var(--text-on-primary)', borderColor: 'var(--primary)' }}
+              className="btn primary"
               disabled={busy}
               onClick={() => void saveAllAndClose()}
             >
