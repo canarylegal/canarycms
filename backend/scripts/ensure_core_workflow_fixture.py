@@ -8,6 +8,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from sqlalchemy import select, func
 from app.db import SessionLocal, engine
 from app.models import Case, CaseLockMode, CaseStatus, User, UserRole, UserPermissionCategory
+from app.models import MatterHeadType, MatterSubType, MatterSubTypeMenu
 from app.security import hash_password
 
 
@@ -40,9 +41,15 @@ def main():
                         permission_category_id=staff_category.id, is_active=True)
             db.add(user); db.flush(); users.append(user)
         staff, approver, _ = users
+        head = MatterHeadType(name='CI workflow matters')
+        db.add(head); db.flush()
+        subtype = MatterSubType(head_type_id=head.id, name='CI workflow subtype')
+        db.add(subtype); db.flush()
+        db.add(MatterSubTypeMenu(sub_type_id=subtype.id, name='Tasks'))
         for number, title, owner in [('900001', 'CI Core Workflows', staff), ('900002', 'CI Restricted Matter', approver)]:
             db.add(Case(case_number=number, title=title, client_name='Synthetic test client',
                         fee_earner_user_id=owner.id, created_by=owner.id, status=CaseStatus.open,
+                        matter_head_type_id=head.id, matter_sub_type_id=subtype.id,
                         lock_mode=CaseLockMode.allow_list))
         db.commit()
     print('Created synthetic staff, approver, restricted user and two test matters.')

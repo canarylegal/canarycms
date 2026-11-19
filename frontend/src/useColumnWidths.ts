@@ -1,89 +1,91 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { MENU_COLUMN_RESET_EVENT } from './userUiPreferences'
 
 type ColumnWidthsOptions = {
-  /** Persisted pixel widths; omit length or pass undefined to use CSS fr defaults. */
+  /** Existing pixel preferences are used as relative weights, without rewriting them. */
   widths?: number[]
   onChange?: (widths: number[]) => void
-  /** Fallback when DOM measure fails on first resize. */
   fallbackWidths?: number[]
   min?: number
+  minimumWidths?: number[]
 }
 
-function measureRowColumnWidths(row: HTMLElement, count: number): number[] {
-  const children = Array.from(row.children).slice(0, count) as HTMLElement[]
-  if (children.length !== count) return []
-  return children.map((el) => Math.round(el.getBoundingClientRect().width))
+export function columnGrid(weights: number[], minimums: number[]): string {
+  return weights.map((weight, i) => `minmax(${minimums[i]}px, ${weight}fr)`).join(' ')
 }
 
-/** Resizable pixel column widths; uses CSS fr layout until the user resizes once. */
+/** CSS fits the weights to the container. Only completed user drags persist preferences. */
 export function useColumnWidths(columnCount: number, options?: ColumnWidthsOptions) {
-  const min = options?.min ?? 48
-  const fallbacks = options?.fallbackWidths ?? Array.from({ length: columnCount }, () => 120)
-  const externalWidths = options?.widths
-  const customized =
-    externalWidths != null && externalWidths.length === columnCount && options?.onChange != null
-
-  const [pixelWidths, setPixelWidths] = useState<number[] | null>(null)
-
-  useEffect(() => {
-    if (customized && externalWidths) {
-      setPixelWidths(externalWidths.map((w, i) => Math.max(min, Math.min(2000, w || fallbacks[i]!))))
-      return
-    }
-    setPixelWidths(null)
-  }, [customized, externalWidths, fallbacks, min])
+  const [local, setLocal] = useState<{ source: string; widths: number[] } | null>(null)
+  const source = JSON.stringify(options?.widths ?? [])
+  const widths = local?.source === source ? local.widths : options?.widths
+  const minimums = Array.from({ length: columnCount }, (_, i) => options?.minimumWidths?.[i] ?? options?.min ?? 48)
+  const latest = useRef(options)
+  useEffect(() => { latest.current = options }, [options])
+  const cancelDrag = useRef<(() => void) | null>(null)
 
   useEffect(() => {
-    function onMenuColumnReset() {
-      setPixelWidths(null)
+    function reset() {
+      cancelDrag.current?.()
+      setLocal(null)
     }
-    window.addEventListener(MENU_COLUMN_RESET_EVENT, onMenuColumnReset)
-    return () => window.removeEventListener(MENU_COLUMN_RESET_EVENT, onMenuColumnReset)
+    window.addEventListener(MENU_COLUMN_RESET_EVENT, reset)
+    return () => {
+      cancelDrag.current?.()
+      window.removeEventListener(MENU_COLUMN_RESET_EVENT, reset)
+    }
   }, [])
 
-  const gridTemplateColumns = pixelWidths
-    ? pixelWidths.map((w) => `${Math.round(w)}px`).join(' ')
-    : undefined
+  const startResize = useCallback((index: number, startX: number, row?: HTMLElement | null) => {
+    if (index < 0 || index >= columnCount - 1) return
+    cancelDrag.current?.()
+    const opts = latest.current
+    const mins = Array.from({ length: columnCount }, (_, i) => opts?.minimumWidths?.[i] ?? opts?.min ?? 48)
+    // Always measure the current layout, including any intervening sidebar/window resize.
+    const measured = row ? Array.from(row.children).slice(0, columnCount).map(el => el.getBoundingClientRect().width) : []
+    const base = measured.length === columnCount && measured.every(w => w > 0)
+      ? measured : Array.from({ length: columnCount }, (_, i) => Math.max(mins[i], opts?.fallbackWidths?.[i] ?? 120))
+    let next: number[] | null = null
+    const cursor = document.body.style.cursor
+    const userSelect = document.body.style.userSelect
+    function move(event: MouseEvent) {
+      const delta = Math.max(mins[index] - base[index], Math.min(base[index + 1] - mins[index + 1], event.clientX - startX))
+      if (delta === 0 && !next) return
+      next = [...base]
+      next[index] += delta
+      next[index + 1] -= delta
+      setLocal({ source, widths: next })
+    }
+    function cleanup() {
+      document.removeEventListener('mousemove', move)
+      document.removeEventListener('mouseup', finish)
+      window.removeEventListener('blur', finish)
+      document.body.style.cursor = cursor
+      document.body.style.userSelect = userSelect
+      cancelDrag.current = null
+    }
+    function finish() {
+      cleanup()
+      if (next && next.some((w, i) => Math.abs(w - base[i]) >= 1)) {
+        // Keep the existing integer preference format and its 2000 upper bound.
+        const scale = Math.min(1, 2000 / Math.max(...next))
+        const saved = next.map(w => Math.max(48, Math.round(w * scale)))
+        setLocal({ source, widths: saved })
+        latest.current?.onChange?.(saved)
+      } else if (next) setLocal(local)
+    }
+    cancelDrag.current = cleanup
+    document.body.style.cursor = 'col-resize'
+    document.body.style.userSelect = 'none'
+    document.addEventListener('mousemove', move)
+    document.addEventListener('mouseup', finish)
+    window.addEventListener('blur', finish)
+  }, [columnCount, source, local])
 
-  const startResize = useCallback(
-    (colIndex: number, startClientX: number, measureRow?: HTMLElement | null) => {
-      let base = pixelWidths ?? (customized && externalWidths ? externalWidths : null)
-      if (!base) {
-        const measured = measureRow ? measureRowColumnWidths(measureRow, columnCount) : []
-        base =
-          measured.length === columnCount
-            ? measured
-            : fallbacks.map((w) => Math.max(min, Math.min(2000, w || 120)))
-        setPixelWidths(base)
-        options?.onChange?.(base)
-      }
-      const startW = base[colIndex] ?? fallbacks[colIndex] ?? min
-      function onMove(ev: MouseEvent) {
-        const dx = ev.clientX - startClientX
-        setPixelWidths((prev) => {
-          const current = prev ?? base!
-          const next = [...current]
-          next[colIndex] = Math.max(min, startW + dx)
-          options?.onChange?.(next)
-          return next
-        })
-      }
-      function onUp() {
-        document.removeEventListener('mousemove', onMove)
-        document.removeEventListener('mouseup', onUp)
-        window.removeEventListener('blur', onUp)
-        document.body.style.cursor = ''
-        document.body.style.userSelect = ''
-      }
-      document.body.style.cursor = 'col-resize'
-      document.body.style.userSelect = 'none'
-      document.addEventListener('mousemove', onMove)
-      document.addEventListener('mouseup', onUp)
-      window.addEventListener('blur', onUp)
-    },
-    [columnCount, customized, externalWidths, fallbacks, min, options, pixelWidths],
-  )
-
-  return { gridTemplateColumns, startResize, customized: customized || pixelWidths != null }
+  const customized = widths?.length === columnCount
+  return {
+    gridTemplateColumns: customized ? columnGrid(widths, minimums) : undefined,
+    startResize,
+    customized,
+  }
 }

@@ -646,15 +646,15 @@ export function CasePortalPanel({ token, caseId, onFilesChanged }: Props) {
         {formSubmissions.length === 0 ? (
           <div className="muted">No portal forms sent on this matter yet.</div>
         ) : (
-          <div className="table">
-            <div className="tr th" style={{ gridTemplateColumns: '1fr 140px 120px 160px' }}>
+          <div className="table casePortalResponsiveTable">
+            <div className="tr th" style={{ gridTemplateColumns: 'minmax(180px, 2fr) minmax(140px, 1.4fr) minmax(100px, 1fr) minmax(160px, 1.6fr)' }}>
               <div className="thCell">Form</div>
               <div className="thCell">Contact</div>
               <div className="thCell">Status</div>
               <div className="thCell">Actions</div>
             </div>
             {formSubmissions.map((row) => (
-              <div key={row.id} className="tr" style={{ gridTemplateColumns: '1fr 140px 120px 160px' }}>
+              <div key={row.id} className="tr" style={{ gridTemplateColumns: 'minmax(180px, 2fr) minmax(140px, 1.4fr) minmax(100px, 1fr) minmax(160px, 1.6fr)' }}>
                 <div className="td">
                   <div>{row.template_name}</div>
                   <div className="muted" style={{ fontSize: 12 }}>{formatWhen(row.sent_at)}</div>
@@ -707,8 +707,8 @@ export function CasePortalPanel({ token, caseId, onFilesChanged }: Props) {
         {canaryRequests.length === 0 ? (
           <div className="muted">No Canary Sign requests on this matter yet.</div>
         ) : (
-          <div className="table">
-            <div className="tr th" style={{ gridTemplateColumns: '1.2fr 1fr 120px 160px' }}>
+          <div className="table casePortalResponsiveTable">
+            <div className="tr th" style={{ gridTemplateColumns: 'minmax(180px, 1.8fr) minmax(160px, 1.6fr) minmax(100px, 1fr) minmax(160px, 1.6fr)' }}>
               <div className="thCell">Document</div>
               <div className="thCell">Recipients</div>
               <div className="thCell">Status</div>
@@ -717,7 +717,7 @@ export function CasePortalPanel({ token, caseId, onFilesChanged }: Props) {
             {canaryRequests.map((req) => {
               const outstanding = outstandingSignRecipients(req)
               return (
-                <div key={req.id} className="tr" style={{ gridTemplateColumns: '1.2fr 1fr 120px 160px' }}>
+                <div key={req.id} className="tr" style={{ gridTemplateColumns: 'minmax(180px, 1.8fr) minmax(160px, 1.6fr) minmax(100px, 1fr) minmax(160px, 1.6fr)' }}>
                   <div className="td">
                     <div>{req.subject || req.source_filename || 'Document'}</div>
                     <div className="muted" style={{ fontSize: 12 }}>

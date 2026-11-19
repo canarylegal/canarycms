@@ -44,3 +44,7 @@ The suite also verifies cross-user document access, audited denials, edit-sessio
 ownership, revocation of issued WebDAV sessions and real session-expiry recovery.
 See [ACCESS_AND_SESSION_RECOVERY.md](ACCESS_AND_SESSION_RECOVERY.md) for the
 permission policy, audit scope and pinned ONLYOFFICE startup readiness gate.
+
+Responsive column checks cover saved menu proportions, sidebar/viewport changes
+without preference writes, divider dragging and reload, minimum widths, and
+header/body alignment in matter document lists. See [COLUMN_SIZING.md](COLUMN_SIZING.md).

@@ -54,6 +54,7 @@ export function Contacts({ token, me }: { token: string; me?: UserPublic | null 
         LEGACY_AUTO_CONTACTS_COLUMN_WIDTHS,
       ),
       fallbackWidths: [...CONTACTS_COLUMN_WIDTHS_DEFAULT],
+      minimumWidths: [140, 90, 180, 120],
       onChange: (widths) => setUiPreferenceDebounced('contacts_column_widths', widths, 300),
     },
   )

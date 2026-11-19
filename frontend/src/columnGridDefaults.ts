@@ -1,20 +1,20 @@
-/** Proportional column grids used before server-persisted pixel widths (see index.css). */
+/** Proportional column grids with readable minimum widths (see index.css). */
 
 export const MAIN_MENU_CASES_TABLE_GRID =
-  'minmax(0, 10fr) minmax(0, 26.25fr) minmax(0, 34.375fr) minmax(0, 18.125fr) minmax(0, 11.25fr)'
+  'minmax(88px, 10fr) minmax(140px, 26.25fr) minmax(180px, 34.375fr) minmax(120px, 18.125fr) minmax(90px, 11.25fr)'
 
 /** Quotes list uses the same five-column grid as the main menu (Source replaces Status). */
 export const QUOTES_MENU_CASES_TABLE_GRID = MAIN_MENU_CASES_TABLE_GRID
 
 export const TASKS_MENU_TABLE_GRID =
-  'minmax(0, 8.768fr) minmax(0, 6.427fr) minmax(0, 8.768fr) minmax(0, 20.459fr) minmax(0, 30fr) minmax(0, 18.267fr) minmax(0, 7.311fr)'
+  'minmax(90px, 8.768fr) minmax(64px, 6.427fr) minmax(80px, 8.768fr) minmax(140px, 20.459fr) minmax(180px, 30fr) minmax(120px, 18.267fr) minmax(80px, 7.311fr)'
 
 export const CONTACTS_TABLE_GRID =
-  'minmax(0, 90fr) minmax(0, 70fr) minmax(0, 70fr) minmax(0, 70fr)'
+  'minmax(140px, 90fr) minmax(90px, 70fr) minmax(180px, 70fr) minmax(120px, 70fr)'
 
 /** DocuSign envelope list: Sent · Status · Document · Recipients · Client · Reference · Sent by */
 export const DOCUSIGN_TABLE_GRID =
-  'minmax(0, 13fr) minmax(0, 11fr) minmax(0, 22fr) minmax(0, 22fr) minmax(0, 14fr) minmax(0, 8fr) minmax(0, 10fr)'
+  'minmax(100px, 13fr) minmax(90px, 11fr) minmax(160px, 22fr) minmax(160px, 22fr) minmax(120px, 14fr) minmax(80px, 8fr) minmax(90px, 10fr)'
 
 /** Pixel defaults auto-filled on first deploy; treat as “not customized”. */
 export const LEGACY_AUTO_MAIN_MENU_COLUMN_WIDTHS = [110, 165, 300, 130, 225] as const
