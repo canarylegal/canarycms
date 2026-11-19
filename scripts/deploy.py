@@ -2,6 +2,7 @@
 """Repeatable upgrades of an existing Compose deployment. Never removes volumes."""
 from __future__ import annotations
 
+from contextlib import contextmanager
 import argparse
 import copy
 import fcntl
@@ -15,6 +16,19 @@ import tarfile
 import time
 import urllib.request
 from datetime import datetime, timezone
+
+
+@contextmanager
+def operation_lock(project):
+    """Serialize backups/deployments for this project and Docker operator account."""
+    key = hashlib.sha256(project.encode()).hexdigest()[:24]
+    path = Path('/tmp') / f'canary-operation-{os.getuid()}-{key}.lock'
+    fd = os.open(path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(fd, 'w') as lock:
+        if os.fstat(lock.fileno()).st_uid != os.getuid():
+            raise RuntimeError('Operation lock has an unexpected owner.')
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        yield
 
 
 def run(args, **kwargs):
@@ -184,19 +198,19 @@ def verify(config, manifest, expected, timeout=180):
     raise RuntimeError(f'Verification timed out: {last}')
 
 
-def backup(release, manifest):
+def backup(release, manifest, stderr=None):
     db = manifest['containers']['db']
     manifest['schema_before'] = schema_fingerprint(db)
     with (release / 'database.dump').open('wb') as dest:
         subprocess.run(['docker', 'exec', db, 'sh', '-ec',
-                        'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc'], stdout=dest, check=True)
+                        'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc'], stdout=dest, stderr=stderr, check=True)
     with (release / 'database.dump').open('rb') as src:
-        subprocess.run(['docker', 'exec', '-i', db, 'pg_restore', '--list'], stdin=src, stdout=subprocess.DEVNULL, check=True)
+        subprocess.run(['docker', 'exec', '-i', db, 'pg_restore', '--list'], stdin=src, stdout=subprocess.DEVNULL, stderr=stderr, check=True)
     with (release / 'files.tar').open('wb') as dest:
         previous = json.loads((release / 'previous.json').read_text())
         subprocess.run(['docker', 'run', '--rm', '--network', 'none', '--volumes-from',
                         manifest['containers']['backend'] + ':ro', '--entrypoint', 'tar',
-                        previous['services']['backend']['image'], '-C', '/data/files', '-cf', '-', '.'], stdout=dest, check=True)
+                        previous['services']['backend']['image'], '-C', '/data/files', '-cf', '-', '.'], stdout=dest, stderr=stderr, check=True)
     with tarfile.open(release / 'files.tar') as archive:
         for member in archive:
             if member.isfile():
@@ -293,10 +307,12 @@ def main():
             if args.command == 'status':
                 print(json.dumps({k: manifest.get(k) for k in ('commit', 'source', 'project', 'url', 'targets', 'phase')}, indent=2))
                 run(compose(release / ('previous.json' if manifest['phase'] == 'rolled_back' else 'compose.json'), 'ps'))
-            elif args.command == 'apply':
-                apply(release, manifest)
             else:
-                rollback(release, manifest)
+                with operation_lock(manifest['project']):
+                    if args.command == 'apply':
+                        apply(release, manifest)
+                    else:
+                        rollback(release, manifest)
 
 
 if __name__ == '__main__':

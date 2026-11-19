@@ -1,7 +1,11 @@
 import os
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Depends
+from fastapi.responses import JSONResponse
+from app.deps import require_admin
+from app.operational_health import health_snapshot
+from app.request_diagnostics import RequestDiagnosticsMiddleware, configure_request_logging
 from fastapi.middleware.cors import CORSMiddleware
 
 from app import models  # noqa: F401
@@ -257,6 +261,8 @@ def _install_proxy_headers_middleware(application: FastAPI) -> None:
     application.add_middleware(ProxyHeadersMiddleware, trusted_hosts=trusted)
 
 
+configure_request_logging()
+
 app = FastAPI(title="Case Management Backend", lifespan=lifespan)
 
 _cors_kwargs: dict = {
@@ -264,6 +270,7 @@ _cors_kwargs: dict = {
     "allow_credentials": True,
     "allow_methods": ["*"],
     "allow_headers": ["*"],
+    "expose_headers": ["X-Request-ID"],
 }
 _cors_origin_regex = _cors_allow_origin_regex()
 if _cors_origin_regex:
@@ -281,6 +288,8 @@ async def _security_headers_middleware(request, call_next):
     response.headers.setdefault("X-Content-Type-Options", "nosniff")
     return response
 
+
+app.add_middleware(RequestDiagnosticsMiddleware)
 
 app.include_router(auth.router)
 app.include_router(brand.router)
@@ -355,3 +364,16 @@ def health():
         "build_commit": commit or None,
         "product_version": canary_product_version(),
     }
+
+
+@app.get("/health/ready")
+def readiness():
+    result = health_snapshot(include_office=False)
+    return JSONResponse({'status': 'ready' if result['ready'] else 'not_ready'},
+                        status_code=200 if result['ready'] else 503,
+                        headers={'Cache-Control': 'no-store'})
+
+
+@app.get("/admin/health", dependencies=[Depends(require_admin)])
+def operational_health():
+    return JSONResponse(health_snapshot(), headers={'Cache-Control': 'no-store'})

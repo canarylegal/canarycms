@@ -1,0 +1,11 @@
+[Unit]
+Description=Schedule Canary backup checks
+
+[Timer]
+OnCalendar=*-*-* 01:30:00
+Persistent=true
+RandomizedDelaySec=5min
+Unit=canary-backup.service
+
+[Install]
+WantedBy=timers.target
