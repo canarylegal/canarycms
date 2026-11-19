@@ -41,7 +41,7 @@ export function AdminAudit({ token, embedded }: Props) {
 
   const { gridTemplateColumns, startResize } = useColumnWidths(AUDIT_COLUMN_LABELS.length, {
     fallbackWidths: AUDIT_COLUMN_FALLBACK,
-    min: 72,
+    minimumWidths: [168, 152, 152, 224, 176],
   })
 
   const rowGridStyle = gridTemplateColumns ? { gridTemplateColumns } : undefined

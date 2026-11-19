@@ -392,6 +392,7 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
         LEGACY_AUTO_MAIN_MENU_COLUMN_WIDTHS,
       ),
       fallbackWidths: [...MAIN_MENU_COLUMN_WIDTHS_DEFAULT],
+      minimumWidths: [88, 140, 180, 120, 90],
       onChange: (widths) => setUiPreferenceDebounced('main_menu_column_widths', widths, 300),
     },
   )
@@ -405,6 +406,7 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
         LEGACY_AUTO_TASKS_MENU_COLUMN_WIDTHS,
       ),
       fallbackWidths: [...TASKS_MENU_COLUMN_WIDTHS_DEFAULT],
+      minimumWidths: [90, 64, 80, 140, 180, 120, 80],
       onChange: (widths) => setUiPreferenceDebounced('tasks_menu_column_widths', widths, 300),
     },
   )

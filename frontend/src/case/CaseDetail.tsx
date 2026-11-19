@@ -393,6 +393,7 @@ export function CaseDetail({
         LEGACY_AUTO_TASKS_MENU_COLUMN_WIDTHS,
       ),
       fallbackWidths: [...TASKS_MENU_COLUMN_WIDTHS_DEFAULT],
+      minimumWidths: [90, 64, 80, 140, 180, 120, 80],
       onChange: (widths) => setUiPreferenceDebounced('tasks_menu_column_widths', widths, 300),
     },
   )

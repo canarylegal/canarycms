@@ -1612,11 +1612,7 @@ html.dark .topbar--content .btn:not(.primary):not(.danger) {
  */
 .mainMenuShell--mainMenu .casesTableScroll .tr {
   grid-template-columns:
-    minmax(0, 10fr)
-    minmax(0, 26.25fr)
-    minmax(0, 34.375fr)
-    minmax(0, 18.125fr)
-    minmax(0, 11.25fr);
+    minmax(88px, 10fr) minmax(140px, 26.25fr) minmax(180px, 34.375fr) minmax(120px, 18.125fr) minmax(90px, 11.25fr);
 }
 
 /* Closed / archived matters — muted row (main menu cases list only). */
@@ -1640,13 +1636,7 @@ html.dark .topbar--content .btn:not(.primary):not(.danger) {
  */
 .mainMenuShell--mainMenu .tasksTableScroll .tr {
   grid-template-columns:
-    minmax(0, 8.768fr)
-    minmax(0, 6.427fr)
-    minmax(0, 8.768fr)
-    minmax(0, 20.459fr)
-    minmax(0, 30fr)
-    minmax(0, 18.267fr)
-    minmax(0, 7.311fr);
+    minmax(90px, 8.768fr) minmax(64px, 6.427fr) minmax(80px, 8.768fr) minmax(140px, 20.459fr) minmax(180px, 30fr) minmax(120px, 18.267fr) minmax(80px, 7.311fr);
 }
 
 .taskMenuRow--overdue {
@@ -1702,7 +1692,7 @@ html.dark .topbar--content .btn:not(.primary):not(.danger) {
 
 /* Global contacts list (Contacts page): Name 30%; Type · Email · Phone share 70% equally — matches CONTACTS_TABLE_GRID in App.tsx */
 .mainMenuShell--mainMenu .contactsTableScroll .tr {
-  grid-template-columns: minmax(0, 90fr) minmax(0, 70fr) minmax(0, 70fr) minmax(0, 70fr);
+  grid-template-columns: minmax(140px, 90fr) minmax(90px, 70fr) minmax(180px, 70fr) minmax(120px, 70fr);
 }
 
 /*
@@ -1711,24 +1701,13 @@ html.dark .topbar--content .btn:not(.primary):not(.danger) {
  */
 .mainMenuShell--mainMenu .docusignTableScroll .tr {
   grid-template-columns:
-    minmax(0, 13fr)
-    minmax(0, 11fr)
-    minmax(0, 22fr)
-    minmax(0, 22fr)
-    minmax(0, 14fr)
-    minmax(0, 8fr)
-    minmax(0, 10fr);
+    minmax(100px, 13fr) minmax(90px, 11fr) minmax(160px, 22fr) minmax(160px, 22fr) minmax(120px, 14fr) minmax(80px, 8fr) minmax(90px, 10fr);
 }
 
 /* Portal summary desk: Type · Reference · Description · Recipients · Status · Sent */
 .mainMenuShell--mainMenu .portalSummaryTableScroll .tr {
   grid-template-columns:
-    minmax(0, 10fr)
-    minmax(0, 8fr)
-    minmax(0, 28fr)
-    minmax(0, 20fr)
-    minmax(0, 8fr)
-    minmax(0, 12fr);
+    minmax(80px, 10fr) minmax(80px, 8fr) minmax(180px, 28fr) minmax(140px, 20fr) minmax(90px, 8fr) minmax(100px, 12fr);
 }
 
 .mainMenuFilterRow--toolbar {
@@ -3154,8 +3133,8 @@ select {
   /* Match envelope / mime / folder / pin icons in the description column. */
   --docs-file-icon-size: calc(18px * 1.2);
   display: grid;
-  /* Description shrinks; Size / Modified / User stay fixed width (no horizontal scroll on the panel). */
-  grid-template-columns: minmax(0, 1fr) minmax(76px, 76px) minmax(132px, 132px) minmax(92px, 92px);
+  /* All columns share available space; minima keep metadata readable. */
+  grid-template-columns: minmax(200px, 6fr) minmax(76px, 1fr) minmax(132px, 1.7fr) minmax(92px, 1.2fr);
   gap: var(--canary-table-row-gap);
   padding: var(--canary-table-row-padding);
   border-bottom: 1px solid var(--border);
@@ -3176,9 +3155,9 @@ select {
   background: rgba(var(--primary-rgb), 0.06);
 }
 
-.docsTr.attachmentChild {
-  /* Visual indent for email-attachments grouped under a parent .eml row. */
-  padding-left: calc(26px * 0.85);
+.docsTr.attachmentChild > :first-child {
+  /* Indent the description only, keeping proportional metadata tracks aligned. */
+  padding-left: calc(14px * 0.85);
 }
 
 .docsTr > *:first-child {
@@ -3872,7 +3851,7 @@ select {
 .caseDocsScroll {
   flex: 1;
   min-height: 0;
-  overflow-x: hidden;
+  overflow-x: auto;
   overflow-y: auto;
   min-width: 0;
   -webkit-overflow-scrolling: touch;
@@ -6785,3 +6764,16 @@ html.dark .portalShell {
 .adminStorageLegendRow--nested {
   padding-left: 8px;
 }
+
+/* Rows and sticky headers overflow together only below their minimum track widths. */
+.casesTableScroll .tr { min-width: calc(618px + 4 * var(--canary-table-row-gap) + 2 * var(--canary-table-row-padding)); }
+.tasksTableScroll .tr { min-width: calc(754px + 6 * var(--canary-table-row-gap) + 2 * var(--canary-table-row-padding)); }
+.contactsTableScroll .tr { min-width: calc(530px + 3 * var(--canary-table-row-gap) + 2 * var(--canary-table-row-padding)); }
+.docusignTableScroll .tr { min-width: calc(800px + 6 * var(--canary-table-row-gap) + 2 * var(--canary-table-row-padding)); }
+.portalSummaryTableScroll .tr { min-width: calc(670px + 5 * var(--canary-table-row-gap) + 2 * var(--canary-table-row-padding)); }
+.docsTr { min-width: calc(500px + 3 * var(--canary-table-row-gap) + 2 * var(--canary-table-row-padding)); }
+
+.auditTableScroll .tr { min-width: calc(872px + 4 * var(--canary-table-row-gap) + 2 * var(--canary-table-row-padding)); }
+.casePortalResponsiveTable { overflow-x: auto; }
+.casePortalResponsiveTable .tr { min-width: calc(700px + 3 * var(--canary-table-row-gap) + 2 * var(--canary-table-row-padding)); }
+.tasksTableEmbed .tasksTableScroll { overflow-x: auto; }
