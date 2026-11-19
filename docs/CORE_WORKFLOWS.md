@@ -24,3 +24,18 @@ Tests fail rather than skip when credentials or fixtures are missing. They run a
 The Playwright runner image is pinned to `v1.55.0-noble`, matching the lockfile's `@playwright/test`. Update both together. Screenshots/traces and service logs are retained as CI artifacts. The test stack is isolated, but those artifacts should still be treated as internal diagnostics.
 
 These checks cover the core release path. They do not replace broader unit tests, concurrency/load testing, financial reconciliation tests or a security audit.
+
+## Document failure paths
+
+The browser suite also injects failures into otherwise real document workflows:
+
+- Reject the second upload in a batch with HTTP 429, then retry using the retained file selection. Verify the first upload is not repeated.
+- Accept an upload on the server but lose its response. Verify the client reconciles the document list instead of creating a duplicate.
+- Deny a download with HTTP 403, then test a separate transient failure and retry through the existing dialog.
+- Deny the editor's first save attempt, retry without reopening or retyping, and verify the edited text in the downloaded DOCX.
+
+Unit tests cover read retry limits, body timeouts, expired sessions/access denial, partial batch progress, duplicate upload suppression, folder changes during retry, portal notification failures and save-confirmation polling.
+
+Transfer requests and browser delivery are in `documentRequests.ts` and `documentTransferOps.ts`; `useCaseDocumentTransfers.ts` owns progress, busy state and retry dialogs. Reads retry at most once automatically. Uploads never retry automatically: an explicit retry is offered for a definite HTTP 429 rejection, while network/timeouts/server failures require refreshing and checking the list before importing again because the server may already have accepted the file. Successful files are retained, and a failed portal notification never re-uploads them. Save failures keep the editor and unsaved state available for an explicit retry.
+
+The matter/document layout and double-click/right-click interaction model are unchanged. Recovery uses the existing dialogs and editor error surface.

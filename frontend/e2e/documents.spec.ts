@@ -29,6 +29,19 @@ test('document upload, double-click open, edit, save and download persist real c
   await canvasInput.press('Enter')
   const marker = `SAVED-BY-CORE-TEST-${Date.now()}`
   await canvasInput.pressSequentially(marker)
+  let deniedSave = false
+  await editor.route('**/oo-force-save?*', async route => {
+    if (new URL(route.request().url()).searchParams.get('phase') === 'arm' && !deniedSave) {
+      deniedSave = true
+      return route.fulfill({ status: 403, contentType: 'application/json', body: JSON.stringify({ detail: 'Not permitted' }) })
+    }
+    await route.continue()
+  })
+  await editor.getByRole('button', { name: 'Save Changes', exact: true }).click()
+  await expect(editor.getByRole('alert')).toContainText('Keep this editor open')
+  await expect(editor.getByRole('alert')).toContainText('permission')
+  await expect(editor.getByRole('button', { name: 'Save Changes', exact: true })).toBeEnabled()
+  // The retry must save the already-entered text without reopening or retyping it.
   await editor.getByRole('button', { name: 'Save Changes', exact: true }).click()
   await expect(editor.getByRole('button', { name: 'Save Changes', exact: true })).toBeEnabled({ timeout: 90_000 })
   await editor.getByRole('button', { name: 'Close', exact: true }).click()
