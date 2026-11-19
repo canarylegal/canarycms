@@ -204,8 +204,8 @@ def main():
         write_json(state / 'recovery.json', report)
         if args.verify:
             script = Path(__file__).resolve().parents[1] / 'backend/scripts/verify_recovery_readonly.py'
-            with script.open('rb') as source:
-                result = subprocess.check_output(compose + ['exec', '-T', 'backend', 'python', '-'], stdin=source, stderr=subprocess.DEVNULL, timeout=300)
+            with script.open('rb') as source, (state / 'verification.log').open('w') as log:
+                result = subprocess.check_output(compose + ['exec', '-T', 'backend', 'python', '-'], stdin=source, stderr=log, timeout=300)
             verification = json.loads(result)
             if verification.get('status') != 'verified':
                 raise RuntimeError('Authenticated recovery check failed.')

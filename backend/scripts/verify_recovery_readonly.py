@@ -1,27 +1,33 @@
 """Authenticated checks in a restored clone; never allowed against a deployment."""
+from datetime import datetime, timezone
 import hashlib
 import http.cookiejar
 import json
 import os
 from pathlib import Path
 import secrets
-import sys
+import pyotp
 import urllib.request
+import urllib.error
 from sqlalchemy import select, text
 from app.db import SessionLocal, engine
 from app.models import Case, File, User, UserRole
-from app.security import hash_password
+from app.security import hash_password, generate_totp_secret
+from app.totp_secrets import encrypt_totp_secret
 
 if engine.url.database != 'canary_recovery' or os.getenv('CANARY_BACKGROUND_JOBS_ENABLED') != '0':
     raise RuntimeError('Verification is restricted to the isolated recovery database.')
 
 password = secrets.token_urlsafe(32)
+totp_secret = generate_totp_secret()
 with SessionLocal() as db:
     user = User(email='recovery-' + secrets.token_hex(8) + '@example.com', display_name='Recovery check',
-                initials='RC', role=UserRole.admin, is_active=True, password_hash=hash_password(password))
+                initials='R' + secrets.token_hex(5), role=UserRole.admin, is_active=True,
+                is_2fa_enabled=True, totp_secret=encrypt_totp_secret(totp_secret),
+                password_changed_at=datetime.now(timezone.utc), password_hash=hash_password(password))
     db.add(user); db.commit(); user_id = user.id; email = user.email
     cases = db.scalars(select(Case.id)).all()
-    files = db.execute(select(File.id, File.case_id, File.storage_path).order_by(File.id).limit(3)).all()
+    files = db.execute(select(File.id, File.case_id, File.storage_path).where(File.case_id.is_not(None)).order_by(File.id).limit(3)).all()
     balances = [dict(row) for row in db.execute(text("""
         SELECT a.case_id::text AS case_id, a.account_type::text AS account_type,
         COALESCE(SUM(CASE WHEN e.is_approved THEN CASE WHEN e.direction::text='credit'
@@ -35,10 +41,19 @@ def request(path, data=None):
     payload = json.dumps(data).encode() if data is not None else None
     req = urllib.request.Request('http://frontend/api' + path, data=payload,
                                  headers={'Content-Type': 'application/json'})
-    return opener.open(req, timeout=15)
+    try:
+        return opener.open(req, timeout=15)
+    except urllib.error.HTTPError as error:
+        # Private verifier log: validation location/type, never inputs or credentials.
+        try:
+            details = json.load(error).get('detail', [])
+            validation = [{'loc': item.get('loc'), 'type': item.get('type')} for item in details if isinstance(item, dict)]
+        except (ValueError, AttributeError, TypeError):
+            validation = []
+        raise RuntimeError(json.dumps({'status': error.code, 'validation': validation})) from None
 
 try:
-    with request('/auth/login', {'email': email, 'password': password}) as response:
+    with request('/auth/login', {'email': email, 'password': password, 'totp_code': pyotp.TOTP(totp_secret).now()}) as response:
         assert response.status == 200
     with request('/auth/me') as response:
         assert json.load(response)['id'] == str(user_id)
