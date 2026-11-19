@@ -8,29 +8,20 @@ import type {
   UserPublic,
 } from '../types'
 import { composeMatterEmail } from './caseComposeEmail'
-import { fetchCaseFileResponse } from './caseDetailHelpers'
+import { documentRequest } from './documentRequests'
 import {
-  downloadCaseExportZipBlob,
-  downloadCaseFilesSequential,
-  downloadCaseFolderZipBlob,
   formatFileOpError,
   isCommentFile,
   loadEmlPreviewData,
-  notifyPortalFilesAdded,
   openCaseFileBlobInTab,
   downloadEmlViaToken,
   openEmlViaDesktopToken,
   tryOpenEmlInOutlookWeb,
-  uploadFilesToCaseFolder,
 } from './caseDocFileOps'
 import type { EmlPreviewData } from './emlPreview'
 import { joinFolderPath } from './folderPathCodec'
 import { isEmlLikeFileSummary, isOfficeLikeFile } from './officeFiles'
-import {
-  isPortalSharedFolder,
-  portalContactsForFolder,
-  portalSharedFolderUploadNotifyMessage,
-} from './portalFolderAccess'
+import { useCaseDocumentTransfers } from './useCaseDocumentTransfers'
 
 export type CaseDocTextPrompt = {
   title: string
@@ -40,7 +31,7 @@ export type CaseDocTextPrompt = {
   onConfirm: (value: string) => void
 }
 
-type UseCaseDocFileHandlersArgs = {
+export type UseCaseDocFileHandlersArgs = {
   caseId: string | undefined
   caseDetail: CaseOut | null
   token: string
@@ -101,61 +92,10 @@ export function useCaseDocFileHandlers({
   const previewEmlFileRef = useRef<(f: FileSummary) => void>(() => {})
   const openCaseFileRef = useRef<(f: FileSummary) => void>(() => {})
 
-  const uploadFilesToCurrentFolder = useCallback(
-    async (incomingFiles: File[]) => {
-      if (incomingFiles.length === 0 || !caseId) return
-      let notifyPortalContacts = false
-      const sharedContacts = portalEnabled ? portalContactsForFolder(docFolder, portalFolderGrants) : []
-      if (portalEnabled && isPortalSharedFolder(docFolder, portalFolderGrants)) {
-        const choice = await askConfirm({
-          title: 'Notify portal contacts?',
-          message: portalSharedFolderUploadNotifyMessage(sharedContacts, incomingFiles.length),
-          confirmLabel: 'Send e-mail',
-          cancelLabel: 'Skip',
-        })
-        notifyPortalContacts = choice
-      }
-      setBusy(true)
-      setActionErr(null)
-      try {
-        await uploadFilesToCaseFolder(caseId, token, docFolder, incomingFiles)
-        if (notifyPortalContacts) {
-          const notifyOut = await notifyPortalFilesAdded(
-            caseId,
-            token,
-            docFolder,
-            incomingFiles.map((f) => f.name),
-          )
-          if (notifyOut.alerts_skipped_reason) {
-            pushNotification(notifyOut.alerts_skipped_reason)
-          } else if (notifyOut.contacts_notified > 0) {
-            pushNotification(
-              notifyOut.contacts_notified === 1
-                ? 'Portal contact notified by e-mail.'
-                : `${notifyOut.contacts_notified} portal contacts notified by e-mail.`,
-            )
-          }
-        }
-        onRefresh()
-      } catch (err: any) {
-        setActionErr(err?.message ?? 'Upload failed')
-      } finally {
-        setBusy(false)
-      }
-    },
-    [
-      caseId,
-      portalEnabled,
-      docFolder,
-      portalFolderGrants,
-      askConfirm,
-      setBusy,
-      setActionErr,
-      token,
-      pushNotification,
-      onRefresh,
-    ],
-  )
+  const { uploadFilesToCurrentFolder, downloadCaseFiles, downloadCaseExportZip, downloadCaseFolderZip } = useCaseDocumentTransfers({
+    caseId, caseDetail, token, docFolder, portalEnabled, portalFolderGrants, askConfirm,
+    pushNotification, onRefresh, setBusy, setActionErr, setDocMenu,
+  })
 
   const createFolderAtCurrentPath = useCallback(() => {
     setTextPrompt({
@@ -257,20 +197,13 @@ export function useCaseDocFileHandlers({
       setBusy(true)
       setActionErr(null)
       try {
-        const res = await fetchCaseFileResponse(caseId, f.id, token)
-        if (res.status === 401) {
-          localStorage.removeItem('token')
-          window.location.reload()
-          return
-        }
-        if (!res.ok) throw new Error((await res.text()) || res.statusText)
-        const text = await res.text()
+        const text = await documentRequest(`/cases/${caseId}/files/${f.id}`, token, (res) => res.text())
         setCommentText(text)
         setCommentEditFileId(f.id)
         setCommentErr(null)
         setCommentOpen(true)
       } catch (e: any) {
-        setActionErr(e?.message ?? 'Could not load comment')
+        setActionErr(formatFileOpError(e, 'Could not load comment'))
       } finally {
         setBusy(false)
       }
@@ -459,52 +392,6 @@ export function useCaseDocFileHandlers({
 
   previewEmlFileRef.current = previewEmlFile
   openCaseFileRef.current = openCaseFile
-
-  const downloadCaseFiles = useCallback(
-    async (targets: FileSummary[]) => {
-      if (!caseId || targets.length === 0) return
-      setBusy(true)
-      setActionErr(null)
-      try {
-        await downloadCaseFilesSequential(caseId, targets, token)
-      } catch (e: unknown) {
-        setActionErr(formatFileOpError(e, 'Download failed'))
-      } finally {
-        setBusy(false)
-      }
-    },
-    [caseId, setBusy, setActionErr, token],
-  )
-
-  const downloadCaseExportZip = useCallback(async () => {
-    if (!caseId || !caseDetail) return
-    setBusy(true)
-    setActionErr(null)
-    try {
-      await downloadCaseExportZipBlob(caseId, caseDetail.case_number, token)
-    } catch (e: unknown) {
-      setActionErr(formatFileOpError(e, 'Export failed'))
-    } finally {
-      setBusy(false)
-    }
-  }, [caseId, caseDetail, setBusy, setActionErr, token])
-
-  const downloadCaseFolderZip = useCallback(
-    async (folderPath: string) => {
-      if (!caseId) return
-      setBusy(true)
-      setActionErr(null)
-      setDocMenu(null)
-      try {
-        await downloadCaseFolderZipBlob(caseId, folderPath, token)
-      } catch (e: unknown) {
-        setActionErr(formatFileOpError(e, 'Download failed'))
-      } finally {
-        setBusy(false)
-      }
-    },
-    [caseId, setBusy, setActionErr, setDocMenu, token],
-  )
 
   return {
     previewEmlFileRef,

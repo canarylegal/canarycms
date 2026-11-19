@@ -1,3 +1,5 @@
+import { ooForceSavePath, ooSaveStatusPath, pollOnlyofficeSaveConfirmed } from './editorSaveOperations'
+import { documentErrorMessage } from './case/documentRequests'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { apiFetch, COOKIE_SESSION_TOKEN } from './api'
 import { useDialogsOptional, type ConfirmOptions } from './DialogProvider'
@@ -125,7 +127,6 @@ function isPdfOoConfig(cfg: OoConfig): boolean {
 }
 
 const OO_PERSIST_SAVE_TIMEOUT_MS = 90_000
-const OO_SAVE_POLL_MS = 300
 /** Brief poll after programmatic toolbar Save (matches native OO Save callback). */
 const OO_PDF_TOOLBAR_POLL_MS = 12_000
 /** Office formats: allow longer for CommandService forcesave + callback persist. */
@@ -133,7 +134,6 @@ const OO_OFFICE_SAVE_POLL_MS = 45_000
 const OO_SYNC_WAIT_MS = 3_000
 
 type OoForceSaveArmOut = { base_version: number }
-type OoSaveStatusOut = { saved: boolean; version: number }
 
 const OO_TOOLBAR_SAVE_SELECTORS = [
   '#id-toolbar-btn-save',
@@ -179,31 +179,6 @@ function triggerOnlyofficeToolbarSave(): boolean {
     }
   }
   return false
-}
-
-function ooForceSavePath(base: string, docKey: string, phase: 'arm' | 'command'): string {
-  const q = new URLSearchParams({ doc_key: docKey, phase })
-  return `${base}?${q}`
-}
-
-function ooSaveStatusPath(forceSaveUrl: string, baseVersion: number): string {
-  const url = forceSaveUrl.replace(/\/oo-force-save$/, '/oo-save-status')
-  return `${url}?base_version=${encodeURIComponent(String(baseVersion))}`
-}
-
-async function pollOnlyofficeSaveConfirmed(
-  statusUrl: string,
-  baseVersion: number,
-  token: string | undefined,
-  timeoutMs: number,
-): Promise<void> {
-  const deadline = Date.now() + timeoutMs
-  while (Date.now() < deadline) {
-    const st = await apiFetch<OoSaveStatusOut>(statusUrl, { token })
-    if (st.saved && st.version > baseVersion) return
-    await new Promise((r) => setTimeout(r, OO_SAVE_POLL_MS))
-  }
-  throw new Error('ONLYOFFICE forcesave did not confirm within the expected time.')
 }
 
 function resolveOoDocumentType(cfg: OoConfig, dsMajor: number): string {
@@ -317,6 +292,7 @@ export default function EditorPage() {
   const [filename, setFilename] = useState('')
   const [err, setErr] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
+  const saveInFlight = useRef(false)
   const [closing, setClosing] = useState(false)
   /** Save from the “unsaved changes” strip — separate from ``closing`` so Cancel stays enabled (no soft-lock). */
   const [unsavedSaveBusy, setUnsavedSaveBusy] = useState(false)
@@ -772,6 +748,7 @@ export default function EditorPage() {
         await apiFetch(ooForceSavePath(saveBase, docKey, 'command'), { method: 'POST', token })
         saveTriggered = true
       } catch (e: unknown) {
+        if ([401, 403, 404].includes((e as { status?: number }).status ?? 0)) throw e
         console.warn('[ONLYOFFICE] command forcesave failed:', e)
       }
     }
@@ -781,6 +758,7 @@ export default function EditorPage() {
         await pollOnlyofficeSaveConfirmed(statusUrl, arm.base_version, token, OO_OFFICE_SAVE_POLL_MS)
         return
       } catch (pollErr: unknown) {
+        if ([401, 403, 404].includes((pollErr as { status?: number }).status ?? 0)) throw pollErr
         console.warn('[ONLYOFFICE] forcesave not confirmed; using downloadAs:', pollErr)
       }
     } else {
@@ -820,6 +798,7 @@ export default function EditorPage() {
         )
         return
       } catch (pollErr: unknown) {
+        if ([401, 403, 404].includes((pollErr as { status?: number }).status ?? 0)) throw pollErr
         console.warn('[ONLYOFFICE] toolbar forcesave not confirmed; using downloadAs:', pollErr)
       }
     } else {
@@ -833,7 +812,9 @@ export default function EditorPage() {
     params?.mode === 'case' && cfg !== null && !isPdfOoConfig(cfg)
 
   async function performSave(): Promise<boolean> {
-    if (!params || !cfg) return false
+    if (!params || !cfg || saveInFlight.current) return false
+    saveInFlight.current = true
+    setErr(null)
     const fileType = String((cfg.document as { fileType?: string }).fileType ?? '').toLowerCase()
     const dlFormat = fileType === 'pdf' ? 'pdf' : fileType || 'docx'
     /** Compose drafts (quotes, letters) are already on disk — publishing is enough if the user did not edit. */
@@ -887,13 +868,16 @@ export default function EditorPage() {
       setComposePublishPending(false)
       return true
     } catch (e: unknown) {
-      setErr((e as { message?: string }).message ?? 'Save failed. Keep this window open and try again.')
+      setDocumentDirty(true)
+      setErr(`${documentErrorMessage(e, 'Save could not be confirmed.')} Keep this editor open and use Save Changes to retry; your edits have not been discarded.`)
       return false
+    } finally {
+      saveInFlight.current = false
     }
   }
 
   async function handleSaveChanges() {
-    if (!params || !cfg || saving || closing) return
+    if (!params || !cfg || saving || closing || saveInFlight.current) return
     setSaving(true)
     try {
       await performSave()
@@ -963,7 +947,7 @@ export default function EditorPage() {
   }
 
   async function handleUnsavedCloseSave() {
-    if (!params || unsavedSaveBusy) return
+    if (!params || unsavedSaveBusy || saveInFlight.current) return
     setUnsavedSaveBusy(true)
     try {
       const ok = await performSave()

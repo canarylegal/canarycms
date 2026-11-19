@@ -1,3 +1,4 @@
+import { documentRequest } from './documentRequests'
 import { apiUrl, applyAuthHeaders } from '../api'
 import type { CaseContactOut, FileSummary } from '../types'
 import { penceGb } from './financeTotals'
@@ -37,40 +38,22 @@ export function fetchTimedOutMessage(e: unknown): string | null {
 export const EML_PREVIEW_STREAM_CAP = 768 * 1024
 
 export async function fetchEmlTextForPreview(caseId: string, fileId: string, token: string): Promise<string> {
-  const ctrl = new AbortController()
-  const tid = window.setTimeout(() => ctrl.abort(), CASE_FILE_FETCH_MS)
-  try {
-    const res = await fetch(apiUrl(`/cases/${caseId}/files/${fileId}`), {
-      headers: caseAuthHeaders(token),
-      signal: ctrl.signal,
-    })
-    if (res.status === 401) {
-      localStorage.removeItem('token')
-      window.location.reload()
-      return ''
-    }
-    if (!res.ok) throw new Error((await res.text()) || res.statusText)
+  return documentRequest(`/cases/${caseId}/files/${fileId}`, token, async (res) => {
     if (!res.body) return await res.text()
     const reader = res.body.getReader()
     const decoder = new TextDecoder('iso-8859-1', { fatal: false })
     let out = ''
-    while (out.length < EML_PREVIEW_STREAM_CAP) {
-      const { done, value } = await reader.read()
-      if (done) break
-      if (value) out += decoder.decode(value, { stream: true })
-      if (out.length >= EML_PREVIEW_STREAM_CAP) {
-        try {
-          ctrl.abort()
-        } catch {
-          /* ignore */
-        }
-        break
+    try {
+      while (out.length < EML_PREVIEW_STREAM_CAP) {
+        const { done, value } = await reader.read()
+        if (done) break
+        if (value) out += decoder.decode(value, { stream: true })
       }
+      return out
+    } finally {
+      await reader.cancel()
     }
-    return out
-  } finally {
-    clearTimeout(tid)
-  }
+  })
 }
 
 export function ledgerSignedGb(p: number): string {
