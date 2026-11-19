@@ -101,6 +101,7 @@ test('case document columns scale together and remain aligned at minimum size', 
   await aligned(header, page.locator('.docsTr.rowbtn').first())
   await page.screenshot({ path: test.info().outputPath('columns-documents-narrow.png') })
   await page.locator('.caseLeft').getByRole('button', { name: /^Tasks/ }).click()
+  await page.getByRole('button', { name: 'Open tasks', exact: true }).click()
   const tasks = page.locator('.tasksTableEmbed .tasksTableScroll')
   await expect(tasks.locator('.tr.th')).toBeVisible()
   expect(await tasks.evaluate(el => getComputedStyle(el).overflowX)).toBe('auto')
