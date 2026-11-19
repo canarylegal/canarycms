@@ -67,3 +67,5 @@ Practice that full recovery in a disposable environment before relying on it for
 This first updater supports one running container per service, a Compose-managed PostgreSQL service named `db`, a backend using `POSTGRES_*` rather than an explicit `DATABASE_URL`, and persistent `/data/files`. It handles services sharing the backend/frontend network namespace (such as tunnel sidecars). It does not upgrade infrastructure images, change optional package versions, or restore external services. Keep old images and backups until the release is accepted; image pruning can make rollback unavailable.
 
 Run `make test-deploy` for safeguard tests and `make test-core-workflows` for isolated browser/API validation before preparing a release.
+
+Release replay and rollback use recorded immutable image IDs. Rebuilding the same source later is not yet bit-for-bit reproducible: upstream base tags, OS packages and transitive Python dependencies can change. Preserve the built images; full digest and dependency locking is a follow-up.

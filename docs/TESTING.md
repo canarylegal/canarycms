@@ -39,22 +39,13 @@ Environment overrides:
 
 CI: `.github/workflows/portal-smoke.yml` builds `db`+`backend`, ensures the fixture, and runs the same smoke script on portal-related path changes and via **workflow_dispatch**.
 
-Frontend unit CI runs `npm test` (Vitest) then `npm run build` (TypeScript + Vite). `npm run lint:ci` is available locally (zero eslint errors; React Compiler / Fast Refresh / `no-explicit-any` capped as warnings via `--max-warnings`) — wire `lint:ci` into `.github/workflows/ci.yml` once a token with the `workflow` scope can push workflow changes. Thin Playwright browser smoke is documented below (`make test-e2e`); the `browser-e2e` workflow file is ready to push with the same scope.
+Frontend unit CI runs `npm test` (Vitest) then `npm run build` (TypeScript + Vite). `npm run lint:ci` is available locally (zero eslint errors; React Compiler / Fast Refresh / `no-explicit-any` capped as warnings via `--max-warnings`) — wire `lint:ci` into `.github/workflows/ci.yml` once a token with the `workflow` scope can push workflow changes. The isolated Playwright core-workflow suite is documented below.
 
 ### Browser E2E (Playwright)
 
-Thin Chromium smoke against a **running** frontend+backend (not part of the default unit CI job):
+Run `make test-core-workflows` to build a dedicated PostgreSQL/backend/frontend/ONLYOFFICE stack and seed synthetic accounts. It exercises login/logout, explicit matter controls, document editing and verified downloads, access denial, and posting approval. It does not use deployment data.
 
-```bash
-# Stack UI on :8080; firm staff recommended for matter-open path
-export BASE_URL=http://127.0.0.1:8080
-export E2E_STAFF_EMAIL='…'
-export E2E_STAFF_PASSWORD='…'
-make test-e2e
-# or: cd frontend && npm run test:e2e
-```
-
-Covers staff password login (main menu or master recovery shell), optional open-first-matter → docs panel, and portal `/portal` sign-in chrome. CI: `.github/workflows/browser-e2e.yml` (path-filtered + `workflow_dispatch`) brings up compose `prod`, ensures the portal fixture staff user, and runs Playwright.
+See [CORE_WORKFLOWS.md](CORE_WORKFLOWS.md) for isolation, coverage, artifacts and CI details. The `core-workflows` job runs on every PR and main update. Direct `make test-e2e` requires that same dedicated fixture stack and its environment; it is no longer an optional smoke test for arbitrary deployments.
 
 ### Frontend unit tests
 
