@@ -86,7 +86,7 @@ PREV_TAG=v2.0.0 make smoke-firm-dual-tag
 ```
 
 CI: `.github/workflows/firm-contract.yml` checks out the private pilot via repo secret
-`EXAMPLE_FIRM_PILOT_TOKEN` (fine-scoped PAT, `contents:read` on `example-firm-pilot`),
+`EXAMPLE_FIRM_PILOT_SSH_KEY` (private SSH key whose public key is a read-only deploy key on `canarylegal/example-firm-pilot`),
 attaches it with `docker-compose.firm.example.yml`, and runs the same script.
 Without the secret, push/PR skips the job; `workflow_dispatch` prints setup instructions.
 Optional dual-tag job: `workflow_dispatch` with `prev_tag` set.
@@ -101,3 +101,9 @@ make smoke-security
 ```
 
 Runs `backend/scripts/live_security_verify.py` inside the backend container.
+
+To rotate firm CI access, create a new read-only deploy key on the pilot repository,
+replace the `EXAMPLE_FIRM_PILOT_SSH_KEY` Actions secret on `canarylegal/canarycms`,
+run the Firm contract workflow and verify its smoke step actually ran, then remove
+the superseded deploy key. The checkout does not persist credentials. Never commit
+the private key or reuse a personal access token with broader repository access.
