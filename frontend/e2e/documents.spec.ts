@@ -3,22 +3,22 @@ import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { caseId, login } from './core-helpers'
 
-test('document upload, explicit Open, edit, save and download persist real content', async ({ page }) => {
+test('document upload, double-click open, edit, save and download persist real content', async ({ page }) => {
   test.setTimeout(180_000)
   await login(page)
   const id = await caseId(page.request)
-  await page.getByRole('button', { name: 'Open matter 900001', exact: true }).click()
+  await page.getByRole('row').filter({ hasText: '900001' }).dblclick()
   const name = `workflow-${Date.now()}.docx`
   const upload = await readFile(path.resolve('e2e/fixtures/workflow.docx'))
   const chooser = page.waitForEvent('filechooser')
   await page.getByRole('button', { name: 'Import', exact: true }).click()
   await (await chooser).setFiles({ name, mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', buffer: upload })
-  await expect(page.getByRole('button', { name: `Open ${name}`, exact: true })).toBeVisible()
+  await expect(page.getByText(name, { exact: true })).toBeVisible()
   const files = await (await page.request.get(`/api/cases/${id}/files`)).json() as { id: string; original_filename: string }[]
   const file = files.find((item) => item.original_filename === name)
   expect(file).toBeDefined()
   const popup = page.waitForEvent('popup')
-  await page.getByRole('button', { name: `Open ${name}`, exact: true }).click()
+  await page.getByText(name, { exact: true }).dblclick()
   const editor = await popup
   const office = editor.frameLocator('iframe[name="frameEditor"]')
   await expect(office.getByText('Page 1 of 1', { exact: true })).toBeVisible({ timeout: 90_000 })
@@ -32,7 +32,7 @@ test('document upload, explicit Open, edit, save and download persist real conte
   await editor.getByRole('button', { name: 'Save Changes', exact: true }).click()
   await expect(editor.getByRole('button', { name: 'Save Changes', exact: true })).toBeEnabled({ timeout: 90_000 })
   await editor.getByRole('button', { name: 'Close', exact: true }).click()
-  await page.getByRole('button', { name: `Actions for ${name}`, exact: true }).click()
+  await page.getByText(name, { exact: true }).click({ button: 'right' })
   const download = page.waitForEvent('download')
   await page.getByRole('menuitem', { name: 'Download', exact: true }).click()
   const downloaded = await download

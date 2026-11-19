@@ -1,4 +1,3 @@
-import { RowActions } from '../RowActions'
 import type { Dispatch, MouseEvent, RefObject, SetStateAction } from 'react'
 import { createPortal } from 'react-dom'
 import { SearchInput } from '../SearchInput'
@@ -455,16 +454,7 @@ export function CaseDocsList({
           setDocMenu({ kind: 'file', fileId: f.id, x: e.clientX, y: e.clientY })
         }}
       >
-        <div className="rowDescription">
-          <DocsFileDescCell f={f} showPin={!f.parent_file_id} />
-          <RowActions label={f.original_filename} onOpen={() => {
-            if (isEmlLikeFileSummary(f)) void previewEmlFile(f)
-            else void openCaseFile(f)
-          }} onActions={(e) => {
-            const rect = e.currentTarget.getBoundingClientRect()
-            setDocMenu({ kind: 'file', fileId: f.id, x: rect.left, y: rect.bottom + 4 })
-          }} />
-        </div>
+        <DocsFileDescCell f={f} showPin={!f.parent_file_id} />
         <div className="td docsCenter">{formatDocFileSize(f.size_bytes)}</div>
         <div className="td docsCenter">{formatDocModified(docListPrimaryDate(f))}</div>
         <div className="td docsCenter">{fileDocOwnerLabel(f)}</div>
@@ -487,17 +477,11 @@ export function CaseDocsList({
             setDocMenu({ kind: 'folder', folderPath: next, x: e.clientX, y: e.clientY })
           }}
         >
-          <div className="rowDescription">
           <DocsFolderDescCell
             name={decodeFolderPathSegment(folderName)}
             shared={portalEnabled && isPortalSharedFolder(next, portalFolderGrants)}
             contentsSummary={folderContentsSummary(files, next)}
           />
-          <RowActions label={`folder ${decodeFolderPathSegment(folderName)}`} onOpen={() => setDocFolder(next)} onActions={(e) => {
-            const rect = e.currentTarget.getBoundingClientRect()
-            setDocMenu({ kind: 'folder', folderPath: next, x: rect.left, y: rect.bottom + 4 })
-          }} />
-          </div>
           <div className="td muted docsCenter">—</div>
           <div className="td muted docsCenter">—</div>
           <div className="td muted docsCenter">—</div>
@@ -522,16 +506,7 @@ export function CaseDocsList({
           setDocMenu({ kind: 'file', fileId: f.id, x: e.clientX, y: e.clientY })
         }}
       >
-        <div className="rowDescription">
-          <DocsFileDescCell f={f} showPin={false} />
-          <RowActions label={f.original_filename} onOpen={() => {
-            if (isEmlLikeFileSummary(f)) void previewEmlFile(f)
-            else void openCaseFile(f)
-          }} onActions={(e) => {
-            const rect = e.currentTarget.getBoundingClientRect()
-            setDocMenu({ kind: 'file', fileId: f.id, x: rect.left, y: rect.bottom + 4 })
-          }} />
-        </div>
+        <DocsFileDescCell f={f} showPin={false} />
         <div className="td docsCenter">{formatDocFileSize(f.size_bytes)}</div>
         <div className="td docsCenter">{formatDocModified(docListPrimaryDate(f))}</div>
         <div className="td docsCenter">{fileDocOwnerLabel(f)}</div>

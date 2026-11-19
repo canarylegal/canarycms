@@ -43,7 +43,7 @@ Frontend unit CI runs `npm test` (Vitest) then `npm run build` (TypeScript + Vit
 
 ### Browser E2E (Playwright)
 
-Run `make test-core-workflows` to build a dedicated PostgreSQL/backend/frontend/ONLYOFFICE stack and seed synthetic accounts. It exercises login/logout, explicit matter controls, document editing and verified downloads, access denial, and posting approval. It does not use deployment data.
+Run `make test-core-workflows` to build a dedicated PostgreSQL/backend/frontend/ONLYOFFICE stack and seed synthetic accounts. It exercises login/logout, matter double-click and context menus, document editing and verified downloads, access denial, and posting approval. It does not use deployment data.
 
 See [CORE_WORKFLOWS.md](CORE_WORKFLOWS.md) for isolation, coverage, artifacts and CI details. The `core-workflows` job runs on every PR and main update. Direct `make test-e2e` requires that same dedicated fixture stack and its environment; it is no longer an optional smoke test for arbitrary deployments.
 

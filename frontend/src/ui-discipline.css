@@ -541,10 +541,4 @@ html.dark .finAddItemBtn:hover:not(:disabled) {
   letter-spacing: 0.04em;
 }
 
-/* Explicit row actions share the existing row columns and remain visible on touch devices. */
-.rowDescription { display: flex; align-items: center; gap: 8px; min-width: 0; flex-wrap: wrap; }
-.rowDescriptionLabel, .rowDescription > .docsDescWrapper { flex: 1 1 120px; min-width: 0; }
-.rowDescriptionLabel { overflow: hidden; text-overflow: ellipsis; }
-.rowActions { display: inline-flex; gap: 4px; flex: 0 0 auto; margin-left: auto; }
-.rowActions .rowAction { min-height: 30px; padding: 4px 8px; font-size: 12px; white-space: nowrap; }
 .docContextItem:focus-visible { outline: 2px solid var(--select-border); outline-offset: -2px; background: var(--select-fill); color: var(--select-ink); }

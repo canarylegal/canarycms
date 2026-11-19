@@ -1,4 +1,3 @@
-import { RowActions } from './RowActions'
 import { useActionMenuKeyboard } from './useActionMenuKeyboard'
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { MainMenuFilterCheckboxDropdown } from './MainMenuFilterCheckboxDropdown'
@@ -403,14 +402,7 @@ export function CasesTable({
                 {c.case_number}
               </div>
               <div className="td">{c.client_name ?? '—'}</div>
-              <div className="td rowDescription">
-                <span className="rowDescriptionLabel">{c.matter_description}</span>
-                <RowActions label={`matter ${c.case_number}`} onOpen={() => onSelect(c.id)} onActions={(e) => {
-                  onCaseRowFocus(c.id)
-                  const rect = e.currentTarget.getBoundingClientRect()
-                  setCaseCtx({ id: c.id, x: Math.max(8, Math.min(rect.left, window.innerWidth - 220)), y: Math.max(8, Math.min(rect.bottom + 4, window.innerHeight - 180)), focusIndex: 0 })
-                }} />
-              </div>
+              <div className="td">{c.matter_description}</div>
               <div className="td">{feeEarnerLabel(c, users)}</div>
               {showSourceColumn ? (
                 <div className="td">{c.source_name ?? '—'}</div>

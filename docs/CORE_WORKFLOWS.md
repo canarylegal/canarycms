@@ -13,7 +13,7 @@ The seed script requires both `CANARY_TEST_FIXTURE=1` and a database name ending
 
 ## Required checks
 
-- Staff password login, matter opening through visible Open/Actions controls, Escape/focus restoration, and logout/session rejection.
+- Staff password login, matter opening by double-click, right-click menus, Escape/focus restoration, and logout/session rejection.
 - Actual browser document upload, ONLYOFFICE opening/editing, Save Changes, download and verification that the saved text exists in the downloaded DOCX.
 - A restricted user receives 403 for matter, documents and ledger access.
 - A user with anticipated-posting rights creates a pending anticipated client receipt; it does not affect the approved balance. Approval without actual posting rights is denied. A separate approver approves it and the balance changes by the exact amount. A deficit posting is rejected without changing the balance.
