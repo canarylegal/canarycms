@@ -15,7 +15,7 @@ services:
 
   cloudflared-socat:
     profiles: [prod]
-    image: alpine/socat:1.0.5
+    image: alpine/socat:1.0.5@sha256:539ad796e9d359596dbf4b7b7ce626e37f71bcce0a8af7bd1d2adad7c29ea787
     container_name: canary-cloudflared-socat
     restart: unless-stopped
     network_mode: "service:frontend"
@@ -34,7 +34,7 @@ services:
 
   cloudflared-dev:
     profiles: [prod]
-    image: cloudflare/cloudflared:latest
+    image: cloudflare/cloudflared:latest@sha256:6b599ca3e974349ead3286d178da61d291961182ec3fe9c505e1dd02c8ac31b0
     container_name: canary-cloudflared-dev
     restart: unless-stopped
     network_mode: "service:frontend"

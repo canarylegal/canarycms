@@ -68,4 +68,6 @@ This first updater supports one running container per service, a Compose-managed
 
 Run `make test-deploy` for safeguard tests and `make test-core-workflows` for isolated browser/API validation before preparing a release.
 
-Release replay and rollback use recorded immutable image IDs. Rebuilding the same source later is not yet bit-for-bit reproducible: upstream base tags, OS packages and transitive Python dependencies can change. Preserve the built images; full digest and dependency locking is a follow-up.
+Build inputs are now pinned by image/action digests, hashed Python locks and a Debian snapshot. See [BUILD_REPRODUCIBILITY.md](BUILD_REPRODUCIBILITY.md) for updating pins and the distinction between fixed inputs and bit-identical images.
+
+A database/files restore was rehearsed in an isolated deployment, including ledger and document verification. See [DISASTER_RECOVERY.md](DISASTER_RECOVERY.md) for the procedure, evidence, timings and external-artifact requirements.

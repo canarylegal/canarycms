@@ -68,7 +68,7 @@ jobs:
       BACKEND_CONTAINER: canaryci-backend
       FIRM_PACKAGE_DIR: ${{ github.workspace }}/example-firm-pilot
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
       - name: Check pilot checkout secret
         id: secret
@@ -89,7 +89,7 @@ jobs:
 
       - name: Checkout example-firm-pilot
         if: steps.secret.outputs.present == 'true'
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           repository: canarylegal/example-firm-pilot
           token: ${{ secrets.EXAMPLE_FIRM_PILOT_TOKEN }}
@@ -203,7 +203,7 @@ jobs:
       FIRM_PACKAGE_DIR: ${{ github.workspace }}/example-firm-pilot
       PREV_TAG: ${{ inputs.prev_tag }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           fetch-depth: 0
 
@@ -219,7 +219,7 @@ jobs:
 
       - name: Checkout example-firm-pilot
         if: steps.secret.outputs.present == 'true'
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           repository: canarylegal/example-firm-pilot
           token: ${{ secrets.EXAMPLE_FIRM_PILOT_TOKEN }}

@@ -170,8 +170,9 @@ async def lifespan(app: FastAPI):
     finally:
         db_merge.close()
 
-    start_event_tracked_task_job()
-    start_calendar_notification_job()
+    if os.getenv("CANARY_BACKGROUND_JOBS_ENABLED", "1").strip().lower() not in {"0", "false", "no"}:
+        start_event_tracked_task_job()
+        start_calendar_notification_job()
     import time
 
     from app.compose_deploy_job import compose_job_disk_says_running, reconcile_compose_job_state
