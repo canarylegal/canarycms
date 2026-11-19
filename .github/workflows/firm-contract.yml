@@ -62,45 +62,48 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     # Always run a job (skipping every job marks the workflow failed). Missing
-    # EXAMPLE_FIRM_PILOT_TOKEN → notice + success exit; secret present → full smoke.
+    # EXAMPLE_FIRM_PILOT_SSH_KEY → notice + success exit; secret present → full smoke.
     env:
       COMPOSE_FILE: docker-compose.yml:docker-compose.ci.yml:docker-compose.firm.example.yml
       BACKEND_CONTAINER: canaryci-backend
       FIRM_PACKAGE_DIR: ${{ github.workspace }}/example-firm-pilot
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
-      - name: Check pilot checkout secret
+      - name: Check pilot checkout key
         id: secret
+        env:
+          PILOT_CHECKOUT_KEY: ${{ secrets.EXAMPLE_FIRM_PILOT_SSH_KEY }}
         run: |
-          if [ -z "${{ secrets.EXAMPLE_FIRM_PILOT_TOKEN }}" ]; then
+          if [ -z "$PILOT_CHECKOUT_KEY" ]; then
             echo "present=false" >> "$GITHUB_OUTPUT"
             {
               echo "## Firm contract skipped"
               echo ""
-              echo "Create a fine-scoped GitHub PAT with \`contents:read\` on"
-              echo "\`canarylegal/example-firm-pilot\` and store it as the repo secret"
-              echo "\`EXAMPLE_FIRM_PILOT_TOKEN\`."
+              echo "Create a read-only deploy key on"
+              echo "\`canarylegal/example-firm-pilot\` and store its private key as the repo secret"
+              echo "\`EXAMPLE_FIRM_PILOT_SSH_KEY\`."
             } >> "$GITHUB_STEP_SUMMARY"
-            echo "::notice::EXAMPLE_FIRM_PILOT_TOKEN not set — firm contract smoke skipped"
+            echo "::notice::EXAMPLE_FIRM_PILOT_SSH_KEY not set — firm contract smoke skipped"
           else
             echo "present=true" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Checkout example-firm-pilot
         if: steps.secret.outputs.present == 'true'
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           repository: canarylegal/example-firm-pilot
-          token: ${{ secrets.EXAMPLE_FIRM_PILOT_TOKEN }}
+          ref: main
+          ssh-key: ${{ secrets.EXAMPLE_FIRM_PILOT_SSH_KEY }}
+          persist-credentials: false
           path: example-firm-pilot
 
       - name: Write CI .env
         if: steps.secret.outputs.present == 'true'
         run: |
           set -euo pipefail
-          python3 -m pip install --quiet 'cryptography>=42'
-          FERNET="$(python3 -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())')"
+          FERNET="$(python3 -c 'import base64, secrets; print(base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())')"
           {
             echo "COMPOSE_PROJECT_NAME=canaryci"
             echo "COMPOSE_PROFILES="
@@ -203,34 +206,37 @@ jobs:
       FIRM_PACKAGE_DIR: ${{ github.workspace }}/example-firm-pilot
       PREV_TAG: ${{ inputs.prev_tag }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           fetch-depth: 0
 
-      - name: Check pilot checkout secret
+      - name: Check pilot checkout key
         id: secret
+        env:
+          PILOT_CHECKOUT_KEY: ${{ secrets.EXAMPLE_FIRM_PILOT_SSH_KEY }}
         run: |
-          if [ -z "${{ secrets.EXAMPLE_FIRM_PILOT_TOKEN }}" ]; then
+          if [ -z "$PILOT_CHECKOUT_KEY" ]; then
             echo "present=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::EXAMPLE_FIRM_PILOT_TOKEN not set — dual-tag skipped"
+            echo "::notice::EXAMPLE_FIRM_PILOT_SSH_KEY not set — dual-tag skipped"
           else
             echo "present=true" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Checkout example-firm-pilot
         if: steps.secret.outputs.present == 'true'
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           repository: canarylegal/example-firm-pilot
-          token: ${{ secrets.EXAMPLE_FIRM_PILOT_TOKEN }}
+          ref: main
+          ssh-key: ${{ secrets.EXAMPLE_FIRM_PILOT_SSH_KEY }}
+          persist-credentials: false
           path: example-firm-pilot
 
       - name: Write CI .env
         if: steps.secret.outputs.present == 'true'
         run: |
           set -euo pipefail
-          python3 -m pip install --quiet 'cryptography>=42'
-          FERNET="$(python3 -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())')"
+          FERNET="$(python3 -c 'import base64, secrets; print(base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())')"
           {
             echo "COMPOSE_PROJECT_NAME=canaryci-dual"
             echo "COMPOSE_PROFILES="

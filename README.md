@@ -88,3 +88,6 @@ Contact: [colin@canarylegalsoftware.co.uk](mailto:colin@canarylegalsoftware.co.u
 ## Contact
 
 Questions about deployment, licensing, or professional hosting: [colin@canarylegalsoftware.co.uk](mailto:colin@canarylegalsoftware.co.uk)
+
+- [Pinned build inputs](docs/BUILD_REPRODUCIBILITY.md)
+- [Isolated disaster recovery](docs/DISASTER_RECOVERY.md)

@@ -10,7 +10,7 @@ x-credentials: &credentials
 
 services:
   db:
-    image: postgres:16.6
+    image: postgres:16.6@sha256:557fea37a744d5f4c8faab304b0a90858b53ab119735a88c131fd19dab802f36
     environment:
       POSTGRES_USER: canary
       POSTGRES_PASSWORD: isolated-core-database-secret
@@ -57,7 +57,7 @@ services:
       retries: 40
       start_period: 60s
   onlyoffice:
-    image: onlyoffice/documentserver:9.0.3
+    image: onlyoffice/documentserver:9.0.3@sha256:6cf2c2727696954fb25f3f6061f195a6b1a366e1e7c66a3d53fb004322544d21
     environment:
       JWT_ENABLED: "true"
       JWT_SECRET: isolated-core-office-secret

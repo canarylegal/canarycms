@@ -1,7 +1,4 @@
-FROM python:3.12-slim
-
-ARG GIT_COMMIT=unknown
-ENV CANARY_BUILD_COMMIT=${GIT_COMMIT}
+FROM python:3.12-slim@sha256:6c4dd321d176d61ea848dc8c73a4f7dbae8f70e0ee48bb411ea2f045b599fa8e
 
 WORKDIR /app
 
@@ -10,14 +7,18 @@ ENV PYTHONUNBUFFERED=1
 
 # git: optional live commit readout when CANARY_COMPOSE_PROJECT_DIR is mounted (Admin → Deploy notify-only).
 # Docker CLI was removed — in-app Compose updates are not supported (no docker.sock).
+COPY debian.sources /etc/apt/sources.list.d/debian.sources
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends git ca-certificates \
+  && apt-get install -y --no-install-recommends git=1:2.47.3-0+deb13u1 ca-certificates=20250419+deb13u1 \
   && rm -rf /var/lib/apt/lists/*
 
-RUN pip install --no-cache-dir --upgrade pip
+COPY build-requirements.lock requirements.lock /app/
+RUN python -m pip install --no-cache-dir --require-hashes -r build-requirements.lock \
+  && python -m pip install --no-cache-dir --require-hashes --no-build-isolation -r requirements.lock \
+  && python -m pip check
 
-COPY requirements.txt /app/requirements.txt
-RUN pip install --no-cache-dir -r requirements.txt
+ARG GIT_COMMIT=unknown
+ENV CANARY_BUILD_COMMIT=${GIT_COMMIT}
 
 # Includes docker-entrypoint.sh (required — do not gitignore)
 COPY . /app
