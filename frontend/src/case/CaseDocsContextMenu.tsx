@@ -1,3 +1,5 @@
+import { useCallback } from 'react'
+import { useActionMenuKeyboard } from '../useActionMenuKeyboard'
 import type { Dispatch, RefObject, SetStateAction } from 'react'
 import { apiFetch } from '../api'
 import { CANARY_FOLLOW_UP_STANDARD_TASK_ID } from '../standardTasks'
@@ -134,6 +136,8 @@ export function CaseDocsContextMenu({
   setTaskCreateOpen,
   isCommentFile,
 }: CaseDocsContextMenuProps) {
+  const closeActions = useCallback(() => setDocMenu(null), [setDocMenu])
+  useActionMenuKeyboard(docMenuRef, true, closeActions)
   return (
       <div
         ref={docMenuRef}

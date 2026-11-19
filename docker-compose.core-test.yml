@@ -1,0 +1,98 @@
+# Standalone disposable stack. No host data mounts, fixed container names or published ports.
+x-credentials: &credentials
+  CANARY_TEST_FIXTURE: "1"
+  E2E_STAFF_EMAIL: core.staff@example.com
+  E2E_STAFF_PASSWORD: CoreStaff-OnlyForIsolatedTests-73!
+  E2E_APPROVER_EMAIL: core.approver@example.com
+  E2E_APPROVER_PASSWORD: CoreApprover-OnlyForIsolatedTests-81!
+  E2E_DENIED_EMAIL: core.denied@example.com
+  E2E_DENIED_PASSWORD: CoreDenied-OnlyForIsolatedTests-92!
+
+services:
+  db:
+    image: postgres:16.6
+    environment:
+      POSTGRES_USER: canary
+      POSTGRES_PASSWORD: isolated-core-database-secret
+      POSTGRES_DB: canary_core_test
+    volumes: ["db-data:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U canary -d canary_core_test"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+  backend:
+    build:
+      context: ./backend
+      args:
+        GIT_COMMIT: ${GIT_COMMIT:-core-workflow-test}
+    environment:
+      <<: *credentials
+      POSTGRES_USER: canary
+      POSTGRES_PASSWORD: isolated-core-database-secret
+      POSTGRES_DB: canary_core_test
+      POSTGRES_HOST: db
+      JWT_SECRET: isolated-core-jwt-secret-only-for-disposable-tests
+      DATA_ENCRYPTION_KEY: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+      MASTER_ADMIN_LOGIN: isolated-core-recovery
+      MASTER_ADMIN_PASSWORD: isolated-core-recovery-password
+      MASTER_ADMIN_REQUIRE_2FA: "false"
+      CANARY_PUBLIC_URL: http://frontend
+      CANARY_CORS_ORIGINS: http://frontend
+      CANARY_UPDATE_PROMPT_ON_LOGIN: "0"
+      FILES_ROOT: /data/files
+      ONLYOFFICE_JWT_SECRET: isolated-core-office-secret
+      ONLYOFFICE_DS_PUBLIC_URL: http://frontend/office-ds
+      ONLYOFFICE_DS_INTERNAL_URL: http://onlyoffice
+      ONLYOFFICE_APP_URL_INTERNAL: http://backend:8000
+      ONLYOFFICE_CALLBACK_REQUIRE_JWT: "1"
+    command: ["sh", "-ec", "alembic upgrade head && exec uvicorn app.main:app --host 0.0.0.0 --port 8000"]
+    volumes: ["files:/data/files"]
+    depends_on:
+      db: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 3s
+      timeout: 5s
+      retries: 40
+      start_period: 60s
+  onlyoffice:
+    image: onlyoffice/documentserver:9.0.3
+    environment:
+      JWT_ENABLED: "true"
+      JWT_SECRET: isolated-core-office-secret
+      JWT_IN_BODY: "true"
+      SECURE_LINK_SECRET: isolated-core-link-secret
+      ALLOW_PRIVATE_IP_ADDRESS: "true"
+      ALLOW_META_IP_ADDRESS: "false"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost/healthcheck | grep -q true"]
+      interval: 5s
+      timeout: 5s
+      retries: 90
+      start_period: 120s
+  frontend:
+    build:
+      context: ./frontend
+      target: production
+      args:
+        CANARY_PUBLIC_URL: http://frontend
+        VITE_ONLYOFFICE_URL: /office-ds
+    depends_on:
+      backend: {condition: service_healthy}
+      onlyoffice: {condition: service_healthy}
+  tests:
+    profiles: [test]
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.e2e
+    environment:
+      <<: *credentials
+      BASE_URL: http://frontend
+      CI: "1"
+      PLAYWRIGHT_OUTPUT_DIR: /artifacts/test-results
+    volumes:
+      - ${CORE_TEST_OUTPUT:?Set CORE_TEST_OUTPUT to a scratch artifact directory}:/artifacts
+volumes:
+  db-data:
+  files:

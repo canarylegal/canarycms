@@ -45,3 +45,6 @@ thunderbird-addin/web-ext-artifacts/
 thunderbird-addin/.amo-upload-uuid
 canary-thunderbird*.xpi
 canary-thunderbird*.zip
+
+# Isolated workflow test evidence
+/artifacts/

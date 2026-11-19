@@ -55,6 +55,10 @@ Mail add-on detail: [thunderbird-addin/README.md](thunderbird-addin/README.md), 
 
 **Architecture (maintainers):** how Canary’s maintained core relates to optional product capabilities and proprietary firm packages is documented **internally** (not in this public repository). Firm-specific content and customisation belong beside Canary, not in public `canarycms`. See [docs/FIRM_PACKAGE.md](docs/FIRM_PACKAGE.md) for the public attach contract.
 
+## Repeatable upgrades and core workflow checks
+
+For existing installations, use the [reproducible deployment procedure](docs/REPRODUCIBLE_DEPLOYMENTS.md) to build a recorded commit, preserve data, create backups and verify or roll back the app. Run `make test-core-workflows` before release; it uses a fully isolated PostgreSQL/ONLYOFFICE/browser stack ([details](docs/CORE_WORKFLOWS.md)).
+
 ## Deploy checklist (after updating)
 
 Prefer a **release tag** over floating `main` (see [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)).

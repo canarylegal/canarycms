@@ -46,3 +46,11 @@ test-e2e:
 	  E2E_STAFF_EMAIL="$${E2E_STAFF_EMAIL:?Set E2E_STAFF_EMAIL}" \
 	  E2E_STAFF_PASSWORD="$${E2E_STAFF_PASSWORD:?Set E2E_STAFF_PASSWORD}" \
 	  npm run test:e2e
+
+# Builds a fully isolated PostgreSQL/ONLYOFFICE/browser stack and removes only its own volumes.
+.PHONY: test-core-workflows test-deploy
+test-core-workflows:
+	./scripts/test-core-workflows.sh
+
+test-deploy:
+	python3 -m unittest discover -s scripts/tests -v
