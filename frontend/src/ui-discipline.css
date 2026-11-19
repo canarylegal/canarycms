@@ -540,3 +540,5 @@ html.dark .finAddItemBtn:hover:not(:disabled) {
   font-weight: 650;
   letter-spacing: 0.04em;
 }
+
+.docContextItem:focus-visible { outline: 2px solid var(--select-border); outline-offset: -2px; background: var(--select-fill); color: var(--select-ink); }

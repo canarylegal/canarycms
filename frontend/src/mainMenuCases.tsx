@@ -1,3 +1,4 @@
+import { useActionMenuKeyboard } from './useActionMenuKeyboard'
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { MainMenuFilterCheckboxDropdown } from './MainMenuFilterCheckboxDropdown'
 import { SearchInput } from './SearchInput'
@@ -156,6 +157,8 @@ export function CasesTable({
 }) {
   const [caseCtx, setCaseCtx] = useState<null | { id: string; x: number; y: number; focusIndex: number }>(null)
   const caseCtxRef = useRef<HTMLDivElement | null>(null)
+  const closeCaseActions = useCallback(() => setCaseCtx(null), [])
+  useActionMenuKeyboard(caseCtxRef, Boolean(caseCtx), closeCaseActions)
 
   useEffect(() => {
     if (!caseCtx) return
@@ -238,6 +241,7 @@ export function CasesTable({
 
     function onKeyDown(e: KeyboardEvent) {
       if (isEditableKeyboardTarget(e.target) || isModalBlockingKeyboard()) return
+      if (e.target instanceof HTMLElement && e.target.closest('button, [role="menu"]')) return
 
       if (caseCtx) {
         const ctxCase = cases.find((c) => c.id === caseCtx.id)
@@ -377,6 +381,7 @@ export function CasesTable({
               onClick={() => onCaseRowFocus(c.id)}
               onDoubleClick={() => onSelect(c.id)}
               onKeyDown={(e) => {
+                if (e.target !== e.currentTarget) return
                 if (e.key === 'Enter') {
                   e.preventDefault()
                   onSelect(c.id)

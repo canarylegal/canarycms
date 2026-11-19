@@ -1,0 +1,7 @@
+# Keep this version aligned with @playwright/test in package-lock.json.
+FROM mcr.microsoft.com/playwright:v1.55.0-noble
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci
+COPY . .
+CMD ["npm", "run", "test:e2e"]
