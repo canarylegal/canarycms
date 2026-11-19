@@ -3155,9 +3155,9 @@ select {
   background: rgba(var(--primary-rgb), 0.06);
 }
 
-.docsTr.attachmentChild {
-  /* Visual indent for email-attachments grouped under a parent .eml row. */
-  padding-left: calc(26px * 0.85);
+.docsTr.attachmentChild > :first-child {
+  /* Indent the description only, keeping proportional metadata tracks aligned. */
+  padding-left: calc(14px * 0.85);
 }
 
 .docsTr > *:first-child {

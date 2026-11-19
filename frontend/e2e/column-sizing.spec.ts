@@ -1,5 +1,5 @@
 import { expect, test, type Locator } from '@playwright/test'
-import { login } from './core-helpers'
+import { caseId, login } from './core-helpers'
 
 async function tracks(header: Locator) {
   return header.evaluate(el => getComputedStyle(el).gridTemplateColumns.split(' ').map(parseFloat))
@@ -86,19 +86,32 @@ test('saved menu proportions survive sidebar, device size and reload; dragging s
 test('case document columns scale together and remain aligned at minimum size', async ({ page }) => {
   await page.setViewportSize({ width: 1800, height: 1000 })
   await login(page)
+  const id = await caseId(page.request)
+  const parent = await page.request.post(`/api/cases/${id}/files`, { multipart: {
+    upload: { name: 'column-parent.eml', mimeType: 'message/rfc822', buffer: Buffer.from('From: test@example.com\r\nSubject: Column fixture\r\n\r\nTest message') },
+  } })
+  expect(parent.status()).toBe(201)
+  const attachment = await page.request.post(`/api/cases/${id}/files`, { multipart: {
+    parent_file_id: (await parent.json()).id,
+    upload: { name: 'column-attachment.txt', mimeType: 'text/plain', buffer: Buffer.from('Test attachment') },
+  } })
+  expect(attachment.status()).toBe(201)
   await page.getByRole('row').filter({ hasText: '900001' }).dblclick()
   const header = page.locator('.docsTh')
   await expect(header).toBeVisible()
   const large = await tracks(header)
+  await aligned(header, page.locator('.docsTr.attachmentChild'))
   await page.setViewportSize({ width: 1100, height: 800 })
   const small = await tracks(header)
   expect(small[0]).toBeLessThan(large[0])
   expect(small[2]).toBeLessThan(large[2])
   await aligned(header, page.locator('.docsTr.rowbtn').first())
+  await aligned(header, page.locator('.docsTr.attachmentChild'))
   await page.setViewportSize({ width: 750, height: 800 })
   const minimums = [200, 76, 132, 92]
   ;(await tracks(header)).forEach((width, i) => expect(width).toBeGreaterThanOrEqual(minimums[i] - 1))
   await aligned(header, page.locator('.docsTr.rowbtn').first())
+  await aligned(header, page.locator('.docsTr.attachmentChild'))
   await page.screenshot({ path: test.info().outputPath('columns-documents-narrow.png') })
   await page.locator('.caseLeft').getByRole('button', { name: /^Tasks/ }).click()
   await page.getByRole('button', { name: 'Open tasks', exact: true }).click()
