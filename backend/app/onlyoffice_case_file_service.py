@@ -366,6 +366,8 @@ async def oo_export_pdf(
     row = db.get(DbFile, file_id)
     if not row or row.case_id != case_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+    from app.desktop_edit_session import require_user_active_edit_session
+    require_user_active_edit_session(db, file_id, user)
     created = await create_case_file_from_onlyoffice_pdf_export(
         db,
         row,
@@ -398,6 +400,7 @@ async def oo_persist_download(
         browser_url=body.browser_url,
         case_id=case_id,
         precedent_id=None,
+        actor_user_id=user.id,
     )
 
 
@@ -434,6 +437,8 @@ def publish_compose_office_file(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
     if not row.oo_compose_pending:
         return
+    from app.desktop_edit_session import require_user_active_edit_session
+    require_user_active_edit_session(db, file_id, user)
     row.oo_compose_pending = False
     row.updated_at = _utcnow()
     db.add(row)
@@ -591,7 +596,7 @@ def release_desktop_edit(
         s.released_at = now
         db.add(s)
     # CL-18: complete any in-flight force-save waiter without accepting later DS bytes.
-    had_pending = bool(row.oo_force_save_pending)
+    had_pending = bool(sessions and row.oo_force_save_pending)
     if had_pending:
         row.version = (row.version or 1) + 1
         row.oo_force_save_pending = False

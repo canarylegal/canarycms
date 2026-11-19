@@ -59,6 +59,8 @@ services:
   onlyoffice:
     image: onlyoffice/documentserver:9.0.3@sha256:6cf2c2727696954fb25f3f6061f195a6b1a366e1e7c66a3d53fb004322544d21
     environment:
+      # Core workflows do not use optional plugins or their online update service.
+      PLUGINS_ENABLED: "false"
       JWT_ENABLED: "true"
       JWT_SECRET: isolated-core-office-secret
       JWT_IN_BODY: "true"
@@ -66,7 +68,9 @@ services:
       ALLOW_PRIVATE_IP_ADDRESS: "true"
       ALLOW_META_IP_ADDRESS: "false"
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://localhost/healthcheck | grep -q true"]
+      # The pinned image serves /healthcheck before font generation restarts docservice.
+      # Its final log-tail process starts only AFTER fonts/plugins/gzip initialization.
+      test: ["CMD-SHELL", "pgrep -f '^tail -f /var/log/onlyoffice/documentserver/' >/dev/null && curl -fsS http://localhost/healthcheck | grep -q true"]
       interval: 5s
       timeout: 5s
       retries: 90

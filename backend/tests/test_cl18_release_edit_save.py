@@ -56,7 +56,7 @@ def _user(db: Session) -> User:
         email=f"u-{uid.hex[:8]}@example.com",
         password_hash="x",
         display_name="Editor",
-        initials="ED",
+        initials=uid.hex[:8],
         is_active=True,
         created_at=now,
         updated_at=now,
@@ -285,3 +285,32 @@ async def test_callback_refuses_byte_persist_without_session(tmp_path, monkeypat
     db.refresh(row)
     assert row.oo_force_save_pending is False
     assert row.version == 2
+
+def test_other_user_release_does_not_cancel_owners_pending_save(monkeypatch) -> None:
+    db = _session()
+    owner, other = _user(db), _user(db)
+    case = _case(db, owner)
+    row = _file(db, case, owner, pending=True)
+    session = _open_session(db, case, row, owner)
+    monkeypatch.setattr('app.onlyoffice_case_file_service.log_event', lambda *a, **k: None)
+    release_desktop_edit(case.id, row.id, other, db)
+    db.refresh(row); db.refresh(session)
+    assert row.oo_force_save_pending is True
+    assert row.version == 1
+    assert session.released_at is None
+
+
+def test_other_user_cannot_publish_pending_document() -> None:
+    from app.onlyoffice_case_file_service import publish_compose_office_file
+    db = _session()
+    owner, other = _user(db), _user(db)
+    case = _case(db, owner)
+    row = _file(db, case, owner)
+    row.oo_compose_pending = True
+    db.commit()
+    _open_session(db, case, row, owner)
+    with pytest.raises(HTTPException) as exc:
+        publish_compose_office_file(case.id, row.id, None, other, db)
+    assert exc.value.status_code == 409
+    db.refresh(row)
+    assert row.oo_compose_pending is True

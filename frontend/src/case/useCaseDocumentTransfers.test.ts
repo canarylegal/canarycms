@@ -57,3 +57,18 @@ describe('document transfer state', () => {
   })
 
 })
+
+it('retains selected files and progress for explicit retry after session recovery', async () => {
+  const files = [new File(['a'], 'one.txt'), new File(['b'], 'two.txt')]
+  vi.mocked(uploadFilesToCaseFolder).mockImplementationOnce(async (_id, _token, _folder, _files, progress) => {
+    progress!.completed = 1
+    throw new DocumentRequestError('Your session has expired.', 401, false)
+  }).mockResolvedValueOnce()
+  const options = args(); vi.mocked(options.askConfirm).mockResolvedValue(true)
+  const { result } = renderHook(() => useCaseDocumentTransfers(options))
+  await act(async () => { await result.current.uploadFilesToCurrentFolder(files) })
+  expect(uploadFilesToCaseFolder).toHaveBeenCalledTimes(2)
+  const retry = vi.mocked(uploadFilesToCaseFolder).mock.calls[1]
+  expect(retry[3]).toBe(files)
+  expect(retry[4]!.completed).toBe(1)
+})

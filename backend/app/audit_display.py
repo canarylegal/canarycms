@@ -52,6 +52,11 @@ def format_audit_summary(
 ) -> str:
     m = meta or {}
 
+    if action == "access.denied":
+        return f"Access denied: {_s(m.get('method'))} {_s(m.get('route'))}"
+    if action == "case.file.read":
+        return "Opened or downloaded a document"
+
     if action == "auth.login":
         return "Signed in"
     if action == "auth.login.passkey":

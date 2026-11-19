@@ -115,8 +115,19 @@ def get_db():
     db = SessionLocal()
     try:
         yield db
-    except Exception:
+    except Exception as exc:
+        context = db.info.get("audit_request")
         db.rollback()
+        # Denials must survive rollback, without committing any rejected business changes.
+        from fastapi import HTTPException
+        if isinstance(exc, HTTPException) and exc.status_code == 403 and context:
+            from app.audit import log_event
+            try:
+                log_event(db, action="access.denied", **context)
+                db.commit()
+            except Exception:
+                db.rollback()
+                raise
         raise
     else:
         try:

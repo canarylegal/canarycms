@@ -1,3 +1,4 @@
+import { SessionRecovery } from './auth/SessionRecovery'
 import { Component, type ReactNode, StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import './canary-theme.css'
@@ -135,7 +136,7 @@ if (!el) {
     root.render(
       <AppErrorBoundary>
         <DialogProvider>
-          <EditorPage />
+          <SessionRecovery /><EditorPage />
         </DialogProvider>
       </AppErrorBoundary>,
     )
@@ -159,7 +160,7 @@ if (!el) {
             <StrictMode>
               <AppErrorBoundary>
                 <DialogProvider>
-                  <FinanceStandalone caseId={financeCaseId} token={sessionToken} />
+                  <SessionRecovery /><FinanceStandalone caseId={financeCaseId} token={sessionToken} />
                 </DialogProvider>
               </AppErrorBoundary>
             </StrictMode>,
@@ -171,7 +172,7 @@ if (!el) {
             <StrictMode>
               <AppErrorBoundary>
                 <DialogProvider>
-                  <LedgerStandalone caseId={ledgerCaseId!} token={sessionToken} />
+                  <SessionRecovery /><LedgerStandalone caseId={ledgerCaseId!} token={sessionToken} />
                 </DialogProvider>
               </AppErrorBoundary>
             </StrictMode>,
@@ -186,7 +187,7 @@ if (!el) {
           <AppErrorBoundary>
             <DialogProvider>
               <NotificationsProvider>
-                <App />
+                <SessionRecovery /><App />
               </NotificationsProvider>
             </DialogProvider>
           </AppErrorBoundary>

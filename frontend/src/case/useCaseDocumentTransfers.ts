@@ -34,10 +34,13 @@ export function useCaseDocumentTransfers({ caseId, caseDetail, token, docFolder,
       catch (error) {
         if (!current()) return false
         // A lost upload response is ambiguous. Never offer to replay it as though it failed.
-        if (!(error instanceof DocumentRequestError) || !error.retryable) throw error
+        if (!(error instanceof DocumentRequestError) || (!error.retryable && error.status !== 401)) throw error
         const message = documentErrorMessage(error, 'The document operation failed.')
         const retry = await askConfirm({ title, message: `${message}${progress ? ` ${progress.completed} file(s) completed; retry resumes with the remaining files.` : ''}`, confirmLabel: 'Retry', cancelLabel: 'Cancel' })
-        if (!retry) return false
+        if (!retry) {
+          if (error.status === 401) throw error
+          return false
+        }
       }
     }
     return false
@@ -57,8 +60,7 @@ export function useCaseDocumentTransfers({ caseId, caseDetail, token, docFolder,
       try {
         completed = await retryTransfer(() => uploadFilesToCaseFolder(caseId, token, docFolder, incomingFiles, progress, current), current, 'Upload interrupted', progress)
       } catch (error) {
-        // Refresh uses the general API client, whose 401 handling reloads the page.
-        // Keep this view intact so session recovery does not erase local state.
+        // Avoid further requests until sign-in is restored.
         refreshAllowed = !(error instanceof DocumentRequestError && error.status === 401)
         throw new Error(`${progress.completed} of ${incomingFiles.length} files uploaded. ${documentErrorMessage(error, 'Upload failed.')} Files already uploaded will remain in the list.`)
       } finally {

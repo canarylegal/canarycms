@@ -84,6 +84,7 @@ def test_get_db_commits_pending_work_on_success() -> None:
     rollbacks: list[str] = []
 
     class FakeSession:
+        info = {}
         def commit(self) -> None:
             commits.append("commit")
 

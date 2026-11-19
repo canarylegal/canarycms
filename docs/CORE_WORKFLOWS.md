@@ -39,3 +39,8 @@ Unit tests cover read retry limits, body timeouts, expired sessions/access denia
 Transfer requests and browser delivery are in `documentRequests.ts` and `documentTransferOps.ts`; `useCaseDocumentTransfers.ts` owns progress, busy state and retry dialogs. Reads retry at most once automatically. Uploads never retry automatically: an explicit retry is offered for a definite HTTP 429 rejection, while network/timeouts/server failures require refreshing and checking the list before importing again because the server may already have accepted the file. Successful files are retained, and a failed portal notification never re-uploads them. Save failures keep the editor and unsaved state available for an explicit retry.
 
 The matter/document layout and double-click/right-click interaction model are unchanged. Recovery uses the existing dialogs and editor error surface.
+
+The suite also verifies cross-user document access, audited denials, edit-session
+ownership, revocation of issued WebDAV sessions and real session-expiry recovery.
+See [ACCESS_AND_SESSION_RECOVERY.md](ACCESS_AND_SESSION_RECOVERY.md) for the
+permission policy, audit scope and pinned ONLYOFFICE startup readiness gate.

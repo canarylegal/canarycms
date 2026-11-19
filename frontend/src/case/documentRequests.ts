@@ -1,3 +1,4 @@
+import { signalSessionExpired } from '../auth/sessionRecovery'
 import { apiUrl, applyAuthHeaders } from '../api'
 
 export class DocumentRequestError extends Error {
@@ -40,6 +41,7 @@ export async function documentRequest<T>(
       const response = await fetch(apiUrl(path), { method, headers, credentials: 'include', body: options.body, signal: controller.signal })
       if (!response.ok) {
         const status = response.status
+        if (status === 401) signalSessionExpired()
         const retryable = status === 429 || (method === 'GET' && [408, 502, 503, 504].includes(status))
         let message = documentErrorMessage({ status }, 'The document request failed. Please try again.')
         if (status === 429) message = 'The server is busy. Wait a moment, then retry.'
