@@ -18,3 +18,12 @@ it('keeps drafts mounted and requires the original user when checking recovery',
   await waitFor(() => expect(screen.queryByRole('alert')).toBeNull())
   expect(screen.getByLabelText('Draft')).toHaveValue('unsaved work')
 })
+
+it('uses the current account after a deliberate account switch', async () => {
+  render(<SessionRecovery />)
+  rememberSessionUser('newly-signed-in')
+  act(() => signalSessionExpired())
+  vi.mocked(apiFetch).mockResolvedValueOnce({ id: 'newly-signed-in' })
+  fireEvent.click(screen.getByRole('button', { name: 'I’ve signed in' }))
+  await waitFor(() => expect(screen.queryByRole('alert')).toBeNull())
+})

@@ -9,19 +9,17 @@ export function SessionRecovery() {
   const [checking, setChecking] = useState(false)
   const expectedUser = useRef<string | null>(null)
   useEffect(() => {
-    let cancelled = false
     // Standalone editor tabs do not mount useAuth; capture their original account too.
     if (!sessionUserId()) {
-      void apiFetch<{ id: string }>('/auth/me', { token: COOKIE_SESSION_TOKEN }).then(user => {
-        if (!cancelled && !expectedUser.current) expectedUser.current = user.id
-      }).catch(() => { /* A normal signed-out page does not need a recovery notice. */ })
+      void apiFetch<{ id: string }>('/auth/me', { token: COOKIE_SESSION_TOKEN })
+        .catch(() => { /* A normal signed-out page does not need a recovery notice. */ })
     }
     const onExpired = () => {
       if (!expectedUser.current) expectedUser.current = sessionUserId()
       setExpired(true)
     }
     window.addEventListener(SESSION_EXPIRED, onExpired)
-    return () => { cancelled = true; window.removeEventListener(SESSION_EXPIRED, onExpired) }
+    return () => window.removeEventListener(SESSION_EXPIRED, onExpired)
   }, [])
   if (!expired) return null
   return <div role="alert" style={{ position: 'fixed', bottom: 16, right: 16, zIndex: 20000, maxWidth: 440, padding: 16, background: 'white', color: '#172554', border: '1px solid #94a3b8', borderRadius: 8, boxShadow: '0 4px 16px #0003' }}>
