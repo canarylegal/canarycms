@@ -61,10 +61,15 @@ export function useUserUiPreferences(me: UserPublic | null | undefined, token: s
     clearDebounceTimers(debounceRef)
     serverSnapshotRef.current = ''
     migratedRef.current = false
-    // Identity change: replace local prefs from the new user's cache (or defaults).
-    // Queue via microtask so we don't trip react-hooks/set-state-in-effect on the same tick.
-    queueMicrotask(() => setPrefs(readCachedUiPreferences(userId)))
-  }, [userId])
+    // The server-sync effect below owns authenticated preferences. A queued cache
+    // reset can otherwise run after it and replace fresh server widths with defaults.
+    if (me?.ui_preferences) return
+    let cancelled = false
+    queueMicrotask(() => {
+      if (!cancelled) setPrefs(readCachedUiPreferences(userId))
+    })
+    return () => { cancelled = true }
+  }, [userId, me?.ui_preferences])
 
   useEffect(() => {
     if (!me?.ui_preferences) return
@@ -99,7 +104,7 @@ export function useUserUiPreferences(me: UserPublic | null | undefined, token: s
       writePrefsSnapshot(server)
       return server
     })
-  }, [me?.ui_preferences, writePrefsSnapshot])
+  }, [userId, me?.ui_preferences, writePrefsSnapshot])
 
   useEffect(() => {
     if (!token || !me || migratedRef.current) return

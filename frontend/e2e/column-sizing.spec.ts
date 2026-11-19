@@ -11,7 +11,7 @@ async function aligned(header: Locator, body: Locator) {
   a.forEach((width, i) => expect(Math.abs(width - b[i])).toBeLessThan(1))
 }
 
-test('saved menu proportions survive sidebar, device size and reload; dragging saves once', async ({ page }) => {
+test('saved menu proportions survive sidebar, device size and reload; dragging saves once', async ({ page, browser, baseURL }) => {
   await page.setViewportSize({ width: 1800, height: 1000 })
   await login(page)
   const saved = [140, 260, 340, 180, 120]
@@ -63,6 +63,16 @@ test('saved menu proportions survive sidebar, device size and reload; dragging s
   await page.reload()
   await expect(header).toBeVisible()
   expect((await tracks(header))[0] / (await tracks(header))[1]).toBeCloseTo(persisted[0] / persisted[1], 2)
+  const otherContext = await browser.newContext({ baseURL, viewport: { width: 1300, height: 900 } })
+  try {
+    const otherPage = await otherContext.newPage()
+    await login(otherPage)
+    const otherHeader = otherPage.locator('.casesTableScroll .tr.th').first()
+    await expect.poll(async () => (await tracks(otherHeader))[2] / (await tracks(otherHeader))[1]).toBeCloseTo(persisted[2] / persisted[1], 2)
+    expect((await (await otherPage.request.get('/api/auth/me')).json()).ui_preferences.main_menu_column_widths).toEqual(persisted)
+  } finally {
+    await otherContext.close()
+  }
   await page.screenshot({ path: test.info().outputPath('columns-matters.png') })
 
   for (const [name, selector, key] of [
