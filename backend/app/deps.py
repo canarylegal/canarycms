@@ -103,6 +103,15 @@ def get_auth_principal(
             detail="Session expired — sign in again.",
         )
 
+    # Capture only the route template and UUID path identifiers, never query tokens or bodies.
+    route = request.scope.get("route")
+    db.info["audit_request"] = {
+        "actor_user_id": user.id,
+        "meta": {"method": request.method, "route": getattr(route, "path", "unknown"),
+                 **{key: str(value) for key, value in request.path_params.items()
+                    if key in {"case_id", "file_id", "user_id"}}},
+    }
+
     if not user_effective_admin(user, db):
         if user_password_change_required(db, user) and not _path_allows_password_change_only(request.url.path):
             raise HTTPException(
@@ -203,7 +212,7 @@ def require_case_access(case_id, user: User, db: Session) -> Case:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access to this matter has been revoked for your user.")
         return case
 
-    return case
+    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Matter access is not configured.")
 
 
 def get_case_if_accessible(case_id: uuid.UUID, user: User, db: Session) -> Case | None:

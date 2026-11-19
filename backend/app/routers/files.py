@@ -983,6 +983,8 @@ def download_case_file(
     if not path_is_under_files_root(abs_path) or not abs_path.exists():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File missing on disk")
 
+    log_event(db, actor_user_id=user.id, action="case.file.read", entity_type="file",
+              entity_id=str(row.id), meta={"case_id": str(case_id)})
     # Safe MIME types may render inline; others force download.
     return FileResponse(
         path=str(abs_path),

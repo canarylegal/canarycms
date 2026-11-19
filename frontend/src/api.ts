@@ -1,3 +1,4 @@
+import { signalSessionExpired, rememberSessionUser } from './auth/sessionRecovery'
 export type ApiError = {
   status: number
   message: string
@@ -246,19 +247,7 @@ export async function apiFetch<T>(
       const isLoginAttempt = path === '/auth/login' || path.endsWith('/auth/login')
       const isSessionProbe = path === '/auth/me' || path.endsWith('/auth/me')
       if (!isLoginAttempt && !isSessionProbe) {
-        // Token/cookie likely expired/was invalidated; force re-login.
-        try {
-          localStorage.removeItem('token')
-        } catch {
-          /* */
-        }
-        // Editor runs in its own tab — reloading here produces a blank loop and hides the error. User can close and re-open from the main app.
-        if (
-          typeof window !== 'undefined' &&
-          !window.location.pathname.startsWith('/editor/')
-        ) {
-          window.location.reload()
-        }
+        signalSessionExpired()
       }
     }
     const errBody = await parseJsonSafe(res)
@@ -275,5 +264,7 @@ export async function apiFetch<T>(
   if (asBlob) {
     return (await res.blob()) as T
   }
-  return (await parseJsonSafe(res)) as T
+  const result = await parseJsonSafe(res)
+  if (path === '/auth/me' && typeof (result as { id?: unknown })?.id === 'string') rememberSessionUser((result as { id: string }).id)
+  return result as T
 }

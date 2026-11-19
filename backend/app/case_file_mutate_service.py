@@ -364,7 +364,7 @@ def _erase_case_file_tree(db: Session, case_id: uuid.UUID, file_id: uuid.UUID) -
         except Exception:
             pass
     db.delete(row)
-    db.commit()
+    db.flush()
     return row
 
 

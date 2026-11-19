@@ -566,10 +566,23 @@ async def persist_onlyoffice_browser_url_to_file(
     case_id: uuid.UUID | None,
     precedent_id: uuid.UUID | None,
     firm_letterhead_kind: str | None = None,
+    actor_user_id: uuid.UUID | None = None,
 ) -> int:
     """Fetch a DS ``downloadAs`` / cache URL and write bytes to Canary file storage."""
 
     data = await _fetch_onlyoffice_download_bytes(browser_url, log_label=f"oo-persist file={row.id}")
+
+    # A revoked account/matter/session must win over a slow Document Server fetch.
+    if case_id is not None and actor_user_id is not None:
+        from app.deps import require_case_access
+        from app.desktop_edit_session import require_user_active_edit_session
+        from app.models import User
+        db.expire_all()
+        actor = db.get(User, actor_user_id)
+        if actor is None or not actor.is_active:
+            raise HTTPException(status_code=403, detail="Document access has been revoked.")
+        require_case_access(case_id, actor, db)
+        require_user_active_edit_session(db, row.id, actor)
 
     _validate_persist_magic(data, filename=row.original_filename)
 
@@ -618,7 +631,7 @@ async def persist_onlyoffice_browser_url_to_file(
     )
     log_event(
         db,
-        actor_user_id=None,
+        actor_user_id=actor_user_id,
         action=action,
         entity_type="file",
         entity_id=str(row.id),
@@ -1150,7 +1163,7 @@ async def onlyoffice_callback(
         )
         log_event(
             db,
-            actor_user_id=None,
+            actor_user_id=active_after.user_id,
             action=action,
             entity_type="file",
             entity_id=str(row.id),

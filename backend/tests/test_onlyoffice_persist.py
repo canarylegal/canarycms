@@ -61,3 +61,21 @@ async def test_persist_rejects_non_pdf_for_pdf_file(tmp_path, monkeypatch) -> No
                     precedent_id=None,
                 )
     assert exc.value.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_browser_persist_does_not_write_after_actor_revoked(monkeypatch, tmp_path):
+    from unittest.mock import AsyncMock, MagicMock
+    from fastapi import HTTPException
+    from app.routers import onlyoffice
+    import uuid
+    row = MagicMock(id=uuid.uuid4())
+    db = MagicMock()
+    db.get.return_value = None
+    monkeypatch.setattr(onlyoffice, '_fetch_onlyoffice_download_bytes', AsyncMock(return_value=b'never persist'))
+    with pytest.raises(HTTPException) as exc:
+        await onlyoffice.persist_onlyoffice_browser_url_to_file(db, row, browser_url='http://office/cache',
+            case_id=uuid.uuid4(), precedent_id=None, actor_user_id=uuid.uuid4())
+    assert exc.value.status_code == 403
+    db.expire_all.assert_called_once()
+    db.commit.assert_not_called()
