@@ -46,4 +46,14 @@ describe('document transfer state', () => {
     expect(uploadFilesToCaseFolder).toHaveBeenCalledTimes(1)
     expect(options.onRefresh).not.toHaveBeenCalled()
   })
+  it('does not trigger a reloading refresh when the upload session expires', async () => {
+    vi.mocked(uploadFilesToCaseFolder).mockRejectedValue(new DocumentRequestError('Your session has expired.', 401, false))
+    const options = args()
+    const { result } = renderHook(() => useCaseDocumentTransfers(options))
+    await act(async () => { await result.current.uploadFilesToCurrentFolder([new File(['x'], 'one.txt')]) })
+    expect(options.onRefresh).not.toHaveBeenCalled()
+    expect(options.setActionErr).toHaveBeenLastCalledWith(expect.stringContaining('session has expired'))
+    expect(options.setBusy).toHaveBeenLastCalledWith(false)
+  })
+
 })

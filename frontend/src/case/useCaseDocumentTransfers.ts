@@ -53,13 +53,17 @@ export function useCaseDocumentTransfers({ caseId, caseDetail, token, docFolder,
       }
       if (!current()) return
       let completed = false
+      let refreshAllowed = true
       try {
         completed = await retryTransfer(() => uploadFilesToCaseFolder(caseId, token, docFolder, incomingFiles, progress, current), current, 'Upload interrupted', progress)
       } catch (error) {
+        // Refresh uses the general API client, whose 401 handling reloads the page.
+        // Keep this view intact so session recovery does not erase local state.
+        refreshAllowed = !(error instanceof DocumentRequestError && error.status === 401)
         throw new Error(`${progress.completed} of ${incomingFiles.length} files uploaded. ${documentErrorMessage(error, 'Upload failed.')} Files already uploaded will remain in the list.`)
       } finally {
         // Also reconcile an unknown outcome; a server may have accepted the last file.
-        if (current()) onRefresh()
+        if (current() && refreshAllowed) onRefresh()
       }
       if (!completed || !current() || !notify) return
       try {
