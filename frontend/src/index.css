@@ -3133,8 +3133,8 @@ select {
   /* Match envelope / mime / folder / pin icons in the description column. */
   --docs-file-icon-size: calc(18px * 1.2);
   display: grid;
-  /* All columns share available space; minima keep metadata readable. */
-  grid-template-columns: minmax(200px, 6fr) minmax(76px, 1fr) minmax(132px, 1.7fr) minmax(92px, 1.2fr);
+  /* Metadata grows only to useful limits; Description takes the remaining space. */
+  grid-template-columns: minmax(200px, 1fr) clamp(76px, 10%, 96px) clamp(132px, 17%, 180px) clamp(92px, 12%, 100px);
   gap: var(--canary-table-row-gap);
   padding: var(--canary-table-row-padding);
   border-bottom: 1px solid var(--border);

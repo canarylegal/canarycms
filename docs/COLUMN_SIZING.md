@@ -4,6 +4,8 @@ Matter/quote, task (including within a matter), contact and audit lists use
 proportional grid tracks with minimum widths. Document, DocuSign and portal
 summary lists also use proportional tracks. Matter portal tables use flexible
 tracks; ledger tables already use percentage columns and a minimum table width.
+Document metadata is capped at 96px (Size), 180px (Created) and 100px (User);
+Description takes the remaining space on wide screens.
 Column order, sorting, double-click opening and right-click menus are unchanged.
 
 Existing `main_menu_column_widths`, `tasks_menu_column_widths` and
