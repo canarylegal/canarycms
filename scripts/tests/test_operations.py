@@ -68,7 +68,7 @@ class OperationsTests(unittest.TestCase):
     def test_backup_failure_restarts_writers_and_does_not_rotate_or_mark_success(self):
         with tempfile.TemporaryDirectory() as folder:
             root=Path(folder); config={'name':'test','services':{'backend':{},'frontend':{},'db':{}}}
-            active={key:{'Id':key,'Image':'image','Mounts':[]} for key in config['services']}
+            active={key:{'Id':key,'Image':'image','Mounts':[],'Config':{'Env':[]}} for key in config['services']}
             settings={'backup_dir':str(root/'backups'),'state_dir':str(root/'state'),'deployment_config':'config'}
             with patch.object(ops,'resolved',return_value=config), patch.object(ops,'inspect_running',return_value=active), patch.object(ops,'validate_backup_destination'), patch.object(ops,'execute') as execute, patch.object(deploy,'backup',side_effect=OSError('sensitive disk failure')), patch.object(ops,'prune_backups') as prune:
                 with self.assertRaises(OSError): ops.backup_job(settings)
@@ -82,7 +82,7 @@ class OperationsTests(unittest.TestCase):
     def test_partial_stop_failure_still_attempts_restart(self):
         with tempfile.TemporaryDirectory() as folder:
             root=Path(folder); config={'name':'test','services':{'backend':{},'frontend':{},'db':{}}}
-            active={key:{'Id':key,'Image':'image','Mounts':[]} for key in config['services']}
+            active={key:{'Id':key,'Image':'image','Mounts':[],'Config':{'Env':[]}} for key in config['services']}
             settings={'backup_dir':str(root/'backups'),'state_dir':str(root/'state'),'deployment_config':'config'}
             with patch.object(ops,'resolved',return_value=config), patch.object(ops,'inspect_running',return_value=active), patch.object(ops,'validate_backup_destination'), patch.object(ops,'execute',side_effect=[OSError('stop'),None]) as execute:
                 with self.assertRaises(OSError): ops.backup_job(settings)
@@ -163,7 +163,7 @@ class OperationsTests(unittest.TestCase):
             previous_success = '2026-01-01T00:00:00+00:00'
             ops.atomic_json(state/'backup-status.json', {'status':'ok','last_success':previous_success})
             config = {'name':'unit-export-failure','services':{'backend':{},'frontend':{},'db':{}}}
-            active = {key:{'Id':key,'Image':'image','Mounts':[]} for key in config['services']}
+            active = {key:{'Id':key,'Image':'image','Mounts':[],'Config':{'Env':[]}} for key in config['services']}
             settings = {'backup_dir':str(root/'backups'),'state_dir':str(state),'deployment_config':'config'}
             def snapshot(stage, manifest, **kwargs):
                 for name in ['database.dump','files.tar']:
@@ -176,6 +176,13 @@ class OperationsTests(unittest.TestCase):
             self.assertEqual(status['last_success'],previous_success)
             self.assertEqual(status['status'],'failed')
             ops.verify_backup(Path(status['last_verified_backup']))
+
+    def test_backup_records_running_encryption_key_not_edited_compose_value(self):
+        config = {'services':{'backend':{'image':'mutable-tag','environment':{'DATA_ENCRYPTION_KEY':'edited'}}}}
+        active = {'backend':{'Image':'sha256:running','Config':{'Env':['DATA_ENCRYPTION_KEY=running==','POSTGRES_HOST=db']}}}
+        ops.record_running_services(config,active)
+        self.assertEqual(config['services']['backend']['image'],'sha256:running')
+        self.assertEqual(config['services']['backend']['environment']['DATA_ENCRYPTION_KEY'],'running==')
 
 
 if __name__=='__main__': unittest.main()

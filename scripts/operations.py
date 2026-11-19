@@ -106,6 +106,14 @@ def validate_backup_destination(root, config, active):
         raise RuntimeError('External databases are not supported by this paired backup job.')
 
 
+def record_running_services(config, active):
+    # Capture actual keys/settings, even if the Compose file was edited after startup.
+    for name, info in active.items():
+        config['services'][name]['image'] = info['Image']
+        config['services'][name]['environment'] = dict(
+            entry.split('=', 1) for entry in info['Config']['Env'])
+
+
 def archive_volume(stage, config, container, image, destination, filename, log):
     with (stage / filename).open('wb') as stream:
         execute(['docker', 'run', '--rm', '--network', 'none', '--volumes-from', container + ':ro',
@@ -200,8 +208,7 @@ def backup_job(settings):
         try:
             active = inspect_running(settings['deployment_config'], config['services'])
             validate_backup_destination(root, config, active)
-            for name, info in active.items():
-                config['services'][name]['image'] = info['Image']
+            record_running_services(config, active)
             atomic_json(stage / 'previous.json', config)
             targets = [name for name in deploy.dependents(config['services'], ['backend', 'frontend', 'radicale']) if name in active]
             manifest = {'containers': {name: info['Id'] for name, info in active.items()}}
