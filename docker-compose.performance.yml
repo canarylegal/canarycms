@@ -1,0 +1,23 @@
+# Overlay ONLY for docker-compose.core-test.yml with a new canaryperf-* project.
+services:
+  db:
+    cpus: 1.0
+    mem_limit: 1g
+  backend:
+    cpus: 2.0
+    mem_limit: 2g
+    environment:
+      CANARY_PERFORMANCE_FIXTURE: "1"
+      CANARY_BACKGROUND_JOBS_ENABLED: "0"
+  frontend:
+    cpus: 0.5
+    mem_limit: 256m
+  onlyoffice:
+    cpus: 2.0
+    mem_limit: 2g
+  tests:
+    cpus: 2.0
+    mem_limit: 3g
+networks:
+  default:
+    internal: true

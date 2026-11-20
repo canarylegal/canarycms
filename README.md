@@ -93,3 +93,4 @@ Questions about deployment, licensing, or professional hosting: [colin@canaryleg
 - [Isolated disaster recovery](docs/DISASTER_RECOVERY.md)
 
 - [Monitoring, scheduled backups and recovery checks](docs/OPERATIONS.md)
+- [Isolated performance workloads and regression gates](docs/PERFORMANCE.md)

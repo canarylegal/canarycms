@@ -170,8 +170,28 @@ def _active_pending(
 
 
 def form_submission_file_list_item(db: Session, submission: PortalFormSubmission) -> dict[str, Any]:
-    contact = db.get(Contact, submission.contact_id)
-    template = db.get(PortalFormTemplate, submission.template_id)
+    return _form_submission_file_list_item(
+        submission, db.get(Contact, submission.contact_id), db.get(PortalFormTemplate, submission.template_id)
+    )
+
+
+def form_submission_file_list_items(db: Session, submissions: list[PortalFormSubmission]) -> dict[uuid.UUID, dict[str, Any]]:
+    """Batch list metadata: two queries regardless of the number of form snapshots."""
+    if not submissions:
+        return {}
+    contacts = {row.id: row for row in db.scalars(
+        select(Contact).where(Contact.id.in_({s.contact_id for s in submissions}))
+    )}
+    templates = {row.id: row for row in db.scalars(
+        select(PortalFormTemplate).where(PortalFormTemplate.id.in_({s.template_id for s in submissions}))
+    )}
+    return {s.id: _form_submission_file_list_item(s, contacts.get(s.contact_id), templates.get(s.template_id))
+            for s in submissions}
+
+
+def _form_submission_file_list_item(
+    submission: PortalFormSubmission, contact: Contact | None, template: PortalFormTemplate | None
+) -> dict[str, Any]:
     return {
         "id": str(submission.id),
         "status": submission.status.value,
