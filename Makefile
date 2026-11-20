@@ -58,3 +58,7 @@ test-deploy:
 .PHONY: test-operations
 test-operations:
 	./scripts/test-operations.sh
+
+.PHONY: test-performance
+test-performance:
+	./scripts/test-performance.sh

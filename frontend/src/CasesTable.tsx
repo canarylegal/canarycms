@@ -6,7 +6,7 @@ import { isEditableKeyboardTarget, isModalBlockingKeyboard } from './keyboardUti
 import { caseHasRevokedUserAccess, formatCaseStatusLabel } from './types'
 import type { CaseOut, UserSummary } from './types'
 import type { MainMenuCaseStatusFilter } from './userUiPreferences'
-import { buildCaseTableRows, feeEarnerLabel } from './mainMenuCaseData'
+import { buildCaseTableRows, buildFeeEarnerLabels } from './mainMenuCaseData'
 
 export function CasesTable({
   cases,
@@ -83,6 +83,8 @@ export function CasesTable({
       ),
     [cases, users, search, filterMatterTypes, filterFeeEarnerUserIds, filterCaseStatuses, sortKey, sortDir, contextMenuVariant],
   )
+
+  const feeEarnerLabels = useMemo(() => buildFeeEarnerLabels(users), [users])
 
   const rowIds = useMemo(() => rows.map((r) => r.id), [rows])
 
@@ -297,7 +299,7 @@ export function CasesTable({
               </div>
               <div className="td">{c.client_name ?? '—'}</div>
               <div className="td">{c.matter_description}</div>
-              <div className="td">{feeEarnerLabel(c, users)}</div>
+              <div className="td">{c.fee_earner_user_id == null ? '—' : feeEarnerLabels.get(c.fee_earner_user_id) ?? '—'}</div>
               {showSourceColumn ? (
                 <div className="td">{c.source_name ?? '—'}</div>
               ) : (

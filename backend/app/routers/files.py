@@ -352,7 +352,7 @@ def list_case_files(
         PortalFormSubmission,
     )
     from app.portal_service import contact_display_name
-    from app.portal_form_service import form_submission_file_list_item
+    from app.portal_form_service import form_submission_file_list_items
 
     delivery_contact_ids = {d.contact_id for d in delivery_by_file.values()}
     contacts_by_id: dict[uuid.UUID, Contact] = {}
@@ -415,7 +415,7 @@ def list_case_files(
             if sr.source_file_id and sr.source_file_id not in canary_by_file:
                 canary_by_file[sr.source_file_id] = canary_signing_file_list_item(sr)
 
-    form_by_file: dict[uuid.UUID, PortalFormSubmission] = {}
+    form_by_file: dict[uuid.UUID, dict] = {}
     if file_ids:
         form_rows = (
             db.execute(
@@ -424,9 +424,10 @@ def list_case_files(
             .scalars()
             .all()
         )
+        form_items = form_submission_file_list_items(db, form_rows)
         for sub in form_rows:
             if sub.snapshot_file_id and sub.snapshot_file_id not in form_by_file:
-                form_by_file[sub.snapshot_file_id] = sub
+                form_by_file[sub.snapshot_file_id] = form_items[sub.id]
 
     casera_by_file = search_file_summaries_for_case(db, case_id) if file_ids else {}
 
@@ -478,7 +479,7 @@ def list_case_files(
             item["canary_signing"] = canary
         form_sub = form_by_file.get(f.id)
         if form_sub is not None:
-            item["portal_form_submission"] = form_submission_file_list_item(db, form_sub)
+            item["portal_form_submission"] = form_sub
         casera_sum = casera_by_file.get(f.id) if casera_by_file else None
         if casera_sum is not None:
             item["casera_search"] = casera_sum.model_dump(mode="json")

@@ -12,10 +12,23 @@ export function feeEarnerLabel(c: CaseOut, users: UserSummary[]) {
   return u?.display_name ?? '—'
 }
 
+/** One staff lookup table per list calculation; preserve first-match semantics. */
+export function buildFeeEarnerLabels(users: UserSummary[]): Map<string, string> {
+  const labels = new Map<string, string>()
+  for (const user of users) {
+    const id = user.id
+    if (!labels.has(id)) labels.set(id, user.display_name)
+  }
+  return labels
+}
+
 export function caseMatchesMainMenuSearch(c: CaseOut, users: UserSummary[], search: string): boolean {
   const s = search.trim().toLowerCase()
+  return !s || caseMatchesSearchLabel(c, feeEarnerLabel(c, users), s)
+}
+
+function caseMatchesSearchLabel(c: CaseOut, fe: string, s: string): boolean {
   if (!s) return true
-  const fe = feeEarnerLabel(c, users)
   const parts = [
     c.case_number,
     c.client_name ?? '',
@@ -60,14 +73,16 @@ export function buildCaseTableRows(
   sortKey: 'reference' | 'client' | 'matter' | 'feeEarner' | 'status' | 'source' | 'created',
   sortDir: 'asc' | 'desc',
 ): CaseOut[] {
-  const s = search.trim()
+  const s = search.trim().toLowerCase()
+  const labels = buildFeeEarnerLabels(users)
+  const label = (c: CaseOut) => c.fee_earner_user_id == null ? '—' : labels.get(c.fee_earner_user_id) ?? '—'
   const pool = filters.quotesOnlyMatters
     ? cases.filter((c) => c.status === 'quote' || c.status === 'quote_closed')
     : filters.excludeQuoteMatters
       ? cases.filter((c) => c.status !== 'quote' && c.status !== 'quote_closed')
       : cases
   const filtered = s
-    ? pool.filter((c) => caseMatchesMainMenuSearch(c, users, search))
+    ? pool.filter((c) => caseMatchesSearchLabel(c, label(c), s))
     : filterMainMenuCases(pool, filters.matterTypes, filters.feeEarnerUserIds, filters.caseStatuses)
   const dir = sortDir === 'asc' ? 1 : -1
   return [...filtered].sort((a, b) => {
@@ -79,7 +94,7 @@ export function buildCaseTableRows(
           : sortKey === 'matter'
             ? a.matter_description ?? ''
             : sortKey === 'feeEarner'
-              ? feeEarnerLabel(a, users)
+              ? label(a)
               : sortKey === 'status'
                 ? a.status
                 : sortKey === 'source'
@@ -95,7 +110,7 @@ export function buildCaseTableRows(
           : sortKey === 'matter'
             ? b.matter_description ?? ''
             : sortKey === 'feeEarner'
-              ? feeEarnerLabel(b, users)
+              ? label(b)
               : sortKey === 'status'
                 ? b.status
                 : sortKey === 'source'
