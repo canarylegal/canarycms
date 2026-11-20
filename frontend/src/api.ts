@@ -3,6 +3,7 @@ export type ApiError = {
   status: number
   message: string
   body?: unknown
+  requestId?: string
 }
 
 /**
@@ -257,7 +258,12 @@ export async function apiFetch<T>(
         ? new URL(apiUrl(path), window.location.origin).href
         : apiUrl(path)
     const msg = (formatApiErrorDetail(errBody, statusFallback, resolvedUrl).trim() || statusFallback)
-    const err: ApiError = { status: res.status, message: msg, body: errBody }
+    const err: ApiError = {
+      status: res.status,
+      requestId: res.headers.get('X-Request-ID') ?? undefined,
+      message: msg,
+      body: errBody,
+    }
     throw err
   }
 

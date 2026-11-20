@@ -1,0 +1,11 @@
+[Unit]
+Description=Schedule Canary recovery checks
+
+[Timer]
+OnCalendar=Sun *-*-* 03:30:00
+Persistent=true
+RandomizedDelaySec=5min
+Unit=canary-recovery.service
+
+[Install]
+WantedBy=timers.target

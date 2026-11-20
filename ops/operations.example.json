@@ -1,0 +1,15 @@
+{
+  "deployment_config": "/srv/canary/current/compose.json",
+  "backup_dir": "/srv/canary-backups",
+  "state_dir": "/srv/canary-operations",
+  "public_url": "https://canary.example.com",
+  "keep_backups": 14,
+  "max_backup_age_hours": 26,
+  "max_recovery_age_days": 35,
+  "archive_images": true,
+  "export": {
+    "directory": "/mnt/canary-offsite",
+    "target_id": "replace-with-your-offsite-target-id",
+    "passphrase_file": "/etc/canary/backup-passphrase"
+  }
+}

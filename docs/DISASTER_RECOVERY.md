@@ -11,7 +11,7 @@ Required inputs:
 - The matching commercial/firm package snapshot if the installation used one. The current tool supports the commercial package mounted at `/commercial` and its module below that path. Other optional mounts need a reviewed recovery configuration.
 - Docker, Compose, Python 3.12+ on the operator host, sufficient free disk space, and the pinned PostgreSQL/ONLYOFFICE images available locally.
 
-A database dump, file archive and decryption key must be preserved together. The updater captures the pair while application entry points are stopped; its checksums prove byte integrity, not business completeness. Calendar-server data, external mail/Graph state, external databases and external file stores are outside this tool's restore scope.
+A database dump, file archive and decryption key must be preserved together. The updater captures the pair while application entry points are stopped; its checksums prove byte integrity, not business completeness. Scheduled operations backups also capture `/radicale-data` and `/commercial` when mounted on the backend; older deployment backups do not. External mail/Graph state, external databases and external file stores remain outside the restore scope. See [scheduled operations](OPERATIONS.md).
 
 ## 1. Prepare without touching live services
 
@@ -26,7 +26,7 @@ python3 scripts/recovery_drill.py \
   --commercial-source /srv/release-artifacts/MATCHING_COMMERCIAL_SNAPSHOT
 ```
 
-Omit `--commercial-source` only for backups without that package. The supplied directory is **copied** into private drill storage. Its original `/commercial/module` path is retained; the original directory is never mounted into recovery containers.
+Omit `--commercial-source` for backups without that package or with a captured `commercial.tar`. The supplied directory is **copied** into private drill storage. Its original `/commercial/module` path is retained; the original directory is never mounted into recovery containers.
 
 The tool refuses existing state directories, unsafe tar entries, checksum mismatches, and an existing target volume. It generates a new `canaryrestore-*` project with new database/file volumes, no published ports, no host/container namespace sharing and an `internal: true` network. Only the data-encryption key is carried over from the original environment. Database, JWT, recovery-master and document-server secrets are regenerated. Live SMTP/Graph/tunnel settings are not inherited. Background jobs and update checks are disabled in the clone.
 
@@ -40,7 +40,7 @@ The tool performs these steps and writes a private `restore.log`:
 4. Record core table counts, migration revision, a fingerprint of every ledger row, account balances and missing document references in `inventory-before.json`. Missing referenced files stop the drill.
 5. Start the compatible app and ONLYOFFICE images without automatic migrations; wait for health and confirm the internal network.
 
-A healthy container is not enough. Continue with authenticated checks.
+A healthy container is not enough. Use `--verify --cleanup` for automated authenticated read/document-hash/ledger checks and automatic removal of the isolated project, or continue below for the fuller browser editing checks.
 
 ## 3. Verify the recovered app
 

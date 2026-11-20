@@ -1,0 +1,11 @@
+[Unit]
+Description=Schedule Canary monitor checks
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+RandomizedDelaySec=30s
+Unit=canary-monitor.service
+
+[Install]
+WantedBy=timers.target

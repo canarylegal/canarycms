@@ -91,3 +91,5 @@ Questions about deployment, licensing, or professional hosting: [colin@canaryleg
 
 - [Pinned build inputs](docs/BUILD_REPRODUCIBILITY.md)
 - [Isolated disaster recovery](docs/DISASTER_RECOVERY.md)
+
+- [Monitoring, scheduled backups and recovery checks](docs/OPERATIONS.md)

@@ -1,0 +1,16 @@
+[Unit]
+Description=Canary backup job
+After=docker.service network-online.target
+Requires=docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# Replace with the SAME Docker operator account used for deployment.
+User=canary
+EnvironmentFile=/etc/canary/operations.env
+UMask=0077
+ExecStart=/usr/bin/python3 ${CANARY_SOURCE}/scripts/operations.py --config ${CANARY_OPERATIONS_CONFIG} backup
+TimeoutStartSec=2h
+KillMode=mixed
+TimeoutStopSec=5min

@@ -54,3 +54,7 @@ test-core-workflows:
 
 test-deploy:
 	python3 -m unittest discover -s scripts/tests -v
+
+.PHONY: test-operations
+test-operations:
+	./scripts/test-operations.sh
