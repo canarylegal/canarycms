@@ -44,7 +44,13 @@ def preview_unmatch(db, line_id):
         BankReconciliation.firm_bank_account_id == line.firm_bank_account_id,
         BankReconciliation.status == 'approved',
         BankReconciliation.period_end_date >= line.statement_date).order_by(BankReconciliation.id)))
+    from app.models import ClientAccountReconciliation, ReconciliationStatus
+    firm_closed = list(map(str, db.scalars(select(ClientAccountReconciliation.id).where(
+        ClientAccountReconciliation.status == ReconciliationStatus.approved,
+        ClientAccountReconciliation.period_end_date >= line.statement_date).order_by(ClientAccountReconciliation.id))))
     blockers = []
+    if firm_closed:
+        blockers.append('approved_firm_period_requires_reasoned_reopen')
     if not line.matched_pair_id:
         blockers.append('line_is_not_matched')
     if legs:
@@ -59,7 +65,7 @@ def preview_unmatch(db, line_id):
     plan = dict(schema_version=1, operation='unmatch_missing_posting', line_id=str(line.id),
                 before=before, after=dict(matched_pair_id=None, matched_at=None,
                 matched_by_user_id=None, ignored=line.ignored, version=line.version+1),
-                posting_leg_ids=sorted(map(str, legs)), closed_reconciliation_ids=list(map(str, closed)),
+                posting_leg_ids=sorted(map(str, legs)), closed_firm_reconciliation_ids=firm_closed, closed_reconciliation_ids=list(map(str, closed)),
                 blockers=blockers, ledger_effect='none',
                 report_effect='Statement becomes unmatched; review reconciliation before approving it.')
     return dict(plan, plan_hash=_digest(plan))

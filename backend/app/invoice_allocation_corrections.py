@@ -71,8 +71,11 @@ def reverse_allocation(db: Session, *, invoice_id: uuid.UUID, allocation_id: uui
         raise HTTPException(409, 'Receipt allocations are inconsistent; review before correcting')
     before = {'amount_allocated_pence': inv.amount_allocated_pence,
               'paid_at': inv.paid_at.isoformat() if inv.paid_at else None}
+    now = utcnow()
+    from app.accounting_periods import require_accounting_open
+    require_accounting_open(db, now)
     row = InvoiceAllocationReversal(allocation_id=allocation_id, actor_user_id=actor.id,
-        idempotency_key=payload.idempotency_key, reason=payload.reason.strip(), reversed_at=utcnow())
+        idempotency_key=payload.idempotency_key, reason=payload.reason.strip(), reversed_at=now)
     db.add(row)
     inv.amount_allocated_pence = total - original.amount_pence
     # A positive whole-allocation reversal always makes a fully paid invoice unpaid.

@@ -149,6 +149,8 @@ def create_case_invoice(case_id: uuid.UUID, payload: CaseInvoiceCreate, user: Us
     line_rows: list[CaseInvoiceLine] = []
     time_bill_pairs: list[tuple] = []
     now = datetime.utcnow()
+    from app.accounting_periods import require_accounting_open
+    require_accounting_open(db, now)
     inv_id = uuid.uuid4()
     inv_num = _next_invoice_number(db)
 
@@ -223,7 +225,7 @@ def create_case_invoice(case_id: uuid.UUID, payload: CaseInvoiceCreate, user: Us
     if time_bill_pairs:
         mark_time_entries_billed(db, time_bill_pairs)
         db.flush()
-    inv_out = list_case_invoices(case_id, db).invoices[0]
+    inv_out = next(item for item in list_case_invoices(case_id, db).invoices if item.id == inv_id)
     post_payload = LedgerPostCreate(
         description=f"Invoice {inv_num} (pending approval)",
         reference=inv_num,
@@ -279,6 +281,11 @@ def approve_case_invoice(case_id: uuid.UUID, invoice_id: uuid.UUID, user: User, 
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invoice has no ledger posting.")
 
         approve_ledger_pair(case_id, inv.ledger_pair_id, user, db, invoice_workflow=True)
+        # A legacy already-approved charge must not backfill an invoice into a closed period.
+        effective_at = db.scalar(select(func.coalesce(LedgerEntry.recognised_at, LedgerEntry.posted_at)).where(
+            LedgerEntry.pair_id == inv.ledger_pair_id).limit(1))
+        from app.accounting_periods import require_accounting_open
+        require_accounting_open(db, effective_at)
         new_desc = f"Invoice {inv.invoice_number}"
         # Core UPDATE so description / approval are persisted even if ORM instances in the session were stale.
         db.execute(
@@ -290,8 +297,7 @@ def approve_case_invoice(case_id: uuid.UUID, invoice_id: uuid.UUID, user: User, 
         inv.status = INV_APPROVED
         inv.approved_by_user_id = user.id
         # One effective instant for the invoice and its charge, including midnight.
-        inv.approved_at = db.scalar(select(func.coalesce(LedgerEntry.recognised_at, LedgerEntry.posted_at)).where(
-            LedgerEntry.pair_id == inv.ledger_pair_id).limit(1))
+        inv.approved_at = effective_at
         db.add(inv)
         db.flush()
         log_invoice_approve(
@@ -418,6 +424,8 @@ def void_case_invoice(
 
         now = datetime.utcnow()
         if inv.status == INV_PENDING:
+            from app.accounting_periods import require_accounting_open
+            require_accounting_open(db, now)
             if inv.ledger_pair_id:
                 try:
                     delete_ledger_pair_unapproved(case_id, inv.ledger_pair_id, db)
