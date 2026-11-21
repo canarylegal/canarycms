@@ -50,5 +50,6 @@ test('allocation retry after a lost response pays once without changing the dial
   const allocations = await (await page.request.get(`/api/cases/${id}/invoices/${inv.id}/allocations`)).json()
   expect(allocations).toHaveLength(1)
   expect(allocations[0].amount_pence).toBe(10000)
-  await expect(page.getByRole('row').filter({ hasText: inv.invoice_number })).toContainText('Paid')
+  await expect(page.getByRole('row').filter({ hasText: inv.invoice_number })
+    .filter({ has: page.getByRole('button', { name: 'Download', exact: true }) })).toContainText('Paid')
 })
