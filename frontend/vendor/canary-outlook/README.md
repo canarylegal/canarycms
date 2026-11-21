@@ -1,0 +1,1 @@
+Generated, checksum-pinned hosting bundle from https://github.com/canarylegal/canary-outlook. Edit source there, not here. See lock.json for source commit and integrity hashes. Update all three files together from a reviewed clean standalone build. CMS hosting paths and origin stay unchanged. No network fetch or deployment occurs during staging.

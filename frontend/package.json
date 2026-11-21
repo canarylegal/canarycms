@@ -6,13 +6,16 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "postbuild": "node scripts/generate-outlook-manifest.mjs --target dist && node scripts/verify-outlook-addin.mjs",
+    "postbuild": "node scripts/outlook-bundle.mjs dist",
     "lint": "eslint .",
     "lint:ci": "eslint . --max-warnings 226",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "prebuild": "node scripts/outlook-bundle.mjs stage",
+    "predev": "node scripts/outlook-bundle.mjs dev",
+    "test:outlook": "node --test scripts/tests/outlook-bundle.check.mjs"
   },
   "dependencies": {
     "@fullcalendar/core": "^6.1.20",

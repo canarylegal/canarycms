@@ -4,3 +4,7 @@ dist
 *.md
 .env
 .env.*
+
+# Regenerated from the pinned Outlook bundle inside the build
+public/outlook-addin
+public/.well-known/microsoft-officeaddins-allowed.json
