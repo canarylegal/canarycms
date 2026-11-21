@@ -485,6 +485,8 @@ def approve_bank_reconciliation(db: Session, *, actor: User, row: BankReconcilia
     row.version += 1
     db.flush()
     _audit_recon(db, row, actor, 'approve', before)
+    from app.financial_report_snapshots import archive_approval
+    archive_approval(db, 'bank', row, actor)
     return row
 
 

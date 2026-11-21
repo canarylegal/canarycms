@@ -78,6 +78,7 @@ class AccountantPackBuildResult:
     zip_bytes: bytes
     filename: str
     preview: AccountantPackPreview
+    snapshot_id: str | None = None
 
 
 def _invoice_status_label(s: str) -> str:
@@ -580,6 +581,17 @@ def _add_exceptions_sheets(wb: Any, report: ExceptionsReport) -> None:
 
 
 def _write_reconcile_docx(rec: ClientAccountReconciliation, db: Session) -> bytes:
+    from app.financial_report_snapshots import latest_snapshot, verify_chain
+    from fastapi import HTTPException
+    snapshot = latest_snapshot(db, 'firm', rec.id)
+    if snapshot is not None:
+        manifest = verify_chain(db, snapshot)
+        approved = rec.approved_at
+        if approved.tzinfo is None:approved = approved.replace(tzinfo=timezone.utc)
+        if datetime.fromisoformat(manifest['approved_at']) != approved:
+            raise HTTPException(409, 'Approved report archive does not match this approval')
+        with zipfile.ZipFile(BytesIO(snapshot.archive_bytes)) as bundle:
+            return bundle.read('report.docx')
     firm = firm_settings_for_report(db)
     rec_dict = reconciliation_to_dict(rec, db)
     fd, tmp_name = tempfile.mkstemp(suffix=".docx")
@@ -670,15 +682,20 @@ def build_accountant_pack(
     xlsx_bytes = xlsx_bio.getvalue()
 
     zip_bio = BytesIO()
+    snapshot_id = None
     with zipfile.ZipFile(zip_bio, "w", compression=zipfile.ZIP_DEFLATED) as zf:
         zf.writestr(xlsx_name, xlsx_bytes)
         if include_reconcile_doc:
             rec = get_reconciliation_for_period(db, period_end_date)
             if rec and rec.status == ReconciliationStatus.approved:
                 zf.writestr(docx_name, _write_reconcile_docx(rec, db))
+                from app.financial_report_snapshots import latest_snapshot
+                snapshot = latest_snapshot(db, 'firm', rec.id)
+                snapshot_id = str(snapshot.id) if snapshot else None
 
     return AccountantPackBuildResult(
         zip_bytes=zip_bio.getvalue(),
         filename=zip_name,
+        snapshot_id=snapshot_id,
         preview=preview,
     )

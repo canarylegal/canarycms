@@ -9,7 +9,7 @@ from io import BytesIO
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, Response
 from sqlalchemy.orm import Session
 
 from app.db import get_db
@@ -139,8 +139,21 @@ def download_reconciliation_report(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> StreamingResponse:
-    del user
+    from app.bank_integrity import require_banking
+    from app.financial_report_snapshots import latest_snapshot,download_snapshot
+    require_banking(user, db)
     row = get_reconciliation(db, rec_id)
+    snapshot=latest_snapshot(db,'firm',row.id)
+    if row.status.value=='approved' and snapshot is not None:
+        # Never silently regenerate a damaged or stale archived approval.
+        from datetime import timezone
+        expected=row.approved_at.replace(tzinfo=timezone.utc) if row.approved_at.tzinfo is None else row.approved_at
+        actual=snapshot.approved_at.replace(tzinfo=timezone.utc) if snapshot.approved_at.tzinfo is None else snapshot.approved_at
+        if actual!=expected:raise HTTPException(409,'Approved report archive does not match this approval')
+        data,filename,media=download_snapshot(db,snapshot,user,summary_only=True)
+        return Response(data,media_type=media,headers={**attachment_content_disposition_headers(filename),
+            'Cache-Control':'private, no-store','X-Canary-Archive-State':'archived',
+            'X-Canary-Snapshot-Version':str(snapshot.version)})
     firm = firm_settings_for_report(db)
     prepared_name = reconciliation_to_dict(row, db).get("prepared_by_name")
     approved_name = reconciliation_to_dict(row, db).get("approved_by_name")
@@ -173,11 +186,17 @@ def download_reconciliation_report(
     finally:
         tmp.unlink(missing_ok=True)
 
+    from app.audit import log_event
+    log_event(db,actor_user_id=user.id,action='financial.report.download',entity_type='client_account_reconciliation',
+        entity_id=str(row.id),meta={'archive_state':'legacy-unarchived' if row.status.value=='approved' else 'draft'})
+    db.commit()
     period_label = row.period_end_date.strftime("%Y-%m")
     filename = f"Client account reconcile report — {period_label}.docx"
     bio = BytesIO(data)
     return StreamingResponse(
         bio,
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        headers=attachment_content_disposition_headers(filename),
+        headers={**attachment_content_disposition_headers(filename),
+            "Cache-Control":"private, no-store",
+            "X-Canary-Archive-State":"legacy-unarchived" if row.status.value=="approved" else "draft"},
     )

@@ -75,6 +75,7 @@ from app.routers import (
     precedents,
     reports,
     reconciliations,
+    financial_snapshots,
     quote_portal,
     support,
     users,
@@ -350,6 +351,7 @@ app.include_router(me_calendar_events.router)
 app.include_router(me_calendars.router)
 app.include_router(reports.router)
 app.include_router(reconciliations.router)
+app.include_router(financial_snapshots.router)
 app.include_router(quote_portal.router)
 app.include_router(support.router)
 app.include_router(canary_sign.router)

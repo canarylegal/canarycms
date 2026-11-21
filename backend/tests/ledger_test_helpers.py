@@ -10,7 +10,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.models import (
-    AuditEvent,
+    AuditEvent, FinancialReportSnapshot,
     BankStatementImport, BankStatementLine, BankReconciliation, ClientAccountReconciliation,
     DocumentRecovery, LedgerOperation, InterMatterJournal, InvoiceAllocationReversal,
     Base,
@@ -63,7 +63,7 @@ def ledger_test_session() -> Session:
         File.__table__,
         Precedent.__table__,
         FirmSettings.__table__,
-        AuditEvent.__table__,
+        AuditEvent.__table__, FinancialReportSnapshot.__table__,
         DocumentRecovery.__table__, LedgerOperation.__table__, InterMatterJournal.__table__,
     )
     try:

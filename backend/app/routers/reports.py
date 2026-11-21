@@ -1018,6 +1018,9 @@ def post_accountant_pack(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    if body.include_reconcile_doc:
+        from app.bank_integrity import require_banking
+        require_banking(user, db)
     ids = enforce_fee_earner_ids(user, db, body.fee_earner_user_ids)
     if not any(
         [
@@ -1040,11 +1043,23 @@ def post_accountant_pack(
         generated_by_name=generated_by,
         **_pack_params(body),
     )
+    # Finish the read-only report snapshot before committing its download audit.
+    actor_id = user.id
+    db.rollback()
+    from app.audit import log_event
+    from app.financial_report_snapshots import digest
+    log_event(db, actor_user_id=actor_id,
+        action='financial.snapshot.download' if result.snapshot_id else 'financial.report.download',
+        entity_type='financial_report_snapshot' if result.snapshot_id else 'accountant_pack',
+        entity_id=result.snapshot_id,
+        meta={'artifact': 'accountant-pack.zip', 'sha256': digest(result.zip_bytes),
+              'period_end_date': body.period_end_date.isoformat()})
+    db.commit()
     bio = BytesIO(result.zip_bytes)
     return StreamingResponse(
         bio,
         media_type="application/zip",
-        headers={"Content-Disposition": f'attachment; filename="{result.filename}"'},
+        headers={"Content-Disposition": f'attachment; filename="{result.filename}"', "Cache-Control": "private, no-store"},
     )
 
 
