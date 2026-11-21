@@ -262,7 +262,7 @@ Canary connects to users’ mail clients through two optional add-ons. Both use 
 
 | | **Outlook add-in** | **Thunderbird add-on** |
 |---|-------------------|------------------------|
-| **Shipped with** | Frontend Docker image (nginx serves `/outlook-addin/…`) | Signed `.xpi` + update manifest on **canarylegalsoftware.co.uk/thunderbird/** |
+| **Shipped with** | Frontend Docker image (nginx serves `/outlook-addin/…`) | Separate [canary-thunderbird repository](https://github.com/canarylegal/canary-thunderbird); GitHub Release publication pending |
 | **Typical deploy** | Microsoft 365 admin center (tenant-wide) | Manual install once, then auto-update from vendor host |
 | **User sign-in** | Task pane in Outlook | Toolbar **Server & sign-in** once per profile |
 | **Graph on server** | Optional but recommended (drafts, categories) | Not used |
@@ -346,66 +346,21 @@ After add-in code or manifest changes: bump `<Version>` in `manifest.xml`, rebui
 
 The Thunderbird add-on provides **file to matter**, **compose with merge + attachments**, and a **Canary** tag on **incoming** mail. Sent mail is filed on send but is **not** tagged in Thunderbird.
 
-#### Important: signed release only for production
+#### Installation and updates
 
-Release Thunderbird **removes unsigned add-ons on restart**. **Load Temporary Add-on** (Debug Add-ons) is for development only — do **not** rely on it for firm rollout.
+The extension source, tests and build tools are maintained separately in [canary-thunderbird](https://github.com/canarylegal/canary-thunderbird). The CMS build does not bundle or publish extension files.
 
-Production installs require a **Mozilla-signed `.xpi`** (unlisted on the Thunderbird Add-ons store is fine — it does not appear publicly, but Mozilla still signs it).
+Use a reviewed versioned XPI from that repository. GitHub Release publication is still pending; its configured automatic-update feed is not live yet. When releases are published, download from [GitHub Releases](https://github.com/canarylegal/canary-thunderbird/releases).
 
-#### For firm IT — install on workstations
+In Thunderbird 128 or later, open Add-ons and Themes, choose the gear menu, then Install Add-on From File. Select the XPI and connect to your firm's HTTPS Canary site using the Canary toolbar. Existing installations need a one-time manual installation to switch to the GitHub update channel; keep existing settings by installing over the old version rather than uninstalling.
 
-1. Download **`canary-thunderbird-{version}.xpi`** from **`https://canarylegalsoftware.co.uk/thunderbird/`** (or your vendor).
-2. On each PC (or via your software deployment tool):
-   - **Tools** → **Add-ons and Themes** → gear menu → **Install Add-on From File…**
-   - Select the signed `.xpi`.
-3. Confirm **Canary — file to matter** appears and **survives a Thunderbird restart**.
-4. Each user: toolbar **Canary** → **Server & sign-in** → enter **`https://canary.yourfirm.co.uk`** (the **firm** Canary host, not canarylegalsoftware.co.uk).
+The GitHub-channel manifest points at `https://github.com/canarylegal/canary-thunderbird/releases/latest/download/updates.json`. Each published feed points at a versioned XPI with its SHA-256 digest. Firms may manage updates under their own policy; the [Betterbird policy template](../deploy/betterbird/policies.json) remains an administrator-maintained integration example.
 
-**Updates (choose a firm policy):**
+#### Maintainer boundary
 
-- **Vendor channel (default XPI):** Thunderbird checks **`https://canarylegalsoftware.co.uk/thunderbird/updates.json`** about daily and may auto-install newer signed builds.
-- **IT-controlled (recommended for production):** pin a reviewed `.xpi` version and **disable** Thunderbird auto-updates for this add-on. Use Betterbird/Thunderbird `policies.json` `ExtensionSettings` with `installation_mode: force_installed` and a firm-hosted `install_url` (see [deploy/betterbird/policies.json](../deploy/betterbird/policies.json)). Optionally host your own `updates.json` + XPI on an internal HTTPS URL and rebuild the add-on with that `update_url` in `manifest.json`.
-- **Disable auto-update only:** after installing a known-good XPI, remove or override `update_url` via enterprise policy where your mail client supports it, or redistribute a firm-signed build that points `update_url` at your own static hosting.
+Build and test the extension in its own repository (`npm test`, `npm run build`). No ATN submission, signing, extension release workflow or extension deployment runs from Canary CMS. GitHub Actions and background jobs remain disabled for this separation; no release is published.
 
-#### Enterprise pre-install (Betterbird / Thunderbird)
-
-Firm-managed desktops should use **official Betterbird** (not Flatpak) and a system **`policies.json`**:
-
-| OS | Path |
-|----|------|
-| Linux | `/etc/thunderbird/policies/policies.json` |
-| Windows | `C:\Program Files\Betterbird\distribution\policies.json` |
-
-Template (force-install Canary add-on, block other add-ons, primary password, firm calendar categories): [deploy/betterbird/policies.json](../deploy/betterbird/policies.json) and [deploy/betterbird/README.md](../deploy/betterbird/README.md).
-
-On the Canary server, set **`CANARY_CALENDAR_LABEL_SPECS`** in `.env` so in-app calendar labels match Betterbird category names (see `.env.example`). Canary writes `CATEGORIES` into CalDAV events so Betterbird can colour them.
-
-Manual `.xpi` install remains valid for ad-hoc machines; the canonical download URL is **`https://canarylegalsoftware.co.uk/thunderbird/`**.
-
-#### For maintainers — build, sign, and publish
-
-Signing is **not** part of the Docker stack. Maintainers build from the Canary CMS repository (`thunderbird-addin/`):
-
-```bash
-cd thunderbird-addin
-npm ci
-export ATN_API_KEY='…'       # from https://addons.thunderbird.net/developers/addon/api/key/
-export ATN_API_SECRET='…'
-npm run release              # lint → package → sign → publish-hosting
-```
-
-Output:
-
-- **`dist/canary-thunderbird-{version}.xpi`** — signed add-on
-- **`hosting/`** — upload to **`public_html/thunderbird/`** on canarylegalsoftware.co.uk (WordPress: static folder, not a WP page — see `thunderbird-addin/hosting/README.md`)
-
-**One-time setup:** developer account at [addons.thunderbird.net/developers](https://addons.thunderbird.net/developers/); add-on ID is fixed as `canary-file@canarylegal.co.uk` in `manifest.json`. Bump `version` before each new release. The manifest `update_url` points at the central host (all firms share one update channel).
-
-**Manual fallback (no API):** `npm run package`, upload the zip to the ATN developer hub as **unlisted**, download the signed `.xpi`.
-
-**GitHub Actions (optional):** tag `thunderbird-v*` on the repo triggers lint, package, sign (with `ATN_API_KEY` / `ATN_API_SECRET` secrets), and a GitHub Release artifact.
-
-Full detail: [thunderbird-addin/README.md](../thunderbird-addin/README.md).
+Keep authentication/token endpoints, filing and compose APIs, OAuth callback pages and the web-bridge client in CMS. Validate changes to these contracts against the extension. Do not restore a second source copy under frontend/public.
 
 #### User workflow (Thunderbird)
 
@@ -462,4 +417,4 @@ Restart the backend after changes. Canary user email should match the M365 mailb
 
 ---
 
-Adjust hostnames, paths, and ports for your environment. Mail add-on maintainer detail also lives in [frontend/public/outlook-addin/README.md](../frontend/public/outlook-addin/README.md) and [thunderbird-addin/README.md](../thunderbird-addin/README.md).
+Adjust hostnames, paths, and ports for your environment. Mail add-on maintainer detail also lives in [frontend/public/outlook-addin/README.md](../frontend/public/outlook-addin/README.md) and [Canary Thunderbird](https://github.com/canarylegal/canary-thunderbird).
