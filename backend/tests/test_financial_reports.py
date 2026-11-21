@@ -196,3 +196,23 @@ def test_snapshot_scope_excludes_reconciliation_mutations_and_covers_renderers()
     assert {route.path for route in router.routes} == REPORT_SNAPSHOT_PATHS
     assert '/reports/reconciliations' not in REPORT_SNAPSHOT_PATHS
     assert '/reports/reconciliations/id/approve' not in REPORT_SNAPSHOT_PATHS
+
+
+def test_invoice_and_ledger_share_the_same_approval_and_void_instant(monkeypatch):
+    from app import ledger_service
+    from app.invoice_service import create_case_invoice,approve_case_invoice,void_case_invoice
+    from tests.test_invoice_service import _invoice_payload
+    from tests.ledger_test_helpers import ledger_test_session,add_user,add_case
+    db=ledger_test_session(); user=add_user(db); case=add_case(db,fee_earner_user_id=user.id)
+    inv=create_case_invoice(case.id,_invoice_payload(credit_user_id=user.id),user,db)
+    inv.created_at=dt(1); db.flush()
+    monkeypatch.setattr(ledger_service,'utcnow',lambda:dt(2))
+    approve_case_invoice(case.id,inv.id,user,db); db.commit()
+    assert inv.approved_at.date()==date(2026,1,2)
+    leg=db.scalar(select(LedgerEntry).where(LedgerEntry.pair_id==inv.ledger_pair_id))
+    assert inv.approved_at==leg.recognised_at
+    monkeypatch.setattr(ledger_service,'utcnow',lambda:dt(3))
+    void_case_invoice(case.id,inv.id,user,db); db.commit()
+    reversal=db.scalar(select(LedgerEntry).where(LedgerEntry.pair_id==inv.reversal_pair_id))
+    assert inv.voided_at==reversal.recognised_at and inv.voided_at.date()==date(2026,1,3)
+    db.close()

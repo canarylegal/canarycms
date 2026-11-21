@@ -289,7 +289,9 @@ def approve_case_invoice(case_id: uuid.UUID, invoice_id: uuid.UUID, user: User, 
         db.flush()
         inv.status = INV_APPROVED
         inv.approved_by_user_id = user.id
-        inv.approved_at = datetime.utcnow()
+        # One effective instant for the invoice and its charge, including midnight.
+        inv.approved_at = db.scalar(select(LedgerEntry.recognised_at).where(
+            LedgerEntry.pair_id == inv.ledger_pair_id).limit(1))
         db.add(inv)
         db.flush()
         log_invoice_approve(
@@ -473,7 +475,8 @@ def void_case_invoice(
 
         release_billed_time_entries_for_invoice(invoice_id, db)
         inv.status = INV_VOIDED
-        inv.voided_at = now
+        inv.voided_at = db.scalar(select(LedgerEntry.recognised_at).where(
+            LedgerEntry.pair_id == rev_id).limit(1))
         inv.reversal_pair_id = rev_id
         db.add(inv)
         db.flush()
