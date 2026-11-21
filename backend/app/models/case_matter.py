@@ -95,6 +95,11 @@ class MatterContactTypeConfig(Base):
 
 class Case(Base):
     __tablename__ = "case"
+    __table_args__ = (
+        Index('ix_case_menu_created', 'created_at', 'id'),
+        Index('ix_case_menu_status', 'status', 'created_at', 'id'),
+        Index('ix_case_menu_fee_earner', 'fee_earner_user_id', 'created_at', 'id'),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     case_number: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)

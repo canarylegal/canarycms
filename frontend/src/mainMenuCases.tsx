@@ -1,11 +1,12 @@
-import { memo, useMemo, useState, type ReactNode } from 'react'
+import { memo, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { MainMenuFilterCheckboxDropdown } from './MainMenuFilterCheckboxDropdown'
 import { SearchInput } from './SearchInput'
 import type { CaseOpenDocPanel } from './case/CaseDetail'
 import type { CaseOut, UserSummary } from './types'
 import type { MainMenuCaseStatusFilter } from './userUiPreferences'
 import { CasesTable } from './CasesTable'
-import { matterTypeLabel } from './mainMenuCaseData'
+import { apiFetch } from './api'
+import { useMatterPages } from './useMatterPages'
 
 // Preserve existing imports while the panel, table and data helpers evolve separately.
 export { CasesTable } from './CasesTable'
@@ -24,8 +25,9 @@ export const QUOTES_MENU_STATUS_FILTER_OPTIONS: { value: MainMenuCaseStatusFilte
 ]
 
 export const MainMenuCasesPanel = memo(function MainMenuCasesPanel({
-  cases,
-  casesErr,
+  token,
+  revision,
+  onRowsLoaded,
   users,
   filterMatterTypes,
   filterFeeEarnerUserIds,
@@ -53,8 +55,9 @@ export const MainMenuCasesPanel = memo(function MainMenuCasesPanel({
   onQuoteClose,
   keyboardActive = false,
 }: {
-  cases: CaseOut[]
-  casesErr: string | null
+  token: string
+  revision: number
+  onRowsLoaded: (rows: CaseOut[]) => void
   users: UserSummary[]
   filterMatterTypes: string[]
   filterFeeEarnerUserIds: string[]
@@ -90,15 +93,27 @@ export const MainMenuCasesPanel = memo(function MainMenuCasesPanel({
   const [filterOpen, setFilterOpen] = useState(false)
   const [openFilterField, setOpenFilterField] = useState<'matterType' | 'feeEarner' | 'status' | null>(null)
 
-  const matterTypeOptions = useMemo(() => {
-    const set = new Set<string>()
-    for (const c of cases) {
-      set.add(matterTypeLabel(c))
-    }
-    return Array.from(set)
-      .sort((a, b) => a.localeCompare(b))
-      .map((label) => ({ value: label, label }))
-  }, [cases])
+  const [activated, setActivated] = useState(keyboardActive)
+  if (keyboardActive && !activated) setActivated(true)
+  const query = useMemo(() => {
+    const params = new URLSearchParams({q: caseSearch, menu: contextMenuVariant, sort: sortKey, direction: sortDir})
+    filterMatterTypes.forEach(value => params.append('matter_type', value))
+    filterFeeEarnerUserIds.forEach(value => params.append('fee_earner', value))
+    filterCaseStatuses.forEach(value => params.append('status', value))
+    return params.toString()
+  }, [caseSearch, contextMenuVariant, sortKey, sortDir, filterMatterTypes, filterFeeEarnerUserIds, filterCaseStatuses])
+  const pages = useMatterPages(token, query, revision, activated)
+  useEffect(() => { onRowsLoaded(pages.rows) }, [pages.rows, onRowsLoaded])
+  const [matterTypeOptions, setMatterTypeOptions] = useState<{value: string; label: string}[]>([])
+  const [optionsError, setOptionsError] = useState<string | null>(null)
+  useEffect(() => {
+    if (!activated) return
+    const abort = new AbortController()
+    apiFetch<string[]>('/cases/menu-options', {token, signal: abort.signal})
+      .then(labels => { if (!abort.signal.aborted) { setOptionsError(null); setMatterTypeOptions(labels.sort((a,b) => a.localeCompare(b)).map(label => ({value: label, label}))) } })
+      .catch(() => { if (!abort.signal.aborted) setOptionsError('Failed to load matter types. Use Refresh to retry.') })
+    return () => abort.abort()
+  }, [token, revision, activated])
 
   const feeEarnerOptions = useMemo(() => {
     const byId = new Map<string, UserSummary>()
@@ -138,7 +153,7 @@ export const MainMenuCasesPanel = memo(function MainMenuCasesPanel({
 
   return (
     <div className="mainMenuShell mainMenuShell--mainMenu">
-      {casesErr ? <div className="error">{casesErr}</div> : null}
+      {pages.error || optionsError ? <div className="error" role="alert">{pages.error || optionsError} Use Refresh to retry.</div> : null}
       <div className={`mainMenuFilterBar${filterOpen ? ' mainMenuFilterBar--dropdownOpen' : ''}`}>
         <div className="row mainMenuFilterRow mainMenuFilterRow--toolbar mainMenuFilterRow--searchRight">
           <div className="mainMenuFilterRowLeft">
@@ -243,7 +258,11 @@ export const MainMenuCasesPanel = memo(function MainMenuCasesPanel({
       </div>
       {null}
       <CasesTable
-        cases={cases}
+        cases={pages.rows}
+        serverRows
+        loading={pages.busy}
+        hasMore={pages.hasMore}
+        onLoadMore={pages.loadMore}
         users={users}
         search={caseSearch}
         filterMatterTypes={filterMatterTypes}

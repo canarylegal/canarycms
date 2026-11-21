@@ -1,4 +1,5 @@
 import uuid
+from typing import Literal
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -329,6 +330,30 @@ def list_cases(
 
     cases = db.execute(select(Case).order_by(Case.created_at.desc())).scalars().all()
     return _cases_to_out_list(list(cases), db)
+
+
+@router.get("/menu-options", response_model=list[str])
+def list_matter_menu_options(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.matter_menu import matter_type_options
+    return matter_type_options(db)
+
+
+@router.get("/menu")
+def list_matter_menu(
+    user: User = Depends(get_current_user), db: Session = Depends(get_db),
+    q: str = Query(default='', max_length=500),
+    menu: Literal['main', 'quotes'] = 'main',
+    sort: Literal['reference', 'client', 'matter', 'feeEarner', 'status', 'source', 'created'] = 'created',
+    direction: Literal['asc', 'desc'] = 'desc',
+    matter_type: list[str] = Query(default=[]), fee_earner: list[uuid.UUID] = Query(default=[]),
+    status: list[CaseStatus] = Query(default=[]),
+    cursor: str | None = Query(default=None, max_length=8192),
+    limit: int = Query(default=100, ge=1, le=100),
+):
+    from app.matter_menu import menu_page
+    rows, next_cursor = menu_page(db, q=q, menu=menu, sort=sort, direction=direction,
+        matter_types=matter_type, fee_earners=fee_earner, statuses=status, cursor=cursor, limit=limit)
+    return {'items': _cases_to_out_list(rows, db), 'next_cursor': next_cursor}
 
 
 @router.get("/{case_id}/standard-tasks", response_model=list[MatterSubTypeStandardTaskOut])

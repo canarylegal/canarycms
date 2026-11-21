@@ -10,6 +10,10 @@ import { buildCaseTableRows, buildFeeEarnerLabels } from './mainMenuCaseData'
 
 export function CasesTable({
   cases,
+  serverRows = false,
+  loading = false,
+  hasMore = false,
+  onLoadMore,
   users,
   search,
   filterMatterTypes,
@@ -30,6 +34,10 @@ export function CasesTable({
   keyboardEnabled = true,
 }: {
   cases: CaseOut[]
+  serverRows?: boolean
+  loading?: boolean
+  hasMore?: boolean
+  onLoadMore?: () => void
   users: UserSummary[]
   search: string
   filterMatterTypes: string[]
@@ -66,7 +74,7 @@ export function CasesTable({
   }, [caseCtx])
 
   const rows = useMemo(
-    () =>
+    () => serverRows ? cases :
       buildCaseTableRows(
         cases,
         users,
@@ -81,8 +89,30 @@ export function CasesTable({
         sortKey,
         sortDir,
       ),
-    [cases, users, search, filterMatterTypes, filterFeeEarnerUserIds, filterCaseStatuses, sortKey, sortDir, contextMenuVariant],
+    [serverRows, cases, users, search, filterMatterTypes, filterFeeEarnerUserIds, filterCaseStatuses, sortKey, sortDir, contextMenuVariant],
   )
+
+  const scrollRef = useRef<HTMLDivElement | null>(null)
+  const sentinelRef = useRef<HTMLDivElement | null>(null)
+  const pendingKeyboardId = useRef<string | null>(null)
+  useEffect(() => {
+    if (!keyboardEnabled || !hasMore || loading || !onLoadMore || !sentinelRef.current) return
+    const observer = new IntersectionObserver(entries => {
+      if (entries.some(entry => entry.isIntersecting)) onLoadMore()
+    }, {root: scrollRef.current, rootMargin: '200px'})
+    observer.observe(sentinelRef.current)
+    return () => observer.disconnect()
+  }, [keyboardEnabled, hasMore, loading, onLoadMore, rows.length])
+  useEffect(() => {
+    const id = pendingKeyboardId.current
+    if (!id) return
+    const index = rows.findIndex(row => row.id === id)
+    if (index >= 0 && rows[index + 1]) {
+      pendingKeyboardId.current = null
+      onCaseRowFocus(rows[index + 1].id)
+      scrollCaseRowIntoView(rows[index + 1].id)
+    } else if (!loading) pendingKeyboardId.current = null
+  }, [rows, loading, onCaseRowFocus])
 
   const feeEarnerLabels = useMemo(() => buildFeeEarnerLabels(users), [users])
 
@@ -173,7 +203,7 @@ export function CasesTable({
         if (e.key === 'Enter') {
           if (rowIds.length === 0) return
           e.preventDefault()
-          const id = caseListFocusId ?? rowIds[0]
+          const id = caseListFocusId && rowIds.includes(caseListFocusId) ? caseListFocusId : rowIds[0]
           if (!id) return
           onCaseRowFocus(id)
           openContextMenuForCase(id)
@@ -182,7 +212,7 @@ export function CasesTable({
       }
 
       if (e.key === 'Enter') {
-        if (!caseListFocusId) return
+        if (!caseListFocusId || !rowIds.includes(caseListFocusId)) return
         e.preventDefault()
         onSelect(caseListFocusId)
         return
@@ -193,6 +223,11 @@ export function CasesTable({
 
       e.preventDefault()
       const currentIndex = caseListFocusId ? rowIds.indexOf(caseListFocusId) : -1
+      if (e.key === 'ArrowDown' && currentIndex === rowIds.length - 1 && hasMore) {
+        pendingKeyboardId.current = caseListFocusId
+        onLoadMore?.()
+        return
+      }
       let nextIndex: number
       if (currentIndex < 0) {
         nextIndex = e.key === 'ArrowDown' ? 0 : rowIds.length - 1
@@ -218,6 +253,8 @@ export function CasesTable({
     onSelect,
     openContextMenuForCase,
     rowIds,
+    hasMore,
+    onLoadMore,
   ])
 
   const columns = useMemo(() => {
@@ -238,7 +275,7 @@ export function CasesTable({
 
   return (
     <div className="card casesTableCard" style={{ padding: 0, overflow: 'hidden' }}>
-      <div className="casesTableScroll">
+      <div className="casesTableScroll" ref={scrollRef} aria-busy={loading}>
         <div className="table">
         <div className="tr th" style={gridTemplateColumns ? { gridTemplateColumns } : undefined}>
           {columns.map(([k, label], colIndex) => (
@@ -312,7 +349,9 @@ export function CasesTable({
             </div>
           )
         })}
-        {rows.length === 0 ? <div className="muted" style={{ padding: 12 }}>No cases match.</div> : null}
+        {!loading && rows.length === 0 ? <div className="muted" style={{ padding: 12 }}>No cases match.</div> : null}
+        <div ref={sentinelRef} style={{height: 1}} aria-hidden />
+        {loading ? <div className="muted" role="status" style={{padding: 12}}>Loading matters…</div> : null}
         </div>
       </div>
       {caseCtx ? (

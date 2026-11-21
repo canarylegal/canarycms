@@ -181,8 +181,14 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
 
   // Cases
   const [cases, setCases] = useState<CaseOut[]>([])
-  const [, setCasesBusy] = useState(false)
-  const [casesErr, setCasesErr] = useState<string | null>(null)
+  const [casesRevision, setCasesRevision] = useState(0)
+  const onCaseRowsLoaded = useCallback((rows: CaseOut[]) => {
+    setCases(previous => {
+      const known = new Map(previous.map(row => [row.id, row]))
+      rows.forEach(row => known.set(row.id, row))
+      return Array.from(known.values())
+    })
+  }, [])
   const [caseListFocusId, setCaseListFocusId] = useState<string | null>(bootNav.caseId)
   const [caseOpenDocPanel, setCaseOpenDocPanel] = useState<CaseOpenDocPanel | null>(null)
   const consumeCaseOpenDocPanel = useCallback(() => setCaseOpenDocPanel(null), [])
@@ -457,19 +463,9 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
     }
   }, [token])
 
-  async function refreshCases() {
-    if (!token) return
-    setCasesBusy(true)
-    setCasesErr(null)
-    try {
-      const data = await apiFetch<CaseOut[]>('/cases', { token })
-      setCases(Array.isArray(data) ? data : [])
-    } catch (e: any) {
-      setCasesErr(e?.message ?? 'Failed to load cases')
-    } finally {
-      setCasesBusy(false)
-    }
-  }
+  const refreshCases = useCallback(async () => {
+    setCasesRevision(value => value + 1)
+  }, [])
 
   const refreshTaskMenu = useCallback(async () => {
     if (!token) return
@@ -485,7 +481,7 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
   useEffect(() => {
     if (!token) return
     void refreshCases()
-  }, [token])
+  }, [token, refreshCases])
 
   useEffect(() => {
     if (!token || view !== 'tasks') return
@@ -533,9 +529,7 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
     onDiscarded: onQuoteDiscarded,
   })
 
-  const onCaseListInvalidate = useCallback(() => {
-    void refreshCases()
-  }, [token])
+  const onCaseListInvalidate = refreshCases
 
   const onTaskMenuInvalidate = useCallback(() => {
     void refreshTaskMenu()
@@ -649,7 +643,7 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
     setShowNewMatter(false)
     setNewMatterFromQuotes(false)
   }, [])
-  const onRefreshCases = useCallback(() => refreshCases(), [token])
+  const onRefreshCases = refreshCases
 
   const [quoteConvertCaseId, setQuoteConvertCaseId] = useState<string | null>(null)
   const { push: pushNotification } = useNotifications()
@@ -713,7 +707,7 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
         void alert(msg, 'Close matter')
       }
     },
-    [alert, askConfirm, token],
+    [alert, askConfirm, token, refreshCases],
   )
 
   const onMainMenuCaseCreated = useCallback(
@@ -730,7 +724,7 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
         openCaseView(created.id)
       }
     },
-    [newMatterFromQuotes, openCaseView],
+    [newMatterFromQuotes, openCaseView, refreshCases],
   )
 
   const mainMenuFiltersLoadedForUser = useRef<string | null>(null)
@@ -1037,8 +1031,9 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
     <>
       <FirmModuleDashboardSlot token={token} />
       <MainMenuCasesPanel
-        cases={cases}
-        casesErr={casesErr}
+        token={token}
+        revision={casesRevision}
+        onRowsLoaded={onCaseRowsLoaded}
         users={caseListUsers}
         filterMatterTypes={mainMenuFilterMatterTypes}
         filterFeeEarnerUserIds={mainMenuFilterFeeEarnerUserIds}
@@ -1078,8 +1073,9 @@ function App({ initialTasksCaseFilter }: { initialTasksCaseFilter?: string | nul
 
   const quotesCasesPanel = token ? (
     <MainMenuCasesPanel
-      cases={cases}
-      casesErr={casesErr}
+      token={token}
+      revision={casesRevision}
+      onRowsLoaded={onCaseRowsLoaded}
       users={caseListUsers}
       filterMatterTypes={quotesFilterMatterTypes}
       filterFeeEarnerUserIds={quotesFilterFeeEarnerUserIds}
