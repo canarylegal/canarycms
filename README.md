@@ -94,3 +94,5 @@ Questions about deployment, licensing, or professional hosting: [colin@canaryleg
 
 - [Monitoring, scheduled backups and recovery checks](docs/OPERATIONS.md)
 - [Isolated performance workloads and regression gates](docs/PERFORMANCE.md)
+
+Matter-menu pagination and compatibility: [Progressive matter menus](docs/MATTER_PAGINATION.md).
