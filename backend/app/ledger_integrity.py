@@ -58,9 +58,14 @@ def require_external_receipt(db: Session, pair_id: uuid.UUID) -> None:
         raise HTTPException(409, 'Transfers and reversed or compensating postings cannot be used as receipts or bank matches')
 
 
-def require_posting_period(db: Session, bank_ids: set[uuid.UUID | None]) -> None:
+def require_posting_period(db: Session, bank_ids: set[uuid.UUID | None], *, at=None) -> None:
     from app.bank_integrity import lock_bank, require_open_period
     from app.timeutil import utcnow
+    from app.accounting_periods import require_accounting_open
+    from datetime import timezone
+    at = at or utcnow()
+    at = at.replace(tzinfo=timezone.utc) if at.tzinfo is None else at.astimezone(timezone.utc)
+    require_accounting_open(db, at)
     for bank_id in sorted(bank for bank in bank_ids if bank is not None):
         lock_bank(db, bank_id)
-        require_open_period(db, bank_id, utcnow().date())
+        require_open_period(db, bank_id, at.date())

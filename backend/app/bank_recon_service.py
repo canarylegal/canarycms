@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from app.reporting_cutoffs import ledger_effective_at
+from app.accounting_periods import period_impact
 
 import csv
 import io
@@ -429,7 +430,9 @@ def _audit_recon(db: Session, row: BankReconciliation, actor: User, action: str,
         after.pop('notes')  # Keep the full previous notes without duplicating up to 4,000 characters.
     log_event(db, actor_user_id=actor.id, action=f'bank.reconciliation.{action}',
         entity_type='bank_reconciliation', entity_id=str(row.id),
-        meta={'before': before, 'after': after, 'reason': reason})
+        meta={'before': before, 'after': after, 'reason': reason,
+              **({'review_scope': period_impact(
+                  db, row.period_end_date, bank_id=row.firm_bank_account_id)} if action == 'reopen' else {})})
 
 
 def _locked_recon(db: Session, row: BankReconciliation, actor: User, expected_version: int) -> BankReconciliation:
@@ -490,8 +493,8 @@ def reopen_bank_reconciliation(db: Session, *, actor: User, row: BankReconciliat
     row = _locked_recon(db, row, actor, expected_version)
     if not user_may_approve_ledger(actor, db):
         raise HTTPException(403, 'Not permitted to reopen reconciliations')
-    if not reason.strip():
-        raise HTTPException(400, 'A correction reason is required')
+    if not reason.strip() or len(reason.strip()) > 1000:
+        raise HTTPException(400, 'A correction reason of at most 1000 characters is required')
     if row.status != 'approved':
         raise HTTPException(409, 'Only approved reconciliations can be reopened')
     before = _recon_snapshot(row)

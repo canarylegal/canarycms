@@ -43,6 +43,8 @@ def create_inter_matter_journal(
         d = default_client_bank(db)
         bank_id = d.id if d else None
 
+    from app.timeutil import utcnow
+    effective_at = utcnow()
     desc = payload.description.strip()
     from_result = post_transaction(
         payload.from_case_id,
@@ -57,6 +59,7 @@ def create_inter_matter_journal(
         ),
         user,
         db,
+        effective_at=effective_at,
     )
     to_result = post_transaction(
         payload.to_case_id,
@@ -71,6 +74,7 @@ def create_inter_matter_journal(
         ),
         user,
         db,
+        effective_at=effective_at,
     )
     row = InterMatterJournal(
         id=uuid.uuid4(),
@@ -82,7 +86,7 @@ def create_inter_matter_journal(
         from_pair_id=from_result.pair_id,
         to_pair_id=to_result.pair_id,
         created_by_user_id=user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=effective_at,
     )
     db.add(row)
     db.flush()
@@ -158,8 +162,8 @@ def reverse_inter_matter_journal(db, *, journal_id, payload, user):
     reverse = InterMatterJournal(id=uuid.uuid4(), from_case_id=row.to_case_id, to_case_id=row.from_case_id,
         firm_bank_account_id=row.firm_bank_account_id, amount_pence=row.amount_pence,
         description=f'Reversal: {payload.reason.strip()}'[:500],
-        from_pair_id=compensate(db, destination, user, payload.reason.strip()),
-        to_pair_id=compensate(db, source, user, payload.reason.strip()), created_by_user_id=user.id, created_at=now)
+        from_pair_id=compensate(db, destination, user, payload.reason.strip(), effective_at=now),
+        to_pair_id=compensate(db, source, user, payload.reason.strip(), effective_at=now), created_by_user_id=user.id, created_at=now)
     db.add(reverse)
     db.flush()
     result = InterMatterJournalOut.model_validate(reverse, from_attributes=True)

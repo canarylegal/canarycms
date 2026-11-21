@@ -88,6 +88,8 @@ def allocate_to_invoice(db: Session, *, invoice_id: uuid.UUID, ledger_pair_id: u
         raise HTTPException(400, "Allocation exceeds the receipt's unallocated value")
 
     now = datetime.now(timezone.utc)
+    from app.accounting_periods import require_accounting_open
+    require_accounting_open(db, now)
     row = CaseInvoiceAllocation(id=uuid.uuid4(), invoice_id=invoice_id, ledger_pair_id=ledger_pair_id,
         amount_pence=amount_pence, allocated_by_user_id=actor.id, allocated_at=now, notes=notes,
         idempotency_key=idempotency_key)

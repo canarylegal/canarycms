@@ -10,6 +10,8 @@ from sqlalchemy import select, func, case as sql_case
 from sqlalchemy.orm import Session
 
 from app.audit import log_event
+from app.accounting_periods import lock_periods
+from app.bank_integrity import require_banking
 from app.reporting_cutoffs import ledger_effective_at
 from app.models import Case, ClientAccountReconciliation, FirmSettings, ReconciliationStatus, User
 from app.models import LedgerAccount, LedgerAccountType, LedgerEntry
@@ -109,6 +111,8 @@ def create_reconciliation(
     bank_statement_balance_pence: int,
     notes: str | None,
 ) -> ClientAccountReconciliation:
+    require_banking(actor, db)
+    lock_periods(db, exclusive=True)
     existing = db.execute(
         select(ClientAccountReconciliation).where(ClientAccountReconciliation.period_end_date == period_end_date)
     ).scalar_one_or_none()
@@ -161,6 +165,8 @@ def update_reconciliation(
     notes: str | None = None,
     refresh_ledger_totals: bool = True,
 ) -> ClientAccountReconciliation:
+    require_banking(actor, db)
+    lock_periods(db, exclusive=True)
     db.refresh(row, with_for_update=True)
     _assert_draft(row)
     if refresh_ledger_totals:
@@ -196,6 +202,8 @@ def update_reconciliation(
 
 
 def approve_reconciliation(db: Session, *, actor: User, row: ClientAccountReconciliation) -> ClientAccountReconciliation:
+    require_banking(actor, db)
+    lock_periods(db, exclusive=True)
     db.refresh(row, with_for_update=True)
     _assert_draft(row)
     if not user_may_approve_ledger(actor, db):

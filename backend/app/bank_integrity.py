@@ -17,6 +17,8 @@ def require_banking(actor: User, db: Session) -> None:
 
 
 def lock_bank(db: Session, bank_id: uuid.UUID) -> None:
+    from app.accounting_periods import lock_periods
+    lock_periods(db)
     if db.get_bind().dialect.name == 'postgresql':
         locked = db.scalar(text('SELECT pg_try_advisory_xact_lock(:namespace, :key)'),
             {'namespace': 582013719, 'key': zlib.crc32(bank_id.bytes) & 0x7fffffff})
@@ -25,6 +27,9 @@ def lock_bank(db: Session, bank_id: uuid.UUID) -> None:
 
 
 def require_open_period(db: Session, bank_id: uuid.UUID, statement_date: date) -> None:
+    from datetime import datetime, timezone
+    from app.accounting_periods import require_accounting_open
+    require_accounting_open(db, datetime.combine(statement_date, datetime.min.time(), tzinfo=timezone.utc))
     closed = db.scalar(select(BankReconciliation.id).where(
         BankReconciliation.firm_bank_account_id == bank_id,
         BankReconciliation.status == 'approved',

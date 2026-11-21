@@ -78,8 +78,6 @@ def reversal_legs(db, case_id, pair_id, user, *, journal_id=None):
         raise HTTPException(409, 'Correct invoice allocations before reversing this posting')
     if db.scalar(select(BankStatementLine.id).where(BankStatementLine.matched_pair_id == pair_id).limit(1)):
         raise HTTPException(409, 'Unmatch this posting through the bank correction workflow before reversing it')
-    require_posting_period(db, {leg.firm_bank_account_id for account, leg in zip(accounts, legs)
-                               if account.account_type.value == "client"})
     for account, leg in zip(accounts, legs):
         if account.account_type.value == 'client' and leg.direction == LedgerDirection.credit:
             _reject_client_deficit(_balance(account.id, db) - leg.amount_pence)
@@ -88,10 +86,12 @@ def reversal_legs(db, case_id, pair_id, user, *, journal_id=None):
     return legs
 
 
-def compensate(db, legs, user, reason):
+def compensate(db, legs, user, reason, *, effective_at=None):
     """Preserve original bank and party, including archived banks; never resolve a new default."""
     pair_id = uuid.uuid4()
-    now = utcnow()
+    now = effective_at or utcnow()
+    require_posting_period(db, {leg.firm_bank_account_id for leg in legs
+        if db.get(LedgerAccount, leg.account_id).account_type.value == "client"}, at=now)
     for leg in legs:
         db.add(LedgerEntry(id=uuid.uuid4(), pair_id=pair_id, account_id=leg.account_id,
             direction=LedgerDirection.debit if leg.direction == LedgerDirection.credit else LedgerDirection.credit,

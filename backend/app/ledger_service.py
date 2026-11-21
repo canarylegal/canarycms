@@ -204,6 +204,7 @@ def post_transaction(
     db: Session,
     *,
     force_unapproved: bool = False,
+    effective_at=None,
 ) -> LedgerPostResult:
     """
     Create a double-entry posting.
@@ -245,8 +246,9 @@ def post_transaction(
             payment_method=payment_method,
         )
 
-    if is_approved and payload.client_direction:
-        require_posting_period(db, {bank_id})
+    now = effective_at or utcnow()
+    if is_approved:
+        require_posting_period(db, {bank_id} if payload.client_direction else set(), at=now)
     accounts = _get_or_create_accounts(case_id, db, for_update=is_approved)
     if is_approved and payload.client_direction:
         current = _balance(accounts["client"].id, db, approved_only=True)
@@ -260,7 +262,6 @@ def post_transaction(
             _reject_client_deficit(_balance(accounts["client"].id, db, bank_id=bank_id, bank_only=True) - payload.amount_pence)
 
     pair_id = uuid.uuid4()
-    now = utcnow()
     anticipated_for_date = payload.anticipated_for_date if is_anticipated else None
     legs: list[LedgerEntry] = []
 
@@ -604,8 +605,9 @@ def approve_ledger_pair(
             detail="You do not have permission to approve ledger postings.",
         )
 
+    recognised_at = utcnow()
+    require_posting_period(db, {e.firm_bank_account_id for e in legs if e.account_id == accounts["client"].id}, at=recognised_at)
     if client_direction:
-        require_posting_period(db, {e.firm_bank_account_id for e in legs if e.account_id == accounts["client"].id})
         current = _balance(accounts["client"].id, db, approved_only=True)
         projected = _projected_client_balance_after_debit(
             current_balance=current,
@@ -625,7 +627,6 @@ def approve_ledger_pair(
         client_leg = next(e for e in legs if e.account_id == accounts["client"].id)
         _reject_client_deficit(_balance(accounts["client"].id, db, bank_id=client_leg.firm_bank_account_id, bank_only=True) - client_leg.amount_pence)
 
-    recognised_at = utcnow()
     for e in legs:
         e.recognised_at = recognised_at
         e.is_approved = True
