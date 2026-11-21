@@ -81,6 +81,9 @@ def test_legacy_evidence_gap_is_review_not_proof_of_bad_money():
     db.commit()
     assert validate_financial_data(db)['status']=='clear'
     assert leg.recognised_at is None  # Evidence is not silently written back.
+    db.add(AuditEvent(action='ledger.approve',entity_type='ledger_pair',entity_id=str(pair)))
+    db.commit()
+    assert codes(validate_financial_data(db),'review')=={'approval_time_recovery_available'}
     db.close()
 
 

@@ -82,6 +82,9 @@ def validate_financial_data(db):
             if all(e.recognised_at for e in legs): coverage['recorded_recognition_pairs']+=1
             elif audits.get(str(pair)):
                 coverage['legacy_pairs_with_audit_evidence']+=1
+                if 'ledger.approve' in audits[str(pair)]:
+                    finding('review','approval_time_recovery_available','ledger_pair',pair,
+                            fallback='original_posting_date')
             else:
                 coverage['legacy_pairs_without_approval_evidence']+=1
                 finding('review','missing_approval_evidence','ledger_pair',pair,

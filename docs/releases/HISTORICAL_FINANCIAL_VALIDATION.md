@@ -32,7 +32,8 @@ large datasets. It is not a background job or a web request.
    negative client balances (including bank buckets); transfer legs and compensating
    reversals; missing operation results; invalid bank matches; saved reconciliation
    arithmetic; orphan links and impossible event ordering.
-2. **Review items:** missing approval/void evidence, historical corrected cross-matter
+2. **Review items:** missing approval/void evidence, approval times recoverable from
+   audits but absent from the ledger, historical corrected cross-matter
    allocations, and statement import count differences. These require investigation;
    they do not establish that money is missing or that a timestamp should be invented.
 
