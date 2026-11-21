@@ -475,7 +475,7 @@ export function SendCanarySignModal({
         ? `/cases/${caseId}/canary-sign/requests/${amendFromId}/amend`
         : `/cases/${caseId}/canary-sign/send`
       await apiFetch<CanarySignSigningRequestOut>(path, { token, method: 'POST', json: payload })
-      setNotice(amendFromId ? 'Amended signing request sent.' : 'Document sent for signature.')
+      setNotice(amendFromId ? 'Amended signing request queued.' : 'Signing invitations queued.')
       onSent?.()
     } catch (e: unknown) {
       setErr(friendlySendError(e))

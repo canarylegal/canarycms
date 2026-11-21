@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi import APIRouter, BackgroundTasks, Header, Depends, HTTPException, Query, Response, status
 from sqlalchemy.orm import Session
 
 from app.canary_sign_pdf import (
@@ -22,6 +22,7 @@ from app.canary_sign_service import (
     signing_request_out,
     void_signing_request,
 )
+from app.canary_sign_delivery import dispatch_request
 from app.db import get_db
 from app.deps import get_current_user, require_case_access
 from app.download_headers import content_disposition_headers
@@ -166,6 +167,8 @@ def list_case_canary_sign_requests(
 def post_send_canary_sign(
     case_id: uuid.UUID,
     payload: CanarySignSendIn,
+    background_tasks: BackgroundTasks,
+    operation_key: uuid.UUID | None = Header(default=None, alias="X-Document-Operation-ID"),
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -183,7 +186,9 @@ def post_send_canary_sign(
         expires_in_days=payload.expires_in_days,
         fields_specs=fields_specs,
         retain_fillable_form=payload.retain_fillable_form,
+        operation_key=operation_key,
     )
+    background_tasks.add_task(dispatch_request, req.id, user.id)
     return CanarySignSigningRequestOut(**signing_request_out(db, req))
 
 
@@ -207,6 +212,8 @@ def post_void_canary_sign(
 def post_remind_canary_sign(
     case_id: uuid.UUID,
     request_id: uuid.UUID,
+    background_tasks: BackgroundTasks,
+    operation_key: uuid.UUID | None = Header(default=None, alias="X-Document-Operation-ID"),
     payload: CanarySignRemindIn = CanarySignRemindIn(),
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
@@ -220,7 +227,9 @@ def post_remind_canary_sign(
         req=req,
         actor=user,
         recipient_ids=payload.recipient_ids,
+        operation_key=operation_key,
     )
+    background_tasks.add_task(dispatch_request, req.id, user.id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -229,6 +238,8 @@ def post_amend_canary_sign(
     case_id: uuid.UUID,
     request_id: uuid.UUID,
     payload: CanarySignSendIn,
+    background_tasks: BackgroundTasks,
+    operation_key: uuid.UUID | None = Header(default=None, alias="X-Document-Operation-ID"),
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -251,5 +262,7 @@ def post_amend_canary_sign(
         fields_specs=fields_specs,
         supersedes_id=old.id,
         retain_fillable_form=payload.retain_fillable_form,
+        operation_key=operation_key,
     )
+    background_tasks.add_task(dispatch_request, req.id, user.id)
     return CanarySignSigningRequestOut(**signing_request_out(db, req))

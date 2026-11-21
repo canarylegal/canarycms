@@ -275,7 +275,7 @@ export async function apiFetch<T>(
     return (await res.blob()) as T
   }
   const result = await parseJsonSafe(res)
-  documentRetry?.complete(result)
+  documentRetry?.complete(result, res.status)
   if (path === '/auth/me' && typeof (result as { id?: unknown })?.id === 'string') rememberSessionUser((result as { id: string }).id)
   return result as T
 }
