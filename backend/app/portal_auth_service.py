@@ -368,11 +368,41 @@ def portal_canary_sign_exchange(payload: PortalCanarySignExchangeIn, db: Session
     if access_row is None or not portal_access_is_active(access_row):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Portal access is not active")
 
-    require_case_portal_enabled(db, req.case_id)
+    from app.models import CanarySignStatus, CanarySignRecipientStatus
+    from app.timeutil import utcnow
+    from datetime import timezone
+
+    expires = (
+        req.expires_at.replace(tzinfo=timezone.utc)
+        if req.expires_at.tzinfo is None
+        else req.expires_at
+    )
+    if (
+        req.status != CanarySignStatus.pending
+        or expires <= utcnow()
+        or recipient.status
+        in (CanarySignRecipientStatus.signed, CanarySignRecipientStatus.declined)
+        or recipient.portal_access_version is None
+        or recipient.portal_access_version != portal_session_version(access_row)
+    ):
+        raise HTTPException(
+            401, "Invalid or expired signing link — sign in with your access code"
+        )
+    from app.security import PortalSessionPayload
+    from app.portal_policy import authorize
+
+    principal = PortalSessionPayload(
+        contact_id=str(contact.id),
+        session_version=access_row.session_version,
+        signing_request_id=str(req.id),
+    )
+    db.info["portal_session"] = principal
+    authorize(db, req.case_id, signing_request_id=req.id, lock=True)
 
     token = create_portal_session_token(
         contact_id=str(contact.id),
         session_version=portal_session_version(access_row),
+        signing_request_id=str(req.id),
     )
     log_event(
         db,
@@ -387,6 +417,6 @@ def portal_canary_sign_exchange(payload: PortalCanarySignExchangeIn, db: Session
     return PortalCanarySignExchangeOut(
         session_token=token,
         contact_name=contact_display_name(contact),
-        grants=grant_summaries(db, contact.id),
+        grants=[],
         signing=PortalCanarySignOut(**view),
     )

@@ -502,6 +502,9 @@ def respond_to_quote_delivery(
     accepted: bool,
     decline_reason: str | None,
 ) -> QuotePortalDelivery:
+    from app.portal_policy import authorize
+
+    authorize(db, delivery.case_id, lock=True, client_only=True)
     delivery = db.scalar(
         select(QuotePortalDelivery)
         .where(QuotePortalDelivery.id == delivery.id)
@@ -589,6 +592,9 @@ def get_delivery_for_contact(db: Session, delivery_id: uuid.UUID, contact_id: uu
     delivery = db.get(QuotePortalDelivery, delivery_id)
     if delivery is None or delivery.contact_id != contact_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Quote not found")
+    from app.portal_policy import authorize
+
+    authorize(db, delivery.case_id, client_only=True)
     return delivery
 
 
@@ -671,6 +677,10 @@ def list_pending_quote_deliveries_for_contact(
     )
     out: list[QuotePortalDelivery] = []
     for delivery in rows:
+        from app.portal_policy import visible
+
+        if not visible(db, delivery.case_id):
+            continue
         if not delivery_can_respond(db, delivery):
             continue
         if db.get(File, delivery.file_id) is None:
@@ -725,6 +735,10 @@ def list_pending_approvals_for_grant(
     )
     out: list[QuotePortalDelivery] = []
     for delivery in rows:
+        from app.portal_policy import visible
+
+        if not visible(db, delivery.case_id):
+            continue
         if not delivery_can_respond(db, delivery):
             continue
         if db.get(File, delivery.file_id) is None:

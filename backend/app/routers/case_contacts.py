@@ -53,7 +53,11 @@ def add_contact_snapshot_from_global(
 ) -> CaseContactOut:
     require_case_access(case_id, user, db)
 
-    contact = db.get(Contact, payload.contact_id)
+    contact = db.scalar(
+        select(Contact)
+        .where(Contact.id == payload.contact_id)
+        .with_for_update(key_share=True)
+    )
     if not contact:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Global contact not found")
 
@@ -101,6 +105,11 @@ def add_contact_snapshot_from_global(
         letter_salutation=letter_salutation,
         letter_salutation_custom=letter_salutation_custom,
     )
+    from app.models import PortalMatterBlock
+
+    block = db.get(PortalMatterBlock, (case_id, contact.id))
+    if block is not None:
+        db.delete(block)
     db.add(cc)
     db.flush()
     db.refresh(cc)
@@ -223,6 +232,70 @@ def remove_case_contact(
     cc = db.get(CaseContact, case_contact_id)
     if not cc or cc.case_id != case_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Case contact not found")
+    from app.models import PortalMatterBlock, ContactPortalGrant, MatterPortalAccess
+    from app.portal_service import bump_matter_portal_session_version
+    from app.timeutil import utcnow
+
+    if cc.contact_id:
+        db.scalar(
+            select(Contact)
+            .where(Contact.id == cc.contact_id)
+            .with_for_update(key_share=True)
+        )
+        others = db.scalar(
+            select(CaseContact.id)
+            .where(
+                CaseContact.case_id == case_id,
+                CaseContact.contact_id == cc.contact_id,
+                CaseContact.id != cc.id,
+            )
+            .limit(1)
+        )
+        if others is None:
+            if db.get(PortalMatterBlock, (case_id, cc.contact_id)) is None:
+                db.add(
+                    PortalMatterBlock(
+                        case_id=case_id, contact_id=cc.contact_id, revoked_at=utcnow()
+                    )
+                )
+            for grant in db.scalars(
+                select(ContactPortalGrant).where(
+                    ContactPortalGrant.case_id == case_id,
+                    ContactPortalGrant.contact_id == cc.contact_id,
+                )
+            ):
+                grant.expires_at = utcnow()
+            from app.models import CanarySignRecipient, CanarySignRequest
+
+            for recipient in db.scalars(
+                select(CanarySignRecipient)
+                .join(
+                    CanarySignRequest,
+                    CanarySignRequest.id == CanarySignRecipient.signing_request_id,
+                )
+                .where(
+                    CanarySignRequest.case_id == case_id,
+                    CanarySignRecipient.contact_id == cc.contact_id,
+                )
+            ):
+                recipient.portal_access_version = None
+            access = db.scalar(
+                select(MatterPortalAccess).where(
+                    MatterPortalAccess.case_id == case_id,
+                    MatterPortalAccess.contact_id == cc.contact_id,
+                )
+            )
+            if access:
+                access.enabled = False
+                bump_matter_portal_session_version(access)
+            log_event(
+                db,
+                actor_user_id=user.id,
+                action="portal.matter.access.revoked",
+                entity_type="case_contact",
+                entity_id=str(cc.id),
+                meta={"case_id": str(case_id), "contact_id": str(cc.contact_id)},
+            )
     db.delete(cc)
     sync_case_client_name(db, case_id)
     log_event(
@@ -234,4 +307,3 @@ def remove_case_contact(
         meta={"case_id": str(case_id)},
     )
     db.commit()
-

@@ -131,6 +131,10 @@ def grant_summaries(
         grants = filter_grants_for_portal_enabled_cases(db, list_active_grants_for_contact(db, contact_id))
     out: list[PortalGrantSummaryOut] = []
     for g in grants:
+        from app.portal_policy import visible
+
+        if not visible(db, g.case_id):
+            continue
         case = db.get(Case, g.case_id)
         case_title = (case.title or "").strip() if case else "Matter"
         if not case_title:
@@ -243,6 +247,9 @@ def canary_request_for_contact(
     ).scalar_one_or_none()
     if recip is None:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not a recipient on this signing request")
+    from app.portal_policy import authorize
+
+    authorize(db, req.case_id, signing_request_id=req.id)
     return req, recip
 
 
@@ -261,9 +268,17 @@ def portal_session(
             focus_case_id = None
     return PortalSessionOut(
         contact_name=contact_display_name(contact),
-        grants=grant_summaries(db, contact.id, case_id=case_filter),
+        grants=(
+            []
+            if session.signing_request_id
+            else grant_summaries(db, contact.id, case_id=case_filter)
+        ),
         staff_preview=session.staff_preview,
-        audience="exchange" if getattr(session, "audience", "client") == "exchange" else "client",
+        audience=(
+            "exchange"
+            if getattr(session, "audience", "client") == "exchange"
+            else "client"
+        ),
         focus_case_id=focus_case_id,
     )
 
@@ -459,10 +474,16 @@ def issue_file_open_token(
     if not grant.can_download:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Download is not allowed for this area")
     get_portal_grant_file(db, grant, contact.id, file_id)
+    from dataclasses import asdict
+
+    principal = db.info.get("portal_session")
+    if principal is None:
+        raise HTTPException(401, "Missing portal session")
     tok = create_portal_file_open_token(
         contact_id=str(contact.id),
         grant_id=str(grant.id),
         file_id=str(file_id),
+        session_claims=asdict(principal),
     )
     return {"token": tok}
 
@@ -484,9 +505,17 @@ def open_file_with_token(
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid link") from e
 
-    contact = db.get(Contact, contact_id)
-    if contact is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid link")
+    from app.deps import get_portal_contact
+
+    try:
+        if not isinstance(payload.session_claims, dict):
+            raise ValueError("Missing session binding")
+        principal = PortalSessionPayload(**payload.session_claims)
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(401, "Invalid or expired link") from exc
+    if principal.contact_id != str(contact_id):
+        raise HTTPException(401, "Invalid link")
+    contact = get_portal_contact(session=principal, db=db)
 
     grant = get_grant_for_contact(db, contact_id=contact.id, grant_id=grant_id)
     if not grant.can_download:
@@ -581,6 +610,14 @@ def upload_file(
     disk_written = True
     commit_attempted = False
     try:
+        from app.portal_policy import authorize, fresh
+
+        authorize(db, grant.case_id, lock=True)
+        grant = fresh(db, ContactPortalGrant, grant.id, lock=True)
+        if grant is None:
+            raise HTTPException(403, "This area is no longer available")
+        grant = get_grant_for_contact(db, contact_id=contact.id, grant_id=grant.id)
+        ensure_upload_folder_allowed(grant=grant, folder=target_folder)
         mime = upload.content_type or (
             mimetypes.guess_type(original)[0] or "application/octet-stream"
         )
@@ -746,6 +783,10 @@ def client_actions(contact: Contact, db: Session) -> PortalClientActionsOut:
         select(QuotePortalDelivery).where(QuotePortalDelivery.contact_id == contact.id)
     ).scalars().all()
     for d in quote_rows:
+        from app.portal_policy import visible
+
+        if not visible(db, d.case_id):
+            continue
         if d.status == QuotePortalDeliveryStatus.pending:
             continue
         view = portal_quote_delivery_view(db, d)
@@ -784,6 +825,10 @@ def client_actions(contact: Contact, db: Session) -> PortalClientActionsOut:
         select(PortalFormSubmission).where(PortalFormSubmission.contact_id == contact.id)
     ).scalars().all()
     for sub in form_all:
+        from app.portal_policy import visible
+
+        if not visible(db, sub.case_id):
+            continue
         if sub.status == PortalFormSubmissionStatus.pending:
             continue
         case = db.get(Case, sub.case_id)
@@ -826,7 +871,12 @@ def client_actions(contact: Contact, db: Session) -> PortalClientActionsOut:
         else:
             inactive.append(item)
 
-    for req, recip in list_pending_docusign_for_contact(db, contact.id):
+    principal = db.info.get("portal_session")
+    for req, recip in (
+        []
+        if principal and principal.signing_request_id
+        else list_pending_docusign_for_contact(db, contact.id)
+    ):
         sync_envelope_status(db, req)
         if req.status.value != "pending":
             continue

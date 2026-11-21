@@ -462,7 +462,7 @@ def resend_form_submission(
 
 
 def list_pending_for_contact(db: Session, contact_id: uuid.UUID) -> list[PortalFormSubmission]:
-    return (
+    rows = (
         db.execute(
             select(PortalFormSubmission)
             .where(
@@ -475,11 +475,18 @@ def list_pending_for_contact(db: Session, contact_id: uuid.UUID) -> list[PortalF
         .all()
     )
 
+    from app.portal_policy import visible
+
+    return [row for row in rows if visible(db, row.case_id)]
+
 
 def get_submission_for_contact(db: Session, submission_id: uuid.UUID, contact_id: uuid.UUID) -> PortalFormSubmission:
     row = db.get(PortalFormSubmission, submission_id)
     if row is None or row.contact_id != contact_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Form not found")
+    from app.portal_policy import authorize
+
+    authorize(db, row.case_id, client_only=True)
     return row
 
 
@@ -764,6 +771,24 @@ def _save_snapshot_on_matter(
     return row
 
 
+def _lock_pending_submission(db, submission, contact):
+    from app.portal_policy import authorize
+
+    authorize(db, submission.case_id, lock=True, client_only=True)
+    with db.no_autoflush:
+        row = db.scalar(
+            select(PortalFormSubmission)
+            .where(PortalFormSubmission.id == submission.id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+    if row is None or row.contact_id != contact.id:
+        raise HTTPException(404, "Form not found")
+    if row.status != PortalFormSubmissionStatus.pending:
+        raise HTTPException(400, "Form is not pending")
+    return row
+
+
 async def upload_submission_file(
     db: Session,
     *,
@@ -810,6 +835,7 @@ async def upload_submission_file(
     try:
         write_bytes_atomic(paths.abs_path, raw)
         disk_written = True
+        submission = _lock_pending_submission(db, submission, contact)
         now = utcnow()
         row = File(
             id=file_id,
@@ -872,7 +898,7 @@ def remove_submission_file(
     contact: Contact,
 ) -> dict[str, Any]:
     """Remove one uploaded file from a multi-file (`files`) field response."""
-    _ = contact  # auth already enforced by caller
+    submission = _lock_pending_submission(db, submission, contact)
     if submission.status != PortalFormSubmissionStatus.pending:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Form is not pending")
     template = db.get(PortalFormTemplate, submission.template_id)
@@ -906,18 +932,7 @@ def complete_submission(
     contact: Contact,
     responses_in: dict[str, Any],
 ) -> PortalFormSubmission:
-    submission = db.scalar(
-        select(PortalFormSubmission)
-        .where(PortalFormSubmission.id == submission.id)
-        .with_for_update()
-        .execution_options(populate_existing=True)
-    )
-    if submission is None or submission.contact_id != contact.id:
-        raise HTTPException(404, "Form not found")
-    if submission.status != PortalFormSubmissionStatus.pending:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="Form is not pending"
-        )
+    submission = _lock_pending_submission(db, submission, contact)
 
     template = db.get(PortalFormTemplate, submission.template_id)
     if template is None:
@@ -926,6 +941,19 @@ def complete_submission(
         )
     fields = load_template_fields(db, template.id)
     merged = dict(submission.responses or {})
+    # Attachment references are server-owned. A stale form payload must not drop
+    # a concurrent upload or substitute a file belonging to another client.
+    for field in fields:
+        if (
+            field.field_type in (PortalFormFieldType.file, PortalFormFieldType.files)
+            and field.field_key in responses_in
+        ):
+            supplied = responses_in[field.field_key]
+            current = merged.get(field.field_key)
+            if supplied != current and not (not supplied and not current):
+                raise HTTPException(
+                    409, "Attachments changed — refresh the form before submitting"
+                )
     merged.update(responses_in)
     validated = _validate_responses(fields, merged)
 
