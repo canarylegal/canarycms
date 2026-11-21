@@ -21,3 +21,5 @@ Cursors are positions, not snapshots or access tokens. Insertions/deletions befo
 `make test-performance` runs migrated PostgreSQL tests for large attachment groups, every sort/direction, literal searches, cross-folder matching, empty folders and inserts/deletions at page boundaries. API/browser workloads compare all 1,200 synthetic documents with the legacy response and enforce bounded rows, payloads and query counts. `make test-core-workflows` covers access revocation, failure recovery, document editing/saving, uploads, session recovery and saved columns. Frontend unit tests cover races, cancellation, retries, selection and keyboard continuation.
 
 All tests use disposable deployments. Merge/deployment and scheduled-job activation are separate actions.
+
+Lists above 250 loaded rows use a measured-height rendering window; the data remains loaded while off-screen DOM rows are removed. This preserves selection and operations while bounding DOM size. See [large-matter workload and regression checks](PERFORMANCE.md#large-matter-document-rendering).

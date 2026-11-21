@@ -54,6 +54,8 @@ def main():
         for i in range(100):
             db.add(PortalFormSubmission(case_id=hot.id,template_id=templates[i%5].id,contact_id=contacts[i].id,
                     snapshot_file_id=ids[i],sent_by_user_id=staff.id,status=PortalFormSubmissionStatus.completed))
+        from seed_large_document_fixture import seed_large_documents
+        seed_large_documents(db, staff)
         db.commit()
-    print(json.dumps({'matters':5002,'fee_earners':200,'hot_case_documents':1200,'portal_forms':100}))
+    print(json.dumps({'matters':5002,'fee_earners':200,'hot_case_documents':1200,'portal_forms':100,'large_case_documents':12000,'large_attachment_group':2001,'folder_depth':21}))
 if __name__=='__main__': main()
