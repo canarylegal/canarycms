@@ -51,13 +51,9 @@ from app.portal_service import (
 from app.portal_case import require_case_portal_enabled
 from app.portal_notifications import ALERTS_NOT_CONFIGURED_MSG
 from app.quote_portal_service import pick_portal_grant_for_case
-from app.security import PORTAL_QUOTE_EXCHANGE_TTL_SECONDS
 
 _FIELD_KEY_RE = re.compile(r"^[a-z][a-z0-9_]{0,79}$")
-_FORM_SUBMISSION_ID_RE = re.compile(
-    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
-    re.IGNORECASE,
-)
+
 
 FORM_EMAIL_SEND_FAILED_MSG = (
     "The notification e-mail could not be delivered. The form is still available on the portal."
@@ -76,35 +72,15 @@ def utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def form_link_for_submission(submission_id: uuid.UUID) -> str:
-    """Short client portal link for a form submission (used in e-mail)."""
+def form_link_for_submission(submission_id: str | uuid.UUID) -> str:
+    """Format a form invitation URL; callers must supply an issued credential."""
     base = portal_public_url().rstrip("/")
     return f"{base}/f/{submission_id}"
 
 
-def _form_submission_link_expired(submission: PortalFormSubmission) -> bool:
-    sent_at = submission.sent_at
-    if sent_at.tzinfo is None:
-        sent_at = sent_at.replace(tzinfo=timezone.utc)
-    age = (utcnow() - sent_at).total_seconds()
-    return age > PORTAL_QUOTE_EXCHANGE_TTL_SECONDS
-
-
 def resolve_form_exchange_submission(db: Session, exchange_token: str) -> PortalFormSubmission:
-    """Resolve a form e-mail link token (submission UUID) to a pending submission row."""
-    token = (exchange_token or "").strip()
-    if not token or not _FORM_SUBMISSION_ID_RE.match(token):
-        raise ValueError("Invalid or expired form link")
-
-    submission_id = uuid.UUID(token)
-    submission = db.get(PortalFormSubmission, submission_id)
-    if submission is None:
-        raise ValueError("Invalid or expired form link")
-    if submission.status != PortalFormSubmissionStatus.pending:
-        raise ValueError("Invalid or expired form link")
-    if _form_submission_link_expired(submission):
-        raise ValueError("Invalid or expired form link")
-    return submission
+    from app.portal_invitation import resolve
+    return resolve(db, exchange_token.strip(), "form")
 
 
 def _normalize_field_key(key: str) -> str:
@@ -331,7 +307,8 @@ def send_form_to_contact(
     db.add(submission)
     db.flush()
 
-    form_url = form_link_for_submission(submission.id)
+    from app.portal_invitation import issue
+    form_url = form_link_for_submission(issue(db, "form", submission))
     email_sent = dispatch_alert(
         db,
         AlertKind.portal_form_sent,
@@ -422,7 +399,8 @@ def resend_form_submission(
     db.add(submission)
     db.flush()
 
-    form_url = form_link_for_submission(submission.id)
+    from app.portal_invitation import issue
+    form_url = form_link_for_submission(issue(db, "form", submission))
     email_sent = dispatch_alert(
         db,
         AlertKind.portal_form_sent,
@@ -462,7 +440,7 @@ def resend_form_submission(
 
 
 def list_pending_for_contact(db: Session, contact_id: uuid.UUID) -> list[PortalFormSubmission]:
-    return (
+    rows = (
         db.execute(
             select(PortalFormSubmission)
             .where(
@@ -475,11 +453,18 @@ def list_pending_for_contact(db: Session, contact_id: uuid.UUID) -> list[PortalF
         .all()
     )
 
+    from app.portal_policy import visible
+
+    return [row for row in rows if visible(db, row.case_id, resource_kind="form", resource_id=row.id)]
+
 
 def get_submission_for_contact(db: Session, submission_id: uuid.UUID, contact_id: uuid.UUID) -> PortalFormSubmission:
     row = db.get(PortalFormSubmission, submission_id)
     if row is None or row.contact_id != contact_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Form not found")
+    from app.portal_policy import authorize
+
+    authorize(db, row.case_id, resource_kind="form", resource_id=row.id, client_only=True)
     return row
 
 
@@ -764,6 +749,24 @@ def _save_snapshot_on_matter(
     return row
 
 
+def _lock_pending_submission(db, submission, contact):
+    from app.portal_policy import authorize
+
+    authorize(db, submission.case_id, resource_kind="form", resource_id=submission.id, lock=True, client_only=True)
+    with db.no_autoflush:
+        row = db.scalar(
+            select(PortalFormSubmission)
+            .where(PortalFormSubmission.id == submission.id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+    if row is None or row.contact_id != contact.id:
+        raise HTTPException(404, "Form not found")
+    if row.status != PortalFormSubmissionStatus.pending:
+        raise HTTPException(400, "Form is not pending")
+    return row
+
+
 async def upload_submission_file(
     db: Session,
     *,
@@ -810,6 +813,7 @@ async def upload_submission_file(
     try:
         write_bytes_atomic(paths.abs_path, raw)
         disk_written = True
+        submission = _lock_pending_submission(db, submission, contact)
         now = utcnow()
         row = File(
             id=file_id,
@@ -872,7 +876,7 @@ def remove_submission_file(
     contact: Contact,
 ) -> dict[str, Any]:
     """Remove one uploaded file from a multi-file (`files`) field response."""
-    _ = contact  # auth already enforced by caller
+    submission = _lock_pending_submission(db, submission, contact)
     if submission.status != PortalFormSubmissionStatus.pending:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Form is not pending")
     template = db.get(PortalFormTemplate, submission.template_id)
@@ -906,18 +910,7 @@ def complete_submission(
     contact: Contact,
     responses_in: dict[str, Any],
 ) -> PortalFormSubmission:
-    submission = db.scalar(
-        select(PortalFormSubmission)
-        .where(PortalFormSubmission.id == submission.id)
-        .with_for_update()
-        .execution_options(populate_existing=True)
-    )
-    if submission is None or submission.contact_id != contact.id:
-        raise HTTPException(404, "Form not found")
-    if submission.status != PortalFormSubmissionStatus.pending:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="Form is not pending"
-        )
+    submission = _lock_pending_submission(db, submission, contact)
 
     template = db.get(PortalFormTemplate, submission.template_id)
     if template is None:
@@ -926,6 +919,19 @@ def complete_submission(
         )
     fields = load_template_fields(db, template.id)
     merged = dict(submission.responses or {})
+    # Attachment references are server-owned. A stale form payload must not drop
+    # a concurrent upload or substitute a file belonging to another client.
+    for field in fields:
+        if (
+            field.field_type in (PortalFormFieldType.file, PortalFormFieldType.files)
+            and field.field_key in responses_in
+        ):
+            supplied = responses_in[field.field_key]
+            current = merged.get(field.field_key)
+            if supplied != current and not (not supplied and not current):
+                raise HTTPException(
+                    409, "Attachments changed — refresh the form before submitting"
+                )
     merged.update(responses_in)
     validated = _validate_responses(fields, merged)
 

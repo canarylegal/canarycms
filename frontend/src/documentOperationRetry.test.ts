@@ -19,3 +19,15 @@ it('does not reuse keys for changed content or unrelated operations', async () =
   expect(await documentOperationRetry('/cases/two/files','GET',undefined)).toBeNull()
   expect(await documentOperationRetry('/cases/two/invoices','POST','a')).toBeNull()
 })
+it('retains signing operations after uncertain responses and releases a confirmed reminder', async () => {
+  const path='/cases/sign-retry/canary-sign/requests/request/remind'
+  const first=await documentOperationRetry(path,'POST','{}')
+  expect(first).not.toBeNull()
+  first?.complete('<html>proxy</html>',200)
+  expect((await documentOperationRetry(path,'POST','{}'))?.key).toBe(first?.key)
+  first?.complete(null,204)
+  expect((await documentOperationRetry(path,'POST','{}'))?.key).not.toBe(first?.key)
+  expect(await documentOperationRetry('/cases/sign-retry/canary-sign/send','POST','{}')).not.toBeNull()
+  expect(await documentOperationRetry('/cases/sign-retry/canary-sign/requests/request/amend','POST','{}')).not.toBeNull()
+  expect(await documentOperationRetry('/cases/sign-retry/docusign/requests/request/resend','POST','{}')).toBeNull()
+})

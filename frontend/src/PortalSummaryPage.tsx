@@ -301,7 +301,7 @@ export function PortalSummaryPage({
             method: 'POST',
             json: {},
           })
-          pushNotification('Signing reminder sent.')
+          pushNotification('Signing reminder queued.')
         } else {
           await apiFetch(`/cases/${r.case_id}/docusign/requests/${r.id}/resend`, {
             token,

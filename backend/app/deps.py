@@ -337,10 +337,33 @@ def require_portal_client_audience(session: PortalSessionPayload) -> None:
 
 
 def get_portal_contact(
+    request: Request = None,
     session: PortalSessionPayload = Depends(get_portal_session),
     db: Session = Depends(get_db),
 ) -> Contact:
     from app.models import ContactPortalAccess, MatterPortalAccess
+    db.info["portal_session"] = session
+    from app.portal_policy import validate_preview, authorize
+    validate_preview(db, session)
+    if session.invitation:
+        authorize(db, uuid.UUID(session.case_id), resource_kind=session.resource_kind, resource_id=session.resource_id)
+        if request is not None:
+            path = request.url.path
+            prefix = "/portal/forms/" if session.resource_kind == "form" else "/portal/quote-deliveries/"
+            base = prefix + str(session.resource_id)
+            if path not in ("/portal/session", "/portal/forms", "/portal/quote-deliveries", "/portal/client-actions", "/portal/canary-sign") and path != base and not path.startswith(base + "/"):
+                raise HTTPException(403, "This invitation is limited to its form or quote")
+    if session.signing_request_id and request is not None:
+        path = request.url.path
+        allowed = path in (
+            "/portal/session",
+            "/portal/forms",
+            "/portal/quote-deliveries",
+            "/portal/client-actions",
+            "/portal/canary-sign",
+        ) or path.startswith("/portal/canary-sign/")
+        if not allowed:
+            raise HTTPException(403, "This link is limited to its signing request")
     from app.portal_service import matter_portal_access_is_active, portal_access_is_active
 
     try:

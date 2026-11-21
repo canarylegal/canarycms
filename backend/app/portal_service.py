@@ -354,6 +354,9 @@ def get_grant_for_contact(db: Session, *, contact_id: uuid.UUID, grant_id: uuid.
     grant = db.get(ContactPortalGrant, grant_id)
     if not grant or grant.contact_id != contact_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Area not found")
+    from app.portal_policy import authorize
+
+    authorize(db, grant.case_id)
     if not grant_is_active(grant):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="This area is no longer available")
     from app.portal_case import require_case_portal_enabled
