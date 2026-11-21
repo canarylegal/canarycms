@@ -79,11 +79,22 @@ test('large document browsing has bounded rendering and preserves interaction st
   await page.keyboard.press('Escape')
   await page.screenshot({path:info.outputPath('large-document-window.png')})
   await scroll.evaluate(el=>{el.scrollTop=el.scrollHeight/2})
-  const visibleFiles=scroll.locator('[data-doc-key]:not([data-doc-key^="folder:"])')
-  await expect(visibleFiles.last()).toBeVisible()
-  // Clicking an overscan row scrolls the window and changes which row is last.
-  // Keep the same document identity for selection and its context menu.
-  const rangeEndKey=await visibleFiles.last().getAttribute('data-doc-key')
+  // scrollTop changes before the virtual window updates. CSS visibility also
+  // includes overscan rows, so wait for a row actually at the viewport centre.
+  let rangeEndKey:string|null=null
+  await expect.poll(async()=>{
+   rangeEndKey=await scroll.evaluate(host=>{
+    const viewport=host.getBoundingClientRect()
+    const centre=(viewport.top+viewport.bottom)/2
+    const files=Array.from(host.querySelectorAll<HTMLElement>('[data-doc-key]:not([data-doc-key^="folder:"])'))
+    const row=files.find(file=>{
+     const bounds=file.getBoundingClientRect()
+     return bounds.top<=centre&&bounds.bottom>centre
+    })
+    return row?.dataset.docKey??null
+   })
+   return rangeEndKey
+  }).not.toBeNull()
   const rangeEnd=scroll.locator(`[data-doc-key="${rangeEndKey}"]`)
   await rangeEnd.click({modifiers:['Control','Shift']})
   await expect(rangeEnd).toHaveClass(/active/)
