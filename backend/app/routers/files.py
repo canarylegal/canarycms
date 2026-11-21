@@ -5,6 +5,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, File as FastAPIFile, HTTPException, Query, Request, Response, UploadFile, status, Form
 from fastapi.responses import FileResponse
+from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -492,7 +493,12 @@ def _file_list_items(db: Session, case_id: uuid.UUID, rows):
     return out
 
 
-@router.get("/browse")
+class DocumentPageOut(BaseModel):
+    items: list[dict]
+    next_cursor: str | None
+
+
+@router.get("/browse", response_model=DocumentPageOut)
 def browse_case_files(
     case_id: uuid.UUID, user: User = Depends(get_current_user), db: Session = Depends(get_db),
     folder: str = Query(default=''), q: str = Query(default='', max_length=500),
@@ -517,7 +523,7 @@ def case_folder_metadata(case_id: uuid.UUID, user: User = Depends(get_current_us
     return folder_metadata(db, case_id)
 
 
-@router.get("/{file_id}/metadata")
+@router.get("/{file_id}/metadata", response_model=dict)
 def case_file_metadata(case_id: uuid.UUID, file_id: uuid.UUID, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     require_case_access(case_id, user, db)
     rows = db.execute(select(DbFile, User.display_name, User.email, User.initials).join(User, User.id == DbFile.owner_id)

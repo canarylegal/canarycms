@@ -61,6 +61,6 @@ test('document scrolling preserves selection and search finds an unloaded attach
  const search=page.getByRole('textbox',{name:'Search documents',exact:true})
  await search.fill('Performance document 0201')
  await expect(page.getByText('Performance document 0200',{exact:true})).toBeVisible()
- await expect(page.getByText('Performance document 0201',{exact:true})).toBeVisible()
+ await expect(page.getByText('↳ Performance document 0201',{exact:true})).toBeVisible()
  expect(await rows.count()).toBeGreaterThan(0)
 })
