@@ -22,6 +22,11 @@ test('authenticated reports and accountant exports run in read-only snapshots', 
     expect(xlsx.headers()['content-type']).toContain('spreadsheetml')
     expect((await xlsx.body()).subarray(0,2).toString()).toBe('PK')
   }
+  // The neighbouring reconciliation APIs write records and must remain writable.
+  const reconciliation = await page.request.post('/api/reports/reconciliations', { data: {
+    period_end_date: '2041-06-30', bank_statement_balance_pence: 0, notes: 'Isolated report snapshot regression',
+  } })
+  expect(reconciliation.status(), await reconciliation.text()).toBe(201)
   const pack = await page.request.post('/api/reports/accountant-pack', { data: {
     ...data, period_end_date: new Date().toISOString().slice(0,10),
     include_exceptions: false, include_reconcile_doc: false,
