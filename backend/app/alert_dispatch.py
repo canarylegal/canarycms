@@ -115,18 +115,18 @@ def matter_deep_link(case_id: uuid.UUID | str) -> str:
     return f"{canary_public_url().rstrip('/')}/case/{case_id}"
 
 
-def dispatch_alert(
+def render_alert(
     db: Session,
     kind: AlertKind,
     *,
     to_email: str,
     context: dict[str, Any],
     actor_user_id: uuid.UUID | None = None,
-) -> bool:
-    """Build template, send via firm e-mail transport, audit. Returns True if sent."""
+) -> FirmEmailMessage | None:
+    """Render without network calls or transaction commits."""
     addr = (to_email or "").strip()
     if not addr:
-        return False
+        return None
 
     firm = _firm_name(db)
     body_html: str | None = None
@@ -361,11 +361,28 @@ def dispatch_alert(
             )
         else:
             log.warning("alert_dispatch: unknown kind %s", kind)
-            return False
+            return None
 
+    return FirmEmailMessage(
+        to_email=addr, subject=subject, body_text=body, body_html=body_html
+    )
+
+
+def dispatch_alert(
+    db: Session,
+    kind: AlertKind,
+    *,
+    to_email: str,
+    context: dict[str, Any],
+    actor_user_id: uuid.UUID | None = None,
+) -> bool:
+    message = render_alert(db, kind, to_email=to_email, context=context)
+    if message is None:
+        return False
+    addr = message.to_email
     transport = try_send_firm_email(
         db,
-        FirmEmailMessage(to_email=addr, subject=subject, body_text=body, body_html=body_html),
+        message,
     )
     if transport is None:
         return False
@@ -376,7 +393,11 @@ def dispatch_alert(
         action=f"alert.email.{kind.value}",
         entity_type="email",
         entity_id=addr,
-        meta={"kind": kind.value, "transport": transport, **{k: str(v) for k, v in context.items() if k != "access_code"}},
+        meta={
+            "kind": kind.value,
+            "transport": transport,
+            **{k: str(v) for k, v in context.items() if k != "access_code"},
+        },
     )
     db.commit()
     return True

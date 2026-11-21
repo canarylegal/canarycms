@@ -19,6 +19,8 @@ def send_smtp_message(
     subject: str,
     body: str,
     body_html: str | None = None,
+    notification_id: str | None = None,
+    timeout_seconds: float | None = None,
 ) -> None:
     """Send a plain-text message using org SMTP settings."""
     row = get_smtp_notification_settings(db)
@@ -38,14 +40,25 @@ def send_smtp_message(
 
     msg = EmailMessage()
     msg["Subject"] = subject
-    msg["From"] = f"{row.from_name} <{from_email}>" if (row.from_name or "").strip() else from_email
+    msg["From"] = (
+        f"{row.from_name} <{from_email}>"
+        if (row.from_name or "").strip()
+        else from_email
+    )
     msg["To"] = to_email
+    if notification_id:
+        msg["Message-ID"] = f"<{notification_id}@notifications.canary.invalid>"
     msg.set_content(body)
     if body_html:
         msg.add_alternative(body_html, subtype="html")
 
     if use_tls and port == 465:
-        with smtplib.SMTP_SSL(host, port, context=ssl.create_default_context()) as smtp:
+        with smtplib.SMTP_SSL(
+            host,
+            port,
+            context=ssl.create_default_context(),
+            **({"timeout": timeout_seconds} if timeout_seconds is not None else {}),
+        ) as smtp:
             if user and password:
                 smtp.login(user, password)
             elif password:
@@ -53,7 +66,11 @@ def send_smtp_message(
             smtp.send_message(msg)
         return
 
-    with smtplib.SMTP(host, port) as smtp:
+    with smtplib.SMTP(
+        host,
+        port,
+        **({"timeout": timeout_seconds} if timeout_seconds is not None else {}),
+    ) as smtp:
         if use_tls:
             context = ssl.create_default_context()
             smtp.starttls(context=context)

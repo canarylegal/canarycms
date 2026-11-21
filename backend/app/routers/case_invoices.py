@@ -17,8 +17,6 @@ from app.invoice_service import (
     approve_case_invoice,
     create_case_invoice,
     list_case_invoices,
-    notify_invoice_approved_after_commit,
-    notify_invoice_rejected_after_commit,
     void_case_invoice,
 )
 from sqlalchemy import select
@@ -64,7 +62,9 @@ def add_invoice(
     return out
 
 
-@router.post("/{case_id}/invoices/{invoice_id}/approve", status_code=status.HTTP_204_NO_CONTENT)
+@router.post(
+    "/{case_id}/invoices/{invoice_id}/approve", status_code=status.HTTP_204_NO_CONTENT
+)
 def approve_invoice(
     case_id: uuid.UUID,
     invoice_id: uuid.UUID,
@@ -74,7 +74,6 @@ def approve_invoice(
     require_case_access(case_id, user, db)
     approve_case_invoice(case_id, invoice_id, user, db)
     db.commit()
-    notify_invoice_approved_after_commit(db, case_id=case_id, invoice_id=invoice_id, actor=user)
 
 
 @router.get("/{case_id}/invoices/{invoice_id}/document.docx")
@@ -173,7 +172,9 @@ def add_invoice_allocation(
     )
 
 
-@router.delete("/{case_id}/invoices/{invoice_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/{case_id}/invoices/{invoice_id}", status_code=status.HTTP_204_NO_CONTENT
+)
 def delete_invoice(
     case_id: uuid.UUID,
     invoice_id: uuid.UUID,
@@ -184,13 +185,6 @@ def delete_invoice(
     require_case_access(case_id, user, db)
     void_case_invoice(case_id, invoice_id, user, db, reject_comment=payload.comment)
     db.commit()
-    notify_invoice_rejected_after_commit(
-        db,
-        case_id=case_id,
-        invoice_id=invoice_id,
-        actor=user,
-        reject_comment=payload.comment,
-    )
 
 
 @router.post('/{case_id}/invoices/{invoice_id}/allocations/{allocation_id}/reverse', response_model=InvoiceAllocationReversalOut)

@@ -61,3 +61,8 @@ Defaults: daily backup at 01:30, weekly recovery on Sunday at 03:30, monitoring 
 `make test-operations` builds a uniquely named disposable stack, seeds synthetic matter/document/ledger data, creates and encrypts a paired backup, stops its own database and ONLYOFFICE to check failure reporting, restores and verifies the encrypted copy, rejects deliberate corruption and removes its own resources. It does not use existing deployment credentials, services or storage. CI runs the same command. Private backup/test directories are deliberately excluded from uploaded CI artifacts.
 
 Host unit tests cover corruption/traversal, retention, shared locking, failed snapshots/stops, missing export targets, encryption round trips, stale results, network failure separation and timeout cleanup. The ordinary frontend/backend/core workflow suites remain required.
+
+## Staff notification delivery
+
+See [Staff notification outbox](STAFF_NOTIFICATION_OUTBOX.md) for on-demand delivery,
+audited recovery and restore precautions. This release installs no notification job.

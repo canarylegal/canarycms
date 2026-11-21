@@ -23,12 +23,15 @@ def send_graph_mail_message(
     body_html: str | None = None,
     from_name: str | None = None,
     save_to_sent_items: bool = True,
+    notification_id: str | None = None,
 ) -> None:
     """Send plain-text mail as ``send_mailbox`` via Graph ``/users/{mailbox}/sendMail``."""
     mailbox = (send_mailbox or "").strip()
     to_addr = (to_email or "").strip()
     if not mailbox:
-        raise RuntimeError("Graph send mailbox is not configured (Admin → E-mail → Alert notifications).")
+        raise RuntimeError(
+            "Graph send mailbox is not configured (Admin → E-mail → Alert notifications)."
+        )
     if not to_addr:
         raise RuntimeError("Recipient e-mail is required.")
 
@@ -44,9 +47,15 @@ def send_graph_mail_message(
         },
         "saveToSentItems": bool(save_to_sent_items),
     }
+    if notification_id:
+        payload["message"]["internetMessageHeaders"] = [
+            {"name": "x-canary-notification-id", "value": notification_id}
+        ]
     display = (from_name or "").strip()
     if display:
-        payload["message"]["from"] = {"emailAddress": {"name": display, "address": mailbox}}
+        payload["message"]["from"] = {
+            "emailAddress": {"name": display, "address": mailbox}
+        }
     headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
     try:
         with httpx.Client(timeout=30.0) as client:
@@ -55,4 +64,9 @@ def send_graph_mail_message(
         raise RuntimeError(f"Could not reach Microsoft Graph to send mail: {e}") from e
     if res.status_code >= 400:
         txt = (res.text or "").strip()
-        raise RuntimeError(f"Microsoft Graph sendMail failed ({res.status_code}): {txt[:700]}")
+        raise RuntimeError(
+            f"Microsoft Graph sendMail failed ({res.status_code}): {txt[:700]}"
+        )
+
+    if notification_id and res.status_code != 202:
+        raise RuntimeError("Unexpected Graph acceptance response for staff notification")
