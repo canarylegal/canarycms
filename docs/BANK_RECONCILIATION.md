@@ -1,6 +1,6 @@
 # Bank reconciliation and recoverable matching
 
-The Banking screen retains its layout and Match/Unmatch interactions. Its writes now include the displayed record version. Old browser tabs should reload after deployment. A competing edit returns 409; refresh and review the current state before submitting another correction. A lost match/unmatch response refreshes the screen without automatically repeating the write.
+The Banking screen retains its layout and Match/Unmatch interactions. Its writes now include the displayed record version. Old browser tabs should reload after deployment. A competing edit returns 409; refresh and review the current state before submitting another correction. A lost match/unmatch response refreshes the screen without automatically repeating the write. Switching banks clears the previous bank’s rows and selection immediately; late responses cannot replace the selected bank’s data.
 
 ## Financial rules
 
