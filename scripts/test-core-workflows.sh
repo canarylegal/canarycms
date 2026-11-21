@@ -19,4 +19,14 @@ trap cleanup EXIT
 "${compose[@]}" --profile test build > "$CORE_TEST_OUTPUT/build.log" 2>&1
 "${compose[@]}" up -d --wait --wait-timeout 600 db backend onlyoffice frontend
 "${compose[@]}" exec -T backend python scripts/ensure_core_workflow_fixture.py
+"${compose[@]}" run --rm --no-deps -T -v "$(pwd)/backend/tests:/app/tests:ro" \
+  -e DATABASE_URL=postgresql+psycopg://canary:isolated-core-database-secret@db:5432/canary_core_test \
+  backend pytest -q tests/test_upload_recovery_postgres.py
 "${compose[@]}" --profile test run --rm --no-deps --user "$(id -u):$(id -g)" -e HOME=/tmp tests
+
+# The receipt must survive a real backend restart, not just a browser retry.
+"${compose[@]}" exec -T backend python < backend/scripts/check_import_restart.py > "$CORE_TEST_OUTPUT/import-before-restart.json"
+"${compose[@]}" restart backend
+"${compose[@]}" up -d --wait --wait-timeout 120 backend
+"${compose[@]}" exec -T backend python < backend/scripts/check_import_restart.py > "$CORE_TEST_OUTPUT/import-after-restart.json"
+cmp "$CORE_TEST_OUTPUT/import-before-restart.json" "$CORE_TEST_OUTPUT/import-after-restart.json"

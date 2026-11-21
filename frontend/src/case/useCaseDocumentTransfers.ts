@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef } from 'react'
 import type { FileSummary } from '../types'
 import type { UseCaseDocFileHandlersArgs } from './useCaseDocFileHandlers'
-import { downloadCaseExportZipBlob, downloadCaseFilesSequential, downloadCaseFolderZipBlob, uploadFilesToCaseFolder } from './documentTransferOps'
+import { type UploadProgress, downloadCaseExportZipBlob, downloadCaseFilesSequential, downloadCaseFolderZipBlob, uploadFilesToCaseFolder } from './documentTransferOps'
 import { documentErrorMessage, DocumentRequestError } from './documentRequests'
 import { notifyPortalFilesAdded } from './caseDocFileOps'
 import { isPortalSharedFolder, portalContactsForFolder, portalSharedFolderUploadNotifyMessage } from './portalFolderAccess'
@@ -28,15 +28,15 @@ export function useCaseDocumentTransfers({ caseId, caseDetail, token, docFolder,
     finally { inFlight.current = false; if (mounted.current) setBusy(false) }
   }, [caseId, setBusy, setActionErr])
 
-  const retryTransfer = useCallback(async (operation: () => Promise<void>, current: () => boolean, title: string, progress?: { completed: number }) => {
+  const retryTransfer = useCallback(async (operation: () => Promise<void>, current: () => boolean, title: string, progress?: { completed: number; uploaded?: string[] }) => {
     while (current()) {
       try { await operation(); return true }
       catch (error) {
         if (!current()) return false
-        // A lost upload response is ambiguous. Never offer to replay it as though it failed.
+        // Uploads carry durable receipts, so explicit retries are safe after a lost response.
         if (!(error instanceof DocumentRequestError) || (!error.retryable && error.status !== 401)) throw error
         const message = documentErrorMessage(error, 'The document operation failed.')
-        const retry = await askConfirm({ title, message: `${message}${progress ? ` ${progress.completed} file(s) completed; retry resumes with the remaining files.` : ''}`, confirmLabel: 'Retry', cancelLabel: 'Cancel' })
+        const retry = await askConfirm({ title, message: `${message}${progress ? ` ${progress.uploaded?.length ?? progress.completed} file(s) completed; retry resumes with the remaining files.` : ''}`, confirmLabel: 'Retry', cancelLabel: 'Cancel' })
         if (!retry) {
           if (error.status === 401) throw error
           return false
@@ -49,7 +49,7 @@ export function useCaseDocumentTransfers({ caseId, caseDetail, token, docFolder,
   const uploadFilesToCurrentFolder = useCallback(async (incomingFiles: File[]) => {
     if (!caseId || incomingFiles.length === 0) return
     await runTransfer(async (current) => {
-      const progress = { completed: 0 }
+      const progress: UploadProgress = { completed: 0 }
       let notify = false
       if (portalEnabled && isPortalSharedFolder(docFolder, portalFolderGrants)) {
         notify = await askConfirm({ title: 'Notify portal contacts?', message: portalSharedFolderUploadNotifyMessage(portalContactsForFolder(docFolder, portalFolderGrants), incomingFiles.length), confirmLabel: 'Send e-mail', cancelLabel: 'Skip' })
@@ -62,14 +62,19 @@ export function useCaseDocumentTransfers({ caseId, caseDetail, token, docFolder,
       } catch (error) {
         // Avoid further requests until sign-in is restored.
         refreshAllowed = !(error instanceof DocumentRequestError && error.status === 401)
-        throw new Error(`${progress.completed} of ${incomingFiles.length} files uploaded. ${documentErrorMessage(error, 'Upload failed.')} Files already uploaded will remain in the list.`)
+        throw new Error(`${progress.uploaded?.length ?? progress.completed} of ${incomingFiles.length} files uploaded. ${documentErrorMessage(error, 'Upload failed.')} Files already uploaded will remain in the list.`)
       } finally {
         // Also reconcile an unknown outcome; a server may have accepted the last file.
         if (current() && refreshAllowed) onRefresh()
       }
-      if (!completed || !current() || !notify) return
+      if (!current()) return
+      if (!completed || progress.failures?.length) {
+        const failed = progress.failures?.map(f => `${f.name}: ${f.message}`).join('; ')
+        setActionErr(`${progress.uploaded?.length ?? progress.completed} of ${incomingFiles.length} files uploaded. ${failed || 'Import stopped; remaining files were not confirmed.'} Successful files remain in the list.`)
+      }
+      if (!notify || !completed || !progress.uploaded?.length) return
       try {
-        const out = await notifyPortalFilesAdded(caseId, token, docFolder, incomingFiles.map((f) => f.name))
+        const out = await notifyPortalFilesAdded(caseId, token, docFolder, progress.uploaded)
         if (!current()) return
         if (out.alerts_skipped_reason) pushNotification(out.alerts_skipped_reason)
         else if (out.contacts_notified > 0) pushNotification(out.contacts_notified === 1 ? 'Portal contact notified by e-mail.' : `${out.contacts_notified} portal contacts notified by e-mail.`)

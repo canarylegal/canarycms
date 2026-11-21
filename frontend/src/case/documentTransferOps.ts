@@ -1,6 +1,6 @@
 import type { FileSummary } from '../types'
 import { decodeFolderPathSegment, splitFolderPath } from './folderPathCodec'
-import { documentRequest } from './documentRequests'
+import { documentRequest, DocumentRequestError } from './documentRequests'
 
 export function triggerBlobDownload(blob: Blob, filename: string): void {
   const url = URL.createObjectURL(blob)
@@ -68,17 +68,41 @@ export async function downloadCaseFolderZipBlob(caseId: string, folderPath: stri
   triggerBlobDownload(new Blob([blob], { type: 'application/zip' }), `${safeBase}.zip`)
 }
 
+// getRandomValues is available on internal HTTP origins too; randomUUID is not.
+function uploadKey(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(16))
+  bytes[6] = (bytes[6] & 15) | 64
+  bytes[8] = (bytes[8] & 63) | 128
+  const hex = Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('')
+  return `${hex.slice(0,8)}-${hex.slice(8,12)}-${hex.slice(12,16)}-${hex.slice(16,20)}-${hex.slice(20)}`
+}
+
+export type UploadProgress = { completed: number; keys?: string[]; failures?: {name: string; message: string}[]; uploaded?: string[] }
+
 /** The caller owns progress so an explicit retry never repeats acknowledged files. */
 export async function uploadFilesToCaseFolder(
   caseId: string, token: string, folder: string, incomingFiles: File[],
-  progress: { completed: number } = { completed: 0 },
+  progress: UploadProgress = { completed: 0 },
   current: () => boolean = () => true,
 ): Promise<void> {
+  progress.keys ??= incomingFiles.map(uploadKey)
+  progress.failures ??= []
+  progress.uploaded ??= []
   while (progress.completed < incomingFiles.length && current()) {
     const form = new FormData()
     form.append('upload', incomingFiles[progress.completed])
     form.append('folder', folder)
-    await documentRequest(`/cases/${caseId}/files`, token, async (res) => { await res.text() }, { method: 'POST', body: form })
+    const file = incomingFiles[progress.completed]
+    try {
+      await documentRequest(`/cases/${caseId}/files`, token, async (res) => { await res.json() }, {
+        method: 'POST', body: form, idempotencyKey: progress.keys[progress.completed],
+      })
+      progress.uploaded.push(file.name)
+    } catch (error) {
+      // A rejected individual file must not block unrelated files in the batch.
+      if (!(error instanceof DocumentRequestError) || ![400, 413, 422].includes(error.status ?? 0)) throw error
+      progress.failures.push({name: file.name, message: error.message})
+    }
     progress.completed++
   }
 }

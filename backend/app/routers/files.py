@@ -3,7 +3,7 @@ import uuid
 from typing import Literal
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File as FastAPIFile, HTTPException, Query, Request, Response, UploadFile, status, Form
+from fastapi import APIRouter, Depends, File as FastAPIFile, HTTPException, Query, Request, Response, UploadFile, status, Form, Header
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy import select
@@ -124,6 +124,7 @@ log = logging.getLogger(__name__)
 def upload_case_file(
     case_id: uuid.UUID,
     upload: UploadFile = FastAPIFile(...),
+    idempotency_key: uuid.UUID | None = Header(default=None),
     folder: str = Form(default=""),
     parent_file_id: uuid.UUID | None = Form(default=None),
     notify_portal_contacts: bool = Form(default=False),
@@ -141,6 +142,7 @@ def upload_case_file(
     return upload_case_file_service(
         case_id,
         upload,
+        idempotency_key=idempotency_key,
         folder=folder,
         parent_file_id=parent_file_id,
         notify_portal_contacts=notify_portal_contacts,

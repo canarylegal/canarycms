@@ -57,3 +57,35 @@ describe('document request recovery', () => {
     expect(progress.completed).toBe(2)
   })
 })
+
+ it('reuses the same receipt after a lost upload response without resending earlier files', async () => {
+   const keys: string[] = [], names: string[] = []
+   let lost = false
+   vi.stubGlobal('fetch', vi.fn(async (_url, options: RequestInit) => {
+     const file = (options.body as FormData).get('upload') as File
+     names.push(file.name); keys.push(new Headers(options.headers).get('Idempotency-Key')!)
+     if (file.name === 'two.txt' && !lost) { lost = true; throw new TypeError('lost response') }
+     return new Response('{}')
+   }))
+   const files = [new File(['a'], 'one.txt'), new File(['b'], 'two.txt')]
+   const progress = {completed: 0}
+   await expect(uploadFilesToCaseFolder('case', '', '', files, progress)).rejects.toMatchObject({retryable: true})
+   expect(names).toEqual(['one.txt', 'two.txt'])
+   await uploadFilesToCaseFolder('case', '', '', files, progress)
+   expect(names).toEqual(['one.txt', 'two.txt', 'two.txt'])
+   expect(keys[1]).toBe(keys[2]); expect(keys[0]).not.toBe(keys[1])
+ })
+ it('continues after an individual rejection and reports only accepted files as uploaded', async () => {
+   const names: string[] = []
+   vi.stubGlobal('fetch', vi.fn(async (_url, options: RequestInit) => {
+     const file = (options.body as FormData).get('upload') as File
+     names.push(file.name)
+     return new Response('{}', {status: file.name === 'large.txt' ? 413 : 201})
+   }))
+   const files = ['one.txt','large.txt','three.txt'].map(name => new File(['x'],name))
+   const progress: import('./documentTransferOps').UploadProgress = {completed:0}
+   await uploadFilesToCaseFolder('case', '', '', files, progress)
+   expect(names).toEqual(files.map(f=>f.name))
+   expect(progress.uploaded).toEqual(['one.txt','three.txt'])
+   expect(progress.failures).toEqual([{name:'large.txt',message:'This file is too large to upload.'}])
+ })

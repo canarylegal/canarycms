@@ -49,6 +49,7 @@ from app.owa_urls import outlook_graph_message_id_storable as _outlook_graph_mes
 from app.portal_notifications import notify_portal_contacts_files_added_batch
 from app.schemas import ComposeOfficeDocumentIn, ComposeQuoteIn
 from app.upload_limits import max_upload_bytes
+from app.upload_receipts import UploadReceipt, receipt_id, lock_receipt, fingerprint_upload, replay_receipt
 
 log = logging.getLogger(__name__)
 
@@ -61,6 +62,7 @@ def upload_case_file(
     case_id: uuid.UUID,
     upload: UploadFile,
     *,
+    idempotency_key: uuid.UUID | None = None,
     folder: str = "",
     parent_file_id: uuid.UUID | None = None,
     notify_portal_contacts: bool = False,
@@ -83,6 +85,19 @@ def upload_case_file(
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
 
+    operation_id = receipt_id(case_id, user.id, idempotency_key) if idempotency_key else None
+    fingerprint = None
+    if operation_id:
+        lock_receipt(db, operation_id)
+        fingerprint = fingerprint_upload(upload, dict(filename=upload.filename, mime=upload.content_type,
+            folder=folder, parent=parent_file_id, notify=notify_portal_contacts,
+            precedent=compose_precedent_id, case_contact=compose_case_contact_id, global_contact=compose_global_contact_id,
+            mbox=source_imap_mbox, uid=source_imap_uid, message=source_internet_message_id,
+            outlook_item=outlook_item_id, outlook_conversation=outlook_conversation_id))
+        previous = replay_receipt(db, operation_id, fingerprint)
+        if previous is not None:
+            return previous
+
     parent: DbFile | None = None
     if parent_file_id is not None:
         parent = db.get(DbFile, parent_file_id)
@@ -101,11 +116,12 @@ def upload_case_file(
             session_folder_locked = False
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=_FOLDER_GONE_DETAIL)
 
-    file_id = uuid.uuid4()
+    file_id = operation_id or uuid.uuid4()
     original = upload.filename or "upload.bin"
     paths = case_file_paths(case_id=case_id, file_id=file_id, original_filename=original, folder_path=folder)
 
     disk_written = False
+    commit_started = False
     try:
         try:
             size = stream_upload_to_path(paths.abs_path, upload.file, max_bytes=max_upload_bytes())
@@ -227,6 +243,11 @@ def upload_case_file(
         except Exception:
             log.exception("firm_module document.uploaded hook failed case_id=%s", case_id)
             raise
+        response = {"id": str(row.id), "case_id": str(row.case_id),
+            "original_filename": row.original_filename, "mime_type": row.mime_type, "size_bytes": row.size_bytes}
+        if operation_id:
+            db.add(UploadReceipt(id=operation_id, fingerprint=fingerprint, response=response))
+        commit_started = True
         db.commit()
         disk_written = False
     finally:
@@ -237,7 +258,19 @@ def upload_case_file(
                 log.exception("failed to release folder-ops session lock case_id=%s", case_id)
             session_folder_locked = False
         if disk_written:
-            unlink_stored_file(paths.abs_path)
+            # A connection error during COMMIT can mean it succeeded. Never remove
+            # committed bytes; if the DB is unavailable retain them for the same-ID retry.
+            safe_to_remove = True
+            if operation_id and commit_started:
+                try:
+                    db.rollback()
+                    lock_receipt(db, operation_id)
+                    safe_to_remove = db.get(UploadReceipt, operation_id) is None
+                except Exception:
+                    safe_to_remove = False
+                    log.exception("upload commit outcome unknown operation_id=%s", operation_id)
+            if safe_to_remove:
+                unlink_stored_file(paths.abs_path)
 
     db.refresh(row)
     if notify_portal_contacts:

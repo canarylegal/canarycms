@@ -25,7 +25,7 @@ describe('document transfer state', () => {
     expect(options.setBusy).toHaveBeenLastCalledWith(false)
   })
   it('refreshes successful uploads even if portal notification fails, without reuploading', async () => {
-    vi.mocked(uploadFilesToCaseFolder).mockResolvedValue()
+    vi.mocked(uploadFilesToCaseFolder).mockImplementation(async (_id, _token, _folder, files, progress) => { progress!.uploaded = files.map(f => f.name) })
     vi.mocked(notifyPortalFilesAdded).mockRejectedValue(new Error('notification failed'))
     const options = args(); options.portalEnabled = true; vi.mocked(options.askConfirm).mockResolvedValue(true)
     const { result } = renderHook(() => useCaseDocumentTransfers(options))
