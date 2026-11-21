@@ -307,6 +307,7 @@ def test_diagnostics_are_aggregate_only_and_detect_stale_attempts(monkeypatch):
 def test_portal_upload_queue_failure_does_not_commit_file(tmp_path, monkeypatch):
     from io import BytesIO
     from fastapi import UploadFile
+    from app.security import PortalSessionPayload
     from app import portal_browse_service as browse, portal_notifications as portal
     from app.models import File
 
@@ -331,7 +332,7 @@ def test_portal_upload_queue_failure_does_not_commit_file(tmp_path, monkeypatch)
             UploadFile(filename="Synthetic.txt", file=BytesIO(b"preserved bytes")),
             folder="",
             contact=contact,
-            session=SimpleNamespace(audience="client"),
+            session=PortalSessionPayload(contact_id=str(contact.id)),
             db=db,
         )
 
