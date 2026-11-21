@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 from app.document_durability import create_document_bytes
+from app.notification_outbox import enqueue_staff
 
 import logging
 import secrets
@@ -398,15 +399,25 @@ def send_signing_request(
     require_case_portal_enabled(db, case_id)
 
     if not recipient_specs:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="At least one recipient is required")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="At least one recipient is required",
+        )
     if expires_in_days < 1 or expires_in_days > 365:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="expires_in_days must be between 1 and 365")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="expires_in_days must be between 1 and 365",
+        )
 
     source = db.get(DbFile, source_file_id)
     if not source or source.case_id != case_id:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="File not found"
+        )
     if source.category == FileCategory.system:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot sign system items")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot sign system items"
+        )
     if getattr(source, "oo_compose_pending", False):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -497,7 +508,10 @@ def send_signing_request(
         name = str(spec.get("name") or "").strip()
         email = str(spec.get("email") or "").strip().lower()
         if not name or not email:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Each recipient needs a name and email")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Each recipient needs a name and email",
+            )
         routing_order = max(1, int(spec.get("routing_order") or 1))
         case_contact_id = spec.get("case_contact_id")
         contact_id = spec.get("contact_id")
@@ -523,7 +537,9 @@ def send_signing_request(
         recipients.append(recipient)
     db.flush()
 
-    for field in _parse_field_specs(db, request_id=req.id, recipients=recipients, fields_specs=fields_specs):
+    for field in _parse_field_specs(
+        db, request_id=req.id, recipients=recipients, fields_specs=fields_specs
+    ):
         db.add(field)
     db.flush()
 
@@ -542,8 +558,18 @@ def send_signing_request(
                 detail={"reason": "Superseded", "superseded_by": str(req.id)},
             )
 
-    _add_audit(db, req=req, event_type=CanarySignAuditEventType.created, detail={"subject": req.subject})
-    _add_audit(db, req=req, event_type=CanarySignAuditEventType.sent, detail={"recipient_count": len(recipients)})
+    _add_audit(
+        db,
+        req=req,
+        event_type=CanarySignAuditEventType.created,
+        detail={"subject": req.subject},
+    )
+    _add_audit(
+        db,
+        req=req,
+        event_type=CanarySignAuditEventType.sent,
+        detail={"recipient_count": len(recipients)},
+    )
 
     access_codes: dict[uuid.UUID, str] = {}
     for recipient in recipients:
@@ -557,6 +583,7 @@ def send_signing_request(
         if newly and code:
             access_codes[recipient.id] = code
 
+    _notify_staff_sent(db, case_id, req, actor)
     try:
         _notify_recipients(
             db,
@@ -565,7 +592,6 @@ def send_signing_request(
             kind=AlertKind.canary_sign_requested,
             access_codes=access_codes,
         )
-        _notify_staff_sent(db, case_id, req, actor)
     except Exception as e:
         log.warning("Canary Sign alert e-mail failed after send %s: %s", req.id, e)
 
@@ -623,22 +649,24 @@ def _notify_recipients(
         )
 
 
-def _notify_staff_sent(db: Session, case_id: uuid.UUID, req: CanarySignRequest, actor: User) -> None:
-    if not firm_alerts_configured(db):
-        return
+def _notify_staff_sent(
+    db: Session, case_id: uuid.UUID, req: CanarySignRequest, actor: User
+) -> None:
     for user in list_portal_staff_recipient_users(db, case_id):
         if not user.email:
             continue
-        dispatch_alert(
+        enqueue_staff(
             db,
-            AlertKind.canary_sign_sent_staff,
-            to_email=user.email.strip(),
+            kind=AlertKind.canary_sign_sent_staff,
+            event_key=str(req.id),
+            case_id=req.case_id,
+            recipient_user_id=user.id,
             context={
                 "staff_name": user.display_name or user.email,
                 "document_name": req.subject,
                 "sender_name": actor.display_name or actor.email,
             },
-            actor_user_id=actor.id,
+            actor_id=actor.id,
         )
 
 
@@ -1261,42 +1289,58 @@ def decline_signing(
     return req
 
 
-def _notify_staff_declined(db: Session, req: CanarySignRequest, recipient: CanarySignRecipient, reason: str) -> None:
-    if not firm_alerts_configured(db):
-        return
+def _notify_staff_declined(
+    db: Session, req: CanarySignRequest, recipient: CanarySignRecipient, reason: str
+) -> None:
     for user in list_portal_staff_recipient_users(db, req.case_id):
         if not user.email:
             continue
-        dispatch_alert(
+        enqueue_staff(
             db,
-            AlertKind.canary_sign_declined_staff,
-            to_email=user.email.strip(),
+            kind=AlertKind.canary_sign_declined_staff,
+            event_key=str(req.id),
+            case_id=req.case_id,
+            recipient_user_id=user.id,
             context={
                 "staff_name": user.display_name or user.email,
                 "document_name": req.subject,
                 "recipient_name": recipient.name,
                 "decline_reason": reason,
             },
-            actor_user_id=req.sent_by_user_id,
+            actor_id=req.sent_by_user_id,
         )
 
 
-def complete_signing_request(db: Session, req: CanarySignRequest, *, detail: str | None = None) -> None:
+def complete_signing_request(
+    db: Session, req: CanarySignRequest, *, detail: str | None = None
+) -> None:
     db.flush()
-    req = db.execute(select(CanarySignRequest).where(CanarySignRequest.id == req.id)
-        .with_for_update().execution_options(populate_existing=True)).scalar_one()
+    req = db.execute(
+        select(CanarySignRequest)
+        .where(CanarySignRequest.id == req.id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    ).scalar_one()
     if req.status == CanarySignStatus.completed:
         return
 
-    snapshot = db.get(DbFile, req.snapshot_pdf_file_id) if req.snapshot_pdf_file_id else None
+    snapshot = (
+        db.get(DbFile, req.snapshot_pdf_file_id) if req.snapshot_pdf_file_id else None
+    )
     source = db.get(DbFile, req.source_file_id)
     if snapshot is None:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Signing snapshot missing")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Signing snapshot missing",
+        )
 
     ensure_files_root()
     abs_path = (FILES_ROOT / snapshot.storage_path).resolve()
     if not abs_path.is_file():
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Signing snapshot missing on disk")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Signing snapshot missing on disk",
+        )
     pdf_bytes = abs_path.read_bytes()
 
     # Apply fillable form answers and flatten before stamping Canary Sign overlays
@@ -1310,7 +1354,14 @@ def complete_signing_request(db: Session, req: CanarySignRequest, *, detail: str
     fields = _fields_for_request(db, req.id)
     stamps = []
     for f in fields:
-        if not f.value or f.page is None or f.x_pct is None or f.y_pct is None or f.w_pct is None or f.h_pct is None:
+        if (
+            not f.value
+            or f.page is None
+            or f.x_pct is None
+            or f.y_pct is None
+            or f.w_pct is None
+            or f.h_pct is None
+        ):
             continue
         stamp = stamp_from_field_value(
             page=int(f.page),
@@ -1333,7 +1384,10 @@ def complete_signing_request(db: Session, req: CanarySignRequest, *, detail: str
     folder_path = (source.folder_path if source else "") or ""
     owner_id = req.sent_by_user_id or (source.owner_id if source else None)
     if owner_id is None:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="No owner for signed file")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="No owner for signed file",
+        )
 
     stem = Path(source.original_filename if source else req.subject).stem or "document"
     signed = _save_case_file(
@@ -1392,7 +1446,10 @@ def complete_signing_request(db: Session, req: CanarySignRequest, *, detail: str
         db,
         req=req,
         event_type=CanarySignAuditEventType.completed,
-        detail={"signed_file_id": str(signed.id), "certificate_file_id": str(cert_file.id)},
+        detail={
+            "signed_file_id": str(signed.id),
+            "certificate_file_id": str(cert_file.id),
+        },
     )
 
     # Case note for fee earner visibility
@@ -1423,30 +1480,25 @@ def complete_signing_request(db: Session, req: CanarySignRequest, *, detail: str
         entity_id=str(req.id),
         meta={"case_id": str(req.case_id), "signed_file_id": str(signed.id)},
     )
+    _notify_staff_completed(db, req)
     db.commit()
-    # Notifications must never announce a completion whose documents rolled back.
-    try:
-        _notify_staff_completed(db, req)
-    except Exception:
-        db.rollback()
-        log.exception('Signing completion notification failed request_id=%s', req.id)
 
 
 def _notify_staff_completed(db: Session, req: CanarySignRequest) -> None:
-    if not firm_alerts_configured(db):
-        return
     for user in list_portal_staff_recipient_users(db, req.case_id):
         if not user.email:
             continue
-        dispatch_alert(
+        enqueue_staff(
             db,
-            AlertKind.canary_sign_completed_staff,
-            to_email=user.email.strip(),
+            kind=AlertKind.canary_sign_completed_staff,
+            event_key=str(req.id),
+            case_id=req.case_id,
+            recipient_user_id=user.id,
             context={
                 "staff_name": user.display_name or user.email,
                 "document_name": req.subject,
             },
-            actor_user_id=req.sent_by_user_id,
+            actor_id=req.sent_by_user_id,
         )
 
 

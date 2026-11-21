@@ -22,7 +22,13 @@ from sqlalchemy import select
 
 from app.db import SessionLocal
 from app.email_crypt import decrypt_password, encrypt_password, needs_reencryption, uses_legacy_encryption_key
-from app.models import ContactPortalAccess, EmailIntegrationSettings, SmtpNotificationSettings, User
+from app.models import (
+    NotificationOutbox,
+    ContactPortalAccess,
+    EmailIntegrationSettings,
+    SmtpNotificationSettings,
+    User,
+)
 
 
 def _maybe_reencrypt(value: str | None, *, dry_run: bool) -> tuple[str | None, bool]:
@@ -38,8 +44,14 @@ def _maybe_reencrypt(value: str | None, *, dry_run: bool) -> tuple[str | None, b
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Re-encrypt Fernet secrets under DATA_ENCRYPTION_KEY.")
-    parser.add_argument("--dry-run", action="store_true", help="Report rows that would change without writing.")
+    parser = argparse.ArgumentParser(
+        description="Re-encrypt Fernet secrets under DATA_ENCRYPTION_KEY."
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Report rows that would change without writing.",
+    )
     args = parser.parse_args()
 
     if uses_legacy_encryption_key():
@@ -49,8 +61,12 @@ def main() -> None:
     db = SessionLocal()
     changed = 0
     try:
-        for user in db.scalars(select(User).where(User.caldav_password_enc.is_not(None))).all():
-            new_val, did = _maybe_reencrypt(user.caldav_password_enc, dry_run=args.dry_run)
+        for user in db.scalars(
+            select(User).where(User.caldav_password_enc.is_not(None))
+        ).all():
+            new_val, did = _maybe_reencrypt(
+                user.caldav_password_enc, dry_run=args.dry_run
+            )
             if did:
                 changed += 1
                 print(f"user {user.id} caldav_password_enc")
@@ -67,7 +83,9 @@ def main() -> None:
                 if not args.dry_run:
                     user.totp_secret = new_val
 
-        for row in db.scalars(select(ContactPortalAccess).where(ContactPortalAccess.code_enc.is_not(None))).all():
+        for row in db.scalars(
+            select(ContactPortalAccess).where(ContactPortalAccess.code_enc.is_not(None))
+        ).all():
             new_val, did = _maybe_reencrypt(row.code_enc, dry_run=args.dry_run)
             if did:
                 changed += 1
@@ -75,9 +93,19 @@ def main() -> None:
                 if not args.dry_run:
                     row.code_enc = new_val
 
+        for row in db.scalars(select(NotificationOutbox)).all():
+            new_val, did = _maybe_reencrypt(row.payload_enc, dry_run=args.dry_run)
+            if did:
+                changed += 1
+                print(f"notification_outbox {row.id} payload_enc")
+                if not args.dry_run:
+                    row.payload_enc = new_val
+
         email_row = db.get(EmailIntegrationSettings, 1)
         if email_row and email_row.graph_client_secret_enc:
-            new_val, did = _maybe_reencrypt(email_row.graph_client_secret_enc, dry_run=args.dry_run)
+            new_val, did = _maybe_reencrypt(
+                email_row.graph_client_secret_enc, dry_run=args.dry_run
+            )
             if did:
                 changed += 1
                 print("email_integration_settings graph_client_secret_enc")

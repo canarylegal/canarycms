@@ -1,4 +1,5 @@
 """Ledger service — double-entry posting logic adhering to SAR 2019."""
+
 from __future__ import annotations
 
 import uuid
@@ -365,9 +366,14 @@ def update_ledger_pair_unapproved(
     _try_lock_ledger_pair(db, pair_id)
     accounts, legs = _ledger_pair_legs(case_id, pair_id, db, for_update=True)
     if not legs:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Posting not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Posting not found"
+        )
     if any(e.is_approved for e in legs):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Approved postings cannot be edited")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Approved postings cannot be edited",
+        )
 
     client_direction, office_direction = _pair_directions(legs, accounts)
     is_anticipated = any(e.is_anticipated for e in legs)
@@ -403,6 +409,7 @@ def update_ledger_pair_unapproved(
 
         notify_anticipated_payment_amended(
             db,
+            event_key=f"{pair_id}:{uuid.uuid4()}",
             case_id=case_id,
             actor=user,
             poster_user_id=poster_user_id,
@@ -425,9 +432,14 @@ def reject_ledger_pair_unapproved(
     _try_lock_ledger_pair(db, pair_id)
     accounts, legs = _ledger_pair_legs(case_id, pair_id, db, for_update=True)
     if not legs:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Posting not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Posting not found"
+        )
     if any(e.is_approved for e in legs):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Approved postings cannot be rejected")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Approved postings cannot be rejected",
+        )
 
     client_direction, office_direction = _pair_directions(legs, accounts)
     is_anticipated = any(e.is_anticipated for e in legs)
@@ -452,6 +464,7 @@ def reject_ledger_pair_unapproved(
 
         notify_anticipated_payment_rejected(
             db,
+            event_key=str(pair_id),
             case_id=case_id,
             poster_user_id=poster_user_id,
             actor=user,
@@ -567,13 +580,20 @@ def approve_ledger_pair(
         .all()
     )
     if not legs:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Posting not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Posting not found"
+        )
     if any(e.account_id not in aid for e in legs):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid posting")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid posting"
+        )
     if any(e.is_approved for e in legs):
         if invoice_workflow:
             return
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Posting is already approved")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Posting is already approved",
+        )
 
     was_anticipated = any(e.is_anticipated for e in legs)
     poster_user_id = legs[0].posted_by_user_id
@@ -606,7 +626,11 @@ def approve_ledger_pair(
         )
 
     recognised_at = utcnow()
-    require_posting_period(db, {e.firm_bank_account_id for e in legs if e.account_id == accounts["client"].id}, at=recognised_at)
+    require_posting_period(
+        db,
+        {e.firm_bank_account_id for e in legs if e.account_id == accounts["client"].id},
+        at=recognised_at,
+    )
     if client_direction:
         current = _balance(accounts["client"].id, db, approved_only=True)
         projected = _projected_client_balance_after_debit(
@@ -625,7 +649,15 @@ def approve_ledger_pair(
 
     if client_direction == "debit":
         client_leg = next(e for e in legs if e.account_id == accounts["client"].id)
-        _reject_client_deficit(_balance(accounts["client"].id, db, bank_id=client_leg.firm_bank_account_id, bank_only=True) - client_leg.amount_pence)
+        _reject_client_deficit(
+            _balance(
+                accounts["client"].id,
+                db,
+                bank_id=client_leg.firm_bank_account_id,
+                bank_only=True,
+            )
+            - client_leg.amount_pence
+        )
 
     for e in legs:
         e.recognised_at = recognised_at
@@ -649,6 +681,7 @@ def approve_ledger_pair(
 
         notify_anticipated_payment_approved(
             db,
+            event_key=str(pair_id),
             case_id=case_id,
             poster_user_id=poster_user_id,
             actor=user,

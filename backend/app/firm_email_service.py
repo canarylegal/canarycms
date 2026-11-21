@@ -29,6 +29,7 @@ class FirmEmailMessage:
     subject: str
     body_text: str
     body_html: str | None = None
+    notification_id: str | None = None
 
 
 def _graph_alert_ready(db: Session) -> bool:
@@ -102,6 +103,11 @@ def send_firm_email(db: Session, message: FirmEmailMessage) -> ResolvedTransport
             subject=message.subject,
             body_text=message.body_text,
             body_html=message.body_html,
+            **(
+                {"notification_id": message.notification_id}
+                if message.notification_id
+                else {}
+            ),
             from_name=(row.graph_send_from_name or "").strip() or None,
         )
         return "graph"
@@ -111,6 +117,11 @@ def send_firm_email(db: Session, message: FirmEmailMessage) -> ResolvedTransport
         subject=message.subject,
         body=message.body_text,
         body_html=message.body_html,
+        **(
+            {"notification_id": message.notification_id, "timeout_seconds": 30.0}
+            if message.notification_id
+            else {}
+        ),
     )
     return "smtp"
 

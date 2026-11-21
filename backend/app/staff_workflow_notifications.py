@@ -6,7 +6,8 @@ import uuid
 
 from sqlalchemy.orm import Session
 
-from app.alert_dispatch import AlertKind, dispatch_alert
+from app.alert_dispatch import AlertKind
+from app.notification_outbox import enqueue_staff
 from app.models import Case, User
 
 
@@ -34,6 +35,8 @@ def _notify_user(
     actor: User,
     kind: AlertKind,
     context: dict[str, str],
+    case_id: uuid.UUID,
+    event_key: str,
 ) -> None:
     if recipient_user_id is None or recipient_user_id == actor.id:
         return
@@ -43,15 +46,14 @@ def _notify_user(
     email = (recipient.email or "").strip()
     if not email:
         return
-    dispatch_alert(
+    enqueue_staff(
         db,
-        kind,
-        to_email=email,
-        context={
-            **context,
-            "staff_name": _user_label(recipient),
-        },
-        actor_user_id=actor.id,
+        kind=kind,
+        event_key=event_key,
+        case_id=case_id,
+        recipient_user_id=recipient.id,
+        actor_id=actor.id,
+        context={**context, "staff_name": _user_label(recipient)},
     )
 
 
@@ -59,6 +61,7 @@ def notify_anticipated_payment_approved(
     db: Session,
     *,
     case_id: uuid.UUID,
+    event_key: str,
     poster_user_id: uuid.UUID | None,
     actor: User,
     description: str,
@@ -68,6 +71,8 @@ def notify_anticipated_payment_approved(
     case_number, matter_title = _case_labels(db, case_id)
     _notify_user(
         db,
+        case_id=case_id,
+        event_key=event_key,
         recipient_user_id=poster_user_id,
         actor=actor,
         kind=AlertKind.anticipated_payment_approved,
@@ -86,6 +91,7 @@ def notify_anticipated_payment_amended(
     db: Session,
     *,
     case_id: uuid.UUID,
+    event_key: str,
     actor: User,
     poster_user_id: uuid.UUID,
     description: str,
@@ -101,6 +107,8 @@ def notify_anticipated_payment_amended(
     poster = db.get(User, poster_user_id)
     _notify_user(
         db,
+        case_id=case_id,
+        event_key=event_key,
         recipient_user_id=case.fee_earner_user_id,
         actor=actor,
         kind=AlertKind.anticipated_payment_amended,
@@ -120,6 +128,7 @@ def notify_anticipated_payment_rejected(
     db: Session,
     *,
     case_id: uuid.UUID,
+    event_key: str,
     poster_user_id: uuid.UUID | None,
     actor: User,
     description: str,
@@ -130,6 +139,8 @@ def notify_anticipated_payment_rejected(
     case_number, matter_title = _case_labels(db, case_id)
     _notify_user(
         db,
+        case_id=case_id,
+        event_key=event_key,
         recipient_user_id=poster_user_id,
         actor=actor,
         kind=AlertKind.anticipated_payment_rejected,
@@ -149,6 +160,7 @@ def notify_invoice_approved(
     db: Session,
     *,
     case_id: uuid.UUID,
+    event_key: str,
     creator_user_id: uuid.UUID | None,
     actor: User,
     invoice_number: str,
@@ -157,6 +169,8 @@ def notify_invoice_approved(
     case_number, matter_title = _case_labels(db, case_id)
     _notify_user(
         db,
+        case_id=case_id,
+        event_key=event_key,
         recipient_user_id=creator_user_id,
         actor=actor,
         kind=AlertKind.invoice_approved,
@@ -174,6 +188,7 @@ def notify_invoice_rejected(
     db: Session,
     *,
     case_id: uuid.UUID,
+    event_key: str,
     creator_user_id: uuid.UUID | None,
     actor: User,
     invoice_number: str,
@@ -183,6 +198,8 @@ def notify_invoice_rejected(
     case_number, matter_title = _case_labels(db, case_id)
     _notify_user(
         db,
+        case_id=case_id,
+        event_key=event_key,
         recipient_user_id=creator_user_id,
         actor=actor,
         kind=AlertKind.invoice_rejected,

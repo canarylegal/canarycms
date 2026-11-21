@@ -359,7 +359,9 @@ def test_cashier_cannot_amend_anticipated_without_post_anticipated() -> None:
     assert exc.value.status_code == 403
 
 
-def test_amend_by_non_fee_earner_notifies_fee_earner(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_amend_by_non_fee_earner_notifies_fee_earner(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     db = ledger_test_session()
     fee_earner = add_user(db, email="fee@example.com")
     poster_cat = add_fee_earner_category(db)
@@ -394,11 +396,13 @@ def test_amend_by_non_fee_earner_notifies_fee_earner(monkeypatch: pytest.MonkeyP
 
     sent: list[dict] = []
 
-    def _capture(db, kind, *, to_email, context, actor_user_id=None):
-        sent.append({"kind": kind, "to_email": to_email, "context": context})
+    def _capture(db, *, kind, recipient_user_id, context, **kwargs):
+        sent.append(
+            {"kind": kind, "recipient_user_id": recipient_user_id, "context": context}
+        )
         return True
 
-    monkeypatch.setattr("app.staff_workflow_notifications.dispatch_alert", _capture)
+    monkeypatch.setattr("app.staff_workflow_notifications.enqueue_staff", _capture)
 
     update_ledger_pair_unapproved(
         case.id,
@@ -410,7 +414,7 @@ def test_amend_by_non_fee_earner_notifies_fee_earner(monkeypatch: pytest.MonkeyP
     db.commit()
 
     assert len(sent) == 1
-    assert sent[0]["to_email"] == "fee@example.com"
+    assert sent[0]["recipient_user_id"] == fee_earner.id
     assert sent[0]["context"]["description"] == "Updated payment"
 
 

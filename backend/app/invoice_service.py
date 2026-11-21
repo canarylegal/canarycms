@@ -255,11 +255,13 @@ def create_case_invoice(case_id: uuid.UUID, payload: CaseInvoiceCreate, user: Us
     return inv_out
 
 
-def approve_case_invoice(case_id: uuid.UUID, invoice_id: uuid.UUID, user: User, db: Session) -> None:
+def approve_case_invoice(
+    case_id: uuid.UUID, invoice_id: uuid.UUID, user: User, db: Session
+) -> None:
     """Approve a pending invoice and its linked office posting (CL-08).
 
-    Idempotent when already approved. Does not send e-mail — callers must notify
-    after a successful ``db.commit()`` so alert dispatch cannot commit mid-flow.
+    Idempotent when already approved. Queues staff mail in the caller transaction;
+    the on-demand dispatcher sends only after the business change commits.
     """
     if not user_may_approve_invoice(user, db):
         raise HTTPException(
@@ -272,19 +274,33 @@ def approve_case_invoice(case_id: uuid.UUID, invoice_id: uuid.UUID, user: User, 
             select(CaseInvoice).where(CaseInvoice.id == invoice_id).with_for_update()
         ).scalar_one_or_none()
         if not inv or inv.case_id != case_id:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invoice not found")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Invoice not found"
+            )
         if inv.status == INV_APPROVED:
             return
         if inv.status != INV_PENDING:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invoice is not pending approval.")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invoice is not pending approval.",
+            )
         if not inv.ledger_pair_id:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invoice has no ledger posting.")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invoice has no ledger posting.",
+            )
 
-        approve_ledger_pair(case_id, inv.ledger_pair_id, user, db, invoice_workflow=True)
+        approve_ledger_pair(
+            case_id, inv.ledger_pair_id, user, db, invoice_workflow=True
+        )
         # A legacy already-approved charge must not backfill an invoice into a closed period.
-        effective_at = db.scalar(select(func.coalesce(LedgerEntry.recognised_at, LedgerEntry.posted_at)).where(
-            LedgerEntry.pair_id == inv.ledger_pair_id).limit(1))
+        effective_at = db.scalar(
+            select(func.coalesce(LedgerEntry.recognised_at, LedgerEntry.posted_at))
+            .where(LedgerEntry.pair_id == inv.ledger_pair_id)
+            .limit(1)
+        )
         from app.accounting_periods import require_accounting_open
+
         require_accounting_open(db, effective_at)
         new_desc = f"Invoice {inv.invoice_number}"
         # Core UPDATE so description / approval are persisted even if ORM instances in the session were stale.
@@ -313,68 +329,42 @@ def approve_case_invoice(case_id: uuid.UUID, invoice_id: uuid.UUID, user: User, 
         if case is not None:
             # Approval and its durable document must succeed or roll back together.
             from app.invoice_document_service import save_invoice_document_to_case
-            save_invoice_document_to_case(inv=inv, case=case, actor_user_id=user.id, db=db)
+
+            save_invoice_document_to_case(
+                inv=inv, case=case, actor_user_id=user.id, db=db
+            )
+        queue_invoice_notification(db, inv=inv, actor=user, approved=True)
     except HTTPException:
         raise
     except Exception as exc:
         _raise_invoice_conflict_from_db(exc)
 
 
-def notify_invoice_approved_after_commit(
+def queue_invoice_notification(
     db: Session,
     *,
-    case_id: uuid.UUID,
-    invoice_id: uuid.UUID,
+    inv: CaseInvoice,
     actor: User,
+    approved: bool,
+    comment: str | None = None,
 ) -> None:
-    """Best-effort staff e-mail after invoice approval has been committed."""
-    inv = db.get(CaseInvoice, invoice_id)
-    if inv is None or inv.case_id != case_id or inv.status != INV_APPROVED:
-        return
-    from app.staff_workflow_notifications import notify_invoice_approved
+    from app.staff_workflow_notifications import (
+        notify_invoice_approved,
+        notify_invoice_rejected,
+    )
 
-    try:
-        notify_invoice_approved(
-            db,
-            case_id=case_id,
-            creator_user_id=inv.created_by_user_id,
-            actor=actor,
-            invoice_number=inv.invoice_number,
-            total_pence=int(inv.total_pence),
-        )
-        db.commit()
-    except Exception:
-        log.exception("invoice approved notification failed invoice_id=%s", invoice_id)
-        db.rollback()
-
-
-def notify_invoice_rejected_after_commit(
-    db: Session,
-    *,
-    case_id: uuid.UUID,
-    invoice_id: uuid.UUID,
-    actor: User,
-    reject_comment: str | None,
-) -> None:
-    inv = db.get(CaseInvoice, invoice_id)
-    if inv is None or inv.case_id != case_id or inv.status != INV_VOIDED:
-        return
-    from app.staff_workflow_notifications import notify_invoice_rejected
-
-    try:
-        notify_invoice_rejected(
-            db,
-            case_id=case_id,
-            creator_user_id=inv.created_by_user_id,
-            actor=actor,
-            invoice_number=inv.invoice_number,
-            total_pence=int(inv.total_pence),
-            comment=reject_comment,
-        )
-        db.commit()
-    except Exception:
-        log.exception("invoice rejected notification failed invoice_id=%s", invoice_id)
-        db.rollback()
+    notify = notify_invoice_approved if approved else notify_invoice_rejected
+    args = dict(
+        case_id=inv.case_id,
+        event_key=str(inv.id),
+        creator_user_id=inv.created_by_user_id,
+        actor=actor,
+        invoice_number=inv.invoice_number,
+        total_pence=int(inv.total_pence),
+    )
+    if not approved:
+        args["comment"] = comment
+    notify(db, **args)
 
 
 def void_case_invoice(
@@ -395,25 +385,43 @@ def void_case_invoice(
         # CL-13: lock invoice row (same order as approve) to avoid deadlocks.
         _try_lock_invoice(db, invoice_id)
         inv = db.execute(
-            select(CaseInvoice).where(CaseInvoice.id == invoice_id).with_for_update().execution_options(populate_existing=True)
+            select(CaseInvoice)
+            .where(CaseInvoice.id == invoice_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
         ).scalar_one_or_none()
         if not inv or inv.case_id != case_id:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invoice not found")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Invoice not found"
+            )
         if inv.status == INV_VOIDED:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invoice already voided.")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invoice already voided.",
+            )
 
         # Paid allocations must not be stranded by a concurrent invoice void.
         from app.models import CaseInvoiceAllocation
-        from app.invoice_allocation_integrity import active_allocation, require_consistent_totals
+        from app.invoice_allocation_integrity import (
+            active_allocation,
+            require_consistent_totals,
+        )
+
         require_consistent_totals(db, inv)
-        allocated = db.scalar(select(CaseInvoiceAllocation.id).where(
-            CaseInvoiceAllocation.invoice_id == invoice_id, active_allocation()).limit(1))
+        allocated = db.scalar(
+            select(CaseInvoiceAllocation.id)
+            .where(CaseInvoiceAllocation.invoice_id == invoice_id, active_allocation())
+            .limit(1)
+        )
         if allocated is not None or int(inv.amount_allocated_pence or 0) > 0:
-            raise HTTPException(409, "This invoice has payment allocations; review them before voiding")
+            raise HTTPException(
+                409, "This invoice has payment allocations; review them before voiding"
+            )
 
         now = datetime.utcnow()
         if inv.status == INV_PENDING:
             from app.accounting_periods import require_accounting_open
+
             require_accounting_open(db, now)
             if inv.ledger_pair_id:
                 try:
@@ -436,11 +444,17 @@ def void_case_invoice(
                 total_pence=int(inv.total_pence),
                 was_pending=True,
             )
+            queue_invoice_notification(
+                db, inv=inv, actor=user, approved=False, comment=reject_comment
+            )
             return
 
         # Approved: post reversal (office credit) and require office balance check per spec
         if inv.status != INV_APPROVED or not inv.ledger_pair_id:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot void this invoice.")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Cannot void this invoice.",
+            )
 
         ledger = get_ledger(case_id, db)
         office_bal = ledger.office.balance_pence
@@ -472,8 +486,11 @@ def void_case_invoice(
 
         release_billed_time_entries_for_invoice(invoice_id, db)
         inv.status = INV_VOIDED
-        inv.voided_at = db.scalar(select(func.coalesce(LedgerEntry.recognised_at, LedgerEntry.posted_at)).where(
-            LedgerEntry.pair_id == rev_id).limit(1))
+        inv.voided_at = db.scalar(
+            select(func.coalesce(LedgerEntry.recognised_at, LedgerEntry.posted_at))
+            .where(LedgerEntry.pair_id == rev_id)
+            .limit(1)
+        )
         inv.reversal_pair_id = rev_id
         db.add(inv)
         db.flush()
@@ -503,6 +520,9 @@ def void_case_invoice(
             total_pence=total,
             was_pending=False,
             reversal_pair_id=rev_id,
+        )
+        queue_invoice_notification(
+            db, inv=inv, actor=user, approved=False, comment=reject_comment
         )
     except HTTPException:
         raise
