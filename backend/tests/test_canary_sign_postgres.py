@@ -451,3 +451,24 @@ def test_retry_ignores_non_persisted_placement_metadata():
     with SessionLocal() as db:
         result=sign.submit_signature(db,db.get(CanarySignRequest,rid),db.get(CanarySignRecipient,recips[0]),field_values={str(fields[0]):{'text':'Synthetic signature','page':1}})
         assert result.status==CanarySignStatus.completed
+
+
+@pytest.mark.parametrize("artifact", ["snapshot_pdf_file_id", "signed_file_id", "certificate_file_id"])
+def test_legacy_missing_checksum_preserves_access_without_inventing_baseline(caplog, artifact):
+    rid, _, _, recips, fields = seed()
+    assert submit(rid, recips[0], fields[0]) == "completed"
+    with SessionLocal() as db:
+        req = db.get(CanarySignRequest, rid)
+        row = db.get(File, getattr(req, artifact))
+        row.checksum = None
+        db.commit()
+        readers = {
+            "snapshot_pdf_file_id": sign.read_snapshot_pdf_bytes,
+            "signed_file_id": sign.read_signed_pdf_bytes,
+            "certificate_file_id": sign.read_certificate_pdf_bytes,
+        }
+        result = readers[artifact](db, req)
+        raw = result if isinstance(result, bytes) else result[0]
+        assert raw == (FILES_ROOT / row.storage_path).read_bytes()
+        assert row.checksum is None
+        assert "no integrity baseline" in caplog.text

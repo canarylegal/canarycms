@@ -1790,7 +1790,12 @@ def list_case_requests(db: Session, case_id: uuid.UUID) -> list[CanarySignReques
 
 def _verified_pdf_bytes(row: DbFile, path: Path) -> bytes:
     raw = path.read_bytes()
-    if not row.checksum or hashlib.sha256(raw).hexdigest() != row.checksum:
+    if not row.checksum:
+        # Older signing artifacts predate checksum persistence. Preserve access,
+        # but do not manufacture a verification baseline from untrusted bytes.
+        log.warning("Canary Sign legacy file has no integrity baseline: file_id=%s", row.id)
+        return raw
+    if hashlib.sha256(raw).hexdigest() != row.checksum:
         log.error("Canary Sign file integrity failure: file_id=%s", row.id)
         raise HTTPException(
             status_code=409,
