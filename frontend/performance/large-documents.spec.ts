@@ -81,8 +81,13 @@ test('large document browsing has bounded rendering and preserves interaction st
   await scroll.evaluate(el=>{el.scrollTop=el.scrollHeight/2})
   const visibleFiles=scroll.locator('[data-doc-key]:not([data-doc-key^="folder:"])')
   await expect(visibleFiles.last()).toBeVisible()
-  await visibleFiles.last().click({modifiers:['Control','Shift']})
-  await visibleFiles.last().click({button:'right'})
+  // Clicking an overscan row scrolls the window and changes which row is last.
+  // Keep the same document identity for selection and its context menu.
+  const rangeEndKey=await visibleFiles.last().getAttribute('data-doc-key')
+  const rangeEnd=scroll.locator(`[data-doc-key="${rangeEndKey}"]`)
+  await rangeEnd.click({modifiers:['Control','Shift']})
+  await expect(rangeEnd).toHaveClass(/active/)
+  await rangeEnd.click({button:'right'})
   await expect(page.getByRole('menuitem',{name:/^Download [0-9]+ files$/})).toBeVisible()
   await page.keyboard.press('Escape')
   const search=page.getByRole('textbox',{name:'Search documents',exact:true})
