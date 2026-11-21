@@ -368,6 +368,7 @@ def create_case_portal_preview(
         contact_id=str(contact.id),
         case_id=str(case_id),
         staff_user_id=str(user.id),
+        staff_version=user.auth_token_version,
     )
     log_event(
         db,

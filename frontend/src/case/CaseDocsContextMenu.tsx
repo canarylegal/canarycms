@@ -542,7 +542,7 @@ export function CaseDocsContextMenu({
                                     method: 'POST',
                                     json: {},
                                   })
-                                  pushNotification('Signing reminders sent.')
+                                  pushNotification('Signing reminders queued.')
                                 } catch (e: any) {
                                   setActionErr(e?.message ?? 'Remind failed')
                                 } finally {

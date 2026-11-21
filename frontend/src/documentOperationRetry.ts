@@ -1,6 +1,6 @@
 /** Keep uncertain document requests identifiable across a manual retry or reload. */
 export async function documentOperationRetry(path: string, method: string, body: unknown) {
-  if (!['POST', 'PATCH'].includes(method) || !/^\/cases\/[^/]+\/(files\/(compose-office|compose-quote|folders\/(rename|move)|[^/]+\/(rename|move|oo-export-pdf))|finance\/completion-statement)$/.test(path)) return null
+  if (!['POST', 'PATCH'].includes(method) || !/^\/cases\/[^/]+\/(files\/(compose-office|compose-quote|folders\/(rename|move)|[^/]+\/(rename|move|oo-export-pdf))|finance\/completion-statement|canary-sign\/(send|requests\/[^/]+\/(amend|remind)))$/.test(path)) return null
   const bytes = new TextEncoder().encode(JSON.stringify([method, path, body ?? null]))
   // WebCrypto hashing requires HTTPS; LAN HTTP still supports getRandomValues.
   const hash = crypto.subtle
@@ -18,8 +18,13 @@ export async function documentOperationRetry(path: string, method: string, body:
   }
   pending.set(storageKey, key)
   try { sessionStorage.setItem(storageKey, key) } catch { /* Do not prevent a request if storage is unavailable. */ }
-  return { key, complete(result: unknown) {
+  return { key, complete(result: unknown, status?: number) {
     // A proxy's unexpected success page is not a confirmed operation response.
+    if (status === 204 && /\/canary-sign\/requests\/[^/]+\/remind$/.test(path)) {
+      if (pending.get(storageKey) === key) pending.delete(storageKey)
+      try { sessionStorage.removeItem(storageKey) } catch { /* Optional persistence. */ }
+      return
+    }
     if (!result || typeof result !== 'object') return
     if (!('id' in result) && !('file_id' in result) && !('new_folder_path' in result)) return
     if (pending.get(storageKey) === key) pending.delete(storageKey)

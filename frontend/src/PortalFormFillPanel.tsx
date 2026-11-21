@@ -4,7 +4,13 @@ import { triggerBlobDownload } from './case/caseDocFileOps'
 import { SingleSelectDropdown } from './SingleSelectDropdown'
 import type { PortalFormDetailOut, PortalFormFieldOut } from './types'
 
+import { portalRequestError, type PortalDraft } from './portal/sessionErrors'
+
 type Props = {
+  isSessionCurrent?: () => boolean
+  sessionBlocked?: boolean
+  recoveryDraft?: PortalDraft | null
+  onDraftChange?: (draft: PortalDraft) => void
   submissionId: string
   portalToken: string
   onBack: () => void
@@ -557,7 +563,7 @@ export function PortalFormLocalPreview({ title, description, fields, className }
   )
 }
 
-async function portalDownloadFile(path: string, portalToken: string, fallbackName: string) {
+async function portalDownloadFile(path: string, portalToken: string, fallbackName: string, isCurrent: () => boolean) {
   const headers = new Headers()
   applyAuthHeaders(headers, portalToken)
   const res = await fetch(apiUrl(path), { headers })
@@ -569,17 +575,23 @@ async function portalDownloadFile(path: string, portalToken: string, fallbackNam
     } catch {
       /* keep text */
     }
-    throw new Error(formatApiErrorDetail(parsed, res.statusText, apiUrl(path)))
+    if (!isCurrent()) return
+    throw portalRequestError(res.status, formatApiErrorDetail(parsed, res.statusText, apiUrl(path)), portalToken)
   }
   const blob = await res.blob()
+  if (!isCurrent()) return
   const cd = res.headers.get('Content-Disposition') || ''
   const match = /filename\*?=(?:UTF-8''|")?([^";]+)/i.exec(cd)
   const name = match ? decodeURIComponent(match[1].replace(/"/g, '')) : fallbackName
   triggerBlobDownload(blob, name || fallbackName)
 }
 
-export function PortalFormFillPanel({ submissionId, portalToken, onBack, onSubmitted, previewMode = false }: Props) {
+export function PortalFormFillPanel({ submissionId, portalToken, onBack, onSubmitted, previewMode = false, sessionBlocked = false, recoveryDraft, onDraftChange, isSessionCurrent }: Props) {
   const [form, setForm] = useState<PortalFormDetailOut | null>(null)
+  const sessionGuardRef = useRef(isSessionCurrent)
+  sessionGuardRef.current = isSessionCurrent
+  const recoveryDraftRef = useRef(recoveryDraft)
+  recoveryDraftRef.current = recoveryDraft
   const [values, setValues] = useState<Record<string, unknown>>({})
   const [busy, setBusy] = useState(false)
   const [uploadBusyKey, setUploadBusyKey] = useState<string | null>(null)
@@ -591,8 +603,8 @@ export function PortalFormFillPanel({ submissionId, portalToken, onBack, onSubmi
 
   const status = (form?.status || '').toLowerCase()
   const isCompleted = status === 'completed'
-  const isReadOnly = isCompleted || status === 'voided' || status === 'superseded' || previewMode
-  const canSubmit = Boolean(form) && status === 'pending' && !previewMode
+  const isReadOnly = isCompleted || status === 'voided' || status === 'superseded' || previewMode || sessionBlocked
+  const canSubmit = Boolean(form) && status === 'pending' && !previewMode && !sessionBlocked
 
   useEffect(() => {
     if (!validationActive || !form) return
@@ -604,6 +616,7 @@ export function PortalFormFillPanel({ submissionId, portalToken, onBack, onSubmi
 
   useEffect(() => {
     let cancelled = false
+    const isCurrent = sessionGuardRef.current ?? (() => true)
     void (async () => {
       setBusy(true)
       setErr(null)
@@ -620,7 +633,8 @@ export function PortalFormFillPanel({ submissionId, portalToken, onBack, onSubmi
         } catch {
           /* keep text */
         }
-        if (!res.ok) throw new Error(formatApiErrorDetail(parsed, res.statusText))
+        if (cancelled || !isCurrent()) return
+        if (!res.ok) throw portalRequestError(res.status, formatApiErrorDetail(parsed, res.statusText), portalToken)
         const detail = parsed as PortalFormDetailOut
         if (cancelled) return
         setForm(detail)
@@ -630,8 +644,17 @@ export function PortalFormFillPanel({ submissionId, portalToken, onBack, onSubmi
           const existing = detail.responses?.[f.field_key]
           if (existing !== undefined) initial[f.field_key] = existing
         }
+        const recoveryDraft = recoveryDraftRef.current
+        if (detail.status === 'pending' && recoveryDraft?.submissionId === submissionId && recoveryDraft.contactId === detail.contact_id) {
+          for (const field of detail.fields) {
+            if (field.field_type !== 'file' && field.field_type !== 'files' && field.field_type !== 'section' && field.field_key in recoveryDraft.values) {
+              initial[field.field_key] = recoveryDraft.values[field.field_key]
+            }
+          }
+        }
         setValues(initial)
       } catch (e: unknown) {
+        if (!isCurrent()) return
         if (!cancelled) setErr((e as { message?: string }).message ?? 'Could not load form')
       } finally {
         if (!cancelled) setBusy(false)
@@ -641,6 +664,14 @@ export function PortalFormFillPanel({ submissionId, portalToken, onBack, onSubmi
       cancelled = true
     }
   }, [submissionId, portalToken])
+
+  const draftCallback = useRef(onDraftChange)
+  draftCallback.current = onDraftChange
+  useEffect(() => {
+    if (form?.status === 'pending' && !previewMode) {
+      draftCallback.current?.({contactId: form.contact_id, submissionId, values})
+    }
+  }, [form, values, submissionId, previewMode])
 
   function setFieldValue(key: string, value: unknown) {
     setValues((prev) => ({ ...prev, [key]: value }))
@@ -657,6 +688,7 @@ export function PortalFormFillPanel({ submissionId, portalToken, onBack, onSubmi
   }
 
   async function uploadFile(field: PortalFormFieldOut, file: File) {
+    const isCurrent = sessionGuardRef.current ?? (() => true)
     if (previewMode || isReadOnly) return
     setUploadBusyKey(field.field_key)
     setErr(null)
@@ -674,7 +706,8 @@ export function PortalFormFillPanel({ submissionId, portalToken, onBack, onSubmi
       } catch {
         /* keep text */
       }
-      if (!res.ok) throw new Error(formatApiErrorDetail(parsed, res.statusText))
+      if (!isCurrent()) return
+      if (!res.ok) throw portalRequestError(res.status, formatApiErrorDetail(parsed, res.statusText), portalToken)
       const out = parsed as FileValue & { files?: FileValue[] }
       if (field.field_type === 'files' && Array.isArray(out.files)) {
         setFieldValue(field.field_key, out.files)
@@ -682,13 +715,15 @@ export function PortalFormFillPanel({ submissionId, portalToken, onBack, onSubmi
         setFieldValue(field.field_key, { file_id: out.file_id, filename: out.filename })
       }
     } catch (e: unknown) {
+      if (!isCurrent()) return
       setErr((e as { message?: string }).message ?? 'Upload failed')
     } finally {
-      setUploadBusyKey(null)
+      if (isCurrent()) setUploadBusyKey(null)
     }
   }
 
   async function removeUploadedFile(field: PortalFormFieldOut, fileId: string) {
+    const isCurrent = sessionGuardRef.current ?? (() => true)
     if (previewMode || isReadOnly || field.field_type !== 'files') return
     setUploadBusyKey(field.field_key)
     setErr(null)
@@ -706,17 +741,20 @@ export function PortalFormFillPanel({ submissionId, portalToken, onBack, onSubmi
       } catch {
         /* keep text */
       }
-      if (!res.ok) throw new Error(formatApiErrorDetail(parsed, res.statusText))
+      if (!isCurrent()) return
+      if (!res.ok) throw portalRequestError(res.status, formatApiErrorDetail(parsed, res.statusText), portalToken)
       const out = parsed as { files?: FileValue[] }
       setFieldValue(field.field_key, Array.isArray(out.files) ? out.files : [])
     } catch (e: unknown) {
+      if (!isCurrent()) return
       setErr((e as { message?: string }).message ?? 'Could not remove file')
     } finally {
-      setUploadBusyKey(null)
+      if (isCurrent()) setUploadBusyKey(null)
     }
   }
 
   async function downloadSnapshot() {
+    const isCurrent = sessionGuardRef.current ?? (() => true)
     setBusy(true)
     setErr(null)
     try {
@@ -724,15 +762,18 @@ export function PortalFormFillPanel({ submissionId, portalToken, onBack, onSubmi
         `/portal/forms/${submissionId}/snapshot`,
         portalToken,
         form?.snapshot_filename || 'completed-form.docx',
+        isCurrent,
       )
     } catch (e: unknown) {
+      if (!isCurrent()) return
       setErr((e as { message?: string }).message ?? 'Could not download completed form')
     } finally {
-      setBusy(false)
+      if (isCurrent()) setBusy(false)
     }
   }
 
   async function submit() {
+    const isCurrent = sessionGuardRef.current ?? (() => true)
     if (!form || !canSubmit) return
     const errors = collectPortalFormFieldErrors(form.fields, values)
     if (Object.keys(errors).length > 0) {
@@ -772,12 +813,14 @@ export function PortalFormFillPanel({ submissionId, portalToken, onBack, onSubmi
       } catch {
         /* keep text */
       }
-      if (!res.ok) throw new Error(formatApiErrorDetail(parsed, res.statusText))
+      if (!isCurrent()) return
+      if (!res.ok) throw portalRequestError(res.status, formatApiErrorDetail(parsed, res.statusText), portalToken)
       onSubmitted()
     } catch (e: unknown) {
+      if (!isCurrent()) return
       setErr((e as { message?: string }).message ?? 'Could not submit form')
     } finally {
-      setBusy(false)
+      if (isCurrent()) setBusy(false)
     }
   }
 
@@ -823,7 +866,7 @@ export function PortalFormFillPanel({ submissionId, portalToken, onBack, onSubmi
         </div>
       ) : null}
 
-      {err ? <div className="error">{err}</div> : null}
+      {err && !sessionBlocked ? <div className="error">{err}</div> : null}
       {busy && !form ? <div className="muted">Loading form…</div> : null}
       {form ? (
         <div className="stack portalFormFields" style={{ gap: 10 }}>

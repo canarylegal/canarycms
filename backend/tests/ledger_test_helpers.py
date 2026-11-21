@@ -48,12 +48,20 @@ def ledger_test_session() -> Session:
     """SQLite session with ledger, invoice, and audit tables."""
     engine = create_engine("sqlite+pysqlite:///:memory:")
 
+    from sqlalchemy import Uuid
+    from sqlalchemy.dialects.postgresql import UUID
+
     patched: list[tuple[object, object]] = []
     for table in Base.metadata.tables.values():
         for column in table.columns:
             if isinstance(column.type, JSONB):
                 patched.append((column, column.type))
                 column.type = JSON()
+            elif isinstance(column.type, UUID):
+                # SQLite gives a UUID declaration numeric affinity; rare hex IDs
+                # resembling scientific notation otherwise return floats.
+                patched.append((column, column.type))
+                column.type = Uuid(as_uuid=True)
 
     tables = (
         UserPermissionCategory.__table__,

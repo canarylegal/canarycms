@@ -274,3 +274,20 @@ class CaseDocsView(Base):
         UUID(as_uuid=True), ForeignKey("case.id", ondelete="CASCADE"), primary_key=True
     )
     last_viewed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class PortalMatterBlock(Base):
+    """Explicit matter-contact revocation, independent of retained document history."""
+
+    __tablename__ = "portal_matter_block"
+    case_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("case.id", ondelete="CASCADE"), primary_key=True
+    )
+    contact_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("contact.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    revoked_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=datetime.utcnow
+    )

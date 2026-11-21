@@ -20,12 +20,21 @@ class NotificationOutbox(Base):
             "state IN ('pending','sending','sent','failed','uncertain','cancelled')",
             name="ck_notification_state",
         ),
+        CheckConstraint(
+            "(recipient_user_id IS NOT NULL AND signing_request_id IS NULL AND signing_recipient_id IS NULL AND binding_enc IS NULL) OR (recipient_user_id IS NULL AND signing_request_id IS NOT NULL AND signing_recipient_id IS NOT NULL AND binding_enc IS NOT NULL AND kind IN ('canary_sign_requested','canary_sign_reminded'))",
+            name="ck_notification_recipient_scope",
+        ),
     )
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True)
     kind: Mapped[str] = mapped_column(String(80), nullable=False)
     event_key: Mapped[str] = mapped_column(String(240), nullable=False)
     case_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
-    recipient_user_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    recipient_user_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
+    signing_request_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, nullable=True, index=True
+    )
+    signing_recipient_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
+    binding_enc: Mapped[str | None] = mapped_column(Text, nullable=True)
     payload_enc: Mapped[str] = mapped_column(Text, nullable=False)
     payload_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
     state: Mapped[str] = mapped_column(

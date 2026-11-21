@@ -22,6 +22,12 @@ def main():
             _message(row)  # Authenticate encryption and verify the frozen payload hash.
             item = summary(row)
             item["payload_sha256"] = row.payload_sha256
+            if row.signing_request_id:
+                from app.email_crypt import decrypt_password
+                binding = json.loads(decrypt_password(row.binding_enc))
+                item["binding_sha256"] = hashlib.sha256(json.dumps(binding, sort_keys=True).encode()).hexdigest()
+                item["signing_request_id"] = str(row.signing_request_id)
+                item["signing_recipient_id"] = str(row.signing_recipient_id)
             item["attempts"] = [
                 {"id": str(a.id), "state": a.state, "code": a.code}
                 for a in db.scalars(
