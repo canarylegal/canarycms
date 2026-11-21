@@ -72,7 +72,9 @@ and private diagnostic evidence for review.
 
 ## Corrections remain a separate step
 
-The report includes stable codes, affected UUIDs and evidence, but no executable fixes.
+The report includes stable codes, affected UUIDs and evidence, but applies no fixes.
+See [Historical correction review](HISTORICAL_CORRECTION_REVIEW.md) for the separate
+operator preview and explicitly approved correction workflow.
 For a flagged match, inspect the statement, linked posting and audit history. A missing
 posting does not prove which replacement posting (if any) is correct. If the period is
 approved, use the existing reasoned reopen/correction workflow after review. Never
