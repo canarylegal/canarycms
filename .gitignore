@@ -26,7 +26,7 @@ backend/scripts/prepare_*_precedents.py
 backend/scripts/prepare_*_quote_precedent.py
 backend/scripts/prepare_*_quote_spreadsheet.py
 backend/scripts/seed_*_fee_scales.py
-deploy/betterbird/policies.json
+deploy/*/policies.json
 
 # Stray artifacts
 backend/=2.8.0

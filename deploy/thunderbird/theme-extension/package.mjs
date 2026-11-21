@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/** Build canary-theme.xpi for Betterbird (Settings → Add-ons → Install from file). */
+/** Build canary-theme.xpi for Thunderbird (Settings → Add-ons → Install from file). */
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'url'

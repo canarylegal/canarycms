@@ -1,6 +1,6 @@
 # Canary CMS documentation
 
-Guides for deploying, operating, and troubleshooting a Canary installation.
+Guides for the current Canary CMS 2.x line. Classic 1.x documentation remains on the [classic branch](https://github.com/canarylegal/canarycms/tree/classic/docs). Follow the documentation at your chosen release tag.
 
 | Document | Audience | Summary |
 |----------|----------|---------|
@@ -19,3 +19,5 @@ Guides for deploying, operating, and troubleshooting a Canary installation.
 **Repository entry point:** [README.md](../README.md) (quick start, licence).
 
 - [Document recovery and truthful save confirmations](DOCUMENT_RECOVERY.md)
+
+- [UI theme ownership and local checks](UI_THEME.md)

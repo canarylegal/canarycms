@@ -53,3 +53,14 @@ def test_proprietary_profile_has_no_canary_legal_leaks(monkeypatch) -> None:
 
     hits = bc.proprietary_leak_hits()
     assert hits == [], hits
+
+
+def test_thunderbird_feed_default_and_legacy_overrides(monkeypatch) -> None:
+    monkeypatch.delenv("CANARY_BRAND_TB_UPDATE_BASE_URL", raising=False)
+    monkeypatch.delenv("CANARY_TB_UPDATE_BASE_URL", raising=False)
+    expected = "https://github.com/canarylegal/canary-thunderbird/releases/latest/download"
+    assert bc.env_brand_snapshot()["thunderbird_update_base_url"] == expected
+    monkeypatch.setenv("CANARY_TB_UPDATE_BASE_URL", "https://legacy.example/addin")
+    assert bc.thunderbird_update_base_url() == "https://legacy.example/addin"
+    monkeypatch.setenv("CANARY_BRAND_TB_UPDATE_BASE_URL", "https://firm.example/addin")
+    assert bc.thunderbird_update_base_url() == "https://firm.example/addin"

@@ -146,4 +146,4 @@ Force nulls case matter-type FKs, deletes firm catalogue rows and portal submiss
 
 ## Hygiene
 
-Public `.gitignore` already ignores firm-shaped local scripts (`seed_*_portal_forms.py`, firm precedent deploy helpers, Betterbird firm policies). Prefer putting those under the firm package instead of the Canary tree.
+Public `.gitignore` already ignores firm-shaped local scripts (`seed_*_portal_forms.py`, firm precedent deploy helpers, Thunderbird firm policies). Prefer putting those under the firm package instead of the Canary tree.

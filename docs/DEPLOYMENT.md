@@ -1,4 +1,8 @@
-# Canary CMS — deployment guide
+# Canary CMS 2.x — deployment guide
+
+This guide covers the current 2.x line. Canary Classic 1.x has its own [classic branch and deployment guide](https://github.com/canarylegal/canarycms/blob/classic/docs/DEPLOYMENT.md). Do not use Classic tags or assume an in-place Classic-to-2.x database upgrade; plan and rehearse that migration separately.
+
+Use the documentation shipped with your selected release. `main` is the development line, not a production release.
 
 Assumes you already own a domain (e.g. `canary.yourfirm.co.uk`) and a Linux server with Docker. Canary’s production stack is Docker Compose: an nginx frontend (port 8080 by default) proxies `/api`, WebDAV, ONLYOFFICE, and CalDAV to internal services.
 
@@ -33,7 +37,7 @@ If using **Cloudflare** (orange cloud / “Proxied”): TLS and WAF live at Clou
 git clone https://github.com/canarylegal/canarycms.git /opt/canarycms
 cd /opt/canarycms
 # Prefer a release tag for production (see CHANGELOG.md / GitHub Releases)
-git checkout v1.0.0   # or latest vX.Y.Z
+git checkout v2.0.0   # example: select the reviewed 2.x release approved for this install
 cp .env.example .env
 ```
 
@@ -114,26 +118,10 @@ Admin → Deploy (and the optional post-login prompt) only **notify** when GitHu
 
 The former GUI Compose updater code is **intentionally retained** in the repo (fail-closed stubs + implementation under `backend/app/local_compose_update.py` and `backend/app/compose_deploy_job.py`) so audits do not treat it as unmarked dead code and so any future re-enablement requires an explicit security review. It is not a supported production path.
 
-**Prefer a known release**, not an unreviewed `main` tip:
-
-```bash
-cd /path/to/canarycms
-git fetch --tags origin
-git checkout vX.Y.Z   # or: git checkout <full-commit-sha>
-GIT_COMMIT=$(git rev-parse HEAD) docker compose --profile prod build
-docker compose --profile prod up -d
-```
-
-Fast-forward without a tag (still pin the SHA you verified):
-
-```bash
-git pull --ff-only
-GIT_COMMIT=$(git rev-parse HEAD) docker compose --profile prod build
-docker compose --profile prod up -d
-```
+For an existing 2.x installation, use the [reproducible upgrade and rollback procedure](REPRODUCIBLE_DEPLOYMENTS.md). Select an approved release tag, prepare from a clean checkout, inspect the recorded backup and configuration plan, then apply and verify under the maintenance procedure. Do not update a live installation by pulling floating `main` or rebuilding a single service ad hoc.
 
 Bake `GIT_COMMIT` so Admin → Deploy can compare correctly. With the default
-`CANARY_GITHUB_DEPLOY_REF=latest-release`, a host on `v1.0.0` stays quiet until a newer
+`CANARY_GITHUB_DEPLOY_REF=latest-release`, a host pinned to a 2.x release stays quiet until a newer
 GitHub Release is published (it will **not** nag for every commit on `main`).
 
 ---
@@ -334,7 +322,7 @@ docker compose --profile prod up -d
 | Blank white task pane | Manifest URLs wrong or frontend not reachable; open `taskpane.html` in a normal browser tab. |
 | “Already installed elsewhere” | Same add-in `<Id>` with a **different** host — remove old Canary add-in from **My add-ins → Custom add-ins**, redeploy. |
 | Upload XML validation error | Use the repo’s current `manifest.xml` schema; validate with `npx office-addin-manifest validate manifest.xml` if needed. |
-| Compose send does not file to matter | User must click **Apply to message** before send; manifest must include `OnMessageSend` (v1.0.10+). |
+| Compose send does not file to matter | User must click **Apply to message** before send; manifest must include `OnMessageSend` (Outlook add-in version 1.0.10 or later; independent of the CMS version). |
 
 #### Outlook updates
 
@@ -362,7 +350,7 @@ Use a reviewed versioned XPI from that repository. GitHub Release publication is
 
 In Thunderbird 128 or later, open Add-ons and Themes, choose the gear menu, then Install Add-on From File. Select the XPI and connect to your firm's HTTPS Canary site using the Canary toolbar. Existing installations need a one-time manual installation to switch to the GitHub update channel; keep existing settings by installing over the old version rather than uninstalling.
 
-The GitHub-channel manifest points at `https://github.com/canarylegal/canary-thunderbird/releases/latest/download/updates.json`. Each published feed points at a versioned XPI with its SHA-256 digest. Firms may manage updates under their own policy; the [Betterbird policy template](../deploy/betterbird/policies.json) remains an administrator-maintained integration example.
+The GitHub-channel manifest points at `https://github.com/canarylegal/canary-thunderbird/releases/latest/download/updates.json`. Each published feed points at a versioned XPI with its SHA-256 digest. Firms may manage updates under their own policy; the [Thunderbird enterprise policy guidance](../deploy/thunderbird/README.md#enterprise-policy-policiesjson) describes administrator-maintained policies; firm policy files are intentionally not committed.
 
 #### Maintainer boundary
 

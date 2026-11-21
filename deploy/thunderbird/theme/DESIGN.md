@@ -1,4 +1,4 @@
-# Canary theme for Betterbird — design spec
+# Canary theme for Thunderbird — design spec
 
 Visual language aligned with the Canary web app (`frontend/src/index.css`, `theme.ts`).
 
@@ -20,8 +20,8 @@ Visual language aligned with the Canary web app (`frontend/src/index.css`, `them
 
 ## Typography
 
-- **UI:** system stack (Segoe UI / Roboto on Windows, system-ui on Linux) — Betterbird does not ship DM Sans.
-- **Density:** default Betterbird spacing; theme does not shrink lists.
+- **UI:** system stack (Segoe UI / Roboto on Windows, system-ui on Linux) — Thunderbird does not ship DM Sans.
+- **Density:** default Thunderbird spacing; theme does not shrink lists.
 
 ## Layout intent
 
