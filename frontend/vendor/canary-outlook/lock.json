@@ -1,0 +1,9 @@
+{
+  "schema": 1,
+  "repository": "https://github.com/canarylegal/canary-outlook",
+  "source_commit": "41a92c3ea3d55f5ede0bf54d894da903ff501fd8",
+  "source_dirty": false,
+  "version": "1.0.28.0",
+  "bundle_sha256": "ac3b614fbe9b11e23f09e83d2dd072bbc0484ecd40b972ee66e4278af4263463",
+  "hosting_sha256": "3b09cfc399068c3aee401013cc7ea243559cbf2677635e3a3a35a862c25cccab"
+}

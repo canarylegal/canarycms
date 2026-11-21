@@ -39,3 +39,7 @@ claudecanary1.txt
 
 # Isolated workflow test evidence
 /artifacts/
+
+# Generated from pinned canary-outlook hosting bundle
+frontend/public/outlook-addin/
+frontend/public/.well-known/microsoft-officeaddins-allowed.json

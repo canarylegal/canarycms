@@ -342,6 +342,14 @@ After add-in code or manifest changes: bump `<Version>` in `manifest.xml`, rebui
 
 ---
 
+#### Outlook source ownership and hosting bundle
+
+The source, manifest template, build tools and tests are maintained in [canary-outlook](https://github.com/canarylegal/canary-outlook). CMS consumes the reviewed, checksum-pinned bundle under `frontend/vendor/canary-outlook/`. `npm run build` stages it before Vite and renders the manifest and Office allowlist afterward using the existing `CANARY_PUBLIC_URL`; `npm run dev` also stages the bundle.
+
+Do not edit generated `frontend/public/outlook-addin/` files. Update all three vendor bundle files from a clean standalone build in a reviewed CMS change. No network download occurs during staging. Required icons are compared with the shared CMS icons before writing, so branding differences fail visibly.
+
+Hosting remains on the existing CMS origin at `/outlook-addin/*`, `/icons/*` and `/.well-known/microsoft-officeaddins-allowed.json`. Authentication callbacks, nginx configuration, server APIs and manifest identity are unchanged. This source separation does not deploy or register an add-in with Microsoft.
+
 ### 8.2 Thunderbird add-on
 
 The Thunderbird add-on provides **file to matter**, **compose with merge + attachments**, and a **Canary** tag on **incoming** mail. Sent mail is filed on send but is **not** tagged in Thunderbird.
@@ -417,4 +425,4 @@ Restart the backend after changes. Canary user email should match the M365 mailb
 
 ---
 
-Adjust hostnames, paths, and ports for your environment. Mail add-on maintainer detail also lives in [frontend/public/outlook-addin/README.md](../frontend/public/outlook-addin/README.md) and [Canary Thunderbird](https://github.com/canarylegal/canary-thunderbird).
+Adjust hostnames, paths, and ports for your environment. Mail add-on maintainer detail also lives in [Canary Outlook](https://github.com/canarylegal/canary-outlook) and [Canary Thunderbird](https://github.com/canarylegal/canary-thunderbird).
