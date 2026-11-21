@@ -16,6 +16,11 @@ import { dndEventHasFiles } from './docFormat'
 import { isEmlLikeUploadFile } from './officeFiles'
 
 export type CaseDetailDocumentsProps = {
+  pageLoading: boolean
+  pageError: string | null
+  hasMore: boolean
+  onLoadMore: () => void
+  folderSummaries: Record<string, string>
   busy: boolean
   portalEnabled: boolean
   caseDetail: CaseOut | null
@@ -66,6 +71,7 @@ export type CaseDetailDocumentsProps = {
 }
 
 export function CaseDetailDocuments({
+  pageLoading, pageError, hasMore, onLoadMore, folderSummaries,
   busy,
   portalEnabled,
   caseDetail,
@@ -107,6 +113,16 @@ export function CaseDetailDocuments({
   uploadFilesToCurrentFolder,
   setActionErr,
 }: CaseDetailDocumentsProps) {
+  const scrollRef = useRef<HTMLDivElement | null>(null)
+  const sentinelRef = useRef<HTMLDivElement | null>(null)
+  useEffect(() => {
+    if (!hasMore || pageLoading || pageError || !sentinelRef.current) return
+    const observer = new IntersectionObserver(entries => {
+      if (entries.some(entry => entry.isIntersecting)) onLoadMore()
+    }, {root: scrollRef.current, rootMargin: '200px'})
+    observer.observe(sentinelRef.current)
+    return () => observer.disconnect()
+  }, [hasMore, pageLoading, pageError, onLoadMore])
   const [docsDragOver, setDocsDragOver] = useState(false)
   const importInputRef = useRef<HTMLInputElement | null>(null)
   const newMenuRef = useRef<HTMLDivElement | null>(null)
@@ -181,6 +197,7 @@ export function CaseDetailDocuments({
         docSearch={docSearch}
         setDocSearch={setDocSearch}
       />
+      {pageError ? <div className="error" role="alert">{pageError} Use Refresh to retry.</div> : null}
       <div
         className={`card caseDocsCard${docsDragOver ? ' caseDocsCard--dragOver' : ''}`}
         onDragEnter={(e) => {
@@ -225,7 +242,7 @@ export function CaseDetailDocuments({
           await uploadFilesToCurrentFolder(droppedFiles)
         }}
       >
-        <div className="caseDocsScroll" tabIndex={0} onKeyDown={handleDocsKeyDown}>
+        <div className="caseDocsScroll" ref={scrollRef} aria-busy={pageLoading} tabIndex={0} onKeyDown={handleDocsKeyDown}>
           <CaseDocsList
             docSortKey={docSortKey}
             setDocSortKey={setDocSortKey}
@@ -247,7 +264,10 @@ export function CaseDetailDocuments({
             portalEnabled={portalEnabled}
             portalFolderGrants={portalFolderGrants}
             files={files}
+            folderSummaries={folderSummaries}
           />
+          <div ref={sentinelRef} style={{height: 1}} aria-hidden />
+          {pageLoading ? <div className="muted" role="status" style={{padding: 12}}>Loading documents…</div> : null}
         </div>
       </div>
 

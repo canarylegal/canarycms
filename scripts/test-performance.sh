@@ -28,7 +28,7 @@ trap cleanup EXIT
 "${compose[@]}" exec -T backend python scripts/seed_performance_fixture.py
 "${compose[@]}" run --rm --no-deps -T -v "$(pwd)/backend/tests:/app/tests:ro" \
   -e DATABASE_URL=postgresql+psycopg://canary:isolated-core-database-secret@db:5432/canary_core_test \
-  backend pytest -q tests/test_matter_menu.py
+  backend pytest -q tests/test_matter_menu.py tests/test_document_pages.py
 "${compose[@]}" exec -T backend python scripts/profile_performance.py --assert-budgets > "$CORE_TEST_OUTPUT/api-metrics.json"
 mapfile -t containers < <("${compose[@]}" ps -q)
 docker stats --format '{{json .}}' "${containers[@]}" > "$CORE_TEST_OUTPUT/resource-samples.raw" &

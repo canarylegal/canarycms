@@ -14,7 +14,7 @@ client=TestClient(app)
 assert client.post('/auth/login',json={'email':os.environ['E2E_STAFF_EMAIL'],'password':os.environ['E2E_STAFF_PASSWORD']}).status_code==200
 with SessionLocal() as db: case_id=str(db.scalar(select(Case.id).where(Case.case_number=='900001')))
 report={}
-for name,path,count in [('matters','/cases',5002),('matter_page','/cases/menu',100),('documents',f'/cases/{case_id}/files',1200)]:
+for name,path,count in [('matters','/cases',5002),('matter_page','/cases/menu',100),('documents',f'/cases/{case_id}/files',1200),('document_page',f'/cases/{case_id}/files/browse',100)]:
     samples=[];queries=[];sizes=[]
     for iteration in range(6):
         statements=[]
@@ -25,7 +25,7 @@ for name,path,count in [('matters','/cases',5002),('matter_page','/cases/menu',1
         finally: event.remove(engine,'before_cursor_execute',query)
         elapsed=(time.perf_counter()-start)*1000
         assert response.status_code==200
-        data=response.json()['items'] if name=='matter_page' else response.json()
+        data=response.json()['items'] if name in ('matter_page','document_page') else response.json()
         assert len(data)==count
         if name=='documents':
             forms=[f['portal_form_submission'] for f in response.json() if 'portal_form_submission' in f]
@@ -45,5 +45,7 @@ if '--assert-budgets' in sys.argv:
     assert report['matters']['queries']<=20,report
     assert report['matter_page']['queries']<=20,report
     assert report['matter_page']['response_bytes']<150000,report
+    assert report['document_page']['response_bytes']<150000,report
+    assert report['document_page']['queries']<=30,report
     assert max(r['max_ms'] for r in report.values())<5000,report
 print(json.dumps(report))

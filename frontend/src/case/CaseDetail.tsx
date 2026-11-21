@@ -50,7 +50,8 @@ import { isClientMatterContact } from './caseDetailHelpers'
 import { isCommentFile } from './caseDocFileOps'
 import { linkPickedGlobalContactIfNeeded } from './caseContactPickOps'
 import { useCaseDocFileHandlers } from './useCaseDocFileHandlers'
-import { useCaseDocsFolderData } from './useCaseDocsFolderData'
+import { useDocumentPages } from './useDocumentPages'
+import { splitFolderPath } from './folderPathCodec'
 import { useCaseDocsSelection } from './useCaseDocsSelection'
 import { useCasePrecedentPicker } from './useCasePrecedentPicker'
 import { CaseDetailDocuments } from './CaseDetailDocuments'
@@ -68,7 +69,7 @@ export function CaseDetail({
   caseDetail,
   notes: _notes,
   tasks: _tasks,
-  files,
+  filesRevision,
   caseContacts,
   error,
   onRefresh,
@@ -88,7 +89,7 @@ export function CaseDetail({
   caseDetail: CaseOut | null
   notes: CaseNoteOut[]
   tasks: CaseTaskOut[]
-  files: FileSummary[]
+  filesRevision: number
   caseContacts: CaseContactOut[]
   error: string | null
   onRefresh: () => void
@@ -133,7 +134,7 @@ export function CaseDetail({
   }, [matterScopeId, token, portalEnabled])
   useEffect(() => {
     refreshPortalFolderGrants()
-  }, [refreshPortalFolderGrants, files])
+  }, [refreshPortalFolderGrants, filesRevision])
   useEffect(() => {
     if (!token) {
       setDocusignEnabled(false)
@@ -247,6 +248,9 @@ export function CaseDetail({
   >(null)
   const [docSortKey, setDocSortKey] = useState<'description' | 'size' | 'created' | 'user'>('created')
   const [docSortDir, setDocSortDir] = useState<'asc' | 'desc'>('desc')
+  const documentQuery = useMemo(() => new URLSearchParams({folder: docFolder, q: docSearch, sort: docSortKey, direction: docSortDir}).toString(), [docFolder, docSearch, docSortKey, docSortDir])
+  const documentPages = useDocumentPages(token, matterScopeId, documentQuery, filesRevision)
+  const files = documentPages.rows
   const [moveMenu, setMoveMenu] = useState<{ kind: 'file'; fileId: string } | { kind: 'folder'; folderPath: string } | null>(null)
   const [portalMenu, setPortalMenu] = useState<{ folderPath: string } | null>(null)
   const docMenuRef = useRef<HTMLDivElement | null>(null)
@@ -973,21 +977,19 @@ export function CaseDetail({
     return () => window.removeEventListener('mousedown', onDocMouseDown)
   }, [docMenu])
 
-  const {
-    childFolders,
-    allFolderPaths,
-    sortedChildFolders,
-    sortedPinnedInFolder,
-    sortedRegularInFolder,
-    breadcrumbParts,
-    allDocKeys,
-  } = useCaseDocsFolderData({
-    files,
-    docSearch,
-    docFolder,
-    docSortKey,
-    docSortDir,
-  })
+  const allFolderPaths = documentPages.folders.paths
+  const childFolders = useMemo(() => {
+    const prefix = docFolder ? `${docFolder}/` : ''
+    return [...new Set(allFolderPaths.filter(path => path.startsWith(prefix) && path !== docFolder)
+      .map(path => path.slice(prefix.length).split('/')[0]))]
+  }, [allFolderPaths, docFolder])
+  const sortedChildFolders = useMemo(() => [...childFolders].sort((a,b) => a.localeCompare(b) * (docSortDir === 'asc' ? 1 : -1)), [childFolders, docSortDir])
+  const sortedPinnedInFolder = useMemo(() => files.filter(file => file.group_pinned), [files])
+  const sortedRegularInFolder = useMemo(() => files.filter(file => !file.group_pinned), [files])
+  const breadcrumbParts = useMemo(() => splitFolderPath(docFolder), [docFolder])
+  const allDocKeys = useMemo(() => [...sortedPinnedInFolder.map(file => file.id),
+    ...sortedChildFolders.map(name => `folder:${docFolder ? `${docFolder}/` : ''}${name}`),
+    ...sortedRegularInFolder.map(file => file.id)], [sortedPinnedInFolder, sortedChildFolders, sortedRegularInFolder, docFolder])
 
   const {
     previewEmlFileRef,
@@ -1038,6 +1040,9 @@ export function CaseDetail({
     handleDocItemClick,
   } = useCaseDocsSelection({
     allDocKeys,
+    hasMore: documentPages.hasMore,
+    loading: documentPages.busy,
+    onLoadMore: documentPages.loadMore,
     caseDocPanel,
     docMenu,
     commentOpen,
@@ -1048,6 +1053,10 @@ export function CaseDetail({
     previewEmlFile: (f) => previewEmlFileRef.current(f),
     openCaseFile: (f) => openCaseFileRef.current(f),
   })
+
+  useEffect(() => {
+    setSelectedDocSet(new Set())
+  }, [matterScopeId, docFolder, docSearch, filesRevision, setSelectedDocSet])
 
   function resetContactPickForm() {
     setPickMatterCcId('none')
@@ -1257,6 +1266,11 @@ export function CaseDetail({
               downloadCaseExportZip={downloadCaseExportZip}
               setCaseDocPanel={setCaseDocPanel}
               onRefresh={onRefresh}
+              pageLoading={documentPages.busy}
+              pageError={documentPages.error}
+              hasMore={documentPages.hasMore}
+              onLoadMore={documentPages.loadMore}
+              folderSummaries={documentPages.folders.summaries}
               docSearch={docSearch}
               setDocSearch={setDocSearch}
               docSortKey={docSortKey}
@@ -1346,8 +1360,9 @@ export function CaseDetail({
               propertyBaseline={propertyBaseline}
               setPropertyDetails={setPropertyDetails}
               setActionErr={setActionErr}
-              onOpenSearchFile={(fileId) => {
-                const f = files.find((x) => x.id === fileId)
+              onOpenSearchFile={async (fileId) => {
+                try {
+                const f = files.find((x) => x.id === fileId) ?? await apiFetch<FileSummary>(`/cases/${caseId}/files/${fileId}/metadata`, {token})
                 if (!f) {
                   setActionErr('Search document not found — try Sync with Casera, then refresh.')
                   return
@@ -1355,6 +1370,7 @@ export function CaseDetail({
                 setDocFolder((f.folder_path || 'Searches').trim() || 'Searches')
                 setCaseDocPanel('documents')
                 void openCaseFile(f)
+                } catch { setActionErr('Search document unavailable. Refresh and try again.') }
               }}
               caseContacts={caseContacts}
               contactAddOpen={contactAddOpen}

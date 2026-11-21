@@ -53,5 +53,6 @@ export type CaseDocsBrowserProps = {
     >
   >
   portalFolderGrants: CasePortalFolderAccessGrantOut[]
+  folderSummaries?: Record<string, string>
   files: FileSummary[]
 }
