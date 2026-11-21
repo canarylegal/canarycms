@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 import uuid
 from datetime import date, datetime, timedelta, timezone
@@ -14,10 +16,13 @@ from app.models import (
     CalendarEventEmailAlertSubscription,
     CalendarEventNotificationSent,
     CaseEvent,
+    NotificationOutbox,
     MatterSubTypeEventTemplate,
     User,
 )
-from app.alert_dispatch import AlertKind, dispatch_alert
+from app.alert_dispatch import AlertKind
+from app.notification_outbox import enqueue_staff
+from fastapi import HTTPException
 from app.firm_email_service import resolve_alert_transport
 
 log = logging.getLogger(__name__)
@@ -198,9 +203,7 @@ def _should_fire(
 
 
 def process_due_calendar_notifications(db: Session) -> int:
-    """Send due reminder e-mails; returns number of messages sent."""
-    if resolve_alert_transport(db) is None:
-        return 0
+    """Queue due reminders without network I/O; caller commits the batch."""
 
     today = datetime.now(timezone.utc).date()
     rows = (
@@ -219,41 +222,46 @@ def process_due_calendar_notifications(db: Session) -> int:
             continue
         anchor = sub.anchor_date
         on_day, every_n, every_unit = _template_rules(db, sub.matter_template_id)
-        kinds = _should_fire(today, anchor, on_day=on_day, every_n=every_n, every_unit=every_unit)
+        kinds = _should_fire(
+            today, anchor, on_day=on_day, every_n=every_n, every_unit=every_unit
+        )
         for kind in kinds:
-            exists = (
-                db.execute(
-                    select(CalendarEventNotificationSent.id).where(
-                        CalendarEventNotificationSent.user_id == sub.user_id,
-                        CalendarEventNotificationSent.event_key == sub.event_key,
-                        CalendarEventNotificationSent.sent_day == today,
-                        CalendarEventNotificationSent.kind == kind,
-                    )
+            exists = db.execute(
+                select(CalendarEventNotificationSent.id).where(
+                    CalendarEventNotificationSent.user_id == sub.user_id,
+                    CalendarEventNotificationSent.event_key == sub.event_key,
+                    CalendarEventNotificationSent.sent_day == today,
+                    CalendarEventNotificationSent.kind == kind,
                 )
-                .scalar_one_or_none()
-            )
+            ).scalar_one_or_none()
             if exists:
                 continue
-            sent = dispatch_alert(
+            event_key = reminder_key(sub, today, kind)
+            if (
+                db.scalar(
+                    select(NotificationOutbox.id).where(
+                        NotificationOutbox.kind == "calendar_event_reminder",
+                        NotificationOutbox.event_key == event_key,
+                        NotificationOutbox.recipient_user_id == user.id,
+                    )
+                )
+                is not None
+            ):
+                continue
+            queued = enqueue_staff(
                 db,
-                AlertKind.calendar_event_reminder,
-                to_email=user.email,
+                kind=AlertKind.calendar_event_reminder,
+                case_id=None,
+                event_key=event_key,
+                recipient_user_id=user.id,
+                actor_id=None,
                 context={
                     "title": sub.title_snapshot or "Event",
                     "anchor_label": anchor.isoformat() if anchor else "unknown",
                 },
             )
-            if not sent:
+            if queued is None:
                 continue
-            db.add(
-                CalendarEventNotificationSent(
-                    id=uuid.uuid4(),
-                    user_id=sub.user_id,
-                    event_key=sub.event_key,
-                    sent_day=today,
-                    kind=kind,
-                )
-            )
             sent_count += 1
     return sent_count
 
@@ -332,3 +340,59 @@ def refresh_case_event_subscription_snapshot(db: Session, *, viewer_id: uuid.UUI
         all_day=bool(cad),
         matter_template_id=case_event.template_id,
     )
+
+
+def reminder_fingerprint(sub):
+    values = [
+        sub.event_key,
+        str(sub.anchor_date),
+        str(sub.anchor_at),
+        sub.title_snapshot,
+        str(sub.matter_template_id),
+        bool(sub.all_day),
+    ]
+    return hashlib.sha256(json.dumps(values).encode()).hexdigest()
+
+
+def reminder_key(sub, day, kind):
+    return f"{sub.id}:{day.isoformat()}:{kind}:{reminder_fingerprint(sub)}"
+
+
+def require_reminder_access(db, row, recipient):
+    """Fail closed for revoked, changed or expired calendar subscriptions."""
+    from app.calendar_service import resolve_calendar_access
+    from app.deps import require_case_access
+
+    try:
+        sid, day, kind, fingerprint = row.event_key.split(":")
+        sub = db.get(CalendarEventEmailAlertSubscription, uuid.UUID(sid))
+        today = datetime.now(timezone.utc).date()
+        if (
+            sub is None
+            or not sub.enabled
+            or sub.user_id != recipient.id
+            or day != today.isoformat()
+            or fingerprint != reminder_fingerprint(sub)
+        ):
+            raise ValueError("Stale subscription")
+        on_day, every_n, every_unit = _template_rules(db, sub.matter_template_id)
+        if kind not in _should_fire(
+            today,
+            sub.anchor_date,
+            on_day=on_day,
+            every_n=every_n,
+            every_unit=every_unit,
+        ):
+            raise ValueError("Reminder no longer due")
+        parts = sub.event_key.split(SEP, 2)
+        if parts[0] == "c" and len(parts) == 2:
+            event = db.get(CaseEvent, uuid.UUID(parts[1]))
+            if event is None:
+                raise ValueError("Event removed")
+            require_case_access(event.case_id, recipient, db)
+        elif parts[0] == "r" and len(parts) == 3:
+            resolve_calendar_access(db, recipient, uuid.UUID(parts[1]))
+        else:
+            raise ValueError("Unknown calendar source")
+    except (ValueError, TypeError):
+        raise HTTPException(403, "Reminder subscription changed or expired") from None

@@ -537,14 +537,23 @@ def upload_file(
     grant = get_grant_for_contact(db, contact_id=contact.id, grant_id=grant_id)
     if getattr(session, "audience", "client") == "exchange" and session.case_id:
         if str(grant.case_id) != session.case_id:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Area not found")
-    target_folder = ensure_upload_folder_allowed(grant=grant, folder=folder or grant.folder_path or "")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Area not found"
+            )
+    target_folder = ensure_upload_folder_allowed(
+        grant=grant, folder=folder or grant.folder_path or ""
+    )
     case = db.get(Case, grant.case_id)
     if case is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Matter not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Matter not found"
+        )
     owner = db.get(User, case.fee_earner_user_id)
     if owner is None or not owner.is_active:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Matter fee earner missing")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Matter fee earner missing",
+        )
     if not user_may_be_fee_earner(owner, db):
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -561,13 +570,20 @@ def upload_file(
         folder_path=target_folder,
     )
     try:
-        size = stream_upload_to_path(paths.abs_path, upload.file, max_bytes=max_upload_bytes())
+        size = stream_upload_to_path(
+            paths.abs_path, upload.file, max_bytes=max_upload_bytes()
+        )
     except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail=str(e)) from e
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail=str(e)
+        ) from e
 
     disk_written = True
+    commit_attempted = False
     try:
-        mime = upload.content_type or (mimetypes.guess_type(original)[0] or "application/octet-stream")
+        mime = upload.content_type or (
+            mimetypes.guess_type(original)[0] or "application/octet-stream"
+        )
         now = datetime.now(timezone.utc)
         row = File(
             id=file_id,
@@ -616,12 +632,15 @@ def upload_file(
             contact=contact,
             grant=grant,
             filename=row.original_filename,
+            file_id=row.id,
         )
+        commit_attempted = True
         db.commit()
         disk_written = False
     finally:
-        if disk_written:
+        if disk_written and not commit_attempted:
             unlink_stored_file(paths.abs_path)
+        # Retain bytes after an ambiguous commit; never delete a possibly committed file.
 
     db.refresh(row)
     return file_out(grant, row)

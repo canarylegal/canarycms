@@ -27,16 +27,18 @@ def _run_once() -> None:
             n = process_due_calendar_notifications(db)
             db.commit()
             if n:
-                log.info("calendar_notification_job: sent %s reminder e-mail(s)", n)
+                log.info("calendar_notification_job: queued %s reminder e-mail(s)", n)
             return
-        got = db.execute(text(f"SELECT pg_try_advisory_lock({_ADVISORY_LOCK_KEY})")).scalar()
+        got = db.execute(
+            text(f"SELECT pg_try_advisory_lock({_ADVISORY_LOCK_KEY})")
+        ).scalar()
         if not got:
             return
         locked = True
         n = process_due_calendar_notifications(db)
         db.commit()
         if n:
-            log.info("calendar_notification_job: sent %s reminder e-mail(s)", n)
+            log.info("calendar_notification_job: queued %s reminder e-mail(s)", n)
     except Exception:
         log.exception("calendar_notification_job: run failed")
         db.rollback()

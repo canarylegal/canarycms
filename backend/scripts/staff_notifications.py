@@ -16,6 +16,7 @@ from app.notification_outbox import deliver, review, summary, _admin
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     subs = parser.add_subparsers(dest="command", required=True)
+    subs.add_parser("diagnostics")
     listing = subs.add_parser("list")
     listing.add_argument(
         "--state",
@@ -57,9 +58,14 @@ def main():
             result = [deliver(identity, actor_id=args.actor_id) for identity in ids]
         else:
             with SessionLocal() as db:
-                if args.command in ("list", "inspect"):
+                if args.command in ("list", "inspect", "diagnostics"):
                     begin_report_snapshot(db)
-                if args.command == "list":
+                if args.command == "diagnostics":
+                    from app.notification_diagnostics import diagnostics
+
+                    result = diagnostics(db)
+                    db.rollback()
+                elif args.command == "list":
                     query = (
                         select(NotificationOutbox)
                         .order_by(NotificationOutbox.created_at, NotificationOutbox.id)
@@ -109,7 +115,9 @@ def main():
         return (
             2
             if any(
-                r.get("state") in ("failed", "uncertain", "sending") for r in results
+                r.get("attention_required")
+                or r.get("state") in ("failed", "uncertain", "sending")
+                for r in results
             )
             else 0
         )

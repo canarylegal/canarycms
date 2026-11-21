@@ -24,6 +24,14 @@ from app.upload_receipts import lock_receipt
 
 STAFF_KINDS = frozenset(
     (
+        "portal_staff_upload",
+        "portal_form_completed",
+        "portal_quote_accepted",
+        "portal_quote_declined",
+        "calendar_event_reminder",
+        "docusign_sign_sent_staff",
+        "docusign_sign_completed_staff",
+        "casera_search_result",
         "invoice_approved",
         "invoice_rejected",
         "anticipated_payment_approved",
@@ -67,6 +75,8 @@ def enqueue_staff(
         )
     if not event_key or len(event_key) > 240:
         raise ValueError("A bounded stable event identity is required")
+    if case_id is None and kind != "calendar_event_reminder":
+        raise ValueError("Matter staff alerts require a case identity")
     recipient = db.get(User, recipient_user_id)
     if (
         recipient is None
@@ -174,7 +184,14 @@ def deliver(
                 code = "recipient_changed_or_inactive"
             else:
                 try:
-                    require_case_access(row.case_id, recipient, db)
+                    if row.kind == "calendar_event_reminder":
+                        from app.calendar_email_alert_service import (
+                            require_reminder_access,
+                        )
+
+                        require_reminder_access(db, row, recipient)
+                    else:
+                        require_case_access(row.case_id, recipient, db)
                 except HTTPException:
                     code = "recipient_access_denied"
         if code is None:

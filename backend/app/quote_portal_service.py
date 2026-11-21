@@ -10,6 +10,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.notification_outbox import enqueue_staff
 from app.alert_dispatch import AlertKind, dispatch_alert, firm_alerts_configured, portal_public_url
 from app.audit import log_event
 from app.models import (
@@ -461,25 +462,29 @@ def _notify_staff_quote_response(
     db: Session,
     *,
     case_id: uuid.UUID,
+    delivery_id: uuid.UUID,
     contact: Contact,
     filename: str,
     accepted: bool,
     decline_reason: str | None,
 ) -> None:
-    if not firm_alerts_configured(db):
-        return
     from app.portal_notifications import staff_matter_context
 
-    kind = AlertKind.portal_quote_accepted if accepted else AlertKind.portal_quote_declined
+    kind = (
+        AlertKind.portal_quote_accepted if accepted else AlertKind.portal_quote_declined
+    )
     matter_ctx = staff_matter_context(db, case_id)
     for user in list_portal_staff_recipient_users(db, case_id):
         addr = (user.email or "").strip()
         if not addr:
             continue
-        dispatch_alert(
+        enqueue_staff(
             db,
-            kind,
-            to_email=addr,
+            kind=kind,
+            case_id=case_id,
+            event_key=str(delivery_id),
+            recipient_user_id=user.id,
+            actor_id=None,
             context={
                 "contact_name": contact_display_name(contact),
                 "quote_filename": filename,
@@ -497,14 +502,27 @@ def respond_to_quote_delivery(
     accepted: bool,
     decline_reason: str | None,
 ) -> QuotePortalDelivery:
+    delivery = db.scalar(
+        select(QuotePortalDelivery)
+        .where(QuotePortalDelivery.id == delivery.id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    if delivery is None:
+        raise HTTPException(404, "Quote not found")
     if delivery.contact_id != contact.id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not allowed")
     if delivery.status != QuotePortalDeliveryStatus.pending:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="This quote is no longer awaiting a response")
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This quote is no longer awaiting a response",
+        )
 
     row = db.get(File, delivery.file_id)
     if row is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Quote file not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Quote file not found"
+        )
     current_version = int(row.version or 1)
     if current_version != int(delivery.file_version_at_send):
         delivery.status = QuotePortalDeliveryStatus.superseded
@@ -517,7 +535,11 @@ def respond_to_quote_delivery(
         )
 
     now = utcnow()
-    delivery.status = QuotePortalDeliveryStatus.accepted if accepted else QuotePortalDeliveryStatus.declined
+    delivery.status = (
+        QuotePortalDeliveryStatus.accepted
+        if accepted
+        else QuotePortalDeliveryStatus.declined
+    )
     delivery.responded_at = now
     reason = (decline_reason or "").strip() or None
     if not accepted:
@@ -554,6 +576,7 @@ def respond_to_quote_delivery(
         case_id=delivery.case_id,
         contact=contact,
         filename=row.original_filename,
+        delivery_id=delivery.id,
         accepted=accepted,
         decline_reason=reason,
     )

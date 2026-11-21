@@ -731,15 +731,22 @@ def _save_snapshot_on_matter(
         contact=contact,
         completed_at=completed_at,
     )
-    existing = db.get(File, submission.snapshot_file_id) if submission.snapshot_file_id else None
+    existing = (
+        db.get(File, submission.snapshot_file_id)
+        if submission.snapshot_file_id
+        else None
+    )
     if existing is not None and existing.case_id == case.id:
-        paths = case_file_paths(
-            case_id=case.id,
+        from app.document_durability import create_document_bytes
+
+        paths = create_document_bytes(
+            data,
+            root=FILES_ROOT,
             file_id=existing.id,
-            original_filename=existing.original_filename,
-            folder_path=existing.folder_path or "",
+            filename=existing.original_filename,
         )
-        paths.abs_path.write_bytes(data)
+        existing.storage_path = paths.rel_path
+        existing.checksum = paths.checksum
         existing.size_bytes = len(data)
         existing.updated_at = datetime.utcnow()
         db.add(existing)
@@ -899,12 +906,24 @@ def complete_submission(
     contact: Contact,
     responses_in: dict[str, Any],
 ) -> PortalFormSubmission:
+    submission = db.scalar(
+        select(PortalFormSubmission)
+        .where(PortalFormSubmission.id == submission.id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    if submission is None or submission.contact_id != contact.id:
+        raise HTTPException(404, "Form not found")
     if submission.status != PortalFormSubmissionStatus.pending:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Form is not pending")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Form is not pending"
+        )
 
     template = db.get(PortalFormTemplate, submission.template_id)
     if template is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Template not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Template not found"
+        )
     fields = load_template_fields(db, template.id)
     merged = dict(submission.responses or {})
     merged.update(responses_in)
@@ -912,10 +931,19 @@ def complete_submission(
 
     case = db.get(Case, submission.case_id)
     if case is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Case not found")
-    owner = db.get(User, submission.sent_by_user_id) if submission.sent_by_user_id else db.get(User, case.fee_earner_user_id)
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Case not found"
+        )
+    owner = (
+        db.get(User, submission.sent_by_user_id)
+        if submission.sent_by_user_id
+        else db.get(User, case.fee_earner_user_id)
+    )
     if owner is None:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Could not resolve file owner")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Could not resolve file owner",
+        )
 
     now = utcnow()
     submission.responses = validated
@@ -958,6 +986,7 @@ def complete_submission(
         case_id=submission.case_id,
         contact=contact,
         form_name=template.name,
+        submission_id=submission.id,
         matter_label=client_matter_description(case),
     )
     return submission
