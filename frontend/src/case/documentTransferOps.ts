@@ -77,7 +77,7 @@ export async function uploadFilesToCaseFolder(
   progress: UploadProgress = { completed: 0 },
   current: () => boolean = () => true,
 ): Promise<void> {
-  progress.keys ??= incomingFiles.map(uploadKey)
+  progress.keys ??= incomingFiles.map(requestKey)
   progress.failures ??= []
   progress.uploaded ??= []
   while (progress.completed < incomingFiles.length && current()) {
