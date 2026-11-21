@@ -51,7 +51,7 @@ Operational guides live under **[docs/](docs/)**:
 | [docs/FIRM_PACKAGE.md](docs/FIRM_PACKAGE.md) | Attach a private firm package (precedents, portal forms, assets) |
 | [`.env.proprietary.example`](.env.proprietary.example) | White-label / fork brand profile (`CANARY_BRAND_*`) |
 
-Mail add-on detail: [thunderbird-addin/README.md](thunderbird-addin/README.md), [frontend/public/outlook-addin/README.md](frontend/public/outlook-addin/README.md).
+Mail add-on detail: [Canary Thunderbird](https://github.com/canarylegal/canary-thunderbird), [frontend/public/outlook-addin/README.md](frontend/public/outlook-addin/README.md).
 
 **Architecture (maintainers):** how Canary’s maintained core relates to optional product capabilities and proprietary firm packages is documented **internally** (not in this public repository). Firm-specific content and customisation belong beside Canary, not in public `canarycms`. See [docs/FIRM_PACKAGE.md](docs/FIRM_PACKAGE.md) for the public attach contract.
 

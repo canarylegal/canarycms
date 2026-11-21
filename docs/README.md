@@ -12,7 +12,7 @@ Guides for deploying, operating, and troubleshooting a Canary installation.
 
 **Component guides** (live next to the code they describe):
 
-- [thunderbird-addin/README.md](../thunderbird-addin/README.md) — Thunderbird add-on build, sign, and install
+- [Canary Thunderbird](https://github.com/canarylegal/canary-thunderbird) — Thunderbird source, tests, offline builds and installation
 - [frontend/public/outlook-addin/README.md](../frontend/public/outlook-addin/README.md) — Outlook add-in manifest and M365 deployment
 - [frontend/README.md](../frontend/README.md) — Frontend development notes
 
