@@ -17,6 +17,7 @@ from app.inter_matter_journal_service import create_inter_matter_journal, list_i
 from app.models import User
 from app.permission_checks import user_may_access_accounts_workspace
 from app.schemas.bank import (
+    BankVersionIn, BankCorrectionIn, BankRestoreIn,
     BankReconciliationCreate,
     BankReconciliationOut,
     BankReconciliationUpdate,
@@ -68,6 +69,7 @@ def _bank_out(row) -> FirmBankAccountOut:
 
 def _line_out(row) -> BankStatementLineOut:
     return BankStatementLineOut(
+        version=row.version,
         id=row.id,
         import_id=row.import_id,
         firm_bank_account_id=row.firm_bank_account_id,
@@ -84,6 +86,7 @@ def _line_out(row) -> BankStatementLineOut:
 
 def _recon_out(row) -> BankReconciliationOut:
     return BankReconciliationOut(
+        version=row.version,
         id=row.id,
         firm_bank_account_id=row.firm_bank_account_id,
         period_end_date=row.period_end_date,
@@ -127,7 +130,7 @@ async def import_bank_statement(
         actor=user,
     )
     db.commit()
-    lines = recon.list_statement_lines(db, firm_bank_account_id=firm_bank_account_id, unmatched_only=False)
+    lines = recon.list_statement_lines(db, firm_bank_account_id=firm_bank_account_id, import_id=imp.id, limit=None)
     # Only return lines from this import
     from_import = [l for l in lines if l.import_id == imp.id]
     return BankStatementImportOut(
@@ -164,7 +167,7 @@ def match_statement_line(
     db: Session = Depends(get_db),
 ) -> BankStatementLineOut:
     _require_accounts(user, db)
-    row = recon.match_line(db, line_id=line_id, ledger_pair_id=payload.ledger_pair_id, actor=user)
+    row = recon.match_line(db, line_id=line_id, ledger_pair_id=payload.ledger_pair_id, actor=user, expected_version=payload.expected_version)
     db.commit()
     db.refresh(row)
     return _line_out(row)
@@ -173,11 +176,12 @@ def match_statement_line(
 @router.post("/statements/lines/{line_id}/unmatch", response_model=BankStatementLineOut)
 def unmatch_statement_line(
     line_id: uuid.UUID,
+    payload: BankVersionIn,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> BankStatementLineOut:
     _require_accounts(user, db)
-    row = recon.unmatch_line(db, line_id=line_id)
+    row = recon.unmatch_line(db, line_id=line_id, actor=user, expected_version=payload.expected_version)
     db.commit()
     db.refresh(row)
     return _line_out(row)
@@ -186,14 +190,31 @@ def unmatch_statement_line(
 @router.post("/statements/lines/{line_id}/ignore", response_model=BankStatementLineOut)
 def ignore_statement_line(
     line_id: uuid.UUID,
+    payload: BankVersionIn,
     ignored: bool = True,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> BankStatementLineOut:
     _require_accounts(user, db)
-    row = recon.ignore_line(db, line_id=line_id, ignored=ignored)
+    row = recon.ignore_line(db, line_id=line_id, ignored=ignored, actor=user, expected_version=payload.expected_version)
     db.commit()
     db.refresh(row)
+    return _line_out(row)
+
+
+@router.get("/statements/lines/{line_id}/history")
+def statement_history(line_id: uuid.UUID, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    import json
+    return [{'id': str(event.id), 'action': event.action, 'created_at': event.created_at,
+             'actor_user_id': event.actor_user_id, 'changes': json.loads(event.meta_json)}
+            for event in recon.line_history(db, line_id=line_id, actor=user)]
+
+
+@router.post("/statements/lines/{line_id}/restore", response_model=BankStatementLineOut)
+def restore_statement(line_id: uuid.UUID, payload: BankRestoreIn,
+                      user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    row = recon.restore_line(db, line_id=line_id, actor=user, **payload.model_dump())
+    db.commit()
     return _line_out(row)
 
 
@@ -254,11 +275,7 @@ def update_recon(
     row = db.get(BankReconciliation, rec_id)
     if row is None:
         raise HTTPException(status_code=404, detail="Reconciliation not found")
-    if payload.statement_balance_pence is not None:
-        row.statement_balance_pence = payload.statement_balance_pence
-    if payload.notes is not None:
-        row.notes = payload.notes
-    row = recon.refresh_bank_reconciliation(db, row)
+    row = recon.refresh_bank_reconciliation(db, row, actor=user, **payload.model_dump())
     db.commit()
     db.refresh(row)
     return _recon_out(row)
@@ -267,6 +284,7 @@ def update_recon(
 @router.post("/reconciliations/{rec_id}/approve", response_model=BankReconciliationOut)
 def approve_recon(
     rec_id: uuid.UUID,
+    payload: BankVersionIn,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> BankReconciliationOut:
@@ -276,9 +294,21 @@ def approve_recon(
     row = db.get(BankReconciliation, rec_id)
     if row is None:
         raise HTTPException(status_code=404, detail="Reconciliation not found")
-    row = recon.approve_bank_reconciliation(db, actor=user, row=row)
+    row = recon.approve_bank_reconciliation(db, actor=user, row=row, expected_version=payload.expected_version)
     db.commit()
     db.refresh(row)
+    return _recon_out(row)
+
+
+@router.post("/reconciliations/{rec_id}/reopen", response_model=BankReconciliationOut)
+def reopen_recon(rec_id: uuid.UUID, payload: BankCorrectionIn,
+                 user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.models import BankReconciliation
+    row = db.get(BankReconciliation, rec_id)
+    if row is None:
+        raise HTTPException(404, 'Reconciliation not found')
+    row = recon.reopen_bank_reconciliation(db, row=row, actor=user, **payload.model_dump())
+    db.commit()
     return _recon_out(row)
 
 

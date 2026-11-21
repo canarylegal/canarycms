@@ -3,30 +3,28 @@
 from __future__ import annotations
 
 import uuid
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timezone, timedelta, time
 
 from fastapi import HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import select, func, case as sql_case
 from sqlalchemy.orm import Session
 
 from app.audit import log_event
 from app.models import Case, ClientAccountReconciliation, FirmSettings, ReconciliationStatus, User
-from app.reports_service import balances_by_case_ids
+from app.models import LedgerAccount, LedgerAccountType, LedgerEntry
 from app.permission_checks import user_may_approve_ledger
 
 
-def firm_wide_ledger_totals(db: Session) -> tuple[int, int]:
-    """Sum approved client and office ledger balances across all matters."""
-    case_ids = list(db.execute(select(Case.id)).scalars().all())
-    if not case_ids:
-        return 0, 0
-    bal = balances_by_case_ids(case_ids, db)
-    client_total = office_total = 0
-    for cid in case_ids:
-        cp, op = bal.get(cid, (0, 0))
-        client_total += cp
-        office_total += op
-    return client_total, office_total
+def firm_wide_ledger_totals(db: Session, as_of: date | None = None) -> tuple[int, int]:
+    """Complete approved balances at an inclusive UTC period boundary."""
+    signed = sql_case((LedgerEntry.direction == 'credit', LedgerEntry.amount_pence), else_=-LedgerEntry.amount_pence)
+    query = (select(LedgerAccount.account_type, func.sum(signed)).join(LedgerEntry)
+        .where(LedgerEntry.is_approved.is_(True), LedgerEntry.is_anticipated.is_(False))
+        .group_by(LedgerAccount.account_type))
+    if as_of:
+        query = query.where(LedgerEntry.posted_at < datetime.combine(as_of + timedelta(days=1), time.min, tzinfo=timezone.utc))
+    balances = dict(db.execute(query).all())
+    return int(balances.get(LedgerAccountType.client, 0)), int(balances.get(LedgerAccountType.office, 0))
 
 
 def compute_difference_pence(*, bank_statement_balance_pence: int, ledger_client_total_pence: int) -> int:
@@ -118,7 +116,7 @@ def create_reconciliation(
             status_code=status.HTTP_409_CONFLICT,
             detail="A reconciliation already exists for that period end date.",
         )
-    client_total, office_total = firm_wide_ledger_totals(db)
+    client_total, office_total = firm_wide_ledger_totals(db, period_end_date)
     diff = compute_difference_pence(
         bank_statement_balance_pence=bank_statement_balance_pence,
         ledger_client_total_pence=client_total,
@@ -162,9 +160,10 @@ def update_reconciliation(
     notes: str | None = None,
     refresh_ledger_totals: bool = True,
 ) -> ClientAccountReconciliation:
+    db.refresh(row, with_for_update=True)
     _assert_draft(row)
     if refresh_ledger_totals:
-        client_total, office_total = firm_wide_ledger_totals(db)
+        client_total, office_total = firm_wide_ledger_totals(db, row.period_end_date)
         row.ledger_client_total_pence = client_total
         row.ledger_office_total_pence = office_total
     if bank_statement_balance_pence is not None:
@@ -196,12 +195,16 @@ def update_reconciliation(
 
 
 def approve_reconciliation(db: Session, *, actor: User, row: ClientAccountReconciliation) -> ClientAccountReconciliation:
+    db.refresh(row, with_for_update=True)
     _assert_draft(row)
     if not user_may_approve_ledger(actor, db):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You are not permitted to approve reconciliations.",
         )
+    row.ledger_client_total_pence, row.ledger_office_total_pence = firm_wide_ledger_totals(db, row.period_end_date)
+    row.difference_pence = compute_difference_pence(bank_statement_balance_pence=row.bank_statement_balance_pence,
+        ledger_client_total_pence=row.ledger_client_total_pence)
     _assert_approvable(difference_pence=row.difference_pence, notes=row.notes)
     now = datetime.now(timezone.utc)
     row.status = ReconciliationStatus.approved

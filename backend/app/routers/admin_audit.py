@@ -23,6 +23,17 @@ ACCOUNTS_AUDIT_ACTIONS = (
     "reconciliation.create",
     "reconciliation.update",
     "reconciliation.approve",
+    "case.invoice.allocate",
+    "bank.statement.import",
+    "bank.statement.match",
+    "bank.statement.unmatch",
+    "bank.statement.ignore",
+    "bank.statement.unignore",
+    "bank.statement.restore",
+    "bank.reconciliation.create",
+    "bank.reconciliation.update",
+    "bank.reconciliation.approve",
+    "bank.reconciliation.reopen",
 )
 
 router = APIRouter(prefix="/admin/audit-events", tags=["admin-audit"])

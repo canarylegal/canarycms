@@ -54,6 +54,7 @@ class FirmBankAccountUpdate(BaseModel):
 
 
 class BankStatementLineOut(BaseModel):
+    version: int
     id: uuid.UUID
     import_id: uuid.UUID
     firm_bank_account_id: uuid.UUID
@@ -76,7 +77,20 @@ class BankStatementImportOut(BaseModel):
     lines: list[BankStatementLineOut] = Field(default_factory=list)
 
 
-class BankStatementMatchIn(BaseModel):
+class BankVersionIn(BaseModel):
+    expected_version: int = Field(ge=0, strict=True)
+    model_config = {"extra": "forbid"}
+
+
+class BankCorrectionIn(BankVersionIn):
+    reason: str = Field(min_length=1, max_length=1000)
+
+
+class BankRestoreIn(BankCorrectionIn):
+    event_id: uuid.UUID
+
+
+class BankStatementMatchIn(BankVersionIn):
     ledger_pair_id: uuid.UUID
 
     model_config = {"extra": "forbid"}
@@ -95,6 +109,7 @@ class UnpresentedLedgerLegOut(BaseModel):
 
 
 class BankReconciliationOut(BaseModel):
+    version: int
     id: uuid.UUID
     firm_bank_account_id: uuid.UUID
     period_end_date: date
@@ -118,7 +133,7 @@ class BankReconciliationCreate(BaseModel):
     model_config = {"extra": "forbid"}
 
 
-class BankReconciliationUpdate(BaseModel):
+class BankReconciliationUpdate(BankVersionIn):
     statement_balance_pence: int | None = None
     notes: str | None = Field(default=None, max_length=4000)
 

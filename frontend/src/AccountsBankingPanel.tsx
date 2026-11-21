@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { apiFetch, apiUrl, applyAuthHeaders, type ApiError } from './api'
 import type {
   BankReconciliationOut,
@@ -37,6 +37,7 @@ export function AccountsBankingPanel({
   setErr: (v: string | null) => void
   active: boolean
 }) {
+  const loadSequence = useRef(0)
   const [banks, setBanks] = useState<FirmBankAccountOut[]>([])
   const [bankId, setBankId] = useState('')
   const [lines, setLines] = useState<BankStatementLineOut[]>([])
@@ -63,9 +64,11 @@ export function AccountsBankingPanel({
   )
 
   const load = useCallback(async () => {
+    const sequence = ++loadSequence.current
     setErr(null)
     try {
       const b = await apiFetch<FirmBankAccountOut[]>('/accounts/banking/bank-accounts?kind=client', { token })
+      if (sequence !== loadSequence.current) return
       setBanks(b)
       const id = bankId && b.some((x) => x.id === bankId) ? bankId : b.find((x) => x.is_default)?.id || b[0]?.id || ''
       if (id !== bankId) setBankId(id)
@@ -92,6 +95,7 @@ export function AccountsBankingPanel({
         apiFetch<XeroSettingsOut>('/accounts/banking/xero/settings', { token }),
         apiFetch<XeroExportOut[]>('/accounts/banking/xero/exports', { token }),
       ])
+      if (sequence !== loadSequence.current) return
       setLines(l)
       setUnpresented(u)
       setRecons(r)
@@ -100,13 +104,14 @@ export function AccountsBankingPanel({
       setXero(xs)
       setExports(xe)
     } catch (e) {
-      setErr((e as ApiError).message ?? 'Could not load banking')
+      if (sequence === loadSequence.current) setErr((e as ApiError).message ?? 'Could not load banking')
     }
   }, [token, bankId, setErr])
 
   useEffect(() => {
     if (!active) return
     void load()
+    return () => { loadSequence.current += 1 }
   }, [active, load])
 
   async function importFile(file: File) {
@@ -149,12 +154,29 @@ export function AccountsBankingPanel({
       await apiFetch(`/accounts/banking/statements/lines/${lineId}/match`, {
         token,
         method: 'POST',
-        json: { ledger_pair_id: matchPairId.trim() },
+        json: { ledger_pair_id: matchPairId.trim(), expected_version: lines.find(l => l.id === lineId)?.version },
       })
       setMatchPairId('')
       await load()
     } catch (e) {
-      setErr((e as ApiError).message ?? 'Match failed')
+      await load().catch(() => undefined)
+      setErr((e as ApiError).message ?? 'Could not confirm the match. Refresh to check its status before retrying.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function unmatchLine(line: BankStatementLineOut) {
+    setBusy(true)
+    setErr(null)
+    try {
+      await apiFetch(`/accounts/banking/statements/lines/${line.id}/unmatch`, {
+        token, method: 'POST', json: { expected_version: line.version },
+      })
+      await load()
+    } catch (e) {
+      await load().catch(() => undefined)
+      setErr((e as ApiError).message ?? 'Could not confirm the correction. Refresh before retrying.')
     } finally {
       setBusy(false)
     }
@@ -191,7 +213,7 @@ export function AccountsBankingPanel({
     setBusy(true)
     setErr(null)
     try {
-      await apiFetch(`/accounts/banking/reconciliations/${id}/approve`, { token, method: 'POST' })
+      await apiFetch(`/accounts/banking/reconciliations/${id}/approve`, { token, method: 'POST', json: { expected_version: recons.find(r => r.id === id)?.version } })
       await load()
     } catch (e) {
       setErr((e as ApiError).message ?? 'Approve failed')
@@ -325,7 +347,16 @@ export function AccountsBankingPanel({
       <div className="row" style={{ gap: 12, flexWrap: 'wrap', alignItems: 'end' }}>
         <label className="stack" style={{ gap: 4 }}>
           <span>Client bank</span>
-          <select className="input" value={bankId} onChange={(e) => setBankId(e.target.value)} disabled={busy}>
+          <select className="input" value={bankId} onChange={(e) => {
+            loadSequence.current += 1
+            setBankId(e.target.value)
+            setLines([])
+            setUnpresented([])
+            setRecons([])
+            setEoms([])
+            setMatchPairId('')
+            setMsg(null)
+          }} disabled={busy}>
             {banks.length === 0 ? <option value="">No banks configured</option> : null}
             {banks.map((b) => (
               <option key={b.id} value={b.id}>
@@ -418,10 +449,7 @@ export function AccountsBankingPanel({
                         className="btn"
                         disabled={busy}
                         onClick={() =>
-                          void apiFetch(`/accounts/banking/statements/lines/${l.id}/unmatch`, {
-                            token,
-                            method: 'POST',
-                          }).then(load)
+                          void unmatchLine(l)
                         }
                       >
                         Unmatch

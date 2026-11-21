@@ -5,11 +5,12 @@ import csv
 import io
 import re
 import uuid
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timezone, timedelta, time
+from decimal import Decimal, InvalidOperation
 from xml.etree import ElementTree as ET
 
 from fastapi import HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import select, func, case as sql_case
 from sqlalchemy.orm import Session
 
 from app.models import (
@@ -23,6 +24,9 @@ from app.models import (
     User,
 )
 from app.permission_checks import user_may_approve_ledger
+from app.audit import log_event
+from app.bank_integrity import lock_bank, require_banking, require_open_period
+from app.bank_matching_service import match_line, unmatch_line, ignore_line, line_history, restore_line
 from app.bank_accounts_service import get_bank_account
 
 
@@ -48,10 +52,13 @@ def _parse_amount_to_pence(raw: str) -> int | None:
         neg = True
         s = s[1:-1].strip()
     try:
-        pounds = float(s)
-    except ValueError:
+        pounds = Decimal(s)
+        scaled = pounds * 100
+        if not scaled.is_finite() or scaled != scaled.to_integral_value() or abs(scaled) > 2147483647:
+            raise HTTPException(400, "Amounts must be finite whole pence within the supported range")
+        pence = int(scaled)
+    except InvalidOperation:
         return None
-    pence = int(round(pounds * 100))
     return -pence if neg else pence
 
 
@@ -83,22 +90,28 @@ def parse_statement_csv(content: bytes) -> list[dict]:
         )
 
     rows: list[dict] = []
-    for r in reader:
+    for row_number, r in enumerate(reader, start=2):
+        if not any(str(value or "").strip() for value in r.values()):
+            continue
         d = _parse_uk_date(r.get(date_col, ""))
         if d is None:
-            continue
+            raise HTTPException(400, f"Invalid statement date on CSV row {row_number}")
         if amount_col:
             amt = _parse_amount_to_pence(r.get(amount_col, ""))
         else:
             credit = _parse_amount_to_pence(r.get(credit_col, "")) if credit_col else None
             debit = _parse_amount_to_pence(r.get(debit_col, "")) if debit_col else None
+            if credit and debit:
+                raise HTTPException(400, f"Both credit and debit are set on CSV row {row_number}")
             if credit and credit != 0:
                 amt = abs(credit)
             elif debit and debit != 0:
                 amt = -abs(debit)
             else:
-                continue
-        if amt is None or amt == 0:
+                amt = 0 if credit == 0 or debit == 0 else None
+        if amt is None:
+            raise HTTPException(400, f"Invalid statement amount on CSV row {row_number}")
+        if amt == 0:
             continue
         bal = _parse_amount_to_pence(r.get(bal_col, "")) if bal_col else None
         rows.append(
@@ -194,7 +207,11 @@ def import_statement(
     content: bytes,
     actor: User,
 ) -> BankStatementImport:
-    get_bank_account(db, firm_bank_account_id)
+    require_banking(actor, db)
+    lock_bank(db, firm_bank_account_id)
+    bank = get_bank_account(db, firm_bank_account_id)
+    if bank.account_kind != 'client':
+        raise HTTPException(400, 'Client bank account required')
     name = (filename or "").lower()
     if name.endswith(".ofx") or name.endswith(".qfx") or content.lstrip()[:1] in (b"<", b"O"):
         try:
@@ -207,6 +224,7 @@ def import_statement(
     else:
         parsed = parse_statement_csv(content)
 
+    require_open_period(db, firm_bank_account_id, min(row['statement_date'] for row in parsed))
     imp = BankStatementImport(
         id=uuid.uuid4(),
         firm_bank_account_id=firm_bank_account_id,
@@ -231,6 +249,8 @@ def import_statement(
             )
         )
     db.flush()
+    log_event(db, actor_user_id=actor.id, action='bank.statement.import', entity_type='bank_statement_import',
+              entity_id=str(imp.id), meta={'bank_id': str(firm_bank_account_id), 'line_count': len(parsed)})
     return imp
 
 
@@ -239,7 +259,8 @@ def list_statement_lines(
     *,
     firm_bank_account_id: uuid.UUID,
     unmatched_only: bool = False,
-    limit: int = 500,
+    limit: int | None = 500,
+    import_id: uuid.UUID | None = None,
 ) -> list[BankStatementLine]:
     q = (
         select(BankStatementLine)
@@ -247,67 +268,11 @@ def list_statement_lines(
         .order_by(BankStatementLine.statement_date.desc(), BankStatementLine.created_at.desc())
         .limit(limit)
     )
+    if import_id is not None:
+        q = q.where(BankStatementLine.import_id == import_id)
     if unmatched_only:
         q = q.where(BankStatementLine.matched_pair_id.is_(None), BankStatementLine.ignored.is_(False))
     return list(db.execute(q).scalars().all())
-
-
-def match_line(
-    db: Session,
-    *,
-    line_id: uuid.UUID,
-    ledger_pair_id: uuid.UUID,
-    actor: User,
-) -> BankStatementLine:
-    line = db.get(BankStatementLine, line_id)
-    if line is None:
-        raise HTTPException(status_code=404, detail="Statement line not found")
-    # Ensure pair exists on a client ledger leg for this bank (or any client leg).
-    leg = db.execute(
-        select(LedgerEntry)
-        .join(LedgerAccount, LedgerAccount.id == LedgerEntry.account_id)
-        .where(
-            LedgerEntry.pair_id == ledger_pair_id,
-            LedgerAccount.account_type == LedgerAccountType.client,
-            LedgerEntry.is_approved.is_(True),
-        )
-        .limit(1)
-    ).scalar_one_or_none()
-    if leg is None:
-        raise HTTPException(status_code=400, detail="Ledger pair not found on an approved client posting")
-    line.matched_pair_id = ledger_pair_id
-    line.matched_at = datetime.now(timezone.utc)
-    line.matched_by_user_id = actor.id
-    line.ignored = False
-    db.add(line)
-    db.flush()
-    return line
-
-
-def unmatch_line(db: Session, *, line_id: uuid.UUID) -> BankStatementLine:
-    line = db.get(BankStatementLine, line_id)
-    if line is None:
-        raise HTTPException(status_code=404, detail="Statement line not found")
-    line.matched_pair_id = None
-    line.matched_at = None
-    line.matched_by_user_id = None
-    db.add(line)
-    db.flush()
-    return line
-
-
-def ignore_line(db: Session, *, line_id: uuid.UUID, ignored: bool = True) -> BankStatementLine:
-    line = db.get(BankStatementLine, line_id)
-    if line is None:
-        raise HTTPException(status_code=404, detail="Statement line not found")
-    line.ignored = bool(ignored)
-    if ignored:
-        line.matched_pair_id = None
-        line.matched_at = None
-        line.matched_by_user_id = None
-    db.add(line)
-    db.flush()
-    return line
 
 
 def unpresented_client_legs(
@@ -319,26 +284,22 @@ def unpresented_client_legs(
     """Approved client legs on this bank that are not matched to a statement line."""
     matched_pairs = select(BankStatementLine.matched_pair_id).where(
         BankStatementLine.firm_bank_account_id == firm_bank_account_id,
-        BankStatementLine.matched_pair_id.is_not(None),
-    )
-    q = (
-        select(LedgerEntry, LedgerAccount, Case)
+        BankStatementLine.ignored.is_(False),
+        BankStatementLine.matched_pair_id.is_not(None))
+    if as_of:
+        matched_pairs = matched_pairs.where(BankStatementLine.statement_date <= as_of)
+    q = (select(LedgerEntry, LedgerAccount, Case)
         .join(LedgerAccount, LedgerAccount.id == LedgerEntry.account_id)
         .join(Case, Case.id == LedgerAccount.case_id)
-        .where(
-            LedgerAccount.account_type == LedgerAccountType.client,
-            LedgerEntry.is_approved.is_(True),
-            LedgerEntry.is_anticipated.is_(False),
+        .where(LedgerAccount.account_type == LedgerAccountType.client,
+            LedgerEntry.is_approved.is_(True), LedgerEntry.is_anticipated.is_(False),
             LedgerEntry.firm_bank_account_id == firm_bank_account_id,
-            LedgerEntry.pair_id.not_in(matched_pairs),
-        )
-        .order_by(LedgerEntry.posted_at.desc())
-        .limit(500)
-    )
+            LedgerEntry.pair_id.not_in(matched_pairs))
+        .order_by(LedgerEntry.posted_at.desc(), LedgerEntry.id))
+    if as_of:
+        q = q.where(LedgerEntry.posted_at < _cutoff(as_of))
     out: list[dict] = []
     for e, _acc, case in db.execute(q).all():
-        if as_of and e.posted_at.date() > as_of:
-            continue
         out.append(
             {
                 "pair_id": e.pair_id,
@@ -355,51 +316,55 @@ def unpresented_client_legs(
     return out
 
 
-def _bank_ledger_total_pence(db: Session, firm_bank_account_id: uuid.UUID) -> int:
-    """Sum of approved client legs tagged to this bank (credit − debit)."""
-    rows = db.execute(
-        select(LedgerEntry.direction, LedgerEntry.amount_pence)
-        .join(LedgerAccount, LedgerAccount.id == LedgerEntry.account_id)
-        .where(
+def _cutoff(period_end_date: date) -> datetime:
+    return datetime.combine(period_end_date + timedelta(days=1), time.min, tzinfo=timezone.utc)
+
+
+def compute_recon_totals(db: Session, *, firm_bank_account_id: uuid.UUID,
+                         statement_balance_pence: int, period_end_date: date) -> dict[str, int]:
+    """All sums share one SQL snapshot, with UTC period boundaries and no display limits."""
+    lock_bank(db, firm_bank_account_id)
+    bank = get_bank_account(db, firm_bank_account_id)
+    if bank.account_kind != 'client':
+        raise HTTPException(400, 'Client bank account required')
+    signed = sql_case((LedgerEntry.direction == 'credit', LedgerEntry.amount_pence), else_=-LedgerEntry.amount_pence)
+    valid_leg_count = (select(func.count()).select_from(LedgerEntry).join(LedgerAccount)
+        .where(LedgerEntry.pair_id == BankStatementLine.matched_pair_id,
             LedgerAccount.account_type == LedgerAccountType.client,
-            LedgerEntry.is_approved.is_(True),
+            LedgerEntry.is_approved.is_(True), LedgerEntry.is_anticipated.is_(False),
+            LedgerEntry.amount_pence > 0, LedgerEntry.firm_bank_account_id == firm_bank_account_id,
+            signed == BankStatementLine.amount_pence).correlate(BankStatementLine).scalar_subquery())
+    client_leg_count = (select(func.count()).select_from(LedgerEntry).join(LedgerAccount)
+        .where(LedgerEntry.pair_id == BankStatementLine.matched_pair_id,
+            LedgerAccount.account_type == LedgerAccountType.client)
+        .correlate(BankStatementLine).scalar_subquery())
+    invalid_match = db.scalar(select(BankStatementLine.id).where(
+        BankStatementLine.firm_bank_account_id == firm_bank_account_id,
+        BankStatementLine.statement_date <= period_end_date,
+        BankStatementLine.matched_pair_id.is_not(None),
+        (valid_leg_count != 1) | (client_leg_count != 1) | BankStatementLine.ignored.is_(True)).limit(1))
+    if invalid_match:
+        raise HTTPException(409, 'Existing bank matches need review before reconciliation')
+    eligible = (select(LedgerEntry.pair_id.label('pair_id'), signed.label('amount'))
+        .join(LedgerAccount, LedgerAccount.id == LedgerEntry.account_id)
+        .where(LedgerAccount.account_type == LedgerAccountType.client,
+            LedgerEntry.is_approved.is_(True), LedgerEntry.is_anticipated.is_(False),
             LedgerEntry.firm_bank_account_id == firm_bank_account_id,
-        )
-    ).all()
-    total = 0
-    for direction, amount in rows:
-        if direction.value == "credit":
-            total += int(amount)
-        else:
-            total -= int(amount)
-    return total
-
-
-def compute_recon_totals(
-    db: Session,
-    *,
-    firm_bank_account_id: uuid.UUID,
-    statement_balance_pence: int,
-    period_end_date: date,
-) -> dict[str, int]:
-    ledger_total = _bank_ledger_total_pence(db, firm_bank_account_id)
-    unmatched_lines = list_statement_lines(db, firm_bank_account_id=firm_bank_account_id, unmatched_only=True)
-    unmatched_statement = sum(int(l.amount_pence) for l in unmatched_lines if l.statement_date <= period_end_date)
-    unpresented = 0
-    for leg in unpresented_client_legs(db, firm_bank_account_id=firm_bank_account_id, as_of=period_end_date):
-        # Client credit = money held; debit = money out. Unpresented adjusts toward bank.
-        if leg["direction"] == "credit":
-            unpresented += int(leg["amount_pence"])
-        else:
-            unpresented -= int(leg["amount_pence"])
-    # Bank = ledger − unpresented + unmatched statement (simplified three-way)
-    difference = int(statement_balance_pence) - ledger_total + unpresented - unmatched_statement
-    return {
-        "ledger_total_pence": ledger_total,
-        "unpresented_total_pence": unpresented,
-        "unmatched_statement_total_pence": unmatched_statement,
-        "difference_pence": difference,
-    }
+            LedgerEntry.posted_at < _cutoff(period_end_date)).cte('eligible_ledger'))
+    statement = (select(BankStatementLine.matched_pair_id.label('pair_id'), BankStatementLine.amount_pence.label('amount'))
+        .where(BankStatementLine.firm_bank_account_id == firm_bank_account_id,
+            BankStatementLine.statement_date <= period_end_date, BankStatementLine.ignored.is_(False)).cte('statement'))
+    matched_statement = select(statement.c.pair_id).where(statement.c.pair_id == eligible.c.pair_id,
+        statement.c.amount == eligible.c.amount).exists()
+    matched_ledger = select(eligible.c.pair_id).where(eligible.c.pair_id == statement.c.pair_id,
+        eligible.c.amount == statement.c.amount).exists()
+    ledger_sum = select(func.coalesce(func.sum(eligible.c.amount), 0)).scalar_subquery()
+    unpresented_sum = select(func.coalesce(func.sum(eligible.c.amount), 0)).where(~matched_statement).scalar_subquery()
+    unmatched_sum = select(func.coalesce(func.sum(statement.c.amount), 0)).where(~matched_ledger).scalar_subquery()
+    ledger_total, unpresented, unmatched = db.execute(select(ledger_sum, unpresented_sum, unmatched_sum)).one()
+    return {'ledger_total_pence': int(ledger_total), 'unpresented_total_pence': int(unpresented),
+            'unmatched_statement_total_pence': int(unmatched),
+            'difference_pence': int(statement_balance_pence) - int(ledger_total) + int(unpresented) - int(unmatched)}
 
 
 def create_bank_reconciliation(
@@ -411,6 +376,8 @@ def create_bank_reconciliation(
     statement_balance_pence: int,
     notes: str | None,
 ) -> BankReconciliation:
+    require_banking(actor, db)
+    lock_bank(db, firm_bank_account_id)
     get_bank_account(db, firm_bank_account_id)
     existing = db.execute(
         select(BankReconciliation).where(
@@ -442,43 +409,96 @@ def create_bank_reconciliation(
     )
     db.add(row)
     db.flush()
+    _audit_recon(db, row, actor, 'create')
     return row
 
 
-def refresh_bank_reconciliation(db: Session, row: BankReconciliation) -> BankReconciliation:
-    if row.status == "approved":
-        raise HTTPException(status_code=400, detail="Approved reconciliations cannot be refreshed")
-    totals = compute_recon_totals(
-        db,
-        firm_bank_account_id=row.firm_bank_account_id,
-        statement_balance_pence=row.statement_balance_pence,
-        period_end_date=row.period_end_date,
-    )
-    row.ledger_total_pence = totals["ledger_total_pence"]
-    row.unpresented_total_pence = totals["unpresented_total_pence"]
-    row.unmatched_statement_total_pence = totals["unmatched_statement_total_pence"]
-    row.difference_pence = totals["difference_pence"]
-    db.add(row)
+def _recon_snapshot(row: BankReconciliation) -> dict:
+    return {key: str(getattr(row, key)) if key.endswith('_at') and getattr(row, key) else getattr(row, key)
+            for key in ('status', 'version', 'statement_balance_pence', 'ledger_total_pence',
+                'unpresented_total_pence', 'unmatched_statement_total_pence', 'difference_pence',
+                'notes', 'approved_at', 'approved_by_user_id')}
+
+
+def _audit_recon(db: Session, row: BankReconciliation, actor: User, action: str,
+                 before: dict | None = None, reason: str | None = None) -> None:
+    after = _recon_snapshot(row)
+    if before is not None:
+        after.pop('notes')  # Keep the full previous notes without duplicating up to 4,000 characters.
+    log_event(db, actor_user_id=actor.id, action=f'bank.reconciliation.{action}',
+        entity_type='bank_reconciliation', entity_id=str(row.id),
+        meta={'before': before, 'after': after, 'reason': reason})
+
+
+def _locked_recon(db: Session, row: BankReconciliation, actor: User, expected_version: int) -> BankReconciliation:
+    require_banking(actor, db)
+    lock_bank(db, row.firm_bank_account_id)
+    db.refresh(row, with_for_update=True)
+    if row.version != expected_version:
+        raise HTTPException(409, 'This reconciliation changed. Refresh before continuing.')
+    return row
+
+
+def _refresh_totals(db: Session, row: BankReconciliation) -> None:
+    totals = compute_recon_totals(db, firm_bank_account_id=row.firm_bank_account_id,
+        statement_balance_pence=row.statement_balance_pence, period_end_date=row.period_end_date)
+    for key, value in totals.items():
+        setattr(row, key, value)
+
+
+def refresh_bank_reconciliation(db: Session, row: BankReconciliation, *, actor: User, expected_version: int,
+                                statement_balance_pence: int | None = None, notes: str | None = None) -> BankReconciliation:
+    row = _locked_recon(db, row, actor, expected_version)
+    if row.status == 'approved':
+        raise HTTPException(409, 'Approved reconciliations must be reopened before correction')
+    before = _recon_snapshot(row)
+    if statement_balance_pence is not None:
+        row.statement_balance_pence = statement_balance_pence
+    if notes is not None:
+        row.notes = notes.strip() or None
+    _refresh_totals(db, row)
+    row.version += 1
     db.flush()
+    _audit_recon(db, row, actor, 'update', before)
     return row
 
 
-def approve_bank_reconciliation(db: Session, *, actor: User, row: BankReconciliation) -> BankReconciliation:
+def approve_bank_reconciliation(db: Session, *, actor: User, row: BankReconciliation,
+                                expected_version: int) -> BankReconciliation:
+    row = _locked_recon(db, row, actor, expected_version)
     if not user_may_approve_ledger(actor, db):
-        raise HTTPException(status_code=403, detail="Not permitted to approve reconciliations")
-    if row.status == "approved":
+        raise HTTPException(403, 'Not permitted to approve reconciliations')
+    if row.status == 'approved':
         return row
-    if row.difference_pence != 0 and not (row.notes or "").strip():
-        raise HTTPException(
-            status_code=400,
-            detail="Notes are required when the reconciliation difference is not zero",
-        )
-    refresh_bank_reconciliation(db, row)
-    row.status = "approved"
+    before = _recon_snapshot(row)
+    _refresh_totals(db, row)
+    if row.difference_pence != 0 and not (row.notes or '').strip():
+        raise HTTPException(400, f'Notes are required for the refreshed difference of £{Decimal(row.difference_pence) / 100:,.2f}. Update the draft before approving.')
+    row.status = 'approved'
     row.approved_by_user_id = actor.id
     row.approved_at = datetime.now(timezone.utc)
-    db.add(row)
+    row.version += 1
     db.flush()
+    _audit_recon(db, row, actor, 'approve', before)
+    return row
+
+
+def reopen_bank_reconciliation(db: Session, *, actor: User, row: BankReconciliation,
+                               expected_version: int, reason: str) -> BankReconciliation:
+    row = _locked_recon(db, row, actor, expected_version)
+    if not user_may_approve_ledger(actor, db):
+        raise HTTPException(403, 'Not permitted to reopen reconciliations')
+    if not reason.strip():
+        raise HTTPException(400, 'A correction reason is required')
+    if row.status != 'approved':
+        raise HTTPException(409, 'Only approved reconciliations can be reopened')
+    before = _recon_snapshot(row)
+    row.status = 'draft'
+    row.approved_at = None
+    row.approved_by_user_id = None
+    row.version += 1
+    db.flush()
+    _audit_recon(db, row, actor, 'reopen', before, reason.strip())
     return row
 
 
