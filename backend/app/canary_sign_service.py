@@ -18,8 +18,6 @@ from sqlalchemy.orm import Session
 
 from app.alert_dispatch import (
     AlertKind,
-    dispatch_alert,
-    firm_alerts_configured,
     portal_public_url,
 )
 from app.audit import log_event
@@ -210,10 +208,11 @@ def _add_audit(
     detail: dict[str, Any] | None = None,
     ip: str | None = None,
     user_agent: str | None = None,
+    event_id: uuid.UUID | None = None,
 ) -> None:
     db.add(
         CanarySignAuditEvent(
-            id=uuid.uuid4(),
+            id=event_id or uuid.uuid4(),
             signing_request_id=req.id,
             recipient_id=recipient_id,
             event_type=event_type,
@@ -429,6 +428,7 @@ def send_signing_request(
     fields_specs: list[dict[str, Any]] | None = None,
     supersedes_id: uuid.UUID | None = None,
     retain_fillable_form: bool | None = None,
+    operation_key: uuid.UUID | None = None,
 ) -> CanarySignRequest:
     from app.portal_case import firm_canary_sign_enabled
 
@@ -450,7 +450,14 @@ def send_signing_request(
             detail="expires_in_days must be between 1 and 365",
         )
 
-    source = db.get(DbFile, source_file_id)
+    from app.canary_sign_delivery import operation, fingerprint
+    operation_payload = dict(case_id=case_id, source_file_id=source_file_id, subject=subject,
+        recipient_specs=recipient_specs, order_mode=order_mode.value, expires_in_days=expires_in_days,
+        fields_specs=fields_specs, supersedes_id=supersedes_id, retain_fillable_form=retain_fillable_form)
+    operation_id, replay = operation(db, operation_key, actor.id, operation_payload)
+    if replay is not None:
+        return replay
+    source = db.scalar(select(DbFile).where(DbFile.id == source_file_id).with_for_update(key_share=True))
     if not source or source.case_id != case_id:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="File not found"
@@ -466,7 +473,7 @@ def send_signing_request(
         )
 
     existing = active_signing_for_file(db, source_file_id)
-    if existing and not supersedes_id:
+    if existing and (not supersedes_id or existing.id != supersedes_id):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="This document already has a pending Canary Sign request. Void it or amend and re-send.",
@@ -585,7 +592,11 @@ def send_signing_request(
     db.flush()
 
     if supersedes_id:
-        old = db.get(CanarySignRequest, supersedes_id)
+        old = db.scalar(select(CanarySignRequest).where(CanarySignRequest.id == supersedes_id).with_for_update().execution_options(populate_existing=True))
+        if not old or old.status != CanarySignStatus.pending:
+            raise HTTPException(409, "Only an active request can be amended")
+        if old and (old.case_id != case_id or old.source_file_id != source_file_id):
+            raise HTTPException(409, "Amended request must belong to this document and matter")
         if old and old.status == CanarySignStatus.pending:
             old.status = CanarySignStatus.voided
             old.voided_at = now
@@ -603,13 +614,14 @@ def send_signing_request(
         db,
         req=req,
         event_type=CanarySignAuditEventType.created,
-        detail={"subject": req.subject},
+        detail={"subject": req.subject, "operation_fingerprint": fingerprint(operation_payload)},
+        event_id=operation_id,
     )
     _add_audit(
         db,
         req=req,
         event_type=CanarySignAuditEventType.sent,
-        detail={"recipient_count": len(recipients)},
+        detail={"recipient_count": len(recipients), "delivery": "queued"},
     )
 
     access_codes: dict[uuid.UUID, str] = {}
@@ -625,16 +637,8 @@ def send_signing_request(
             access_codes[recipient.id] = code
 
     _notify_staff_sent(db, case_id, req, actor)
-    try:
-        _notify_recipients(
-            db,
-            req,
-            recipients,
-            kind=AlertKind.canary_sign_requested,
-            access_codes=access_codes,
-        )
-    except Exception as e:
-        log.warning("Canary Sign alert e-mail failed after send %s: %s", req.id, e)
+    _notify_recipients(db, req, recipients, kind=AlertKind.canary_sign_requested,
+                       access_codes=access_codes, event_key=str(req.id))
 
     log_event(
         db,
@@ -663,9 +667,9 @@ def _notify_recipients(
     *,
     kind: AlertKind,
     access_codes: dict[uuid.UUID, str] | None = None,
+    event_key: str | None = None,
 ) -> None:
-    if not firm_alerts_configured(db):
-        return
+    from app.canary_sign_delivery import enqueue
     case = db.get(Case, req.case_id)
     matter = client_matter_description(case) if case else "your matter"
     codes = access_codes or {}
@@ -681,13 +685,7 @@ def _notify_recipients(
         code = codes.get(r.id)
         if code:
             ctx["access_code"] = code
-        dispatch_alert(
-            db,
-            kind,
-            to_email=r.email,
-            context=ctx,
-            actor_user_id=req.sent_by_user_id,
-        )
+        enqueue(db, req, r, kind=kind, context=ctx, event_key=event_key or str(req.id))
 
 
 def _notify_staff_sent(
@@ -761,7 +759,13 @@ def remind_signing_request(
     req: CanarySignRequest,
     actor: User,
     recipient_ids: list[uuid.UUID] | None = None,
+    operation_key: uuid.UUID | None = None,
 ) -> None:
+    from app.canary_sign_delivery import operation, fingerprint
+    operation_payload = dict(request_id=str(req.id), recipients=sorted(str(r) for r in recipient_ids) if recipient_ids else None, action="remind")
+    operation_id, replay = operation(db, operation_key, actor.id, operation_payload)
+    if replay is not None: return
+    req = _lock_request(db, req)
     mark_expired_if_needed(db, req)
     if req.status != CanarySignStatus.pending:
         raise HTTPException(
@@ -809,12 +813,14 @@ def remind_signing_request(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="No outstanding recipients to remind.",
         )
-    _notify_recipients(db, req, recipients, kind=AlertKind.canary_sign_reminded)
+    event_id = operation_id or uuid.uuid4()
+    _notify_recipients(db, req, recipients, kind=AlertKind.canary_sign_reminded, event_key=str(event_id))
     _add_audit(
         db,
         req=req,
         event_type=CanarySignAuditEventType.reminded,
-        detail={"recipient_ids": [str(r.id) for r in recipients]},
+        detail={"recipient_ids": [str(r.id) for r in recipients], "operation_fingerprint": fingerprint(operation_payload), "delivery": "queued"},
+        event_id=event_id,
     )
     log_event(
         db,

@@ -5,7 +5,7 @@ from __future__ import annotations
 import mimetypes
 import uuid
 
-from fastapi import APIRouter, Depends, File as FastAPIFile, Form, HTTPException, Query, Request, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, Depends, File as FastAPIFile, Form, HTTPException, Query, Request, UploadFile, status
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -628,6 +628,7 @@ def portal_canary_sign_submit(
     request_id: uuid.UUID,
     payload: PortalCanarySignSubmitIn,
     request: Request,
+    background_tasks: BackgroundTasks,
     contact: Contact = Depends(get_portal_contact),
     session: PortalSessionPayload = Depends(get_portal_session),
     db: Session = Depends(get_db),
@@ -646,6 +647,9 @@ def portal_canary_sign_submit(
         ua=ua,
         consent=bool(payload.consent),
     )
+    from app.canary_sign_delivery import dispatch_request
+    if updated.sent_by_user_id:
+        background_tasks.add_task(dispatch_request, updated.id, updated.sent_by_user_id)
     return PortalCanarySignOut(**canary_portal_signing_view(db, updated, contact_id=contact.id))
 
 
