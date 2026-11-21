@@ -164,6 +164,12 @@ def _eligibility(db, row, req, message):
     )
     if not access or not portal_access_is_active(access):
         return "portal_access_inactive"
+    from app.models import PortalMatterBlock
+
+    if recipient.portal_access_version != access.session_version or db.get(
+        PortalMatterBlock, (req.case_id, contact.id)
+    ):
+        return "portal_access_changed"
     if (
         contact.email != binding["contact_email"]
         or access.code_sha256 != binding["access_code_sha256"]

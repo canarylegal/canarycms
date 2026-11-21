@@ -302,3 +302,64 @@ def test_concurrent_different_plans_only_one_applies():
     with ThreadPoolExecutor(max_workers=2) as pool:
         fs = [pool.submit(attempt, p) for p in (first, second)]
         assert sorted(f.result(20) for f in fs) == ["applied", "stale"]
+
+
+@pytest.mark.parametrize("action", ["baseline", "restore"])
+@pytest.mark.parametrize("stage", ["prepare", "apply"])
+@pytest.mark.parametrize("damage", ["timestamp", "unsigned_recipient", "signed_timestamp", "completion_audit"])
+def test_recovery_rejects_contradictory_completion(action, stage, damage):
+    from sqlalchemy import delete
+    from app.models import CanarySignRecipient, CanarySignAuditEvent
+
+    rid, uid, fid, plan, raw = fixture(action)
+    with SessionLocal() as db:
+        req = db.get(CanarySignRequest, rid)
+        if damage == "timestamp":
+            req.completed_at = None
+        elif damage in ("unsigned_recipient", "signed_timestamp"):
+            recipient = db.scalar(select(CanarySignRecipient).where(CanarySignRecipient.signing_request_id == rid))
+            if damage == "unsigned_recipient":
+                recipient.status = "pending"
+            recipient.signed_at = None
+        else:
+            db.execute(delete(CanarySignAuditEvent).where(
+                CanarySignAuditEvent.signing_request_id == rid,
+                CanarySignAuditEvent.event_type == "completed",
+            ))
+        db.commit()
+        with pytest.raises(ValueError):
+            if stage == "prepare":
+                recovery.prepare(db, request_id=rid, artifact="certificate", action=action,
+                    actor_id=uid, reason="Synthetic reviewed evidence", proof=plan["evidence"],
+                    raw=raw, operation_id=uuid.uuid4())
+            else:
+                recovery.apply(db, plan, raw, approved_sha256=plan["plan_sha256"])
+        db.rollback()
+        assert db.get(CanarySignRecovery, uuid.UUID(plan["operation_id"])) is None
+        assert db.get(CanarySignRequest, rid).certificate_file_id == (fid if action == "baseline" else None)
+        if action == "baseline":
+            assert db.get(File, fid).checksum is None
+
+
+@pytest.mark.parametrize("changed", ["recipient_timestamp", "audit_detail"])
+def test_recovery_rejects_changed_but_still_complete_evidence(changed):
+    from datetime import timedelta
+    from app.models import CanarySignRecipient, CanarySignAuditEvent
+
+    rid, _, _, plan, raw = fixture("restore")
+    with SessionLocal() as db:
+        if changed == "recipient_timestamp":
+            row = db.scalar(select(CanarySignRecipient).where(CanarySignRecipient.signing_request_id == rid))
+            row.signed_at += timedelta(seconds=1)
+        else:
+            row = db.scalar(select(CanarySignAuditEvent).where(
+                CanarySignAuditEvent.signing_request_id == rid,
+                CanarySignAuditEvent.event_type == "completed",
+            ))
+            row.detail = {**(row.detail or {}), "changed": True}
+        db.commit()
+    with pytest.raises(ValueError, match="State changed since review"):
+        run(plan, raw)
+    with SessionLocal() as db:
+        assert db.get(CanarySignRequest, rid).certificate_file_id is None
+        assert db.get(CanarySignRecovery, uuid.UUID(plan["operation_id"])) is None

@@ -307,6 +307,7 @@ def test_diagnostics_are_aggregate_only_and_detect_stale_attempts(monkeypatch):
 def test_portal_upload_queue_failure_does_not_commit_file(tmp_path, monkeypatch):
     from io import BytesIO
     from fastapi import UploadFile
+    from app.security import PortalSessionPayload
     from app import portal_browse_service as browse, portal_notifications as portal
     from app.models import File
 
@@ -315,6 +316,7 @@ def test_portal_upload_queue_failure_does_not_commit_file(tmp_path, monkeypatch)
     monkeypatch.setattr("app.file_storage.FILES_ROOT", tmp_path)
     monkeypatch.setattr("app.deps.require_portal_not_preview", lambda *a: None)
     monkeypatch.setattr(browse, "get_grant_for_contact", lambda *a, **k: grant)
+    monkeypatch.setattr("app.portal_policy.fresh", lambda *a, **k: grant)
     monkeypatch.setattr(browse, "ensure_upload_folder_allowed", lambda **k: "")
     monkeypatch.setattr(browse, "user_may_be_fee_earner", lambda *a: True)
     monkeypatch.setattr(browse, "log_portal_activity", lambda *a, **k: None)
@@ -330,7 +332,7 @@ def test_portal_upload_queue_failure_does_not_commit_file(tmp_path, monkeypatch)
             UploadFile(filename="Synthetic.txt", file=BytesIO(b"preserved bytes")),
             folder="",
             contact=contact,
-            session=SimpleNamespace(audience="client"),
+            session=PortalSessionPayload(contact_id=str(contact.id)),
             db=db,
         )
 

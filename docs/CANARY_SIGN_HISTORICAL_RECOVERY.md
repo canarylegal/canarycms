@@ -39,7 +39,7 @@ Supported corrections:
 - `baseline`: set a missing checksum only when current bytes match the backup and the original file identity matches. This records a reviewed baseline now; it makes no claim about earlier authenticity.
 - `restore`: recover an original signed PDF or certificate from the evidence bundle when the target reference/file is missing or its stored checksum mismatches. It creates a new immutable file and updates only that artifact reference. The old file/row is retained. It never replaces a healthy artifact, changes signature fields/status/timestamps, or synthesises a completion event. Snapshot restoration is deliberately excluded.
 
-Requests must be unambiguously completed, and the acting administrator must be active. A missing certificate with no independently linked original remains unresolved; do not manufacture evidence or regenerate an apparently original certificate.
+Requests must have a completion timestamp, signed recipients with signing timestamps, and a completion audit, with no voided state. The plan binds recipient identities, states and timestamps plus completion audit identities and contents; apply locks and rechecks that evidence. Previously prepared but unapplied plans must be regenerated and reviewed. Existing applied receipts remain replayable. The acting administrator must be active. A missing certificate with no independently linked original remains unresolved; do not manufacture evidence or regenerate an apparently original certificate.
 
 ## Apply only after explicit approval
 

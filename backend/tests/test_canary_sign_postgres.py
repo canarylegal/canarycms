@@ -472,3 +472,42 @@ def test_legacy_missing_checksum_preserves_access_without_inventing_baseline(cap
         assert raw == (FILES_ROOT / row.storage_path).read_bytes()
         assert row.checksum is None
         assert "no integrity baseline" in caplog.text
+
+
+@pytest.mark.parametrize("answers", [
+    {"new": "answer"},
+    {" number ": 42, "flag": False, "empty": None, " ": "ignored"},
+    {},
+])
+def test_signature_replay_uses_original_form_answer_merge(answers):
+    rid, _, _, recipients, fields = seed(fillable=True)
+    with SessionLocal() as db:
+        req = db.get(CanarySignRequest, rid)
+        req.form_locked_by_recipient_id = recipients[0]
+        req.form_responses = {"previous": "saved"}
+        db.commit()
+
+    def send(supplied):
+        with SessionLocal() as db:
+            return sign.submit_signature(
+                db, db.get(CanarySignRequest, rid), db.get(CanarySignRecipient, recipients[0]),
+                field_values={str(fields[0]): {"text": "Synthetic signature"}},
+                form_responses=supplied,
+            ).status.value
+
+    assert send(answers) == "completed"
+    with SessionLocal() as db:
+        req = db.get(CanarySignRequest, rid)
+        before = (req.signed_file_id, req.certificate_file_id, req.completed_at, dict(req.form_responses))
+        events = db.scalar(select(func.count()).select_from(CanarySignAuditEvent).where(
+            CanarySignAuditEvent.signing_request_id == rid))
+    assert send(answers) == "completed"
+    for changed in ({"previous": "changed"}, {"new_unseen_answer": "not signed"}):
+        with pytest.raises(HTTPException) as error:
+            send(changed)
+        assert error.value.status_code == 409
+    with SessionLocal() as db:
+        req = db.get(CanarySignRequest, rid)
+        assert (req.signed_file_id, req.certificate_file_id, req.completed_at, req.form_responses) == before
+        assert db.scalar(select(func.count()).select_from(CanarySignAuditEvent).where(
+            CanarySignAuditEvent.signing_request_id == rid)) == events

@@ -251,6 +251,9 @@ def mark_expired_if_needed(db: Session, req: CanarySignRequest) -> CanarySignReq
     expires = _aware(req.expires_at)
     if expires is None or expires > utcnow():
         return req
+    from app.portal_policy import authorize
+
+    authorize(db, req.case_id, signing_request_id=req.id, lock=True)
     req = _lock_request(db, req)
     if req.status != CanarySignStatus.pending or not req.expires_at or _aware(req.expires_at) > utcnow():
         return req
@@ -633,6 +636,7 @@ def send_signing_request(
             contact_id=recipient.contact_id,
             actor_user_id=actor.id,
         )
+        recipient.portal_access_version = _row.session_version
         if newly and code:
             access_codes[recipient.id] = code
 
@@ -676,6 +680,20 @@ def _notify_recipients(
     for r in recipients:
         if r.status in (CanarySignRecipientStatus.signed, CanarySignRecipientStatus.declined):
             continue
+        from app.models import ContactPortalAccess
+
+        access = (
+            db.scalar(
+                select(ContactPortalAccess).where(
+                    ContactPortalAccess.contact_id == r.contact_id
+                )
+            )
+            if r.contact_id
+            else None
+        )
+        if access is not None and r.portal_access_version != access.session_version:
+            r.sign_token = secrets.token_urlsafe(24)
+            r.portal_access_version = access.session_version
         ctx: dict[str, Any] = {
             "recipient_name": r.name,
             "document_name": req.subject,
@@ -716,6 +734,9 @@ def void_signing_request(
     actor: User,
     reason: str,
 ) -> CanarySignRequest:
+    from app.portal_policy import authorize
+
+    authorize(db, req.case_id, signing_request_id=req.id, lock=True)
     req = _lock_request(db, req)
     mark_expired_if_needed(db, req)
     if req.status != CanarySignStatus.pending:
@@ -765,6 +786,9 @@ def remind_signing_request(
     operation_payload = dict(request_id=str(req.id), recipients=sorted(str(r) for r in recipient_ids) if recipient_ids else None, action="remind")
     operation_id, replay = operation(db, operation_key, actor.id, operation_payload)
     if replay is not None: return
+    from app.portal_policy import authorize
+
+    authorize(db, req.case_id, signing_request_id=req.id, lock=True)
     req = _lock_request(db, req)
     mark_expired_if_needed(db, req)
     if req.status != CanarySignStatus.pending:
@@ -870,6 +894,10 @@ def list_pending_for_contact(
     out: list[tuple[CanarySignRequest, CanarySignRecipient]] = []
     seen: set[uuid.UUID] = set()
     for req, recip in rows:
+        from app.portal_policy import visible
+
+        if not visible(db, req.case_id, signing_request_id=req.id):
+            continue
         mark_expired_if_needed(db, req)
         if req.status != CanarySignStatus.pending:
             continue
@@ -892,6 +920,10 @@ def list_for_contact(
     out: list[tuple[CanarySignRequest, CanarySignRecipient]] = []
     seen: set[uuid.UUID] = set()
     for req, recip in rows:
+        from app.portal_policy import visible
+
+        if not visible(db, req.case_id, signing_request_id=req.id):
+            continue
         mark_expired_if_needed(db, req)
         if req.id in seen:
             continue
@@ -972,6 +1004,9 @@ def claim_form_lock(
     ip: str | None = None,
     ua: str | None = None,
 ) -> CanarySignRequest:
+    from app.portal_policy import authorize
+
+    authorize(db, req.case_id, signing_request_id=req.id, lock=True)
     req = _lock_request(db, req)
     _refresh_recipient(db, req, recipient)
     mark_expired_if_needed(db, req)
@@ -1049,6 +1084,9 @@ def save_form_responses(
     ip: str | None = None,
     ua: str | None = None,
 ) -> CanarySignRequest:
+    from app.portal_policy import authorize
+
+    authorize(db, req.case_id, signing_request_id=req.id, lock=True)
     req = _lock_request(db, req)
     _refresh_recipient(db, req, recipient)
     mark_expired_if_needed(db, req)
@@ -1193,6 +1231,9 @@ def record_view(
     ip: str | None = None,
     ua: str | None = None,
 ) -> None:
+    from app.portal_policy import authorize
+
+    authorize(db, req.case_id, signing_request_id=req.id, lock=True)
     req = _lock_request(db, req)
     _refresh_recipient(db, req, recipient)
     mark_expired_if_needed(db, req)
@@ -1233,6 +1274,19 @@ def _validate_field_value(field: CanarySignField, value: dict[str, Any] | None) 
     return value
 
 
+def _merge_form_answers(saved: dict | None, supplied: dict | None) -> dict:
+    """Use the same canonical merge for first submission and an unchanged retry."""
+    merged = dict(saved or {})
+    if isinstance(supplied, dict):
+        for key, value in supplied.items():
+            name = str(key).strip()
+            if name:
+                merged[name] = (
+                    value if isinstance(value, bool) or value is None else str(value)
+                )
+    return merged
+
+
 def submit_signature(
     db: Session,
     req: CanarySignRequest,
@@ -1244,6 +1298,9 @@ def submit_signature(
     consent: bool = True,
     form_responses: dict[str, Any] | None = None,
 ) -> CanarySignRequest:
+    from app.portal_policy import authorize
+
+    authorize(db, req.case_id, signing_request_id=req.id, lock=True)
     req = _lock_request(db, req)
     _refresh_recipient(db, req, recipient)
     mark_expired_if_needed(db, req)
@@ -1265,7 +1322,8 @@ def submit_signature(
             or replay_values != expected
             or (
                 form_responses is not None
-                and form_responses != (req.form_responses or {})
+                and _merge_form_answers(req.form_responses, form_responses)
+                != (req.form_responses or {})
             )
         ):
             raise HTTPException(
@@ -1308,17 +1366,7 @@ def submit_signature(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="The fillable form must be completed by the recipient who locked it before others can sign",
                 )
-            merged = dict(req.form_responses or {})
-            if isinstance(form_responses, dict):
-                for key, value in form_responses.items():
-                    name = str(key).strip()
-                    if not name:
-                        continue
-                    merged[name] = (
-                        value
-                        if isinstance(value, bool) or value is None
-                        else str(value)
-                    )
+            merged = _merge_form_answers(req.form_responses, form_responses)
             req.form_responses = merged
             req.form_completed_at = now
             req.updated_at = now
@@ -1419,6 +1467,9 @@ def decline_signing(
     ip: str | None = None,
     ua: str | None = None,
 ) -> CanarySignRequest:
+    from app.portal_policy import authorize
+
+    authorize(db, req.case_id, signing_request_id=req.id, lock=True)
     req = _lock_request(db, req)
     _refresh_recipient(db, req, recipient)
     mark_expired_if_needed(db, req)
