@@ -10,7 +10,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.exc import ObjectDeletedError, StaleDataError
 
-from app.ledger_integrity import lock_matters
+from app.ledger_integrity import lock_matters, require_posting_period
 from app.ledger_party import resolve_ledger_party
 from app.models import (
     Case,
@@ -245,6 +245,8 @@ def post_transaction(
             payment_method=payment_method,
         )
 
+    if is_approved and payload.client_direction:
+        require_posting_period(db, {bank_id})
     accounts = _get_or_create_accounts(case_id, db, for_update=is_approved)
     if is_approved and payload.client_direction:
         current = _balance(accounts["client"].id, db, approved_only=True)
@@ -601,6 +603,7 @@ def approve_ledger_pair(
         )
 
     if client_direction:
+        require_posting_period(db, {e.firm_bank_account_id for e in legs if e.account_id == accounts["client"].id})
         current = _balance(accounts["client"].id, db, approved_only=True)
         projected = _projected_client_balance_after_debit(
             current_balance=current,

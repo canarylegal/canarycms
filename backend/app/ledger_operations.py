@@ -8,7 +8,7 @@ from sqlalchemy import or_, select
 from app.audit import log_event
 from app.deps import require_case_access
 from app.ledger_audit import log_ledger_post
-from app.ledger_integrity import lock_matters, record_receipt, request_receipt
+from app.ledger_integrity import lock_matters, record_receipt, request_receipt, require_posting_period
 from app.ledger_service import (LedgerPostResult, _balance, _reject_client_deficit,
                                 _try_lock_ledger_pair, post_transaction)
 from app.models import (BankStatementLine, CaseInvoice, CaseInvoiceAllocation, InterMatterJournal,
@@ -77,6 +77,8 @@ def reversal_legs(db, case_id, pair_id, user, *, journal_id=None):
         raise HTTPException(409, 'Correct invoice allocations before reversing this posting')
     if db.scalar(select(BankStatementLine.id).where(BankStatementLine.matched_pair_id == pair_id).limit(1)):
         raise HTTPException(409, 'Unmatch this posting through the bank correction workflow before reversing it')
+    require_posting_period(db, {leg.firm_bank_account_id for account, leg in zip(accounts, legs)
+                               if account.account_type.value == "client"})
     for account, leg in zip(accounts, legs):
         if account.account_type.value == 'client' and leg.direction == LedgerDirection.credit:
             _reject_client_deficit(_balance(account.id, db) - leg.amount_pence)

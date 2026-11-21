@@ -239,3 +239,25 @@ def test_replay_after_reversal_does_not_recreate_money_and_rechecks_permissions(
     with pytest.raises(HTTPException) as error:
         operations.reverse_posting(db, case_id=first.id, pair_id=result.pair_id, payload=undo, user=user)
     assert error.value.status_code == 403
+
+
+def test_closed_period_blocks_post_approval_and_reversal():
+    from app.models import BankReconciliation
+    from app.timeutil import utcnow
+    db, user, first, _ = fixture()
+    bank = create_bank_account(db, name='Closed period bank', account_kind='client', sort_code=None,
+        account_number=None, is_default=False, is_active=True)
+    original = post(db, user, first, firm_bank_account_id=bank.id, payment_method='bacs')
+    pending = post(db, user, first, amount=100, firm_bank_account_id=bank.id, anticipated=True, anticipated_for_date=date.today())
+    db.add(BankReconciliation(firm_bank_account_id=bank.id, period_end_date=utcnow().date(), status='approved',
+        statement_balance_pence=10000, ledger_total_pence=10000, unpresented_total_pence=0,
+        unmatched_statement_total_pence=0, difference_pence=0, prepared_by_user_id=user.id))
+    db.commit()
+    for action in ('post', 'approve', 'reverse'):
+        with pytest.raises(HTTPException) as error:
+            if action == 'post': post(db, user, first, firm_bank_account_id=bank.id, payment_method='bacs')
+            elif action == 'approve': approve_ledger_pair(first.id, pending.pair_id, user, db)
+            else: operations.reverse_posting(db, case_id=first.id, pair_id=original.pair_id, payload=reversal(), user=user)
+        assert error.value.status_code == 409
+        db.rollback()
+    assert balance(db, first) == 10000

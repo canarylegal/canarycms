@@ -146,3 +146,48 @@ def test_reversal_serializes_with_financial_dependencies(db, dependency, reverse
     with SessionLocal() as session:
         with pytest.raises(HTTPException) as error: perform(session, not reverse_wins)
         assert error.value.status_code == 409
+
+
+def test_posting_serializes_with_period_approval(db):
+    if db.bind.dialect.name != 'postgresql': pytest.skip('requires isolated PostgreSQL')
+    from app.bank_accounts_service import create_bank_account
+    from app.bank_recon_service import create_bank_reconciliation, approve_bank_reconciliation
+    from app.models import BankReconciliation
+    from app.timeutil import utcnow
+    _, user, matter, _ = fixture(db)
+    bank = create_bank_account(db, name=f'Period race {uuid.uuid4()}', account_kind='client', sort_code=None,
+        account_number=None, is_default=False, is_active=True)
+    post(db, user, matter, firm_bank_account_id=bank.id, payment_method='bacs')
+    report = create_bank_reconciliation(db, actor=user, firm_bank_account_id=bank.id,
+        period_end_date=utcnow().date(), statement_balance_pence=0, notes='Synthetic period race')
+    db.commit()
+    uid, cid, bid, rid = user.id, matter.id, bank.id, report.id
+    payload = LedgerPostCreate(description='Closed-period race', amount_pence=100, client_direction='credit',
+        firm_bank_account_id=bid, payment_method='bacs', idempotency_key=uuid.uuid4())
+    locked, attempted = Event(), Event()
+    def winner():
+        with SessionLocal() as session:
+            approve_bank_reconciliation(session, row=session.get(BankReconciliation, rid),
+                actor=session.get(User, uid), expected_version=0)
+            locked.set()
+            assert attempted.wait(15)
+            session.commit()
+    def contender():
+        assert locked.wait(15)
+        try:
+            with SessionLocal() as session:
+                with pytest.raises(HTTPException) as error:
+                    operations.post_ledger_operation(cid, payload, session.get(User, uid), session)
+                assert error.value.status_code == 409
+        finally: attempted.set()
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        a, b = pool.submit(winner), pool.submit(contender)
+        a.result(20); b.result(20)
+    with SessionLocal() as session:
+        with pytest.raises(HTTPException) as error:
+            operations.post_ledger_operation(cid, payload, session.get(User, uid), session)
+        assert error.value.status_code == 409
+        # This isolated fixture must not change the default-bank policy of later browser tests.
+        from app.models import FirmBankAccount
+        session.get(FirmBankAccount, bid).is_active = False
+        session.commit()

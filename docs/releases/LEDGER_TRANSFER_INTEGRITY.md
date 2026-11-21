@@ -8,7 +8,7 @@ This release preserves the posting and Banking forms. It adds transactional requ
 
 Keys are scoped to the actor across operation types. The same key and payload returns the originally accepted result without another posting or audit. Changed details with the same key return 409. Access and posting rights are checked again before replay. Receipts survive restarts and subsequent corrections: replay confirms original acceptance, not the current balance, and never recreates a rejected or reversed posting. Refresh the ledger to see current status.
 
-Posting, both transfer legs, operation receipt and audit commit together. PostgreSQL transaction advisory locks serialize shared funds and opposite-direction transfers; contention returns 409 rather than waiting in a deadlock. Retry the unchanged request with the same key. Client debits require sufficient approved actual funds both on the matter and on the original selected bank; untagged historical money is its own bucket. No historical rows are automatically retagged.
+Posting, both transfer legs, operation receipt and audit commit together. PostgreSQL transaction advisory locks serialize shared funds and opposite-direction transfers; contention returns 409 rather than waiting in a deadlock. Retry the unchanged request with the same key. Client debits require sufficient approved actual funds both on the matter and on the original selected bank; untagged historical money is its own bucket. No historical rows are automatically retagged. Posting, approval and reversal also lock the selected bank and refuse to change an approved period covering the current posting date; reopen that period with a reason first.
 
 ## Corrections
 
