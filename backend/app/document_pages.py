@@ -8,7 +8,7 @@ import uuid
 from datetime import datetime
 
 from fastapi import HTTPException
-from sqlalchemy import and_, case, func, literal, or_, select
+from sqlalchemy import and_, case, func, or_, select, true, union_all
 from sqlalchemy.orm import aliased
 
 from app.list_search import _ilike_pattern, reject_search_nul
@@ -36,33 +36,52 @@ def sort_value(file, owner, sort):
     return value.collate('und-x-icu')
 
 
+def related_documents(case_id, q):
+    """Cycle-safe search closure, expanding indexed parent/child edges separately."""
+    related = select(File.id, File.parent_file_id).where(visible(File, case_id), or_(
+        func.lower(File.original_filename).like(_ilike_pattern(q), escape='\\'),
+        func.lower(File.source_mail_from_name).like(_ilike_pattern(q), escape='\\'),
+        func.lower(File.source_mail_from_email).like(_ilike_pattern(q), escape='\\'),
+    )).cte('related_documents', recursive=True)
+    neighbor = aliased(File)
+    columns = (neighbor.id, neighbor.parent_file_id, neighbor.case_id, neighbor.oo_compose_pending)
+    # Keep visibility predicates outside these lookup boundaries. Otherwise stale
+    # statistics can favor a case-wide scan for every edge in a large group.
+    parent = select(*columns).where(neighbor.id == related.c.parent_file_id).correlate(related).limit(1)
+    children = select(*columns).where(neighbor.parent_file_id == related.c.id).correlate(related).offset(0)
+    neighbors = union_all(parent, children).lateral('related_neighbors')
+    # UNION deduplicates the closure, even for cyclic links or overlapping matches.
+    return related.union(select(neighbors.c.id, neighbors.c.parent_file_id)
+        .select_from(related).join(neighbors, true()).where(visible(neighbors.c, case_id)))
+
+
 def document_page(db, case_id, *, folder='', q='', sort='created', direction='desc', limit=100, cursor=None):
     q = q.strip().lower()
     reject_search_nul(q)
     reject_search_nul(folder)
-    root, owner, root_owner = aliased(File), aliased(User), aliased(User)
-    child = File.parent_file_id.isnot(None)
-    # Only the immediate children displayed by the existing document browser are in this stream.
-    root_id = func.coalesce(File.parent_file_id, File.id)
-    stmt = (select(File, owner.display_name, owner.email, owner.initials)
-        .join(owner, owner.id == File.owner_id)
-        .join(root, and_(root.id == root_id, visible(root, case_id), root.parent_file_id.is_(None), root.category != 'system', root.folder_path == folder))
+    file = File
+    related = related_documents(case_id, q) if q else None
+    if related is not None:
+        # Drive matching records from the closure by primary key, avoiding a
+        # repeated scan of the materialized CTE for every document in the matter.
+        file = aliased(File, select(File).where(File.id == related.c.id)
+            .correlate(related).limit(1).lateral('matching_document'))
+    root_row, owner, root_owner = aliased(File), aliased(User), aliased(User)
+    child = file.parent_file_id.isnot(None)
+    root_id = func.coalesce(file.parent_file_id, file.id)
+    # LIMIT is a planning boundary: resolve each group root by primary key before
+    # applying visibility predicates, even immediately after a bulk import.
+    root = aliased(File, select(root_row).where(root_row.id == root_id)
+        .correlate(file).limit(1).lateral('document_root'))
+    stmt = select(file, owner.display_name, owner.email, owner.initials)
+    if related is not None:
+        stmt = stmt.select_from(related).join(file, true())
+    stmt = (stmt.join(owner, owner.id == file.owner_id)
+        .join(root, and_(visible(root, case_id), root.parent_file_id.is_(None), root.category != 'system', root.folder_path == folder))
         .join(root_owner, root_owner.id == root.owner_id)
-        .where(visible(File, case_id), File.category != 'system', File.folder_path == folder, func.md5(File.folder_path) == func.md5(folder)))
-    if q:
-        # Recursive closure includes parents, siblings and descendants, including matches in
-        # another folder. UNION (not UNION ALL) terminates even for corrupt cyclic links.
-        related = select(File.id, File.parent_file_id).where(visible(File, case_id), or_(
-            func.lower(File.original_filename).like(_ilike_pattern(q), escape='\\'),
-            func.lower(File.source_mail_from_name).like(_ilike_pattern(q), escape='\\'),
-            func.lower(File.source_mail_from_email).like(_ilike_pattern(q), escape='\\'),
-        )).cte('related_documents', recursive=True)
-        neighbor = aliased(File)
-        related = related.union(select(neighbor.id, neighbor.parent_file_id).join(related,
-            or_(neighbor.id == related.c.parent_file_id, neighbor.parent_file_id == related.c.id)).where(visible(neighbor, case_id)))
-        stmt = stmt.where(File.id.in_(select(related.c.id)))
+        .where(visible(file, case_id), file.category != 'system', file.folder_path == folder, func.md5(file.folder_path) == func.md5(folder)))
     keys = [case((root.is_pinned.is_(True), 0), else_=1), sort_value(root, root_owner, sort),
-            root.created_at, root.id, case((child, 1), else_=0), sort_value(File, owner, sort), File.created_at, File.id]
+            root.created_at, root.id, case((child, 1), else_=0), sort_value(file, owner, sort), file.created_at, file.id]
     directions = ['asc', direction, 'desc', 'asc', 'asc', direction, 'desc', 'asc']
     signature = hashlib.sha256(json.dumps([str(case_id), folder, q, sort, direction]).encode()).hexdigest()
     if cursor:

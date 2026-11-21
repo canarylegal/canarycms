@@ -1,10 +1,13 @@
 import { expect, test } from '@playwright/test'
 import { performance } from 'node:perf_hooks'
-import { credentials, login } from '../e2e/core-helpers'
+import { apiLogin, credentials, login } from '../e2e/core-helpers'
 
 const p95 = (values: number[]) => [...values].sort((a,b)=>a-b)[Math.ceil(values.length*0.95)-1]
 
-test('large matter and document lists retain interactions within generous UI budgets', async ({ page }, info) => {
+test('large matter and document lists retain interactions within generous UI budgets', async ({ page, request }, info) => {
+  // Make repeated measurements independent of the previous run's saved sort.
+  await apiLogin(request,'STAFF')
+  expect((await request.put('/api/users/me/ui-preferences',{data:{main_menu_sort_key:'created',main_menu_sort_dir:'desc'}})).ok()).toBe(true)
   const requests: string[]=[]
   page.on('request',r=>{ if(r.method()==='GET' && /\/api\/cases\/menu(?:\?|$)/.test(r.url())) requests.push(r.url()) })
   const start=performance.now()

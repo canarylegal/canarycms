@@ -30,6 +30,8 @@ trap cleanup EXIT
   -e DATABASE_URL=postgresql+psycopg://canary:isolated-core-database-secret@db:5432/canary_core_test \
   backend pytest -q tests/test_matter_menu.py tests/test_document_pages.py
 "${compose[@]}" exec -T backend python scripts/profile_performance.py --assert-budgets > "$CORE_TEST_OUTPUT/api-metrics.json"
+"${compose[@]}" exec -T backend python scripts/profile_large_documents.py --cold-statistics --assert-budgets > "$CORE_TEST_OUTPUT/large-api-cold.json"
+"${compose[@]}" exec -T backend python scripts/profile_large_documents.py --analyze --assert-budgets > "$CORE_TEST_OUTPUT/large-api-metrics.json"
 mapfile -t containers < <("${compose[@]}" ps -q)
 docker stats --format '{{json .}}' "${containers[@]}" > "$CORE_TEST_OUTPUT/resource-samples.raw" &
 stats_pid=$!

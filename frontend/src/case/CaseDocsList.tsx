@@ -1,3 +1,5 @@
+import {useMemo} from 'react'
+import {WindowedDocumentRows} from './WindowedDocumentRows'
 import { fileDocOwnerLabel } from './caseDetailHelpers'
 import { docListPrimaryDate, formatDocFileSize, formatDocModified } from './docFormat'
 import { DocsFileDescCell, DocsFolderDescCell, folderContentsSummary } from './DocCells'
@@ -52,6 +54,13 @@ export function CaseDocsList({
   | 'files'
   | 'folderSummaries'
 >) {
+  const rows = useMemo(() => [
+    ...sortedPinnedInFolder.map(file => ({kind: 'file' as const, file, pinned: true})),
+    ...sortedChildFolders.map(name => ({kind: 'folder' as const, name})),
+    ...sortedRegularInFolder.map(file => ({kind: 'file' as const, file, pinned: false})),
+  ], [sortedPinnedInFolder, sortedChildFolders, sortedRegularInFolder])
+  const rowKeys = useMemo(() => rows.map(item => item.kind === 'file' ? item.file.id :
+    `folder:${docFolder ? `${docFolder}/` : ''}${item.name}`), [rows, docFolder])
   return (
     <>
     <div className="caseDocsListHead">
@@ -135,35 +144,13 @@ export function CaseDocsList({
       })}
     </div>
 
-    {sortedPinnedInFolder.map((f) => (
-      <div
-        key={f.id}
-        data-doc-key={f.id}
-        className={`docsTr rowbtn ${f.parent_file_id ? 'attachmentChild' : ''} ${selectedDocSet.has(f.id) ? 'active' : ''} ${docFocusKey === f.id ? 'docsTr--focused' : ''}`}
-        onMouseDown={(e) => { if (e.shiftKey) e.preventDefault() }}
-        onClick={(e) => handleDocItemClick(f.id, e)}
-        onDoubleClick={(e) => {
-          e.stopPropagation()
-          if (isEmlLikeFileSummary(f)) void previewEmlFile(f)
-          else void openCaseFile(f)
-        }}
-        onContextMenu={(e) => {
-          e.preventDefault()
-          e.stopPropagation()
-          setDocMenu({ kind: 'file', fileId: f.id, x: e.clientX, y: e.clientY })
-        }}
-      >
-        <DocsFileDescCell f={f} showPin={!f.parent_file_id} />
-        <div className="td docsCenter">{formatDocFileSize(f.size_bytes)}</div>
-        <div className="td docsCenter">{formatDocModified(docListPrimaryDate(f))}</div>
-        <div className="td docsCenter">{fileDocOwnerLabel(f)}</div>
-      </div>
-    ))}
-
-    {sortedChildFolders.map((folderName) => {
-      const next = docFolder ? `${docFolder}/${folderName}` : folderName
-      const folderKey = `folder:${next}`
-      return (
+    <WindowedDocumentRows keys={rowKeys} focusKey={docFocusKey} renderRow={(index) => {
+      const item = rows[index]
+      if (item.kind === 'folder') {
+        const folderName = item.name
+        const next = docFolder ? `${docFolder}/${folderName}` : folderName
+        const folderKey = `folder:${next}`
+        return (
         <div
           key={next}
           data-doc-key={folderKey}
@@ -186,10 +173,10 @@ export function CaseDocsList({
           <div className="td muted docsCenter">—</div>
           <div className="td muted docsCenter">—</div>
         </div>
-      )
-    })}
-
-    {sortedRegularInFolder.map((f) => (
+        )
+      }
+      const f = item.file
+      return (
       <div
         key={f.id}
         data-doc-key={f.id}
@@ -207,12 +194,13 @@ export function CaseDocsList({
           setDocMenu({ kind: 'file', fileId: f.id, x: e.clientX, y: e.clientY })
         }}
       >
-        <DocsFileDescCell f={f} showPin={false} />
+        <DocsFileDescCell f={f} showPin={item.pinned && !f.parent_file_id} />
         <div className="td docsCenter">{formatDocFileSize(f.size_bytes)}</div>
         <div className="td docsCenter">{formatDocModified(docListPrimaryDate(f))}</div>
         <div className="td docsCenter">{fileDocOwnerLabel(f)}</div>
       </div>
-    ))}
+      )
+    }} />
 
     {sortedPinnedInFolder.length === 0 && sortedRegularInFolder.length === 0 && childFolders.length === 0 ? (
       <div className="muted" style={{ padding: 12 }}>

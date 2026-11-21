@@ -52,3 +52,32 @@ Evidence is written beneath `artifacts/performance/` (override with a scratch `C
 A fresh-stack verification also passed the fee-earner UI sort (about 1.5 seconds for 5,002 rows). Its sampled maximum backend memory was about 265 MiB, PostgreSQL 62 MiB, nginx 15 MiB and idle ONLYOFFICE 549 MiB; the renderer reported about 57 MiB of JavaScript heap after the workflow. These are short-run samples, not proven long-term peaks. `resource-summary.json` accompanies the normalized resource samples.
 
 This is a short metadata/list workload test, not a soak test, large-file transfer benchmark, multi-editor benchmark, external integration benchmark or proof of performance at arbitrary database sizes. Repeat with larger agreed workloads before increasing a deployment's expected load.
+
+## Large matter document rendering
+
+The current fixture also populates the second test matter with 12,000 documents: 10,000 at the root, including one pinned parent with 2,000 attachments, plus 2,000 documents spread across 40 branches, each 21 levels deep (840 folder paths). The existing 1,200-document matter and 5,002-matter checks remain in place.
+
+`profile_large_documents.py` measures each sort, attachment/broad/missing/sender searches, a deep folder, complete folder metadata and four concurrent distinct staff accounts. It uses three calls per individual scenario, including the first call, before and after explicit `ANALYZE`. The guarded seed temporarily disables autovacuum for the disposable file table so the cold-statistics check is deterministic; the second profiling pass resets that table option and analyzes it. The cold pass asserts that no file-column statistics exist. Guards require the isolated test database and explicit fixture flags; a 15-second statement timeout stops pathological queries. Regression budgets are 1 second per individual call, 3 seconds under concurrency, 30 SQL statements and 150 KB per document page. Folder metadata has a 250 KB budget for this fixture. These generous limits accommodate shared CI runners; JSON measurements retain the actual results.
+
+Initial local server measurements with refreshed statistics were fast (36–80 ms for populated root sorts/searches, 13 ms for folders and a maximum of 287 ms with four concurrent sessions). CI then exposed a 14.5-second first query immediately after seeding. A controlled local EXPLAIN with absent column statistics reproduced an 8.4-second query and over 31 million discarded parent-join comparisons; search expansion had the same repeated-scan problem.
+
+Parent resolution and search expansion now use bounded lateral lookups through the existing primary-key and parent-file indexes, applying the same visibility filters after lookup. Parent/child edges are expanded separately, and matching records are retrieved directly from the cycle-safe closure. This prevents misleading cold estimates from choosing repeated case-wide or CTE scans. The local default SQL plan dropped from 8.4 seconds to about 50 ms; cold and analyzed API scenarios both passed the unchanged 1-second single-request and 3-second concurrency budgets. No schema migration or new index is required.
+
+Browser rendering was the other bottleneck: roughly 2,000 loaded documents retained over 2,000 row elements and over 60,000 DOM nodes.
+
+Lists above 250 rows now render a visible window with eight extra rows on either side. Natural row heights are measured, including sender lines, folder summaries and signing/form badges; widths, markup, ordering, pinned groups and existing handlers remain unchanged. A prefix-height table and binary search locate visible rows. Removed rows are unobserved so observers do not retain detached DOM. Small lists stay fully mounted. Keyboard focus brings an off-screen target into view; selection and context-menu operations continue to use loaded document data.
+
+The browser regression loads approximately 2,000 documents for paired measurements, then all 10,000 root documents. Both points must retain fewer than 100 mounted rows, fewer than 5,000 DOM nodes and under 100 MiB of JavaScript heap after explicit garbage collection. It also checks off-screen keyboard focus, selection across unmount/remount, shift-selection, context menus, resize, search refresh and unchanged preferences. Separate API traversal verifies every attachment in the 2,001-document group and deep-folder counts. Core workflow checks cover double-click opening, editor saves and downloads.
+
+Paired local Chromium measurements on the same capped stack (about 2,000–2,100 loaded rows, depending on page prefetch):
+
+| Measurement | Previous renderer | Windowed renderer |
+|---|---:|---:|
+| Mounted document/folder rows | 2,140 | 28 |
+| DOM nodes after garbage collection | 66,369 | 2,636 |
+| JavaScript heap after garbage collection | 27.1 MB | 7.9 MB |
+| Time to load approximately 2,000 documents | 3.9 s | 2.4 s |
+
+After all 10,000 root documents were loaded, the windowed renderer retained 29 rows, 2,682 DOM nodes and 12.0 MB of JavaScript heap. Loading the remaining pages took 9.0 seconds. These local observations are not CI timing guarantees; full JSON measurements are retained as synthetic test evidence.
+
+This bounds DOM/rendering work, not the amount of loaded metadata: loaded pages remain in memory so selection and operations retain their existing semantics. Folder metadata still grows with distinct paths. Native browser Find only sees mounted rows; the app's server-side document search covers the matter. These tests are not a long-running soak test or a production capacity guarantee.
