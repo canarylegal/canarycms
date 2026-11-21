@@ -5,6 +5,7 @@ import uuid
 from datetime import date, datetime
 
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     CheckConstraint,
     Date,
@@ -95,11 +96,11 @@ class BankReconciliation(Base):
         UUID(as_uuid=True), ForeignKey("firm_bank_account.id", ondelete="CASCADE"), nullable=False
     )
     period_end_date: Mapped[date] = mapped_column(Date, nullable=False)
-    statement_balance_pence: Mapped[int] = mapped_column(Integer, nullable=False)
-    ledger_total_pence: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    unpresented_total_pence: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    unmatched_statement_total_pence: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    difference_pence: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    statement_balance_pence: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    ledger_total_pence: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    unpresented_total_pence: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    unmatched_statement_total_pence: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    difference_pence: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="draft")
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     prepared_by_user_id: Mapped[uuid.UUID] = mapped_column(

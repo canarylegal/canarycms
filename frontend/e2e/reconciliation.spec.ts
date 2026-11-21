@@ -22,7 +22,7 @@ test('bank matching recovers a lost response and audited corrections preserve re
   const today = new Date().toISOString().slice(0, 10)
   await page.getByRole('navigation', { name: 'Primary' }).getByRole('button', { name: 'Accounts', exact: true }).click()
   await page.getByRole('button', { name: 'Banking', exact: true }).click()
-  await page.getByLabel('Client bank', { exact: true }).selectOption(bank.id)
+  await page.getByRole('combobox', { name: 'Client bank', exact: true }).selectOption(bank.id)
   const imported = page.waitForResponse(r => r.url().endsWith('/statements/import') && r.request().method() === 'POST')
   await page.getByLabel('Import statement (CSV/OFX)').setInputFiles({ name: 'statement.csv', mimeType: 'text/csv',
     buffer: Buffer.from(`Date,Description,Amount\n${today},${description},100.00\n`) })
@@ -30,7 +30,7 @@ test('bank matching recovers a lost response and audited corrections preserve re
   expect(importedResponse.status()).toBe(200)
   const line = (await importedResponse.json()).lines[0]
   const endpoint = `/api/accounts/banking/statements/lines/${line.id}`
-  await page.getByLabel('Selected ledger entry').selectOption(pair)
+  await page.getByRole('combobox', { name: 'Selected ledger entry', exact: true }).selectOption(pair)
   let lostResponse = false
   await page.route(`**/statements/lines/${line.id}/match`, async route => {
     if (!lostResponse) {

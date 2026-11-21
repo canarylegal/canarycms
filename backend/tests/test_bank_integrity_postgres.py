@@ -99,3 +99,22 @@ def test_database_constraint_rejects_duplicate_matches(db):
     db.rollback()
     db.refresh(other)
     assert other.matched_pair_id is None
+
+
+def test_large_complete_balances_fit_migrated_reconciliation_columns(db):
+    from app.reconciliation_service import create_reconciliation
+    if db.bind.dialect.name != 'postgresql': pytest.skip('requires disposable PostgreSQL')
+    _, user, _, bank, account, _, _, leg = fixture(db)
+    leg.amount_pence = 1500000000
+    new_leg(db, account, bank, user, 1500000000)
+    row = service.create_bank_reconciliation(db, actor=user, firm_bank_account_id=bank.id,
+        period_end_date=PERIOD, statement_balance_pence=10000, notes=None)
+    db.commit()
+    db.refresh(row)
+    assert row.ledger_total_pence == 3000000000 and row.unpresented_total_pence == 3000000000
+    assert row.difference_pence == 0
+    report = create_reconciliation(db, actor=user, period_end_date=PERIOD,
+        bank_statement_balance_pence=3000000000, notes='Synthetic aggregate range test')
+    db.commit()
+    db.refresh(report)
+    assert report.ledger_client_total_pence >= 3000000000

@@ -27,6 +27,6 @@ These are authenticated APIs (application prefix `/api`), intended for authorise
 
 ## Deployment and verification
 
-The migration adds line/reconciliation versions, unique matched-payment identity and a match/ignore state check. Duplicate historical matches stop migration with a review-required error; nothing is deduplicated automatically. The state check is NOT VALID for existing rows, while enforcing new writes.
+The migration widens reconciliation totals to 64-bit integers so complete datasets can exceed the former £21.47m aggregate limit, and adds line/reconciliation versions, unique matched-payment identity and a match/ignore state check. Duplicate historical matches stop migration with a review-required error; nothing is deduplicated automatically. The state check is NOT VALID for existing rows, while enforcing new writes.
 
 Run backend tests plus `scripts/test-core-workflows.sh`. The isolated stack checks large period datasets, both sides of date boundaries, permissions, rollback, conflicting matches, approval/correction races, database constraints and browser recovery after a lost response. Dev verification uses synthetic records only. Scheduled jobs remain disabled.

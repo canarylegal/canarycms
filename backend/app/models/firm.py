@@ -135,10 +135,10 @@ class ClientAccountReconciliation(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     period_end_date: Mapped[date] = mapped_column(Date, nullable=False)
-    ledger_client_total_pence: Mapped[int] = mapped_column(Integer, nullable=False)
-    ledger_office_total_pence: Mapped[int] = mapped_column(Integer, nullable=False)
-    bank_statement_balance_pence: Mapped[int] = mapped_column(Integer, nullable=False)
-    difference_pence: Mapped[int] = mapped_column(Integer, nullable=False)
+    ledger_client_total_pence: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    ledger_office_total_pence: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    bank_statement_balance_pence: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    difference_pence: Mapped[int] = mapped_column(BigInteger, nullable=False)
     prepared_by_user_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("user.id", ondelete="RESTRICT"), nullable=False
     )

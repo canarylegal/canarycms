@@ -417,7 +417,7 @@ def _recon_snapshot(row: BankReconciliation) -> dict:
     return {key: str(getattr(row, key)) if key.endswith('_at') and getattr(row, key) else getattr(row, key)
             for key in ('status', 'version', 'statement_balance_pence', 'ledger_total_pence',
                 'unpresented_total_pence', 'unmatched_statement_total_pence', 'difference_pence',
-                'notes', 'approved_at')}
+                'notes', 'approved_at', 'approved_by_user_id')}
 
 
 def _audit_recon(db: Session, row: BankReconciliation, actor: User, action: str,
@@ -473,7 +473,7 @@ def approve_bank_reconciliation(db: Session, *, actor: User, row: BankReconcilia
     before = _recon_snapshot(row)
     _refresh_totals(db, row)
     if row.difference_pence != 0 and not (row.notes or '').strip():
-        raise HTTPException(400, 'Notes are required when the reconciliation difference is not zero')
+        raise HTTPException(400, f'Notes are required for the refreshed difference of £{Decimal(row.difference_pence) / 100:,.2f}. Update the draft before approving.')
     row.status = 'approved'
     row.approved_by_user_id = actor.id
     row.approved_at = datetime.now(timezone.utc)
