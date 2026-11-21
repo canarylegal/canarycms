@@ -1274,6 +1274,19 @@ def _validate_field_value(field: CanarySignField, value: dict[str, Any] | None) 
     return value
 
 
+def _merge_form_answers(saved: dict | None, supplied: dict | None) -> dict:
+    """Use the same canonical merge for first submission and an unchanged retry."""
+    merged = dict(saved or {})
+    if isinstance(supplied, dict):
+        for key, value in supplied.items():
+            name = str(key).strip()
+            if name:
+                merged[name] = (
+                    value if isinstance(value, bool) or value is None else str(value)
+                )
+    return merged
+
+
 def submit_signature(
     db: Session,
     req: CanarySignRequest,
@@ -1309,7 +1322,8 @@ def submit_signature(
             or replay_values != expected
             or (
                 form_responses is not None
-                and form_responses != (req.form_responses or {})
+                and _merge_form_answers(req.form_responses, form_responses)
+                != (req.form_responses or {})
             )
         ):
             raise HTTPException(
@@ -1352,17 +1366,7 @@ def submit_signature(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="The fillable form must be completed by the recipient who locked it before others can sign",
                 )
-            merged = dict(req.form_responses or {})
-            if isinstance(form_responses, dict):
-                for key, value in form_responses.items():
-                    name = str(key).strip()
-                    if not name:
-                        continue
-                    merged[name] = (
-                        value
-                        if isinstance(value, bool) or value is None
-                        else str(value)
-                    )
+            merged = _merge_form_answers(req.form_responses, form_responses)
             req.form_responses = merged
             req.form_completed_at = now
             req.updated_at = now

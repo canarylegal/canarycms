@@ -73,7 +73,41 @@ def file_state(db, file_id):
     return result
 
 
-def request_state(db, req, artifact):
+def completion_evidence(db, req, *, lock=False):
+    """Bind the reviewed completion evidence, reading fresh rows at application time."""
+    recipients = (
+        select(CanarySignRecipient.id, CanarySignRecipient.status, CanarySignRecipient.signed_at)
+        .where(CanarySignRecipient.signing_request_id == req.id)
+        .order_by(CanarySignRecipient.id)
+    )
+    audits = (
+        select(CanarySignAuditEvent.id, CanarySignAuditEvent.created_at, CanarySignAuditEvent.detail)
+        .where(
+            CanarySignAuditEvent.signing_request_id == req.id,
+            CanarySignAuditEvent.event_type == "completed",
+        )
+        .order_by(CanarySignAuditEvent.id)
+    )
+    if lock:
+        recipients = recipients.with_for_update(read=True)
+        audits = audits.with_for_update(read=True)
+    return {
+        "recipients": [
+            {
+                "id": str(r.id),
+                "status": r.status.value,
+                "signed_at": str(r.signed_at) if r.signed_at else None,
+            }
+            for r in db.execute(recipients)
+        ],
+        "audits": [
+            {"id": str(a.id), "created_at": str(a.created_at), "detail": a.detail}
+            for a in db.execute(audits)
+        ],
+    }
+
+
+def request_state(db, req, artifact, *, lock_evidence=False):
     return {
         "request_id": str(req.id),
         "case_id": str(req.case_id),
@@ -82,6 +116,7 @@ def request_state(db, req, artifact):
         "completed_at": str(req.completed_at),
         "voided_at": str(req.voided_at),
         "artifact": artifact,
+        "completion_evidence": completion_evidence(db, req, lock=lock_evidence),
         "references": {
             key: str(getattr(req, attr)) if getattr(req, attr) else None
             for key, attr in ARTIFACTS.items()
@@ -213,7 +248,8 @@ def validate_evidence(req, artifact, proof, raw):
 
 
 def prepare(
-    db, *, request_id, artifact, action, actor_id, reason, proof, raw, operation_id
+    db, *, request_id, artifact, action, actor_id, reason, proof, raw, operation_id,
+    lock_evidence=False,
 ):
     administrator(db, actor_id)
     if artifact not in ARTIFACTS or action not in ("baseline", "restore"):
@@ -221,10 +257,17 @@ def prepare(
     if not reason.strip() or len(reason) > 2000:
         raise ValueError("Review reason required (up to 2000 characters)")
     req = db.get(CanarySignRequest, request_id)
-    if not req or req.status.value != "completed" or req.voided_at:
+    if not req or req.status.value != "completed" or req.voided_at or not req.completed_at:
         raise ValueError("Unambiguous completed request required")
     validate_evidence(req, artifact, proof, raw)
-    before = request_state(db, req, artifact)
+    before = request_state(db, req, artifact, lock_evidence=lock_evidence)
+    completion = before["completion_evidence"]
+    if (
+        not completion["recipients"]
+        or not all(r["status"] == "signed" and r["signed_at"] for r in completion["recipients"])
+        or not completion["audits"]
+    ):
+        raise ValueError("Complete recipient and audit evidence required; investigate contradictory history")
     f = before["file"]
     if f.get("case_id") and f["case_id"] != str(req.case_id):
         raise ValueError("Cross-matter reference requires separate investigation")
@@ -302,6 +345,7 @@ def apply(db, plan, raw, *, approved_sha256):
         proof=plan["evidence"],
         raw=raw,
         operation_id=operation_id,
+        lock_evidence=True,
     )
     if fresh != plan:
         raise ValueError("State changed since review; prepare a new plan")
