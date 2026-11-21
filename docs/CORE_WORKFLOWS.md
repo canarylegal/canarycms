@@ -36,7 +36,7 @@ The browser suite also injects failures into otherwise real document workflows:
 
 Unit tests cover read retry limits, body timeouts, expired sessions/access denial, partial batch progress, duplicate upload suppression, folder changes during retry, portal notification failures and save-confirmation polling.
 
-Transfer requests and browser delivery are in `documentRequests.ts` and `documentTransferOps.ts`; `useCaseDocumentTransfers.ts` owns progress, busy state and retry dialogs. Reads retry at most once automatically. Uploads never retry automatically: an explicit retry is offered for a definite HTTP 429 rejection, while network/timeouts/server failures require refreshing and checking the list before importing again because the server may already have accepted the file. Successful files are retained, and a failed portal notification never re-uploads them. Save failures keep the editor and unsaved state available for an explicit retry.
+Transfer requests and browser delivery are in `documentRequests.ts` and `documentTransferOps.ts`; `useCaseDocumentTransfers.ts` owns progress, busy state and retry dialogs. Reads retry at most once automatically. Uploads never retry automatically. Matter imports now retain a durable receipt key per file, so explicit retry is also safe after a lost response, timeout or transient server failure. See [IMPORT_RECOVERY.md](IMPORT_RECOVERY.md) for scope, batch recovery and restart checks. Successful files are retained, and a failed portal notification never re-uploads them. Save failures keep the editor and unsaved state available for an explicit retry.
 
 The matter/document layout and double-click/right-click interaction model are unchanged. Recovery uses the existing dialogs and editor error surface.
 

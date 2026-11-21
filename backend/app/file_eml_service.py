@@ -13,7 +13,7 @@ from pathlib import Path
 
 from fastapi import HTTPException, status
 
-from app.file_storage import StoredFilePaths, case_file_paths
+from app.file_storage import StoredFilePaths, case_file_paths, write_bytes_atomic
 from app.models import File as DbFile
 
 log = logging.getLogger(__name__)
@@ -210,7 +210,7 @@ def convert_case_upload_msg_to_eml_if_applicable(
         original_filename=eml_name,
         folder_path=folder_path,
     )
-    new_paths.abs_path.write_bytes(eml_bytes)
+    write_bytes_atomic(new_paths.abs_path, eml_bytes)
     return eml_name, new_paths, len(eml_bytes)
 
 

@@ -318,3 +318,5 @@ __all__ = [
     'CommercialFundsSettings',
     'SearchIntegrationSettings',
 ]
+
+from app.models.upload_receipts import UploadReceipt
