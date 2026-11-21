@@ -5,10 +5,11 @@ without using the browser editor. Auth is an unguessable token in the path (use 
 
 from __future__ import annotations
 
+from app.document_durability import lock_document, stage_document_bytes
+
 import html
 import logging
 import mimetypes
-import os
 import uuid
 from datetime import datetime, timezone
 from email.utils import format_datetime
@@ -19,9 +20,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db import get_db
-from app.file_storage import FILES_ROOT, StoredFilePaths, ensure_files_root, path_is_under_files_root
+from app.file_storage import FILES_ROOT, ensure_files_root, path_is_under_files_root
 from app.models import File as DbFile, FileCategory, FileEditSession, User
-from app.file_eml_service import convert_case_upload_msg_to_eml_if_applicable, refresh_root_eml_mail_metadata
+from app.file_eml_service import refresh_root_eml_mail_metadata
 from app.audit import log_event
 from app.canary_public_url import get_canary_public_base
 from app.docx_util import ensure_docx_proofing_language_en_gb_bytes, finalize_stored_docx_bytes
@@ -591,6 +592,7 @@ async def webdav_put_file(
             headers={"ETag": _etag_for_file(frow)},
         )
 
+    expected_version = frow.version
     ensure_files_root()
     abs_path = (FILES_ROOT / frow.storage_path).resolve()
     if not path_is_under_files_root(abs_path):
@@ -617,30 +619,28 @@ async def webdav_put_file(
             if patched != raw:
                 tmp.write_bytes(patched)
 
-        os.replace(tmp, abs_path)
-    except Exception:
-        try:
-            tmp.unlink(missing_ok=True)
-        except OSError:
-            pass
-        raise
-
-    paths_wrap = StoredFilePaths(abs_path=abs_path, rel_path=frow.storage_path, folder_path=frow.folder_path or "")
-    prev_name = frow.original_filename
-    original_fn, new_paths, final_size = convert_case_upload_msg_to_eml_if_applicable(
-        case_id=frow.case_id,
-        file_id=frow.id,
-        folder_path=frow.folder_path or "",
-        original_filename=frow.original_filename,
-        paths=paths_wrap,
-    )
-    frow.storage_path = new_paths.rel_path
-    frow.original_filename = original_fn
-    frow.size_bytes = final_size
-    if prev_name.lower().endswith(".msg") and original_fn.lower().endswith(".eml"):
-        frow.mime_type = "message/rfc822"
-        uploader = db.get(User, sess.user_id)
-        refresh_root_eml_mail_metadata(frow, new_paths.abs_path, uploader_email=uploader.email if uploader else None)
+        frow = lock_document(db, frow, expected_version=expected_version)
+        db.expire(sess)
+        if not _load_session(db, token):
+            raise HTTPException(403, "The edit session has expired or been revoked.")
+        data = tmp.read_bytes()
+        prev_name = frow.original_filename
+        original_fn = prev_name
+        if prev_name.lower().endswith(".msg"):
+            from app.outlook_msg import outlook_msg_path_to_eml_bytes
+            try:
+                data = outlook_msg_path_to_eml_bytes(tmp)
+            except Exception as exc:
+                raise HTTPException(400, "Could not convert Outlook message; the original is unchanged.") from exc
+            original_fn = f"{Path(prev_name).stem}.eml"
+        abs_path = stage_document_bytes(db, frow, data, root=FILES_ROOT)
+        frow.original_filename = original_fn
+        if prev_name.lower().endswith(".msg"):
+            frow.mime_type = "message/rfc822"
+            uploader = db.get(User, sess.user_id)
+            refresh_root_eml_mail_metadata(frow, abs_path, uploader_email=uploader.email if uploader else None)
+    finally:
+        tmp.unlink(missing_ok=True)
 
     frow.version = (frow.version or 1) + 1
     frow.updated_at = _now()
@@ -664,6 +664,7 @@ async def webdav_put_file(
         frow.size_bytes,
         _redact_webdav_path(request.url.path),
     )
+    db.commit()  # Never send a successful PUT response before persistence succeeds.
     return Response(status_code=204, headers={"ETag": _etag_for_file(frow)})
 
 

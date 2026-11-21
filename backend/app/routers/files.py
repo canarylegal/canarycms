@@ -744,12 +744,13 @@ async def oo_force_save(
         None,
         description="Version from ``phase=arm``; required for ``phase=wait``",
     ),
+    attempt_id: uuid.UUID | None = Query(None),
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """Persist in-browser ONLYOFFICE edits to Canary storage.
 
-    Preferred flow (matches toolbar Save): arm → host ``serviceCommand('save')`` → wait.
+    Preferred flow: arm → CommandService with attempt_id → poll that attempt.
     """
     return await oo_force_save_service(
         case_id=case_id,
@@ -757,6 +758,7 @@ async def oo_force_save(
         doc_key=doc_key,
         phase=phase,
         base_version=base_version,
+        attempt_id=attempt_id,
         user=user,
         db=db,
     )
@@ -791,12 +793,13 @@ def oo_save_status(
     case_id: uuid.UUID,
     file_id: uuid.UUID,
     base_version: int = Query(..., description="Version from ``phase=arm`` before triggering ONLYOFFICE save"),
+    attempt_id: uuid.UUID | None = Query(None),
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
-) -> dict[str, int | bool]:
-    """Poll whether ONLYOFFICE callback has persisted edits (version bumped past ``base_version``)."""
+) -> dict[str, int | bool | str | None]:
+    """Poll whether the matching save attempt committed document bytes."""
     return oo_save_status_service(
-        case_id=case_id, file_id=file_id, base_version=base_version, user=user, db=db
+        case_id=case_id, file_id=file_id, base_version=base_version, user=user, db=db, attempt_id=attempt_id
     )
 
 

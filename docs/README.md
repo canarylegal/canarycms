@@ -17,3 +17,5 @@ Guides for deploying, operating, and troubleshooting a Canary installation.
 - [frontend/README.md](../frontend/README.md) — Frontend development notes
 
 **Repository entry point:** [README.md](../README.md) (quick start, licence).
+
+- [Document recovery and truthful save confirmations](DOCUMENT_RECOVERY.md)

@@ -37,6 +37,7 @@ async def test_persist_rejects_non_pdf_for_pdf_file(tmp_path, monkeypatch) -> No
         version=1,
     )
     db = MagicMock()
+    db.execute.return_value.scalar_one_or_none.return_value = row
     monkeypatch.setattr("app.routers.onlyoffice.FILES_ROOT", tmp_path)
     monkeypatch.setattr("app.routers.onlyoffice.ensure_files_root", lambda: None)
 
@@ -71,6 +72,7 @@ async def test_browser_persist_does_not_write_after_actor_revoked(monkeypatch, t
     import uuid
     row = MagicMock(id=uuid.uuid4())
     db = MagicMock()
+    db.execute.return_value.scalar_one_or_none.return_value = row
     db.get.return_value = None
     monkeypatch.setattr(onlyoffice, '_fetch_onlyoffice_download_bytes', AsyncMock(return_value=b'never persist'))
     with pytest.raises(HTTPException) as exc:

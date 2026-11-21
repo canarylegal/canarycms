@@ -23,3 +23,8 @@ it('reports an unconfirmed save within its deadline', async () => {
   await result
   expect(documentRequest).toHaveBeenCalledTimes(2)
 })
+it.each(['failed', 'superseded'])('does not confirm a %s attempt even when the version increased', async (state) => {
+  vi.mocked(documentRequest).mockResolvedValue({ saved: false, version: 20, state })
+  await expect(pollOnlyofficeSaveConfirmed('/save-status', 1, '', 1000)).rejects.toThrow('not confirmed')
+  expect(documentRequest).toHaveBeenCalledTimes(1)
+})

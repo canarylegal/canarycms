@@ -87,10 +87,11 @@ def release_edit_sessions_for_user(
         sess.released_at = now
         db.add(sess)
     # CL-18 / CL-07: do not leave force-save pending after revoke (callback must not persist).
-    for fid in file_ids:
-        frow = db.get(DbFile, fid)
+    for fid in sorted(file_ids):
+        frow = db.execute(select(DbFile).where(DbFile.id == fid).with_for_update()
+                          .execution_options(populate_existing=True)).scalar_one_or_none()
         if frow is not None and frow.oo_force_save_pending:
-            frow.version = (frow.version or 1) + 1
+            frow.oo_save_state = "failed"
             frow.oo_force_save_pending = False
             frow.updated_at = now
             db.add(frow)

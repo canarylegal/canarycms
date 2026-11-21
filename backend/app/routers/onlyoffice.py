@@ -9,6 +9,8 @@ so Firefox does not hand off ``application/pdf`` to the global PDF handler.
 
 from __future__ import annotations
 
+from app.document_durability import lock_document, stage_document_bytes
+
 import json
 import logging
 import os
@@ -38,7 +40,6 @@ from app.file_storage import (
     commit_keeping_stored_file,
     ensure_files_root,
     path_is_under_files_root,
-    write_bytes_atomic,
 )
 from app.models import FeeScale, File as DbFile, FileCategory, Precedent, User
 from app.audit import log_event
@@ -567,13 +568,23 @@ async def persist_onlyoffice_browser_url_to_file(
     precedent_id: uuid.UUID | None,
     firm_letterhead_kind: str | None = None,
     actor_user_id: uuid.UUID | None = None,
+    attempt_id: uuid.UUID | None = None,
 ) -> int:
     """Fetch a DS ``downloadAs`` / cache URL and write bytes to Canary file storage."""
 
+    if attempt_id is not None and row.oo_save_attempt_id == attempt_id and row.oo_save_state == "confirmed":
+        return int(row.version)
+    expected_session_id = None
+    if actor_user_id is not None:
+        from app.desktop_edit_session import get_active_edit_session_for_file
+        original_session = get_active_edit_session_for_file(db, row.id)
+        expected_session_id = original_session.id if original_session is not None else None
+    expected_version = row.version
     data = await _fetch_onlyoffice_download_bytes(browser_url, log_label=f"oo-persist file={row.id}")
+    row = lock_document(db, row, expected_version=expected_version)
 
     # A revoked account/matter/session must win over a slow Document Server fetch.
-    if case_id is not None and actor_user_id is not None:
+    if actor_user_id is not None:
         from app.deps import require_case_access
         from app.desktop_edit_session import require_user_active_edit_session
         from app.models import User
@@ -581,8 +592,15 @@ async def persist_onlyoffice_browser_url_to_file(
         actor = db.get(User, actor_user_id)
         if actor is None or not actor.is_active:
             raise HTTPException(status_code=403, detail="Document access has been revoked.")
-        require_case_access(case_id, actor, db)
-        require_user_active_edit_session(db, row.id, actor)
+        if case_id is not None:
+            require_case_access(case_id, actor, db)
+        session = require_user_active_edit_session(db, row.id, actor)
+        if session.id != expected_session_id or (attempt_id is not None
+                and session.document_key != row.oo_save_document_key):
+            raise HTTPException(409, "The editor session changed during export. Retry from the current editor.")
+
+    if attempt_id is not None and row.oo_save_attempt_id != attempt_id:
+        raise HTTPException(409, "This save attempt has been superseded. Retry saving.")
 
     _validate_persist_magic(data, filename=row.original_filename)
 
@@ -605,20 +623,14 @@ async def persist_onlyoffice_browser_url_to_file(
     if not path_is_under_files_root(abs_path):
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Invalid storage path")
 
-    abs_path.parent.mkdir(parents=True, exist_ok=True)
-    abs_path.write_bytes(data)
-
-    backup_path = Path(str(abs_path) + ".oo_backup")
-    if backup_path.exists():
-        try:
-            backup_path.unlink()
-        except Exception as exc:
-            log.warning("Could not delete backup %s: %s", backup_path, exc)
+    stage_document_bytes(db, row, data, root=FILES_ROOT)
 
     row.version = (row.version or 1) + 1
     row.size_bytes = len(data)
     row.updated_at = datetime.now(timezone.utc)
-    row.oo_force_save_pending = False
+    if attempt_id is not None:
+        row.oo_save_state = "confirmed"
+        row.oo_force_save_pending = False
     if case_id is not None:
         from app.quote_portal_service import supersede_pending_quote_deliveries
 
@@ -877,7 +889,7 @@ def _audit_oo_callback_persist_refused(
         db.commit()
 
 
-def _oo_ack_unchanged_force_save(
+def _oo_refuse_force_save(
     db: Session,
     row: DbFile,
     *,
@@ -885,37 +897,15 @@ def _oo_ack_unchanged_force_save(
     case_id: uuid.UUID | None,
     firm_letterhead_kind: str | None = None,
     status_code: int,
+    attempt_id: str | None = None,
 ) -> None:
-    """Complete /oo-force-save when DS omits ``url`` (document unchanged). Bump version only metadata-wise."""
-
-    row.version = (row.version or 1) + 1
-    row.updated_at = datetime.now(timezone.utc)
-    row.oo_force_save_pending = False
-    if case_id is not None:
-        from app.quote_portal_service import supersede_pending_quote_deliveries
-
-        supersede_pending_quote_deliveries(db, row.id)
+    """A refused or content-free callback is not evidence of a persisted save."""
+    row = lock_document(db, row)
+    if attempt_id and str(row.oo_save_attempt_id) == attempt_id and row.oo_save_state != "confirmed":
+        row.oo_force_save_pending = False
+        row.oo_save_state = "failed"
     db.add(row)
-    action, meta_extra = _oo_save_audit_action_meta(
-        precedent_id=precedent_id,
-        case_id=case_id,
-        firm_letterhead_kind=firm_letterhead_kind,
-    )
-    log_event(
-        db,
-        actor_user_id=None,
-        action=f"{action}_unchanged",
-        entity_type="file",
-        entity_id=str(row.id),
-        meta={**meta_extra, "callback_status": status_code, "version": row.version},
-    )
     db.commit()
-    log.info(
-        "onlyoffice_callback: unchanged force-save ack file=%s callback_status=%s version=%s",
-        row.id,
-        status_code,
-        row.version,
-    )
 
 
 @router.post("/callback")
@@ -958,11 +948,8 @@ async def onlyoffice_callback(
         log.warning("onlyoffice_callback: missing or non-numeric status — ignoring")
         return {"error": 0}
 
-    # 7 = Document Server reported a force-save error (often seen when there is nothing new to persist).
-    # Do **not** clear ``oo_force_save_pending`` here: clearing without bumping ``version`` makes
-    # POST /oo-force-save wait until timeout and then return HTTP 504. ``/oo-force-save`` completes
-    # with a metadata version bump when the CommandService forcesave itself succeeded.
-    if st == 7:
+    # A correlated DS failure ends only that attempt, never a newer one.
+    if st in (3, 7):
         row7 = _callback_resolve_file_row(
             db,
             case_id=case_id,
@@ -972,11 +959,9 @@ async def onlyoffice_callback(
             firm_letterhead_kind=firm_letterhead_kind,
         )
         if row7 is not None:
-            log.warning(
-                "onlyoffice_callback: force-save status=7 (DS error) file=%s oo_force_save_pending=%s",
-                row7.id,
-                row7.oo_force_save_pending,
-            )
+            _oo_refuse_force_save(db, row7, precedent_id=precedent_id, case_id=case_id,
+                firm_letterhead_kind=firm_letterhead_kind, status_code=st,
+                attempt_id=str(payload.get("userdata") or ""))
         return {"error": 0}
 
     # 2 = document closed, must save; 4 = closed with no changes (some builds still send a url);
@@ -994,6 +979,12 @@ async def onlyoffice_callback(
             return {"error": 1}
         db.refresh(row)
         file_id = row.id
+        callback_attempt = str(payload.get("userdata") or "")
+        if callback_attempt:
+            if callback_attempt != str(row.oo_save_attempt_id):
+                return {"error": 0}  # stale callback; never change a newer attempt
+            if row.oo_save_state == "confirmed":
+                return {"error": 0}  # idempotent delivery
 
         # CL-18: never persist Document Server bytes without an active authorised edit session
         # bound to this callback's document key.
@@ -1023,13 +1014,14 @@ async def onlyoffice_callback(
                 commit=not row.oo_force_save_pending,
             )
             if row.oo_force_save_pending:
-                _oo_ack_unchanged_force_save(
+                _oo_refuse_force_save(
                     db,
                     row,
                     precedent_id=precedent_id,
                     case_id=case_id,
                     firm_letterhead_kind=firm_letterhead_kind,
                     status_code=st,
+                    attempt_id=str(payload.get("userdata") or ""),
                 )
             return {"error": 0}
 
@@ -1053,13 +1045,14 @@ async def onlyoffice_callback(
                 commit=not row.oo_force_save_pending,
             )
             if row.oo_force_save_pending:
-                _oo_ack_unchanged_force_save(
+                _oo_refuse_force_save(
                     db,
                     row,
                     precedent_id=precedent_id,
                     case_id=case_id,
                     firm_letterhead_kind=firm_letterhead_kind,
                     status_code=st,
+                    attempt_id=str(payload.get("userdata") or ""),
                 )
             return {"error": 0}
 
@@ -1071,17 +1064,21 @@ async def onlyoffice_callback(
             active_sess.released_at = datetime.now(timezone.utc)
             db.add(active_sess)
             if row.oo_force_save_pending:
-                _oo_ack_unchanged_force_save(
+                _oo_refuse_force_save(
                     db,
                     row,
                     precedent_id=precedent_id,
                     case_id=case_id,
                     firm_letterhead_kind=firm_letterhead_kind,
                     status_code=st,
+                    attempt_id=str(payload.get("userdata") or ""),
                 )
             else:
                 db.commit()
             return {"error": 0}
+
+        if not callback_attempt and row.oo_force_save_pending:
+            return {"error": 0}  # native/autosave cannot acknowledge a host save
 
         log.warning(
             "onlyoffice_callback: active session+key ok, downloading for file %s key=%s",
@@ -1099,9 +1096,16 @@ async def onlyoffice_callback(
         if not fetch_url:
             return {"error": 1}
 
+        expected_version = row.version
         data = await _download_oo_document_bytes(fetch_url, max_bytes=_OO_PERSIST_MAX_BYTES)
         if data is None:
             return {"error": 1}
+
+        row = lock_document(db, row, expected_version=expected_version)
+
+        if callback_attempt and (callback_attempt != str(row.oo_save_attempt_id)
+                                 or row.oo_save_state == "confirmed"):
+            return {"error": 0}
 
         # Re-validate after the download — revoke / key change must win over in-flight fetches.
         db.refresh(active_sess)
@@ -1117,13 +1121,14 @@ async def onlyoffice_callback(
                 file_id,
             )
             if row.oo_force_save_pending:
-                _oo_ack_unchanged_force_save(
+                _oo_refuse_force_save(
                     db,
                     row,
                     precedent_id=precedent_id,
                     case_id=case_id,
                     firm_letterhead_kind=firm_letterhead_kind,
                     status_code=st,
+                    attempt_id=str(payload.get("userdata") or ""),
                 )
             return {"error": 0}
 
@@ -1134,23 +1139,19 @@ async def onlyoffice_callback(
         )
 
         try:
-            write_bytes_atomic(abs_path, data)
+            _validate_persist_magic(data, filename=row.original_filename)
+            stage_document_bytes(db, row, data, root=FILES_ROOT)
         except Exception:
-            log.exception("onlyoffice_callback: atomic write failed for file %s", file_id)
+            db.rollback()
+            log.exception("onlyoffice_callback: staging bytes failed for file %s", file_id)
             return {"error": 1}
-
-        # Remove pre-edit backup now that the new version is saved.
-        backup_path = Path(str(abs_path) + ".oo_backup")
-        if backup_path.exists():
-            try:
-                backup_path.unlink()
-            except Exception as exc:
-                log.warning("Could not delete backup %s: %s", backup_path, exc)
 
         row.version = (row.version or 1) + 1
         row.size_bytes = len(data)
         row.updated_at = datetime.now(timezone.utc)
-        row.oo_force_save_pending = False
+        if callback_attempt and row.oo_save_document_key == cb_key:
+            row.oo_save_state = "confirmed"
+            row.oo_force_save_pending = False
         if case_id is not None:
             from app.quote_portal_service import supersede_pending_quote_deliveries
 
@@ -1185,23 +1186,25 @@ async def onlyoffice_callback(
         if row is None:
             return {"error": 1}
         db.refresh(row)
-        if not row.oo_force_save_pending:
+        if (not row.oo_force_save_pending
+                or str(payload.get("userdata") or "") != str(row.oo_save_attempt_id)):
             return {"error": 0}
         from app.desktop_edit_session import get_active_edit_session_for_file
 
         active_sess = get_active_edit_session_for_file(db, row.id)
         if active_sess is None:
             log.warning(
-                "onlyoffice_callback: force-save pending but no session row for file %s — metadata-only ack",
+                "onlyoffice_callback: force-save pending but no session row for file %s — save not confirmed",
                 row.id,
             )
-        _oo_ack_unchanged_force_save(
+        _oo_refuse_force_save(
             db,
             row,
             precedent_id=precedent_id,
             case_id=case_id,
             firm_letterhead_kind=firm_letterhead_kind,
             status_code=st,
+            attempt_id=str(payload.get("userdata") or ""),
         )
         return {"error": 0}
 
