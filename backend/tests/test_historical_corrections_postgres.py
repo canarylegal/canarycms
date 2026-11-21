@@ -17,8 +17,10 @@ from tests.test_bank_integrity import PERIOD
 def test_correction_serializes_with_bank_operations(db,winner_kind):
     if db.bind.dialect.name!='postgresql':pytest.skip('isolated PostgreSQL required')
     _,user,bank,line,_=fixture(db)
-    reconciliation=banking.create_bank_reconciliation(db,actor=user,firm_bank_account_id=bank.id,
+    # Seed a historical draft directly: modern creation rejects dangling matches.
+    reconciliation=BankReconciliation(firm_bank_account_id=bank.id,prepared_by_user_id=user.id,
         period_end_date=PERIOD,statement_balance_pence=0,notes='Synthetic reconciliation test')
+    db.add(reconciliation)
     db.commit()
     uid,lid,rid=user.id,line.id,reconciliation.id
     plan=preview_unmatch(db,lid);db.rollback()
@@ -29,7 +31,10 @@ def test_correction_serializes_with_bank_operations(db,winner_kind):
         with SessionLocal() as session:
             actor=session.get(User,uid)
             if winner_kind=='ordinary_unmatch':banking.unmatch_line(session,line_id=lid,actor=actor,expected_version=0)
-            elif winner_kind=='period_approval':banking.approve_bank_reconciliation(session,actor=actor,row=session.get(BankReconciliation,rid),expected_version=0)
+            elif winner_kind=='period_approval':
+                # Modern approval requires fixing the invalid match first, in the same transaction.
+                banking.unmatch_line(session,line_id=lid,actor=actor,expected_version=0)
+                banking.approve_bank_reconciliation(session,actor=actor,row=session.get(BankReconciliation,rid),expected_version=0)
             else:correct(session)
             locked.set()
             assert attempted.wait(15)
@@ -55,11 +60,6 @@ def test_correction_serializes_with_bank_operations(db,winner_kind):
             session.commit()
             assert session.get(BankStatementLine,lid).version==1
             assert session.scalar(select(func.count()).select_from(AuditEvent).where(AuditEvent.action==ACTION,AuditEvent.entity_id==plan['plan_hash']))==1
-        # Clear only the synthetic dangling match after proving the closed-period guard.
         if winner_kind=='period_approval':
-            row=session.get(BankReconciliation,rid)
-            banking.reopen_bank_reconciliation(session,actor=session.get(User,uid),row=row,expected_version=row.version,reason='Synthetic test cleanup')
-            session.commit()
-            refreshed=preview_unmatch(session,lid)
-            apply_unmatch(session,plan=refreshed,actor_id=uid,reason='Synthetic test cleanup after reopened period',approved_hash=refreshed['plan_hash'])
-            session.commit()
+            assert session.get(BankReconciliation,rid).status=='approved'
+            assert session.get(BankStatementLine,lid).matched_pair_id is None
