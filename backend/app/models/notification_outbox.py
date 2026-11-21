@@ -24,7 +24,7 @@ class NotificationOutbox(Base):
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True)
     kind: Mapped[str] = mapped_column(String(80), nullable=False)
     event_key: Mapped[str] = mapped_column(String(240), nullable=False)
-    case_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    case_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
     recipient_user_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
     payload_enc: Mapped[str] = mapped_column(Text, nullable=False)
     payload_sha256: Mapped[str] = mapped_column(String(64), nullable=False)

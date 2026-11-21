@@ -5,8 +5,10 @@ and Canary Sign sent/completed/declined staff alerts now queue encrypted, frozen
 messages in the same database transaction as their business change. Queue/audit
 failure prevents that transaction from succeeding. The migration does not backfill
 historical alerts. No frontend, login-code or external-recipient delivery flow changes.
-Other alert families (including portal uploads, calendars and commercial integrations)
-remain on their existing delivery paths; this is not a migration of all outbound mail.
+Portal uploads, form completions, quote responses and opted-in calendar reminders also
+use this outbox. With the paired commercial-package update, DocuSign staff alerts
+and opted-in search-result alerts do too. External messages, support mail, email tests,
+password resets and login codes remain on their existing paths.
 
 There is **no worker, scheduler or automatic retry** in this release. Eligible staff
 alerts accumulate as pending, including while email is disabled. An operator must
@@ -94,3 +96,34 @@ corrupt payloads, provider rejection/timeout, claim/final commit failures, inter
 workers, audited versioned review and unchanged login-code dispatch. PostgreSQL
 tests exercise competing enqueue/dispatch transactions; restart/restore checks
 verify durable state. Tests inject synthetic providers and never contact real recipients.
+
+## Remaining staff alerts and diagnostics
+
+Run `python scripts/staff_notifications.py diagnostics` for aggregate state counts,
+oldest pending age, attempt count and stale sending count. It uses a read-only snapshot,
+prints no identifiers/recipients/content and exits 2 when failed, uncertain or stale
+attempts need attention. It never retries or changes state.
+
+Portal file IDs, form submission IDs, quote delivery IDs and commercial request/product
+IDs provide event identities. Notification retry never reruns an upload, form completion
+or vendor operation. Separate new upload requests remain separate business operations;
+this is not a new portal-upload idempotency protocol. Concurrent form/quote transitions
+are locked. Form completion writes a fresh durable candidate instead of overwriting
+its pending snapshot; retained unreferenced candidates remain available for review.
+
+Calendar reminders use subscription, due date, reminder kind and a snapshot fingerprint.
+Historical sent buckets remain respected; new buckets live in the outbox. Before delivery,
+subscriptions must still be enabled, unchanged, due today and accessible through their
+matter or calendar. Expired/revoked reminders fail closed; review and cancel stale items.
+Reminder collection performs no network I/O and does not commit on its own. Existing
+background collectors remain controlled by CANARY_BACKGROUND_JOBS_ENABLED; dev is
+configured with this set to 0, and backup/monitoring timers remain disabled.
+
+Deploy the Core change before the paired commercial package, then restart the backend.
+Keep local commercial UI changes intact. Test the paired package using its
+`scripts/test-staff-outbox.sh`; no live provider credentials are used in those tests.
+Search webhook queue failures must propagate without committing the callback receipt.
+DocuSign queues inside a savepoint before creating an envelope, so a queue/audit failure
+cannot itself trigger remote creation; provider failure rolls back the tentative notice.
+Existing provider-side operations still have their own recovery limits, outside this
+outbox's email-delivery guarantee.

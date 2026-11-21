@@ -9,6 +9,8 @@ on:
     branches: [main]
     paths:
       - "backend/app/commercial_*.py"
+      - "backend/app/*notification*.py"
+      - "backend/app/portal*.py"
       - "backend/app/routers/commercial_package.py"
       - "backend/app/routers/commercial_modules.py"
       - "backend/app/main.py"
@@ -20,6 +22,8 @@ on:
   pull_request:
     paths:
       - "backend/app/commercial_*.py"
+      - "backend/app/*notification*.py"
+      - "backend/app/portal*.py"
       - "backend/app/routers/commercial_package.py"
       - "backend/app/routers/commercial_modules.py"
       - "backend/app/main.py"
@@ -62,6 +66,7 @@ jobs:
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           repository: canarylegal/canary-commercial
+          ref: 29a396e1b22e2c52aa45c3f70f6b450a3306d258 # paired staff outbox package
           token: ${{ secrets.CANARY_COMMERCIAL_TOKEN }}
           path: canary-commercial
 
@@ -88,3 +93,11 @@ jobs:
         run: |
           chmod +x scripts/smoke-commercial-contract.sh
           ./scripts/smoke-commercial-contract.sh
+
+      - name: Test commercial staff outbox failure paths
+        if: steps.secret.outputs.present == 'true'
+        working-directory: .
+        env:
+          CANARY_DIR: ${{ github.workspace }}
+          PYTHON: python3
+        run: bash canary-commercial/scripts/test-staff-outbox.sh

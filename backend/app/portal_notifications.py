@@ -9,10 +9,10 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.alert_dispatch import AlertKind, dispatch_alert, firm_alerts_configured, matter_deep_link
+from app.notification_outbox import enqueue_staff
 from app.case_reference import display_case_number
 from app.models import Case, CasePortalStaffRecipient, Contact, ContactPortalAccess, ContactPortalGrant, User
 from app.portal_service import contact_display_name, default_grant_label, file_folder_in_grant, grant_is_active
-
 
 ALERTS_NOT_CONFIGURED_MSG = (
     "Automated e-mail is not configured. Ask an administrator to enable Admin → E-mail → "
@@ -161,9 +161,8 @@ def notify_portal_staff_client_upload(
     contact: Contact,
     grant: ContactPortalGrant,
     filename: str,
+    file_id: uuid.UUID,
 ) -> PortalNotifyResult:
-    if not firm_alerts_configured(db):
-        return PortalNotifyResult(0, 0, ALERTS_NOT_CONFIGURED_MSG)
     area = default_grant_label(db, grant)
     matter_ctx = staff_matter_context(db, case_id)
     staff_sent = 0
@@ -171,10 +170,13 @@ def notify_portal_staff_client_upload(
         email = (user.email or "").strip()
         if not email:
             continue
-        if dispatch_alert(
+        if enqueue_staff(
             db,
-            AlertKind.portal_staff_upload,
-            to_email=email,
+            kind=AlertKind.portal_staff_upload,
+            case_id=case_id,
+            event_key=str(file_id),
+            recipient_user_id=user.id,
+            actor_id=None,
             context={
                 "contact_name": contact_display_name(contact),
                 "area_label": area,
@@ -193,9 +195,8 @@ def notify_portal_staff_form_completed(
     contact: Contact,
     form_name: str,
     matter_label: str,
+    submission_id: uuid.UUID,
 ) -> PortalNotifyResult:
-    if not firm_alerts_configured(db):
-        return PortalNotifyResult(0, 0, ALERTS_NOT_CONFIGURED_MSG)
     matter_ctx = staff_matter_context(db, case_id)
     # Prefer staff reference label; fall back to caller-provided client-facing label.
     if not matter_ctx["matter_label"] or matter_ctx["matter_label"] == "matter":
@@ -205,10 +206,13 @@ def notify_portal_staff_form_completed(
         email = (user.email or "").strip()
         if not email:
             continue
-        if dispatch_alert(
+        if enqueue_staff(
             db,
-            AlertKind.portal_form_completed,
-            to_email=email,
+            kind=AlertKind.portal_form_completed,
+            case_id=case_id,
+            event_key=str(submission_id),
+            recipient_user_id=user.id,
+            actor_id=None,
             context={
                 "contact_name": contact_display_name(contact),
                 "form_name": form_name,
