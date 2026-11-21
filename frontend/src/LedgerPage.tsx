@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { requestKey } from './requestKey'
 import { apiFetch, apiUrl, applyAuthHeaders } from './api'
 import { downloadInvoiceDocument, invoiceDownloadFilename } from './invoiceDownload'
 import { ContactSearchPicker } from './ContactSearchPicker'
@@ -162,6 +163,7 @@ export function LedgerPage({ caseId, token, currentUserId, onCaseChanged }: Prop
     invoiceNumber: string
     remainingPence: number
   } | null>(null)
+  const allocationRequest = useRef<{ payload: string; key: string } | null>(null)
   const [allocatePairId, setAllocatePairId] = useState('')
   const [allocateAmountStr, setAllocateAmountStr] = useState('')
   const [allocateErr, setAllocateErr] = useState<string | null>(null)
@@ -1086,6 +1088,7 @@ export function LedgerPage({ caseId, token, currentUserId, onCaseChanged }: Prop
                               setAllocatePairId('')
                               setAllocateAmountStr((remaining / 100).toFixed(2))
                               setAllocateErr(null)
+                              allocationRequest.current = null
                               setAllocateTarget({
                                 id: inv.id,
                                 invoiceNumber: inv.invoice_number,
@@ -1203,13 +1206,17 @@ export function LedgerPage({ caseId, token, currentUserId, onCaseChanged }: Prop
                       )
                       return
                     }
+                    const payload = JSON.stringify([allocateTarget.id, pair, amt])
+                    if (allocationRequest.current?.payload !== payload) {
+                      allocationRequest.current = { payload, key: requestKey() }
+                    }
                     setAllocateBusy(true)
                     setAllocateErr(null)
                     try {
                       await apiFetch(`/cases/${caseId}/invoices/${allocateTarget.id}/allocations`, {
                         token,
                         method: 'POST',
-                        json: { ledger_pair_id: pair, amount_pence: amt },
+                        json: { ledger_pair_id: pair, amount_pence: amt, idempotency_key: allocationRequest.current.key },
                       })
                       setAllocateTarget(null)
                       await refreshAll()
