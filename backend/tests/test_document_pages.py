@@ -85,3 +85,30 @@ def test_long_folder_path_uses_bounded_index_key(db,documents):
     rows,_,cursor=document_page(db,case_id,folder=folder)
     assert [row[0].id for row in rows]==[file.id]
     assert cursor is None
+
+
+def test_search_closure_excludes_hidden_and_cross_case_links(db, documents):
+    case_id, folder, parent, children, _, add = documents
+    other = db.scalar(select(Case.id).where(Case.id != case_id))
+    assert other is not None
+    add('foreign needle.txt', parent.id, case_id=other)
+    add('hidden needle.txt', parent.id, oo_compose_pending=True)
+    foreign_parent = add('foreign root.txt', case_id=other)
+    add('local orphan needle.txt', foreign_parent.id)
+    for query in ('foreign needle', 'hidden needle', 'local orphan needle'):
+        assert walk(db, case_id, folder=folder, q=query)[0] == []
+    rows, _ = walk(db, case_id, folder=folder, q='Message.eml')
+    assert {row.id for row in rows} == {parent.id, *[row.id for row in children]}
+
+
+def test_nested_match_retains_immediate_group_and_cycles_terminate(db, documents):
+    case_id, folder, parent, children, _, add = documents
+    grandchild = add('deep needle.txt', children[0].id)
+    rows, _ = walk(db, case_id, folder=folder, q='deep needle')
+    assert {row.id for row in rows} == {parent.id, *[row.id for row in children]}
+    assert grandchild.id not in {row.id for row in rows}
+    first = add('cycle needle.txt')
+    second = add('cycle neighbour.txt', first.id)
+    first.parent_file_id = second.id
+    db.flush()
+    assert walk(db, case_id, folder=folder, q='cycle needle')[0] == []

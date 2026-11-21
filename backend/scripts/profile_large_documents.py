@@ -15,6 +15,14 @@ from app.models import Case
 from seed_performance_fixture import guard
 
 guard()
+if '--analyze' in sys.argv:
+    with engine.begin() as conn:
+        conn.exec_driver_sql('ALTER TABLE file RESET (autovacuum_enabled)')
+        conn.exec_driver_sql('ANALYZE file')
+with engine.connect() as conn:
+    file_column_stats = conn.exec_driver_sql("SELECT count(*) FROM pg_stats WHERE schemaname='public' AND tablename='file'").scalar_one()
+if '--cold-statistics' in sys.argv:
+    assert file_column_stats == 0, 'Cold-plan regression requires unanalyzed fixture data'
 # A pathological baseline query must fail visibly rather than hang the test job.
 @event.listens_for(engine, 'begin')
 def timeout(conn):
@@ -32,7 +40,7 @@ scenarios = {f'sort_{sort}': {'sort':sort} for sort in ['created','description',
 scenarios.update(search_attachment={'q':'Large document 00001'}, search_broad={'q':'Large document'},
                  search_missing={'q':'not present'}, search_sender={'q':'Synthetic sender'},
                  deep_folder={'folder':'/'.join(['Branch 39']+[f'Level {n:02}' for n in range(1,21)])})
-report = {}
+report = {'statistics': {'file_column_stats':file_column_stats}}
 for name, params in scenarios.items():
     samples=[]; sizes=[]; counts=[]; statuses=[]
     for _ in range(3):

@@ -2,7 +2,7 @@
 import hashlib,json,os,sys,uuid
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
-from sqlalchemy import select,func
+from sqlalchemy import select,func,text
 from app.db import engine,SessionLocal
 from app.models import (User,UserRole,Case,CaseStatus,CaseLockMode,File,FileCategory,Contact,ContactType,
                         PortalFormTemplate,PortalFormSubmission,PortalFormSubmissionStatus)
@@ -18,6 +18,9 @@ def main():
     with SessionLocal() as db:
         if db.scalar(select(func.count()).select_from(Case))!=2 or db.scalar(select(func.count()).select_from(User))!=3:
             raise RuntimeError('Refusing to modify a populated database.')
+        # Keep cold statistics deterministic until the profiler explicitly ANALYZEs.
+        # This transaction is guarded above and belongs only to the disposable fixture.
+        db.execute(text('ALTER TABLE file SET (autovacuum_enabled = false)'))
         staff=db.scalar(select(User).where(User.email==os.environ['E2E_STAFF_EMAIL']))
         hot=db.scalar(select(Case).where(Case.case_number=='900001'))
         hot.lock_mode=CaseLockMode.none
