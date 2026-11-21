@@ -115,7 +115,7 @@ def allocation_fixture(db=None):
 
 def new_invoice(db, case_id, user_id):
     inv = CaseInvoice(id=uuid.uuid4(), case_id=case_id, invoice_number=f'TEST-{uuid.uuid4().hex}',
-        status='approved', total_pence=10000, amount_allocated_pence=0, created_by_user_id=user_id)
+        status='approved', approved_at=datetime.utcnow(), total_pence=10000, amount_allocated_pence=0, created_by_user_id=user_id)
     db.add(inv)
     db.flush()
     return inv

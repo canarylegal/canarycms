@@ -8,7 +8,9 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import HTTPException, status
-from sqlalchemy import case as sql_case, func, select
+from sqlalchemy import case as sql_case, func, select, or_
+from app.reporting_cutoffs import ledger_effective_at
+from app.models import CaseInvoiceAllocation, InvoiceAllocationReversal
 from sqlalchemy.orm import Session
 
 from app.admin_access import user_effective_admin
@@ -91,18 +93,21 @@ def _signed_amount_expr():
     )
 
 
-def balances_by_case_ids(case_ids: list[uuid.UUID], db: Session) -> dict[uuid.UUID, tuple[int, int]]:
+def balances_by_case_ids(case_ids: list[uuid.UUID], db: Session, *, as_of: date | None = None) -> dict[uuid.UUID, tuple[int, int]]:
     """Return ``case_id -> (client_pence, office_pence)`` for approved ledger entries only."""
     if not case_ids:
         return {}
     signed = _signed_amount_expr()
+    eligible = (LedgerEntry.is_approved.is_(True) & LedgerEntry.is_anticipated.is_(False))
+    if as_of is not None:
+        eligible &= ledger_effective_at() < _utc_day_end_exclusive(as_of)
     rows = (
         db.execute(
             select(LedgerAccount.case_id, LedgerAccount.account_type, signed)
             .select_from(LedgerAccount)
             .outerjoin(
                 LedgerEntry,
-                (LedgerAccount.id == LedgerEntry.account_id) & (LedgerEntry.is_approved.is_(True)),
+                (LedgerAccount.id == LedgerEntry.account_id) & eligible,
             )
             .where(LedgerAccount.case_id.in_(case_ids))
             .group_by(LedgerAccount.case_id, LedgerAccount.account_type)
@@ -157,7 +162,7 @@ class ClientOfficeBalanceRow:
 
 
 def report_client_office_balances(
-    fee_earner_user_ids: list[uuid.UUID], db: Session
+    fee_earner_user_ids: list[uuid.UUID], db: Session, *, as_of: date | None = None
 ) -> tuple[list[ClientOfficeBalanceRow], dict[str, int]]:
     rows = (
         db.execute(
@@ -165,7 +170,7 @@ def report_client_office_balances(
             .where(
                 Case.fee_earner_user_id.in_(fee_earner_user_ids),
                 Case.fee_earner_user_id.isnot(None),
-                Case.status.notin_((CaseStatus.closed, CaseStatus.archived, CaseStatus.quote_closed)),
+                Case.created_at < _utc_day_end_exclusive(as_of) if as_of else True,
             )
             .order_by(Case.case_number.asc())
         )
@@ -175,7 +180,7 @@ def report_client_office_balances(
     if not rows:
         return [], {"client_balance_pence": 0, "office_balance_pence": 0}
     case_ids = [c.id for c in rows]
-    bal = balances_by_case_ids(case_ids, db)
+    bal = balances_by_case_ids(case_ids, db, as_of=as_of)
     out: list[ClientOfficeBalanceRow] = []
     tot_client = tot_office = 0
     for c in rows:
@@ -243,10 +248,15 @@ def report_billing(
         .where(
             Case.fee_earner_user_id.in_(fee_earner_user_ids),
             Case.fee_earner_user_id.isnot(None),
-            CaseInvoice.status.in_((INV_PENDING, INV_APPROVED)),
+            CaseInvoice.status.in_((INV_PENDING, INV_APPROVED, "voided")),
         )
         .order_by(CaseInvoice.created_at.desc())
     )
+    if date_to is not None:
+        q = q.where(or_(CaseInvoice.voided_at >= _utc_day_end_exclusive(date_to),
+                       CaseInvoice.status.in_((INV_PENDING, INV_APPROVED))))
+    else:
+        q = q.where(CaseInvoice.status.in_((INV_PENDING, INV_APPROVED)))
     if date_from is not None:
         q = q.where(CaseInvoice.created_at >= _utc_day_start(date_from))
     if date_to is not None:
@@ -271,7 +281,7 @@ def report_billing(
                 case_number=display_case_number(case.case_number, case.status),
                 client_name=case.client_name,
                 invoice_number=inv.invoice_number,
-                invoice_status=inv.status,
+                invoice_status=(INV_APPROVED if inv.approved_at and _as_utc_date(inv.approved_at) <= date_to else INV_PENDING) if date_to else inv.status,
                 fee_earner_name=_fee_earner_label(db, case.fee_earner_user_id),
                 created_at=inv.created_at,
                 fees_ex_vat_pence=f,
@@ -493,11 +503,11 @@ def report_ledger_activity(
         .order_by(LedgerEntry.posted_at.desc(), Case.case_number.asc())
     )
     if date_from is not None:
-        q = q.where(LedgerEntry.posted_at >= _utc_day_start(date_from))
+        q = q.where(ledger_effective_at() >= _utc_day_start(date_from))
     if date_to is not None:
-        q = q.where(LedgerEntry.posted_at < _utc_day_end_exclusive(date_to))
+        q = q.where(ledger_effective_at() < _utc_day_end_exclusive(date_to))
     if approved_only:
-        q = q.where(LedgerEntry.is_approved.is_(True))
+        q = q.where(LedgerEntry.is_approved.is_(True), LedgerEntry.is_anticipated.is_(False))
 
     rows = db.execute(q).all()
     by_pair: dict[uuid.UUID, dict] = {}
@@ -515,7 +525,7 @@ def report_ledger_activity(
                 "client_name": case.client_name,
                 "matter_description": case.title,
                 "fee_earner_name": _fee_earner_label(db, case.fee_earner_user_id),
-                "posted_at": entry.posted_at,
+                "posted_at": entry.recognised_at or entry.posted_at,
                 "posted_by_name": poster_name,
                 "description": entry.description or "",
                 "reference": entry.reference,
@@ -585,11 +595,11 @@ def report_ledger_leg_activity(
         .order_by(LedgerEntry.posted_at.desc(), Case.case_number.asc())
     )
     if date_from is not None:
-        q = q.where(LedgerEntry.posted_at >= _utc_day_start(date_from))
+        q = q.where(ledger_effective_at() >= _utc_day_start(date_from))
     if date_to is not None:
-        q = q.where(LedgerEntry.posted_at < _utc_day_end_exclusive(date_to))
+        q = q.where(ledger_effective_at() < _utc_day_end_exclusive(date_to))
     if approved_only:
-        q = q.where(LedgerEntry.is_approved.is_(True))
+        q = q.where(LedgerEntry.is_approved.is_(True), LedgerEntry.is_anticipated.is_(False))
 
     out: list[LedgerLegActivityRow] = []
     for entry, _account, case, poster in db.execute(q).all():
@@ -605,7 +615,7 @@ def report_ledger_leg_activity(
                 client_name=case.client_name,
                 matter_description=case.title,
                 fee_earner_name=_fee_earner_label(db, case.fee_earner_user_id),
-                posted_at=entry.posted_at,
+                posted_at=entry.recognised_at or entry.posted_at,
                 posted_by_name=poster_name,
                 description=entry.description or "",
                 reference=entry.reference,
@@ -656,12 +666,21 @@ def report_aged_debt(
     *,
     as_of: date | None = None,
 ) -> tuple[list[AgedDebtRow], dict[str, int]]:
-    """Approved invoices that are not fully allocated and whose office balance is still debit.
+    """Outstanding approved invoice principal at the inclusive UTC cutoff.
 
-    Age is measured from ``approved_at`` (fallback ``created_at``). Fully paid invoices
-    (``paid_at`` set or allocations covering the total) are excluded.
+    Matter cash balances are contextual, not a proxy for invoice allocations.
+    Later payments, allocation corrections and voids do not rewrite earlier debt.
     """
     ref = as_of or datetime.now(timezone.utc).date()
+    cutoff = _utc_day_end_exclusive(ref)
+    if as_of is not None:
+        unknown = db.scalar(select(CaseInvoice.id).join(Case, Case.id == CaseInvoice.case_id).where(
+            Case.fee_earner_user_id.in_(fee_earner_user_ids), CaseInvoice.created_at < cutoff,
+            CaseInvoice.approved_at.is_(None),
+            or_(CaseInvoice.status == INV_APPROVED, CaseInvoice.reversal_pair_id.is_not(None)),
+        ).limit(1))
+        if unknown is not None:
+            raise HTTPException(409, "An invoice has no approval timestamp; review its history before running historical aged debt.")
     pairs = (
         db.execute(
             select(CaseInvoice, Case)
@@ -669,8 +688,10 @@ def report_aged_debt(
             .where(
                 Case.fee_earner_user_id.in_(fee_earner_user_ids),
                 Case.fee_earner_user_id.isnot(None),
-                CaseInvoice.status == INV_APPROVED,
-                CaseInvoice.paid_at.is_(None),
+                func.coalesce(CaseInvoice.approved_at, CaseInvoice.created_at) < cutoff,
+                or_(CaseInvoice.status == INV_APPROVED, CaseInvoice.approved_at.is_not(None)),
+                or_(CaseInvoice.voided_at.is_(None), CaseInvoice.voided_at >= cutoff),
+                CaseInvoice.status.in_((INV_APPROVED, "voided")),
             )
             .order_by(CaseInvoice.approved_at.desc().nullslast(), CaseInvoice.created_at.desc())
         )
@@ -679,16 +700,22 @@ def report_aged_debt(
     if not pairs:
         return [], {"0-30": 0, "31-60": 0, "61-90": 0, "90+": 0}
     case_ids = list({c.id for _inv, c in pairs})
-    bal = balances_by_case_ids(case_ids, db)
+    bal = balances_by_case_ids(case_ids, db, as_of=ref)
+    allocations = dict(db.execute(
+        select(CaseInvoiceAllocation.invoice_id, func.sum(CaseInvoiceAllocation.amount_pence))
+        .outerjoin(InvoiceAllocationReversal, InvoiceAllocationReversal.allocation_id == CaseInvoiceAllocation.id)
+        .where(CaseInvoiceAllocation.invoice_id.in_([inv.id for inv, _ in pairs]),
+               CaseInvoiceAllocation.allocated_at < cutoff,
+               or_(InvoiceAllocationReversal.id.is_(None), InvoiceAllocationReversal.reversed_at >= cutoff))
+        .group_by(CaseInvoiceAllocation.invoice_id)
+    ).all())
     out: list[AgedDebtRow] = []
     bucket_totals = {"0-30": 0, "31-60": 0, "61-90": 0, "90+": 0}
     for inv, case in pairs:
-        allocated = int(getattr(inv, "amount_allocated_pence", 0) or 0)
+        allocated = int(allocations.get(inv.id, 0))
         if allocated >= int(inv.total_pence):
             continue
         _client, office = bal.get(case.id, (0, 0))
-        if office >= 0:
-            continue
         anchor = inv.approved_at or inv.created_at
         age_days = max(0, (ref - _as_utc_date(anchor)).days)
         bucket = _age_bucket_label(age_days)
@@ -819,7 +846,7 @@ def _pending_ledger_approvals(
                 "client_name": case.client_name,
                 "matter_description": case.title,
                 "fee_earner_name": _fee_earner_label(db, case.fee_earner_user_id),
-                "posted_at": entry.posted_at,
+                "posted_at": entry.recognised_at or entry.posted_at,
                 "posted_by_user_id": entry.posted_by_user_id,
                 "posted_by_name": poster_name,
                 "description": entry.description or "",
@@ -931,9 +958,9 @@ def _large_postings(
         .order_by(LedgerEntry.posted_at.desc())
     )
     if date_from is not None:
-        q = q.where(LedgerEntry.posted_at >= _utc_day_start(date_from))
+        q = q.where(ledger_effective_at() >= _utc_day_start(date_from))
     if date_to is not None:
-        q = q.where(LedgerEntry.posted_at < _utc_day_end_exclusive(date_to))
+        q = q.where(ledger_effective_at() < _utc_day_end_exclusive(date_to))
     rows = db.execute(q).all()
     by_pair: dict[uuid.UUID, dict] = {}
     for entry, account, case, poster in rows:
@@ -950,7 +977,7 @@ def _large_postings(
                 "client_name": case.client_name,
                 "matter_description": case.title,
                 "fee_earner_name": _fee_earner_label(db, case.fee_earner_user_id),
-                "posted_at": entry.posted_at,
+                "posted_at": entry.recognised_at or entry.posted_at,
                 "posted_by_name": poster_name,
                 "description": entry.description or "",
                 "amount_pence": int(entry.amount_pence),

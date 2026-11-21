@@ -1,6 +1,8 @@
 """CSV/OFX bank statement import and line-level matching."""
 from __future__ import annotations
 
+from app.reporting_cutoffs import ledger_effective_at
+
 import csv
 import io
 import re
@@ -297,7 +299,7 @@ def unpresented_client_legs(
             LedgerEntry.pair_id.not_in(matched_pairs))
         .order_by(LedgerEntry.posted_at.desc(), LedgerEntry.id))
     if as_of:
-        q = q.where(LedgerEntry.posted_at < _cutoff(as_of))
+        q = q.where(ledger_effective_at() < _cutoff(as_of))
     out: list[dict] = []
     for e, _acc, case in db.execute(q).all():
         out.append(
@@ -350,7 +352,7 @@ def compute_recon_totals(db: Session, *, firm_bank_account_id: uuid.UUID,
         .where(LedgerAccount.account_type == LedgerAccountType.client,
             LedgerEntry.is_approved.is_(True), LedgerEntry.is_anticipated.is_(False),
             LedgerEntry.firm_bank_account_id == firm_bank_account_id,
-            LedgerEntry.posted_at < _cutoff(period_end_date)).cte('eligible_ledger'))
+            ledger_effective_at() < _cutoff(period_end_date)).cte('eligible_ledger'))
     statement = (select(BankStatementLine.matched_pair_id.label('pair_id'), BankStatementLine.amount_pence.label('amount'))
         .where(BankStatementLine.firm_bank_account_id == firm_bank_account_id,
             BankStatementLine.statement_date <= period_end_date, BankStatementLine.ignored.is_(False)).cte('statement'))

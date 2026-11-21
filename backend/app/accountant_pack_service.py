@@ -109,7 +109,7 @@ def preview_accountant_pack(
     sections: list[AccountantPackSectionPreview] = []
 
     if include_balances:
-        rows, _totals = report_client_office_balances(fee_earner_user_ids, db)
+        rows, _totals = report_client_office_balances(fee_earner_user_ids, db, as_of=period_end_date)
         sections.append(
             AccountantPackSectionPreview("balances", "Client & office balances", True, len(rows), None)
         )
@@ -312,7 +312,7 @@ def _build_workbook(
     )
 
     if include_balances:
-        rows, totals = report_client_office_balances(fee_earner_user_ids, db)
+        rows, totals = report_client_office_balances(fee_earner_user_ids, db, as_of=period_end_date)
         data = [
             [
                 r.case_number,

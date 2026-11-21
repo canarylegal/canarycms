@@ -279,6 +279,7 @@ def post_transaction(
                 contact_id=party.contact_id,
                 posted_by_user_id=user.id,
                 posted_at=now,
+                recognised_at=now if is_approved else None,
                 is_approved=is_approved,
                 is_anticipated=is_anticipated,
                 anticipated_for_date=anticipated_for_date,
@@ -302,6 +303,7 @@ def post_transaction(
                 contact_id=party.contact_id,
                 posted_by_user_id=user.id,
                 posted_at=now,
+                recognised_at=now if is_approved else None,
                 is_approved=is_approved,
                 is_anticipated=is_anticipated,
                 anticipated_for_date=anticipated_for_date,
@@ -623,7 +625,9 @@ def approve_ledger_pair(
         client_leg = next(e for e in legs if e.account_id == accounts["client"].id)
         _reject_client_deficit(_balance(accounts["client"].id, db, bank_id=client_leg.firm_bank_account_id, bank_only=True) - client_leg.amount_pence)
 
+    recognised_at = utcnow()
     for e in legs:
+        e.recognised_at = recognised_at
         e.is_approved = True
         e.is_anticipated = False
         e.anticipated_for_date = None
