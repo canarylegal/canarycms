@@ -61,6 +61,7 @@ from app.models import (
     User,
     UserRole,
 )
+from app.portal_invitation import issue as issue_invitation
 from app.portal_service import staff_portal_access_code
 from app.security import create_access_token, create_portal_session_token
 
@@ -506,13 +507,19 @@ def main() -> int:
         report.add("client open quote file", len(file_res.content) > 0, f"bytes={len(file_res.content)}")
 
         # Exchange deep-link
-        exchanged = api.json("POST", "/portal/quote-exchange", json_body={"exchange_token": delivery_id})
+        api.request("POST", "/portal/quote-exchange", json_body={"exchange_token": delivery_id}, expected=401)
+        report.add("quote raw ID is not a credential", True)
+        # Fixture-issued invitation: use the same signed token helper as email delivery.
+        with SessionLocal() as invitation_db:
+            row = invitation_db.get(QuotePortalDelivery, uuid.UUID(delivery_id))
+            invitation = issue_invitation(invitation_db, "quote", row)
+        exchanged = api.json("POST", "/portal/quote-exchange", json_body={"exchange_token": invitation})
         report.add("quote-exchange deep link", bool(exchanged.get("session_token")), exchanged.get("contact_name") or "")
 
         accepted = api.json(
             "POST",
             f"/portal/quote-deliveries/{delivery_id}/respond",
-            token=portal,
+            token=exchanged["session_token"],
             json_body={"accepted": True},
         )
         report.add("client accept quote", accepted.get("status") in ("accepted", "approved", "complete", "completed") or accepted.get("accepted") is True or accepted.get("status") == "accepted", str(accepted.get("status")))
@@ -585,14 +592,20 @@ def main() -> int:
             report.add("client view form detail", len(fields) > 0, f"fields={len(fields)}")
 
             # Form exchange deep link
-            fx = api.json("POST", "/portal/form-exchange", json_body={"exchange_token": sub_id})
+            api.request("POST", "/portal/form-exchange", json_body={"exchange_token": sub_id}, expected=401)
+            report.add("form raw ID is not a credential", True)
+            # Fixture-issued invitation: use the same signed token helper as email delivery.
+            with SessionLocal() as invitation_db:
+                row = invitation_db.get(PortalFormSubmission, uuid.UUID(sub_id))
+                invitation = issue_invitation(invitation_db, "form", row)
+            fx = api.json("POST", "/portal/form-exchange", json_body={"exchange_token": invitation})
             report.add("form-exchange deep link", bool(fx.get("session_token")), fx.get("contact_name") or "")
 
             responses = build_form_responses(fields)
             submitted = api.json(
                 "POST",
                 f"/portal/forms/{sub_id}/submit",
-                token=portal,
+                token=fx["session_token"],
                 json_body={"responses": responses},
                 expected={200, 201},
             )

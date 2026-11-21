@@ -6,6 +6,8 @@ services:
     container_name: canaryci-db
   backend:
     container_name: canaryci-backend
+    environment:
+      CANARY_BACKGROUND_JOBS_ENABLED: "0"
     # Full healthcheck block (Compose replaces the mapping; keep the test command).
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')\""]
