@@ -1,3 +1,4 @@
+import { requestKey } from '../requestKey'
 import type { FileSummary } from '../types'
 import { decodeFolderPathSegment, splitFolderPath } from './folderPathCodec'
 import { documentRequest, DocumentRequestError } from './documentRequests'
@@ -66,15 +67,6 @@ export async function downloadCaseFolderZipBlob(caseId: string, folderPath: stri
   const parts = splitFolderPath(folderPath)
   const safeBase = decodeFolderPathSegment(parts[parts.length - 1] ?? '').replace(/[/\\]/g, '_').replace(/^\.+/, '').trim() || 'folder'
   triggerBlobDownload(new Blob([blob], { type: 'application/zip' }), `${safeBase}.zip`)
-}
-
-// getRandomValues is available on internal HTTP origins too; randomUUID is not.
-function uploadKey(): string {
-  const bytes = crypto.getRandomValues(new Uint8Array(16))
-  bytes[6] = (bytes[6] & 15) | 64
-  bytes[8] = (bytes[8] & 63) | 128
-  const hex = Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('')
-  return `${hex.slice(0,8)}-${hex.slice(8,12)}-${hex.slice(12,16)}-${hex.slice(16,20)}-${hex.slice(20)}`
 }
 
 export type UploadProgress = { completed: number; keys?: string[]; failures?: {name: string; message: string}[]; uploaded?: string[] }

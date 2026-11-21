@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { requestKey } from './requestKey'
 import { apiFetch, apiUrl, applyAuthHeaders } from './api'
 import { downloadInvoiceDocument, invoiceDownloadFilename } from './invoiceDownload'
 import { ContactSearchPicker } from './ContactSearchPicker'
@@ -1207,7 +1208,7 @@ export function LedgerPage({ caseId, token, currentUserId, onCaseChanged }: Prop
                     }
                     const payload = JSON.stringify([allocateTarget.id, pair, amt])
                     if (allocationRequest.current?.payload !== payload) {
-                      allocationRequest.current = { payload, key: crypto.randomUUID() }
+                      allocationRequest.current = { payload, key: requestKey() }
                     }
                     setAllocateBusy(true)
                     setAllocateErr(null)
