@@ -225,7 +225,13 @@ def portal_list_quote_deliveries(
     db: Session = Depends(get_db),
 ) -> list[PortalQuoteDeliveryViewOut]:
     require_portal_client_audience(session)
-    rows = list_pending_quote_deliveries_for_contact(db, contact_id=contact.id)
+    from app.portal_policy import visible
+
+    rows = [
+        d
+        for d in list_pending_quote_deliveries_for_contact(db, contact_id=contact.id)
+        if visible(db, d.case_id)
+    ]
     return [_quote_delivery_view(db, d) for d in rows]
 
 
@@ -312,6 +318,8 @@ def portal_list_forms(
     db: Session = Depends(get_db),
 ) -> list[PortalFormPendingOut]:
     require_portal_client_audience(session)
+    if session.signing_request_id:
+        return []
     return list_forms_service(contact, db)
 
 
@@ -372,19 +380,14 @@ async def portal_upload_form_file(
     session: PortalSessionPayload = Depends(get_portal_session),
     db: Session = Depends(get_db),
 ) -> dict:
-    from pathlib import Path
-
-    from app.file_storage import unlink_stored_file
-
     require_portal_client_write(session)
     sub = get_submission_for_contact(db, submission_id, contact.id)
     result = await upload_submission_file(db, submission=sub, field_key=field_key, upload=upload, contact=contact)
-    abs_path = result.pop("abs_path", None)
+    result.pop("abs_path", None)
     try:
         db.commit()
     except Exception:
-        if abs_path:
-            unlink_stored_file(Path(abs_path))
+        # A lost commit acknowledgement is ambiguous: retain bytes for recovery.
         raise
     return result
 

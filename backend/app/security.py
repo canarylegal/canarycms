@@ -200,14 +200,18 @@ class PortalFileOpenTokenPayload:
     contact_id: str
     grant_id: str
     file_id: str
+    session_claims: dict | None = None
 
 
-def create_portal_file_open_token(*, contact_id: str, grant_id: str, file_id: str) -> str:
+def create_portal_file_open_token(
+    *, contact_id: str, grant_id: str, file_id: str, session_claims: dict | None = None
+) -> str:
     """Short-lived JWT so the browser can navigate to an inline file URL (no blob: hand-off)."""
     now = int(time.time())
     payload = {
         "sub": contact_id,
         "purpose": "portal_file_open",
+        "session_claims": session_claims,
         "grant_id": grant_id,
         "file_id": file_id,
         "iat": now,
@@ -228,7 +232,12 @@ def decode_portal_file_open_token(token: str) -> PortalFileOpenTokenPayload:
     file_id = payload.get("file_id")
     if not isinstance(sub, str) or not isinstance(grant_id, str) or not isinstance(file_id, str):
         raise ValueError("Invalid token payload")
-    return PortalFileOpenTokenPayload(contact_id=sub, grant_id=grant_id, file_id=file_id)
+    return PortalFileOpenTokenPayload(
+        contact_id=sub,
+        grant_id=grant_id,
+        file_id=file_id,
+        session_claims=payload.get("session_claims"),
+    )
 
 
 PORTAL_SESSION_TTL_SECONDS = int(os.getenv("PORTAL_SESSION_TTL_SECONDS", "28800"))  # 8h
@@ -243,6 +252,8 @@ class PortalSessionPayload:
     session_version: int = 1
     audience: str = "client"  # "client" | "exchange"
     case_id: str | None = None
+    signing_request_id: str | None = None
+    expires_at: int | None = None
 
 
 @dataclass(frozen=True)
@@ -267,6 +278,7 @@ def create_portal_session_token(
     session_version: int = 1,
     audience: str = "client",
     case_id: str | None = None,
+    signing_request_id: str | None = None,
 ) -> str:
     now = int(time.time())
     aud = (audience or "client").strip().lower() or "client"
@@ -278,6 +290,7 @@ def create_portal_session_token(
         "staff_preview": bool(staff_preview),
         "sv": int(session_version),
         "portal_audience": aud,
+        "signing_request_id": signing_request_id,
         "iat": now,
         "exp": now + PORTAL_SESSION_TTL_SECONDS,
     }
@@ -317,6 +330,8 @@ def decode_portal_session_token(token: str) -> PortalSessionPayload:
         session_version=session_version,
         audience=audience,
         case_id=case_id,
+        signing_request_id=payload.get("signing_request_id"),
+        expires_at=payload.get("exp"),
     )
 
 
