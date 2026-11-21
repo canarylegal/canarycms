@@ -234,6 +234,8 @@ def approve_reconciliation(db: Session, *, actor: User, row: ClientAccountReconc
             "difference_pence": row.difference_pence,
         },
     )
+    from app.financial_report_snapshots import archive_approval
+    archive_approval(db, 'firm', row, actor)
     return row
 
 
