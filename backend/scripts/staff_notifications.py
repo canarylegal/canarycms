@@ -10,7 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from sqlalchemy import select
 from app.db import SessionLocal, begin_report_snapshot
 from app.models import NotificationOutbox, NotificationAttempt
-from app.notification_outbox import deliver, review, summary, _admin
+from app.notification_outbox import deliver, review, summary, _admin, STAFF_KINDS
 
 
 def main():
@@ -50,7 +50,7 @@ def main():
                 ids = list(
                     db.scalars(
                         select(NotificationOutbox.id)
-                        .where(NotificationOutbox.state == "pending")
+                        .where(NotificationOutbox.state == "pending", NotificationOutbox.kind.in_(STAFF_KINDS))
                         .order_by(NotificationOutbox.created_at, NotificationOutbox.id)
                         .limit(args.limit)
                     )

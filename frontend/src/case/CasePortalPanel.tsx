@@ -304,7 +304,7 @@ export function CasePortalPanel({ token, caseId, onFilesChanged }: Props) {
         method: 'POST',
         json: { recipient_ids: ids },
       })
-      setNotice(ids.length === 1 ? 'Reminder sent.' : `Reminders sent to ${ids.length} recipients.`)
+      setNotice(ids.length === 1 ? 'Reminder queued.' : `Reminders queued for ${ids.length} recipients.`)
       setRemindPicker(null)
       await loadCanaryRequests()
     } catch (e: unknown) {

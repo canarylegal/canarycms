@@ -165,6 +165,8 @@ def deliver(
     with session_factory() as db:
         _admin(db, actor_id)
         row = _locked(db, notification_id)
+        if row.kind not in STAFF_KINDS:
+            raise HTTPException(400, "Use the Canary Sign delivery command for recipient messages")
         if row.state != "pending":
             return summary(row)
         code = None

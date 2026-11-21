@@ -114,6 +114,9 @@ def test_parallel_signing_completion_publishes_one_artifact_pair(db, monkeypatch
     )
     db.add(req)
     db.commit()
+    from tests.test_canary_sign_service import _recipient
+    from app.models import CanarySignRecipientStatus
+    _recipient(db, req=req, status=CanarySignRecipientStatus.signed)
     rid, cid = req.id, case.id
     db.rollback()
     rendering, attempted = Event(), Event()

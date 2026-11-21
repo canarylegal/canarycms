@@ -284,6 +284,9 @@ def test_signing_partial_output_failure_can_retry_without_false_completion(
     req.source_file_id = source.id
     req.snapshot_pdf_file_id = source.id
     req.sent_by_user_id = user.id
+    from tests.test_canary_sign_service import _recipient
+    from app.models import CanarySignRecipientStatus
+    _recipient(db, req=req, status=CanarySignRecipientStatus.signed)
     db.commit()
     monkeypatch.setattr(signing, "stamp_signed_pdf", lambda *a: b"signed pdf")
     notices = []

@@ -554,6 +554,9 @@ def test_signing_completion_queue_failure_rolls_back_artifacts(tmp_path, monkeyp
     req.source_file_id = source.id
     req.snapshot_pdf_file_id = source.id
     req.sent_by_user_id = user.id
+    from tests.test_canary_sign_service import _recipient
+    from app.models import CanarySignRecipientStatus
+    _recipient(db, req=req, status=CanarySignRecipientStatus.signed)
     db.commit()
     monkeypatch.setattr(signing, "stamp_signed_pdf", lambda *a: b"signed")
     monkeypatch.setattr(

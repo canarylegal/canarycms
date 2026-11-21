@@ -268,3 +268,14 @@ def test_closed_period_rejects_import_and_stale_reconciliation_edit():
     assert error.value.status_code == 409
     db.rollback(); db.refresh(row)
     assert row.status == 'approved' and row.statement_balance_pence == 10000
+
+
+def test_sqlite_fixture_preserves_numeric_looking_uuid():
+    db, _, _, _, _, imp, _, _ = fixture()
+    identity = uuid.UUID("12345678-1234-4e12-8123-123456789012")
+    row = new_line(db, imp)
+    row.id = identity
+    db.commit()
+    db.expire_all()
+    assert db.get(BankStatementLine, identity).id == identity
+    db.close()
