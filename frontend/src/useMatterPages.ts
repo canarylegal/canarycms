@@ -12,6 +12,7 @@ export function useMatterPages(token: string, query: string, revision: number, e
   const [error, setError] = useState<string | null>(null)
   const [retry, setRetry] = useState(0)
   const generation = useRef(0)
+  const cursorOwner = useRef<{ query: string; token: string; revision: number; retry: number } | null>(null)
   const pending = useRef(false)
   const controller = useRef<AbortController | null>(null)
   const fetchPage = useCallback(async (next: string | null, version: number) => {
@@ -29,6 +30,7 @@ export function useMatterPages(token: string, query: string, revision: number, e
         const ids = new Set(previous.map(row => row.id))
         return [...previous, ...data.items.filter(row => !ids.has(row.id))]
       })
+      cursorOwner.current = { query, token, revision, retry }
       setCursor(data.next_cursor)
     } catch (error) {
       if (generation.current === version && !abort.signal.aborted) {
@@ -40,13 +42,14 @@ export function useMatterPages(token: string, query: string, revision: number, e
         setBusy(false)
       }
     }
-  }, [query, token])
+  }, [query, token, revision, retry])
 
   useEffect(() => {
     const version = ++generation.current
     controller.current?.abort()
     pending.current = false
     setRows([])
+    cursorOwner.current = null
     setCursor(null)
     setError(null)
     setBusy(enabled)
@@ -57,8 +60,14 @@ export function useMatterPages(token: string, query: string, revision: number, e
   }, [fetchPage, revision, enabled, retry])
 
   const loadMore = useCallback(() => {
-    if (cursor && !pending.current && !error) void fetchPage(cursor, generation.current)
-  }, [cursor, error, fetchPage])
+    // Observers can run after render but before the passive reset effect. Never
+    // combine a new query/session with a cursor issued for the previous one.
+    const owner = cursorOwner.current
+    if (enabled && cursor && !pending.current && !error && owner?.query === query &&
+        owner.token === token && owner.revision === revision && owner.retry === retry) {
+      void fetchPage(cursor, generation.current)
+    }
+  }, [cursor, error, fetchPage, enabled, query, token, revision, retry])
   const refresh = useCallback(() => setRetry(value => value + 1), [])
   return { rows, busy, error, hasMore: cursor !== null, loadMore, refresh }
 }
