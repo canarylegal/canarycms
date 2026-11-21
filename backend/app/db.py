@@ -106,6 +106,14 @@ class Base(DeclarativeBase):
     pass
 
 
+# Explicit rendering endpoints: /reports/reconciliations also contains write APIs.
+REPORT_SNAPSHOT_PATHS = frozenset(f"/reports/{name}" for name in (
+    "fee-earners", "client-office-balances", "billing", "wip", "time-recorded",
+    "cases", "cases-opened", "events", "ledger-activity", "aged-debt", "exceptions",
+    "accountant-pack", "accountant-pack/preview", "recent-approved-invoices",
+))
+
+
 def get_db(request: Request = None):
     """Request-scoped session.
 
@@ -115,7 +123,7 @@ def get_db(request: Request = None):
     """
     db = SessionLocal()
     try:
-        if request is not None and request.url.path.startswith("/reports/"):
+        if request is not None and request.url.path in REPORT_SNAPSHOT_PATHS:
             begin_report_snapshot(db)
         yield db
     except Exception as exc:

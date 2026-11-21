@@ -188,3 +188,11 @@ def test_unknown_legacy_invoice_approval_fails_historical_report_explicitly():
     assert error.value.status_code == 409 and 'approval timestamp' in error.value.detail
     assert sum(report_aged_debt([user.id],db)[1].values()) == 10000
     db.close()
+
+
+def test_snapshot_scope_excludes_reconciliation_mutations_and_covers_renderers():
+    from app.db import REPORT_SNAPSHOT_PATHS
+    from app.routers.reports import router
+    assert {route.path for route in router.routes} == REPORT_SNAPSHOT_PATHS
+    assert '/reports/reconciliations' not in REPORT_SNAPSHOT_PATHS
+    assert '/reports/reconciliations/id/approve' not in REPORT_SNAPSHOT_PATHS

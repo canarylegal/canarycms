@@ -34,8 +34,8 @@ that different accounting measures must be identical.
 
 ## Snapshot and exports
 
-Every `/reports/` request starts a PostgreSQL repeatable-read, read-only transaction
-before authentication queries. Rows, totals, labels and all accountant-pack sections
+Every report-rendering request starts a PostgreSQL repeatable-read, read-only transaction
+before authentication queries. Reconciliation write APIs keep their normal write transactions. Rows, totals, labels and all accountant-pack sections
 therefore share one MVCC snapshot. No global locks or scheduled jobs are introduced.
 A later HTTP export intentionally takes a fresh snapshot; it may differ from an older
 preview after new activity. JSON/XLSX/pack parity is tested on the same source state.

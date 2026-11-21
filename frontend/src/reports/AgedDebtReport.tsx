@@ -67,9 +67,9 @@ export function AgedDebtReportBody({ shared, state }: { shared: ReportSectionSha
   return (
     <section className="reportsSection">
       <p className="muted" style={{ marginTop: 0 }}>
-        Approved invoices that are not fully allocated, on matters whose office balance is still debit
-        (client owes). Fully paid invoices (Paid on the matter ledger, or allocations covering the total)
-        are excluded. Outstanding is the invoice total less allocations.
+        Approved invoices outstanding at the selected date, allowing for payments, allocation corrections
+        and voids recorded by that date. Outstanding is the invoice total less active allocations.
+        The matter office balance is shown for context and may repeat across invoices.
       </p>
       <div className="row" style={{ gap: 8, marginTop: 10 }}>
         <button
