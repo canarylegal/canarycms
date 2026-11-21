@@ -10,6 +10,7 @@ from sqlalchemy import select, func, case as sql_case
 from sqlalchemy.orm import Session
 
 from app.audit import log_event
+from app.reporting_cutoffs import ledger_effective_at
 from app.models import Case, ClientAccountReconciliation, FirmSettings, ReconciliationStatus, User
 from app.models import LedgerAccount, LedgerAccountType, LedgerEntry
 from app.permission_checks import user_may_approve_ledger
@@ -22,7 +23,7 @@ def firm_wide_ledger_totals(db: Session, as_of: date | None = None) -> tuple[int
         .where(LedgerEntry.is_approved.is_(True), LedgerEntry.is_anticipated.is_(False))
         .group_by(LedgerAccount.account_type))
     if as_of:
-        query = query.where(LedgerEntry.posted_at < datetime.combine(as_of + timedelta(days=1), time.min, tzinfo=timezone.utc))
+        query = query.where(ledger_effective_at() < datetime.combine(as_of + timedelta(days=1), time.min, tzinfo=timezone.utc))
     balances = dict(db.execute(query).all())
     return int(balances.get(LedgerAccountType.client, 0)), int(balances.get(LedgerAccountType.office, 0))
 
@@ -232,6 +233,4 @@ def firm_settings_for_report(db: Session) -> FirmSettings:
     row = db.get(FirmSettings, 1)
     if row is None:
         row = FirmSettings(id=1)
-        db.add(row)
-        db.flush()
     return row

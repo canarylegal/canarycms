@@ -1,7 +1,8 @@
 import os
 from urllib.parse import quote
 
-from sqlalchemy import create_engine
+from fastapi import Request
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
 
@@ -105,7 +106,7 @@ class Base(DeclarativeBase):
     pass
 
 
-def get_db():
+def get_db(request: Request = None):
     """Request-scoped session.
 
     On a successful request, any pending work (including ``log_event`` flushes) is
@@ -114,6 +115,8 @@ def get_db():
     """
     db = SessionLocal()
     try:
+        if request is not None and request.url.path.startswith("/reports/"):
+            begin_report_snapshot(db)
         yield db
     except Exception as exc:
         context = db.info.get("audit_request")
@@ -137,3 +140,13 @@ def get_db():
             raise
     finally:
         db.close()
+
+
+def begin_report_snapshot(db):
+    """Call before authentication or any report query; one snapshot per request.
+
+    A second HTTP request (including a later export) deliberately gets a new snapshot.
+    No connection isolation toggle: the pool checkout hook already starts a transaction.
+    """
+    if db.get_bind().dialect.name == "postgresql":
+        db.execute(text("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY"))

@@ -91,13 +91,14 @@ def reversal_legs(db, case_id, pair_id, user, *, journal_id=None):
 def compensate(db, legs, user, reason):
     """Preserve original bank and party, including archived banks; never resolve a new default."""
     pair_id = uuid.uuid4()
+    now = utcnow()
     for leg in legs:
         db.add(LedgerEntry(id=uuid.uuid4(), pair_id=pair_id, account_id=leg.account_id,
             direction=LedgerDirection.debit if leg.direction == LedgerDirection.credit else LedgerDirection.credit,
             amount_pence=leg.amount_pence, description=f'Reversal: {reason}'[:500], reference=leg.reference,
             contact_label=leg.contact_label, contact_id=leg.contact_id, case_contact_id=leg.case_contact_id,
             firm_bank_account_id=leg.firm_bank_account_id, payment_method=leg.payment_method,
-            posted_by_user_id=user.id, posted_at=utcnow(), is_approved=True, is_anticipated=False))
+            posted_by_user_id=user.id, posted_at=now, recognised_at=now, is_approved=True, is_anticipated=False))
     db.flush()
     return pair_id
 

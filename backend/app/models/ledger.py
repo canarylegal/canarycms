@@ -81,6 +81,7 @@ class LedgerEntry(Base):
         UUID(as_uuid=True), ForeignKey("user.id", ondelete="SET NULL"), nullable=True
     )
     posted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+    recognised_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     is_approved: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     is_anticipated: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     anticipated_for_date: Mapped[date | None] = mapped_column(Date, nullable=True)
