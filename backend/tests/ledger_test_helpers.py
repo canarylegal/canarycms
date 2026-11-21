@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.models import (
     AuditEvent,
     BankStatementImport, BankStatementLine, BankReconciliation, ClientAccountReconciliation,
-    DocumentRecovery, LedgerOperation, InterMatterJournal,
+    DocumentRecovery, LedgerOperation, InterMatterJournal, InvoiceAllocationReversal,
     Base,
     Case,
     CaseAccessRule,
@@ -58,7 +58,7 @@ def ledger_test_session() -> Session:
         InvoiceSeq.__table__,
         CaseInvoice.__table__,
         CaseInvoiceLine.__table__,
-        CaseInvoiceAllocation.__table__,
+        CaseInvoiceAllocation.__table__, InvoiceAllocationReversal.__table__,
         CaseTimeEntry.__table__,
         File.__table__,
         Precedent.__table__,

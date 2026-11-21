@@ -398,7 +398,7 @@ def void_case_invoice(
         # CL-13: lock invoice row (same order as approve) to avoid deadlocks.
         _try_lock_invoice(db, invoice_id)
         inv = db.execute(
-            select(CaseInvoice).where(CaseInvoice.id == invoice_id).with_for_update()
+            select(CaseInvoice).where(CaseInvoice.id == invoice_id).with_for_update().execution_options(populate_existing=True)
         ).scalar_one_or_none()
         if not inv or inv.case_id != case_id:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invoice not found")
@@ -407,8 +407,10 @@ def void_case_invoice(
 
         # Paid allocations must not be stranded by a concurrent invoice void.
         from app.models import CaseInvoiceAllocation
+        from app.invoice_allocation_integrity import active_allocation, require_consistent_totals
+        require_consistent_totals(db, inv)
         allocated = db.scalar(select(CaseInvoiceAllocation.id).where(
-            CaseInvoiceAllocation.invoice_id == invoice_id).limit(1))
+            CaseInvoiceAllocation.invoice_id == invoice_id, active_allocation()).limit(1))
         if allocated is not None or int(inv.amount_allocated_pence or 0) > 0:
             raise HTTPException(409, "This invoice has payment allocations; review them before voiding")
 

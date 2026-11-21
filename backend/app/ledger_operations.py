@@ -73,7 +73,8 @@ def reversal_legs(db, case_id, pair_id, user, *, journal_id=None):
     if db.scalar(select(LedgerOperation.id).where(LedgerOperation.kind == 'reverse_posting', or_(
             LedgerOperation.reverses_id == pair_id, LedgerOperation.result_id == pair_id)).limit(1)):
         raise HTTPException(409, 'This posting was already reversed or is a reversal')
-    if db.scalar(select(CaseInvoiceAllocation.id).where(CaseInvoiceAllocation.ledger_pair_id == pair_id).limit(1)):
+    from app.invoice_allocation_integrity import active_allocation
+    if db.scalar(select(CaseInvoiceAllocation.id).where(CaseInvoiceAllocation.ledger_pair_id == pair_id, active_allocation()).limit(1)):
         raise HTTPException(409, 'Correct invoice allocations before reversing this posting')
     if db.scalar(select(BankStatementLine.id).where(BankStatementLine.matched_pair_id == pair_id).limit(1)):
         raise HTTPException(409, 'Unmatch this posting through the bank correction workflow before reversing it')
