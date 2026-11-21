@@ -74,6 +74,8 @@ Checklist:
 
 ## Upgrade firm package
 
+Firm-package versions are independent of Canary CMS versions. A firm package tagged `v1.x.y` can target Canary CMS 2.x when its `requires_canary` range allows it; this is not the Classic product branch.
+
 ```bash
 cd /path/to/your-firm-package
 git fetch --tags

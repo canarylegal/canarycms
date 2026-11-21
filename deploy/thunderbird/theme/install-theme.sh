@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Copy Canary userChrome.css + logo into the newest Betterbird/Thunderbird profile.
+# Copy Canary userChrome.css + logo into the newest Thunderbird profile.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -46,5 +46,5 @@ echo "Installed Canary chrome styling to: ${CHROME}/"
 echo "  userChrome.css"
 [[ -f "${CHROME}/canary-logo.jpg" ]] && echo "  canary-logo.jpg"
 echo ""
-echo "Restart Betterbird (quit fully, then reopen)."
+echo "Restart Thunderbird (quit fully, then reopen)."
 echo "Also install canary-theme-1.2.0.xpi if not already on v1.2+."

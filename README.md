@@ -8,6 +8,8 @@ Case-management software for law firms — matters, documents, contacts, tasks, 
 >
 > **Only official GitHub Releases (version tags such as `v2.0.0`) are supported** for live deployments. Pin to a release tag — do not run floating `main` in production. See [Releases](https://github.com/canarylegal/canarycms/releases) and [CHANGELOG.md](CHANGELOG.md).
 
+**Classic 1.x:** historical deployment and maintenance documentation lives on the [classic branch](https://github.com/canarylegal/canarycms/tree/classic). This branch documents the current 2.x line.
+
 **Website:** [canarylegalsoftware.co.uk](https://canarylegalsoftware.co.uk)
 
 **Desktop (Linux):** optional Electron shell — source and `.deb` downloads at [canarylegal/canary-desktop](https://github.com/canarylegal/canary-desktop) ([Releases](https://github.com/canarylegal/canary-desktop/releases)).

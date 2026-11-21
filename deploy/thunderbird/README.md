@@ -1,6 +1,6 @@
-# Betterbird (Canary)
+# Thunderbird (Canary)
 
-Optional Betterbird styling and enterprise deployment notes for firm-managed workstations.
+Optional Thunderbird styling and enterprise deployment notes for firm-managed workstations.
 
 ## Canary UI theme
 
@@ -21,14 +21,14 @@ Typical install paths:
 | OS | Path |
 |----|------|
 | **Linux** | `/etc/thunderbird/policies/policies.json` |
-| **Windows** | `C:\Program Files\Betterbird\distribution\policies.json` |
+| **Windows** | `C:\Program Files\Thunderbird\distribution\policies.json` |
 
-Use the official Betterbird installer (not Flatpak). Restart Betterbird after deploying policy.
+Use the official Thunderbird installer (not Flatpak). Restart Thunderbird after deploying policy.
 
 When releasing a new reviewed mail add-on `.xpi`, update the firm's `install_url` to the **exact reviewed file** on your hosting (or a vendor URL you trust). For production, prefer **IT-controlled** updates: force-install a pinned XPI and do not rely on the vendor `updates.json` channel indefinitely — see `docs/DEPLOYMENT.md` § Thunderbird.
 
 ## Calendar category colours
 
-Betterbird colours CalDAV events by **category name** when the event iCal contains `CATEGORIES:<label>` and the category exists in policy with a matching colour. Category strings must match exactly.
+Thunderbird colours CalDAV events by **category name** when the event iCal contains `CATEGORIES:<label>` and the category exists in policy with a matching colour. Category strings must match exactly.
 
 On the Canary server, set label specs in the firm `.env` (not committed), e.g. `CANARY_CALENDAR_LABEL_SPECS=[{"name":"…","color":"#…"}]`. Restart the backend after changes.

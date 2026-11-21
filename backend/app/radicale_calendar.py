@@ -377,7 +377,7 @@ _CATEGORY_NAME_UNSET = object()
 
 
 def _apply_categories_to_vevent(vevent: ICalEvent, category_name: str | None) -> None:
-    """Set or clear RFC 5545 CATEGORIES on a VEVENT (Betterbird/Thunderbird colour by category)."""
+    """Set or clear RFC 5545 CATEGORIES on a VEVENT (Thunderbird colour by category)."""
     for key in list(vevent.keys()):
         if str(key).lower() == "categories":
             del vevent[key]

@@ -69,11 +69,11 @@ def webauthn_rp_name() -> str:
 
 
 def thunderbird_update_base_url() -> str:
-    """Build-time / docs helper; XPI embed still uses hosting publish config."""
+    """Compatibility metadata; the standalone add-in owns its embedded update URL."""
     return _env(
         "CANARY_BRAND_TB_UPDATE_BASE_URL",
         "CANARY_TB_UPDATE_BASE_URL",
-        default=f"{DEFAULT_VENDOR_URL.rstrip('/')}/thunderbird",
+        default="https://github.com/canarylegal/canary-thunderbird/releases/latest/download",
     )
 
 

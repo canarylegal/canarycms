@@ -1,5 +1,5 @@
-# Create a GitHub Release when an app version tag is pushed (v1.0.0, v1.1.0, …).
-# Thunderbird add-in releases use tags thunderbird-v* and a separate workflow.
+# Create a GitHub Release when an app version tag is pushed (v2.0.0, v2.1.0, …).
+# Classic 1.x is maintained on classic; add-in releases belong to their own repositories.
 
 name: App release
 
