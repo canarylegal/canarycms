@@ -31,6 +31,7 @@ export type FirmBankAccountOut = {
 }
 
 export type BankStatementLineOut = {
+  version: number
   id: string
   import_id: string
   firm_bank_account_id: string
@@ -45,6 +46,7 @@ export type BankStatementLineOut = {
 }
 
 export type BankReconciliationOut = {
+  version: number
   id: string
   firm_bank_account_id: string
   period_end_date: string

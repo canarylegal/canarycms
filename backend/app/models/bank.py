@@ -55,6 +55,11 @@ class BankStatementImport(Base):
 
 class BankStatementLine(Base):
     __tablename__ = "bank_statement_line"
+    __table_args__ = (
+        UniqueConstraint("matched_pair_id", name="uq_statement_matched_pair"),
+        CheckConstraint("NOT (ignored AND matched_pair_id IS NOT NULL)", name="ck_statement_match_state"),
+    )
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     import_id: Mapped[uuid.UUID] = mapped_column(
@@ -80,6 +85,7 @@ class BankStatementLine(Base):
 
 class BankReconciliation(Base):
     __tablename__ = "bank_reconciliation"
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     __table_args__ = (
         UniqueConstraint("firm_bank_account_id", "period_end_date", name="uq_bank_reconciliation_account_period"),
     )

@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.models import (
     AuditEvent,
+    BankStatementImport, BankStatementLine, BankReconciliation, ClientAccountReconciliation,
     DocumentRecovery,
     Base,
     Case,
@@ -50,6 +51,8 @@ def ledger_test_session() -> Session:
         Case.__table__,
         CaseAccessRule.__table__,
         FirmBankAccount.__table__,
+        BankStatementImport.__table__, BankStatementLine.__table__, BankReconciliation.__table__,
+        ClientAccountReconciliation.__table__,
         LedgerAccount.__table__,
         LedgerEntry.__table__,
         InvoiceSeq.__table__,

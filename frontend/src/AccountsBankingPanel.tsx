@@ -149,12 +149,29 @@ export function AccountsBankingPanel({
       await apiFetch(`/accounts/banking/statements/lines/${lineId}/match`, {
         token,
         method: 'POST',
-        json: { ledger_pair_id: matchPairId.trim() },
+        json: { ledger_pair_id: matchPairId.trim(), expected_version: lines.find(l => l.id === lineId)?.version },
       })
       setMatchPairId('')
       await load()
     } catch (e) {
-      setErr((e as ApiError).message ?? 'Match failed')
+      await load().catch(() => undefined)
+      setErr((e as ApiError).message ?? 'Could not confirm the match. Refresh to check its status before retrying.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function unmatchLine(line: BankStatementLineOut) {
+    setBusy(true)
+    setErr(null)
+    try {
+      await apiFetch(`/accounts/banking/statements/lines/${line.id}/unmatch`, {
+        token, method: 'POST', json: { expected_version: line.version },
+      })
+      await load()
+    } catch (e) {
+      await load().catch(() => undefined)
+      setErr((e as ApiError).message ?? 'Could not confirm the correction. Refresh before retrying.')
     } finally {
       setBusy(false)
     }
@@ -191,7 +208,7 @@ export function AccountsBankingPanel({
     setBusy(true)
     setErr(null)
     try {
-      await apiFetch(`/accounts/banking/reconciliations/${id}/approve`, { token, method: 'POST' })
+      await apiFetch(`/accounts/banking/reconciliations/${id}/approve`, { token, method: 'POST', json: { expected_version: recons.find(r => r.id === id)?.version } })
       await load()
     } catch (e) {
       setErr((e as ApiError).message ?? 'Approve failed')
@@ -418,10 +435,7 @@ export function AccountsBankingPanel({
                         className="btn"
                         disabled={busy}
                         onClick={() =>
-                          void apiFetch(`/accounts/banking/statements/lines/${l.id}/unmatch`, {
-                            token,
-                            method: 'POST',
-                          }).then(load)
+                          void unmatchLine(l)
                         }
                       >
                         Unmatch
