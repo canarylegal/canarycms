@@ -311,20 +311,9 @@ def approve_case_invoice(case_id: uuid.UUID, invoice_id: uuid.UUID, user: User, 
         )
         case = db.get(Case, case_id)
         if case is not None:
-            # Savepoint so a document FK/flush failure cannot abort the approval transaction.
-            try:
-                with db.begin_nested():
-                    from app.invoice_document_service import save_invoice_document_to_case
-
-                    save_invoice_document_to_case(inv=inv, case=case, actor_user_id=user.id, db=db)
-            except Exception:
-                # Document can be regenerated on download; do not fail the financial approval.
-                inv.document_file_id = None
-                log.exception(
-                    "invoice document save failed after approval invoice_id=%s case_id=%s",
-                    invoice_id,
-                    case_id,
-                )
+            # Approval and its durable document must succeed or roll back together.
+            from app.invoice_document_service import save_invoice_document_to_case
+            save_invoice_document_to_case(inv=inv, case=case, actor_user_id=user.id, db=db)
     except HTTPException:
         raise
     except Exception as exc:

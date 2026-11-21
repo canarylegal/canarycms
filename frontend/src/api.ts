@@ -1,3 +1,4 @@
+import { documentOperationRetry } from './documentOperationRetry'
 import { signalSessionExpired, rememberSessionUser } from './auth/sessionRecovery'
 export type ApiError = {
   status: number
@@ -199,6 +200,9 @@ export async function apiFetch<T>(
         ? JSON.stringify(json)
         : rest.body
 
+  const documentRetry = await documentOperationRetry(path, method, body)
+  if (documentRetry && !headers.has('X-Document-Operation-ID')) headers.set('X-Document-Operation-ID', documentRetry.key)
+
   const controller = new AbortController()
   const timeoutId =
     typeof window !== 'undefined' && timeoutMs > 0
@@ -271,6 +275,7 @@ export async function apiFetch<T>(
     return (await res.blob()) as T
   }
   const result = await parseJsonSafe(res)
+  documentRetry?.complete(result)
   if (path === '/auth/me' && typeof (result as { id?: unknown })?.id === 'string') rememberSessionUser((result as { id: string }).id)
   return result as T
 }

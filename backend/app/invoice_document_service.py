@@ -1,6 +1,8 @@
 """Generate invoice .docx files and save them on the matter."""
 
 from __future__ import annotations
+from app.document_durability import create_document_bytes
+from fastapi import HTTPException
 
 import os
 import tempfile
@@ -19,7 +21,7 @@ from app.docx_util import (
     strip_empty_invoice_table_rows,
     write_invoice_docx,
 )
-from app.file_storage import FILES_ROOT, case_file_paths, ensure_files_root, path_is_under_files_root, unlink_stored_file
+from app.file_storage import FILES_ROOT, ensure_files_root, path_is_under_files_root
 from app.global_precedent_loader import load_global_precedent_docx_bytes
 from app.models import Case, CaseInvoice, CaseInvoiceLine, Contact, File as DbFile, FileCategory, FirmSettings, User
 from app.precedent_constants import INVOICE_TEMPLATE_PRECEDENT_REFERENCE
@@ -178,13 +180,7 @@ def save_invoice_document_to_case(
     src_bytes = build_invoice_docx_bytes(inv, case, firm, db)
     orig = _invoice_filename(inv.invoice_number)
     file_id = uuid.uuid4()
-    paths = case_file_paths(
-        case_id=case.id,
-        file_id=file_id,
-        original_filename=orig,
-        folder_path=INVOICE_FOLDER_PATH,
-    )
-    paths.abs_path.write_bytes(src_bytes)
+    paths = create_document_bytes(src_bytes, root=FILES_ROOT, file_id=file_id, filename=orig)
     now = datetime.now(timezone.utc)
     row = DbFile(
         id=file_id,
@@ -192,7 +188,7 @@ def save_invoice_document_to_case(
         owner_id=actor_user_id,
         category=FileCategory.case_document,
         storage_path=paths.rel_path,
-        folder_path=paths.folder_path,
+        folder_path=INVOICE_FOLDER_PATH,
         parent_file_id=None,
         source_imap_mbox=None,
         source_imap_uid=None,
@@ -201,21 +197,17 @@ def save_invoice_document_to_case(
         mime_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         size_bytes=len(src_bytes),
         version=1,
-        checksum=None,
+        checksum=paths.checksum,
         created_at=now,
         updated_at=now,
     )
     db.add(row)
     # Flush the File row before linking: CaseInvoice has a bare FK (no relationship),
     # so SQLAlchemy may otherwise UPDATE document_file_id before INSERT into file.
-    try:
-        db.flush()
-        inv.document_file_id = file_id
-        db.add(inv)
-        db.flush()
-    except Exception:
-        unlink_stored_file(paths.abs_path)
-        raise
+    db.flush()
+    inv.document_file_id = file_id
+    db.add(inv)
+    db.flush()
     return file_id
 
 
@@ -228,5 +220,7 @@ def read_invoice_document_bytes(inv: CaseInvoice, case: Case, db: Session) -> tu
             path = (FILES_ROOT / row.storage_path).resolve()
             if path_is_under_files_root(path) and path.is_file():
                 return path.read_bytes(), row.original_filename or filename
+        raise HTTPException(409, 'The saved invoice document is missing; restore it before downloading.')
+    # Legacy approvals without a saved artifact retain their previous download behaviour.
     firm = _firm_settings(db)
     return build_invoice_docx_bytes(inv, case, firm, db), filename

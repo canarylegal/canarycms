@@ -8,6 +8,7 @@ so Firefox does not hand off ``application/pdf`` to the global PDF handler.
 """
 
 from __future__ import annotations
+from app.document_durability import create_document_bytes
 
 from app.document_durability import lock_document, stage_document_bytes
 
@@ -476,7 +477,21 @@ async def create_case_file_from_onlyoffice_pdf_export(
             detail="Source document is already a PDF",
         )
 
+    source_id = source.id
     data = await _fetch_onlyoffice_download_bytes(browser_url, log_label="oo-export-pdf")
+    # The remote fetch can outlive permission changes or source deletion.
+    db.expire_all()
+    from app.deps import require_case_access
+    from app.desktop_edit_session import require_user_active_edit_session
+    from app.document_durability import lock_document
+    require_case_access(case_id, user, db)
+    source = db.get(DbFile, source_id)
+    if source is None:
+        raise HTTPException(404, "Source document not found")
+    require_user_active_edit_session(db, source_id, user)
+    source = lock_document(db, source)
+    if source.case_id != case_id:
+        raise HTTPException(404, 'Source document not found')
     _validate_persist_magic(data, filename="export.pdf")
     data = fix_pdf_form_need_appearances(data)
 
@@ -489,14 +504,8 @@ async def create_case_file_from_onlyoffice_pdf_export(
     )
 
     new_id = uuid.uuid4()
-    paths = case_file_paths(
-        case_id=case_id,
-        file_id=new_id,
-        original_filename=out_name,
-        folder_path=source.folder_path or "",
-    )
     ensure_files_root()
-    paths.abs_path.write_bytes(data)
+    paths = create_document_bytes(data, root=FILES_ROOT, file_id=new_id, filename=out_name)
 
     now = datetime.now(timezone.utc)
     row = DbFile(
@@ -505,7 +514,7 @@ async def create_case_file_from_onlyoffice_pdf_export(
         owner_id=user.id,
         category=FileCategory.case_document,
         storage_path=paths.rel_path,
-        folder_path=paths.folder_path,
+        folder_path=source.folder_path or "",
         parent_file_id=source.id if source.is_portal_quote else None,
         source_imap_mbox=None,
         source_imap_uid=None,
@@ -523,7 +532,7 @@ async def create_case_file_from_onlyoffice_pdf_export(
         mime_type="application/pdf",
         size_bytes=len(data),
         version=1,
-        checksum=None,
+        checksum=paths.checksum,
         is_portal_quote=bool(source.is_portal_quote),
         created_at=now,
         updated_at=now,
@@ -544,10 +553,10 @@ async def create_case_file_from_onlyoffice_pdf_export(
             "source_file_id": str(source.id),
             "filename": out_name,
             "size_bytes": len(data),
-            "folder": paths.folder_path,
+            "folder": source.folder_path or "",
         },
     )
-    commit_keeping_stored_file(db, paths.abs_path)
+    db.flush()
     db.refresh(row)
     log.info(
         "oo-export-pdf: created file=%s from source=%s name=%s size=%s",

@@ -1,6 +1,7 @@
 """Send, track, and complete Canary Sign (built-in e-sign) requests."""
 
 from __future__ import annotations
+from app.document_durability import create_document_bytes
 
 import logging
 import secrets
@@ -27,7 +28,7 @@ from app.canary_sign_pdf import (
     stamp_signed_pdf,
 )
 from app.deps import get_case_if_accessible
-from app.file_storage import FILES_ROOT, case_file_paths, ensure_files_root, unlink_stored_file, unlink_stored_file
+from app.file_storage import FILES_ROOT, ensure_files_root
 from app.models import (
     CanarySignAuditEvent,
     CanarySignAuditEventType,
@@ -241,14 +242,7 @@ def _save_case_file(
 ) -> DbFile:
     ensure_files_root()
     file_id = uuid.uuid4()
-    paths = case_file_paths(
-        case_id=case_id,
-        file_id=file_id,
-        original_filename=filename,
-        folder_path=folder_path,
-    )
-    paths.abs_path.parent.mkdir(parents=True, exist_ok=True)
-    paths.abs_path.write_bytes(raw)
+    paths = create_document_bytes(raw, root=FILES_ROOT, file_id=file_id, filename=filename)
     now = utcnow()
     row = DbFile(
         id=file_id,
@@ -256,22 +250,19 @@ def _save_case_file(
         owner_id=owner_id,
         category=category,
         storage_path=paths.rel_path,
-        folder_path=paths.folder_path,
+        folder_path=folder_path,
         parent_file_id=parent_file_id,
         original_filename=filename,
         mime_type=mime_type,
         size_bytes=len(raw),
+        checksum=paths.checksum,
         version=1,
         is_pinned=False,
         created_at=now,
         updated_at=now,
     )
     db.add(row)
-    try:
-        db.flush()
-    except Exception:
-        unlink_stored_file(paths.abs_path)
-        raise
+    db.flush()
     return row
 
 
@@ -1291,6 +1282,9 @@ def _notify_staff_declined(db: Session, req: CanarySignRequest, recipient: Canar
 
 
 def complete_signing_request(db: Session, req: CanarySignRequest, *, detail: str | None = None) -> None:
+    db.flush()
+    req = db.execute(select(CanarySignRequest).where(CanarySignRequest.id == req.id)
+        .with_for_update().execution_options(populate_existing=True)).scalar_one()
     if req.status == CanarySignStatus.completed:
         return
 
@@ -1429,8 +1423,13 @@ def complete_signing_request(db: Session, req: CanarySignRequest, *, detail: str
         entity_id=str(req.id),
         meta={"case_id": str(req.case_id), "signed_file_id": str(signed.id)},
     )
-    _notify_staff_completed(db, req)
     db.commit()
+    # Notifications must never announce a completion whose documents rolled back.
+    try:
+        _notify_staff_completed(db, req)
+    except Exception:
+        db.rollback()
+        log.exception('Signing completion notification failed request_id=%s', req.id)
 
 
 def _notify_staff_completed(db: Session, req: CanarySignRequest) -> None:

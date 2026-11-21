@@ -122,6 +122,8 @@ def get_db(request: Request = None):
     explicitly mid-request when needed; a final commit of a clean session is a no-op.
     """
     db = SessionLocal()
+    if request is not None and getattr(request, 'headers', {}).get('X-Document-Operation-ID'):
+        db.info['document_operation_key'] = request.headers.get('X-Document-Operation-ID')
     try:
         if request is not None and request.url.path in REPORT_SNAPSHOT_PATHS:
             begin_report_snapshot(db)
