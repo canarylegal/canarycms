@@ -1,9 +1,11 @@
 import logging
 import uuid
+from typing import Literal
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File as FastAPIFile, HTTPException, Query, Request, Response, UploadFile, status, Form
 from fastapi.responses import FileResponse
+from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -298,9 +300,6 @@ def list_case_files(
     db: Session = Depends(get_db),
 ):
     require_case_access(case_id, user, db)
-    from app.models import QuotePortalDelivery
-    from sqlalchemy import func
-
     rows = (
         db.execute(
             select(DbFile, User.display_name, User.email, User.initials)
@@ -309,6 +308,13 @@ def list_case_files(
             .order_by(DbFile.created_at.desc())
         ).all()
     )
+    return _file_list_items(db, case_id, rows)
+
+
+def _file_list_items(db: Session, case_id: uuid.UUID, rows):
+    from app.models import QuotePortalDelivery
+    from sqlalchemy import func
+
     file_ids = [f.id for (f, _, _, _) in rows]
     delivery_by_file: dict[uuid.UUID, QuotePortalDelivery] = {}
     if file_ids:
@@ -485,6 +491,45 @@ def list_case_files(
             item["casera_search"] = casera_sum.model_dump(mode="json")
         out.append(item)
     return out
+
+
+class DocumentPageOut(BaseModel):
+    items: list[dict]
+    next_cursor: str | None
+
+
+@router.get("/browse", response_model=DocumentPageOut)
+def browse_case_files(
+    case_id: uuid.UUID, user: User = Depends(get_current_user), db: Session = Depends(get_db),
+    folder: str = Query(default=''), q: str = Query(default='', max_length=500),
+    sort: Literal['description', 'size', 'created', 'user'] = 'created',
+    direction: Literal['asc', 'desc'] = 'desc',
+    limit: int = Query(default=100, ge=1, le=100),
+    cursor: str | None = Query(default=None, max_length=16384),
+):
+    require_case_access(case_id, user, db)
+    from app.document_pages import document_page
+    rows, pinned, next_cursor = document_page(db, case_id, folder=folder, q=q, sort=sort,
+        direction=direction, limit=limit, cursor=cursor)
+    items = _file_list_items(db, case_id, rows)
+    for item, group_pinned in zip(items, pinned): item['group_pinned'] = group_pinned
+    return {'items': items, 'next_cursor': next_cursor}
+
+
+@router.get("/folder-metadata")
+def case_folder_metadata(case_id: uuid.UUID, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    require_case_access(case_id, user, db)
+    from app.document_pages import folder_metadata
+    return folder_metadata(db, case_id)
+
+
+@router.get("/{file_id}/metadata", response_model=dict)
+def case_file_metadata(case_id: uuid.UUID, file_id: uuid.UUID, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    require_case_access(case_id, user, db)
+    rows = db.execute(select(DbFile, User.display_name, User.email, User.initials).join(User, User.id == DbFile.owner_id)
+        .where(DbFile.id == file_id, DbFile.case_id == case_id, DbFile.oo_compose_pending.is_(False))).all()
+    if not rows: raise HTTPException(404, 'Document not found')
+    return _file_list_items(db, case_id, rows)[0]
 
 
 @router.get("/portal-folder-access", response_model=list[CasePortalFolderAccessGrantOut])

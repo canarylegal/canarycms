@@ -17,6 +17,7 @@ test('cross-user document routes deny access, preserve data and record denials',
     const file = await upload.json()
     const root = `/api/cases/${id}/files`
     const routes: [string, string, object?][] = [
+      ['GET', `${root}/browse`], ['GET', `${root}/folder-metadata`], ['GET', `${root}/${file.id}/metadata`],
       ['GET', root], ['GET', `${root}/${file.id}`], ['GET', `${root}/export-zip`],
       ['GET', `${root}/folders/download-zip?folder_path=`],
       ['GET', `${root}/${file.id}/oo-save-status?base_version=1`],
@@ -91,6 +92,8 @@ test('revoking an allow rule invalidates existing document sessions and is audit
     expect((await guest.get(session.webdav_file_url)).ok()).toBe(true)
     expect((await owner.delete(`/api/cases/${id}/access/${who.id}`)).status()).toBe(204)
     expect((await guest.get(`${root}`)).status()).toBe(403)
+    expect((await guest.get(`/api/cases/${id}/files/browse`)).status()).toBe(403)
+    expect((await guest.get(`/api/cases/${id}/files/folder-metadata`)).status()).toBe(403)
     expect((await guest.post(`${root}/oo-force-save?phase=arm&doc_key=revoked`)).status()).toBe(403)
     expect((await guest.get(session.webdav_file_url)).status()).toBe(404)
     const events = await (await admin.get(`/api/admin/audit-events?action_prefix=case.access.&case_id=${id}`)).json()

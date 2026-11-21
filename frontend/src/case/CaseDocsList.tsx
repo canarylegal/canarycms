@@ -27,6 +27,7 @@ export function CaseDocsList({
   portalEnabled,
   portalFolderGrants,
   files,
+  folderSummaries,
 }: Pick<
   CaseDocsBrowserProps,
   | 'docSortKey'
@@ -49,6 +50,7 @@ export function CaseDocsList({
   | 'portalEnabled'
   | 'portalFolderGrants'
   | 'files'
+  | 'folderSummaries'
 >) {
   return (
     <>
@@ -136,6 +138,7 @@ export function CaseDocsList({
     {sortedPinnedInFolder.map((f) => (
       <div
         key={f.id}
+        data-doc-key={f.id}
         className={`docsTr rowbtn ${f.parent_file_id ? 'attachmentChild' : ''} ${selectedDocSet.has(f.id) ? 'active' : ''} ${docFocusKey === f.id ? 'docsTr--focused' : ''}`}
         onMouseDown={(e) => { if (e.shiftKey) e.preventDefault() }}
         onClick={(e) => handleDocItemClick(f.id, e)}
@@ -163,6 +166,7 @@ export function CaseDocsList({
       return (
         <div
           key={next}
+          data-doc-key={folderKey}
           className={`docsTr rowbtn ${selectedDocSet.has(folderKey) ? 'active' : ''} ${docFocusKey === folderKey ? 'docsTr--focused' : ''}`}
           onMouseDown={(e) => { if (e.shiftKey) e.preventDefault() }}
           onClick={(e) => handleDocItemClick(folderKey, e)}
@@ -176,7 +180,7 @@ export function CaseDocsList({
           <DocsFolderDescCell
             name={decodeFolderPathSegment(folderName)}
             shared={portalEnabled && isPortalSharedFolder(next, portalFolderGrants)}
-            contentsSummary={folderContentsSummary(files, next)}
+            contentsSummary={folderSummaries?.[next] ?? folderContentsSummary(files, next)}
           />
           <div className="td muted docsCenter">—</div>
           <div className="td muted docsCenter">—</div>
@@ -188,6 +192,7 @@ export function CaseDocsList({
     {sortedRegularInFolder.map((f) => (
       <div
         key={f.id}
+        data-doc-key={f.id}
         className={`docsTr rowbtn ${f.parent_file_id ? 'attachmentChild' : ''} ${selectedDocSet.has(f.id) ? 'active' : ''} ${docFocusKey === f.id ? 'docsTr--focused' : ''}`}
         onMouseDown={(e) => { if (e.shiftKey) e.preventDefault() }}
         onClick={(e) => handleDocItemClick(f.id, e)}

@@ -9,10 +9,16 @@ export function useActionMenuKeyboard(ref: RefObject<HTMLDivElement | null>, ope
     menu.setAttribute('role', 'menu')
     const items = () => Array.from(menu.querySelectorAll<HTMLElement>('.docContextItem'))
       .filter((el) => !el.classList.contains('docContextItemDisabled') && el.getAttribute('aria-disabled') !== 'true' && el.getClientRects().length > 0)
-    for (const el of menu.querySelectorAll<HTMLElement>('.docContextItem')) {
-      el.setAttribute('role', 'menuitem')
-      el.tabIndex = -1
+    const prepareItems = () => {
+      for (const el of menu.querySelectorAll<HTMLElement>('.docContextItem')) {
+        el.setAttribute('role', 'menuitem')
+        el.tabIndex = -1
+      }
     }
+    prepareItems()
+    // Refreshes and submenus can add items after the menu first opens.
+    const observer = new MutationObserver(prepareItems)
+    observer.observe(menu, {childList: true, subtree: true})
     items()[0]?.focus()
     const onKey = (event: KeyboardEvent) => {
       const list = items()
@@ -35,6 +41,6 @@ export function useActionMenuKeyboard(ref: RefObject<HTMLDivElement | null>, ope
       }
     }
     menu.addEventListener('keydown', onKey)
-    return () => menu.removeEventListener('keydown', onKey)
+    return () => { observer.disconnect(); menu.removeEventListener('keydown', onKey) }
   }, [ref, open, close])
 }

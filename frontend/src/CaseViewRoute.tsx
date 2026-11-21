@@ -9,7 +9,6 @@ import type {
   CaseNoteOut,
   CaseOut,
   CaseTaskOut,
-  FileSummary,
   UserPublic,
 } from './types'
 
@@ -46,7 +45,7 @@ export function CaseViewRoute({
   const [caseDetail, setCaseDetail] = useState<CaseOut | null>(null)
   const [notes, setNotes] = useState<CaseNoteOut[]>([])
   const [tasks, setTasks] = useState<CaseTaskOut[]>([])
-  const [files, setFiles] = useState<FileSummary[]>([])
+  const [filesRevision, setFilesRevision] = useState(0)
   const [caseContacts, setCaseContacts] = useState<CaseContactOut[]>([])
   const [detailErr, setDetailErr] = useState<string | null>(null)
   const [opening, setOpening] = useState(true)
@@ -55,28 +54,18 @@ export function CaseViewRoute({
   const onCaseDetailChangeRef = useRef(onCaseDetailChange)
   onCaseDetailChangeRef.current = onCaseDetailChange
 
-  const refreshCaseFiles = useCallback(
-    async (id: string) => {
-      try {
-        const f = await apiFetch<FileSummary[]>(`/cases/${id}/files`, { token })
-        if (String(id) !== String(caseIdRef.current)) return
-        setFiles(Array.isArray(f) ? f : [])
-      } catch {
-        /* keep existing file list */
-      }
-    },
-    [token],
-  )
+  const refreshCaseFiles = useCallback(async (id: string) => {
+    if (id === caseIdRef.current) setFilesRevision(value => value + 1)
+  }, [])
 
   const refreshCaseDetail = useCallback(
     async (id: string) => {
       setDetailErr(null)
       try {
-        const [c, n, t, f, cc] = await Promise.all([
+        const [c, n, t, cc] = await Promise.all([
           apiFetch<CaseOut>(`/cases/${id}`, { token }),
           apiFetch<CaseNoteOut[]>(`/cases/${id}/notes`, { token }),
           apiFetch<CaseTaskOut[]>(`/cases/${id}/tasks`, { token }),
-          apiFetch<FileSummary[]>(`/cases/${id}/files`, { token }),
           apiFetch<CaseContactOut[]>(`/cases/${id}/contacts`, { token }),
         ])
         if (String(id) !== String(caseIdRef.current)) return
@@ -84,7 +73,7 @@ export function CaseViewRoute({
         onCaseDetailChangeRef.current(c)
         setNotes(Array.isArray(n) ? n : [])
         setTasks(Array.isArray(t) ? t : [])
-        setFiles(Array.isArray(f) ? f : [])
+        setFilesRevision(value => value + 1)
         setCaseContacts(Array.isArray(cc) ? cc : [])
       } catch (e: unknown) {
         if (String(id) !== String(caseIdRef.current)) return
@@ -107,11 +96,10 @@ export function CaseViewRoute({
       // remount CaseDetail (that reset the doc panel to Overview after Sync with Casera).
       setDetailErr(null)
       try {
-        const [c, n, t, f, cc] = await Promise.all([
+        const [c, n, t, cc] = await Promise.all([
           apiFetch<CaseOut>(`/cases/${caseId}`, { token }),
           apiFetch<CaseNoteOut[]>(`/cases/${caseId}/notes`, { token }),
           apiFetch<CaseTaskOut[]>(`/cases/${caseId}/tasks`, { token }),
-          apiFetch<FileSummary[]>(`/cases/${caseId}/files`, { token }),
           apiFetch<CaseContactOut[]>(`/cases/${caseId}/contacts`, { token }),
         ])
         if (cancelled || String(caseId) !== String(caseIdRef.current)) return
@@ -119,7 +107,7 @@ export function CaseViewRoute({
         onCaseDetailChangeRef.current(c)
         setNotes(Array.isArray(n) ? n : [])
         setTasks(Array.isArray(t) ? t : [])
-        setFiles(Array.isArray(f) ? f : [])
+        setFilesRevision(value => value + 1)
         setCaseContacts(Array.isArray(cc) ? cc : [])
       } catch (e: unknown) {
         if (cancelled || String(caseId) !== String(caseIdRef.current)) return
@@ -181,7 +169,7 @@ export function CaseViewRoute({
       caseDetail={caseDetail}
       notes={notes}
       tasks={tasks}
-      files={files}
+      filesRevision={filesRevision}
       caseContacts={caseContacts}
       error={detailErr}
       selectedCaseId={caseId}

@@ -96,3 +96,5 @@ Questions about deployment, licensing, or professional hosting: [colin@canaryleg
 - [Isolated performance workloads and regression gates](docs/PERFORMANCE.md)
 
 Matter-menu pagination and compatibility: [Progressive matter menus](docs/MATTER_PAGINATION.md).
+
+Document browsing, grouping and regression checks: [Progressive matter documents](docs/DOCUMENT_PAGINATION.md).

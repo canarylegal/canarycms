@@ -43,6 +43,7 @@ class FileCategory(str, enum.Enum):
 
 class File(Base):
     __tablename__ = "file"
+    __table_args__ = (Index('ix_file_case_folder_visible', 'case_id', text('md5(folder_path)'), 'oo_compose_pending', 'parent_file_id').ddl_if(dialect='postgresql'),)
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     case_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("case.id"), nullable=True)

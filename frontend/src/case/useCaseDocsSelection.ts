@@ -3,6 +3,9 @@ import type { FileSummary } from '../types'
 import { isEmlLikeFileSummary } from './officeFiles'
 
 type UseCaseDocsSelectionArgs = {
+  hasMore?: boolean
+  loading?: boolean
+  onLoadMore?: () => void
   allDocKeys: string[]
   caseDocPanel: string
   docMenu: unknown
@@ -16,6 +19,7 @@ type UseCaseDocsSelectionArgs = {
 }
 
 export function useCaseDocsSelection({
+  hasMore = false, loading = false, onLoadMore,
   allDocKeys,
   caseDocPanel,
   docMenu,
@@ -32,11 +36,33 @@ export function useCaseDocsSelection({
   const docAnchorRef = useRef<string | null>(null)
 
   useEffect(() => {
+    if (loading) return
+    if (docAnchorRef.current && !allDocKeys.includes(docAnchorRef.current)) docAnchorRef.current = null
     setDocFocusKey((prev) => {
       if (prev && allDocKeys.includes(prev)) return prev
       return allDocKeys[0] ?? null
     })
-  }, [allDocKeys])
+  }, [allDocKeys, loading])
+
+  const awaitingNext = useRef<string | null>(null)
+  useEffect(() => {
+    const key = awaitingNext.current
+    if (!key) return
+    const index = allDocKeys.indexOf(key)
+    if (index >= 0 && allDocKeys[index + 1]) {
+      const next = allDocKeys[index + 1]
+      awaitingNext.current = null
+      setDocFocusKey(next)
+      setSelectedDocSet(new Set([next]))
+      docAnchorRef.current = next
+    } else if (!loading) awaitingNext.current = null
+  }, [allDocKeys, loading])
+
+  useEffect(() => {
+    if (!docFocusKey) return
+    const row = Array.from(document.querySelectorAll<HTMLElement>('[data-doc-key]')).find(el => el.dataset.docKey === docFocusKey)
+    row?.scrollIntoView?.({block: 'nearest'})
+  }, [docFocusKey])
 
   function activateDocFocusKey(key: string) {
     if (key.startsWith('folder:')) {
@@ -50,7 +76,7 @@ export function useCaseDocsSelection({
   }
 
   function handleDocsKeyDown(e: React.KeyboardEvent) {
-    if (caseDocPanel !== 'documents') return
+    if (caseDocPanel !== 'documents' || (loading && files.length === 0)) return
     if (docMenu || commentOpen || precedentPicker || contactPickModal) return
     const target = e.target as HTMLElement
     if (target.closest('input, textarea, select, button')) return
@@ -59,6 +85,11 @@ export function useCaseDocsSelection({
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
       e.preventDefault()
       const currentIdx = docFocusKey ? allDocKeys.indexOf(docFocusKey) : -1
+      if (e.key === 'ArrowDown' && currentIdx === allDocKeys.length - 1 && hasMore) {
+        awaitingNext.current = docFocusKey
+        onLoadMore?.()
+        return
+      }
       const delta = e.key === 'ArrowDown' ? 1 : -1
       let nextIdx = currentIdx + delta
       if (nextIdx < 0) nextIdx = 0
