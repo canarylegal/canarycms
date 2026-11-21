@@ -40,6 +40,7 @@ services:
       CANARY_PUBLIC_URL: http://frontend
       CANARY_CORS_ORIGINS: http://frontend
       CANARY_UPDATE_PROMPT_ON_LOGIN: "0"
+      CANARY_BACKGROUND_JOBS_ENABLED: "0"
       FILES_ROOT: /data/files
       ONLYOFFICE_JWT_SECRET: isolated-core-office-secret
       ONLYOFFICE_DS_PUBLIC_URL: http://frontend/office-ds

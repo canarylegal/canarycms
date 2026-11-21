@@ -4,6 +4,7 @@ from __future__ import annotations
 from app.document_durability import create_document_bytes
 from app.notification_outbox import enqueue_staff
 
+import hashlib
 import logging
 import secrets
 import uuid
@@ -15,7 +16,12 @@ from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.alert_dispatch import AlertKind, dispatch_alert, firm_alerts_configured, portal_public_url
+from app.alert_dispatch import (
+    AlertKind,
+    dispatch_alert,
+    firm_alerts_configured,
+    portal_public_url,
+)
 from app.audit import log_event
 from app.canary_sign_pdf import (
     build_audit_certificate_pdf,
@@ -50,7 +56,10 @@ from app.models import (
 from app.portal_activity import log_portal_activity
 from app.portal_case import require_case_portal_enabled
 from app.portal_notifications import list_portal_staff_recipient_users
-from app.portal_service import client_matter_description, ensure_contact_portal_access_for_delivery
+from app.portal_service import (
+    client_matter_description,
+    ensure_contact_portal_access_for_delivery,
+)
 
 log = logging.getLogger(__name__)
 
@@ -97,10 +106,13 @@ def signing_request_file_list_item(req: CanarySignRequest) -> dict[str, Any]:
     }
 
 
-def _recipients_for_request(db: Session, request_id: uuid.UUID) -> list[CanarySignRecipient]:
+def _recipients_for_request(
+    db: Session, request_id: uuid.UUID
+) -> list[CanarySignRecipient]:
     return list(
         db.execute(
             select(CanarySignRecipient)
+            .execution_options(populate_existing=True)
             .where(CanarySignRecipient.signing_request_id == request_id)
             .order_by(CanarySignRecipient.routing_order, CanarySignRecipient.created_at)
         )
@@ -112,7 +124,7 @@ def _recipients_for_request(db: Session, request_id: uuid.UUID) -> list[CanarySi
 def _fields_for_request(db: Session, request_id: uuid.UUID) -> list[CanarySignField]:
     return list(
         db.execute(
-            select(CanarySignField)
+            select(CanarySignField).execution_options(populate_existing=True)
             .where(CanarySignField.signing_request_id == request_id)
             .order_by(CanarySignField.sort_order)
         )
@@ -213,17 +225,46 @@ def _add_audit(
     )
 
 
+def _lock_request(db: Session, req: CanarySignRequest) -> CanarySignRequest:
+    """Serialize transitions before inspecting state, including stale ORM instances."""
+    with db.no_autoflush:
+        return db.execute(
+            select(CanarySignRequest)
+            .where(CanarySignRequest.id == req.id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        ).scalar_one()
+
+
+def _refresh_recipient(
+    db: Session, req: CanarySignRequest, recipient: CanarySignRecipient
+) -> None:
+    db.refresh(recipient)
+    if recipient.signing_request_id != req.id:
+        raise HTTPException(
+            status_code=403, detail="Not a recipient on this signing request"
+        )
+
+
 def mark_expired_if_needed(db: Session, req: CanarySignRequest) -> CanarySignRequest:
     if req.status != CanarySignStatus.pending:
         return req
     expires = _aware(req.expires_at)
     if expires is None or expires > utcnow():
         return req
+    req = _lock_request(db, req)
+    if req.status != CanarySignStatus.pending or not req.expires_at or _aware(req.expires_at) > utcnow():
+        return req
     req.status = CanarySignStatus.expired
     req.status_detail = "Expired"
     req.updated_at = utcnow()
     db.add(req)
-    _add_audit(db, req=req, event_type=CanarySignAuditEventType.expired, detail={"expires_at": expires.isoformat()})
+    _add_audit(
+        db,
+        req=req,
+        event_type=CanarySignAuditEventType.expired,
+        detail={"expires_at": expires.isoformat()},
+    )
     db.commit()
     db.refresh(req)
     return req
@@ -677,9 +718,13 @@ def void_signing_request(
     actor: User,
     reason: str,
 ) -> CanarySignRequest:
+    req = _lock_request(db, req)
     mark_expired_if_needed(db, req)
     if req.status != CanarySignStatus.pending:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only pending requests can be voided")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only pending requests can be voided",
+        )
     req.status = CanarySignStatus.voided
     req.voided_at = utcnow()
     req.status_detail = (reason or "Voided")[:500]
@@ -719,12 +764,17 @@ def remind_signing_request(
 ) -> None:
     mark_expired_if_needed(db, req)
     if req.status != CanarySignStatus.pending:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only pending requests can be reminded")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only pending requests can be reminded",
+        )
+    db.flush()
     all_recipients = _recipients_for_request(db, req.id)
     outstanding = [
         r
         for r in all_recipients
-        if r.status in (CanarySignRecipientStatus.pending, CanarySignRecipientStatus.viewed)
+        if r.status
+        in (CanarySignRecipientStatus.pending, CanarySignRecipientStatus.viewed)
     ]
     if req.order_mode == CanarySignOrderMode.sequential:
         eligible_order = _next_sequential_order(all_recipients)
@@ -874,22 +924,35 @@ def _form_gate_allows(req: CanarySignRequest, recipient: CanarySignRecipient) ->
 
 def _snapshot_pdf_bytes(db: Session, req: CanarySignRequest) -> bytes:
     if not req.snapshot_pdf_file_id:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Signing snapshot missing")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Signing snapshot missing",
+        )
     row = db.get(DbFile, req.snapshot_pdf_file_id)
     if not row:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Signing snapshot missing")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Signing snapshot missing",
+        )
     ensure_files_root()
     abs_path = (FILES_ROOT / row.storage_path).resolve()
     if not abs_path.is_file():
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Signing snapshot missing on disk")
-    return abs_path.read_bytes()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Signing snapshot missing on disk",
+        )
+    return _verified_pdf_bytes(row, abs_path)
 
 
-def list_form_fields_for_request(db: Session, req: CanarySignRequest) -> list[dict[str, Any]]:
+def list_form_fields_for_request(
+    db: Session, req: CanarySignRequest
+) -> list[dict[str, Any]]:
     if not getattr(req, "has_fillable_form", False):
         return []
     try:
         return extract_acroform_fields(_snapshot_pdf_bytes(db, req))
+    except HTTPException:
+        raise
     except Exception:
         log.exception("AcroForm extract failed for %s", req.id)
         return []
@@ -903,16 +966,35 @@ def claim_form_lock(
     ip: str | None = None,
     ua: str | None = None,
 ) -> CanarySignRequest:
+    req = _lock_request(db, req)
+    _refresh_recipient(db, req, recipient)
     mark_expired_if_needed(db, req)
     if req.status != CanarySignStatus.pending:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This signing request is no longer active")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This signing request is no longer active",
+        )
     if not req.has_fillable_form:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This document has no fillable form fields")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This document has no fillable form fields",
+        )
     if req.form_completed_at is not None:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="The form has already been completed")
-    if recipient.status in (CanarySignRecipientStatus.signed, CanarySignRecipientStatus.declined):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot lock the form")
-    if req.form_locked_by_recipient_id and req.form_locked_by_recipient_id != recipient.id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="The form has already been completed",
+        )
+    if recipient.status in (
+        CanarySignRecipientStatus.signed,
+        CanarySignRecipientStatus.declined,
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot lock the form"
+        )
+    if (
+        req.form_locked_by_recipient_id
+        and req.form_locked_by_recipient_id != recipient.id
+    ):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Another recipient has already locked this form for editing",
@@ -924,7 +1006,10 @@ def claim_form_lock(
     if req.order_mode == CanarySignOrderMode.sequential:
         others = _recipients_for_request(db, req.id)
         for r in others:
-            if r.routing_order < recipient.routing_order and r.status != CanarySignRecipientStatus.signed:
+            if (
+                r.routing_order < recipient.routing_order
+                and r.status != CanarySignRecipientStatus.signed
+            ):
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="It is not your turn to act on this request yet",
@@ -958,17 +1043,34 @@ def save_form_responses(
     ip: str | None = None,
     ua: str | None = None,
 ) -> CanarySignRequest:
+    req = _lock_request(db, req)
+    _refresh_recipient(db, req, recipient)
     mark_expired_if_needed(db, req)
     if req.status != CanarySignStatus.pending:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This signing request is no longer active")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This signing request is no longer active",
+        )
     if not req.has_fillable_form:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This document has no fillable form fields")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This document has no fillable form fields",
+        )
     if req.form_locked_by_recipient_id != recipient.id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You do not hold the form lock")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not hold the form lock",
+        )
     if req.form_completed_at is not None:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="The form has already been completed")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="The form has already been completed",
+        )
     if not isinstance(responses, dict):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="responses must be an object")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="responses must be an object",
+        )
 
     known = {f["name"] for f in list_form_fields_for_request(db, req)}
     cleaned: dict[str, Any] = {}
@@ -1085,6 +1187,8 @@ def record_view(
     ip: str | None = None,
     ua: str | None = None,
 ) -> None:
+    req = _lock_request(db, req)
+    _refresh_recipient(db, req, recipient)
     mark_expired_if_needed(db, req)
     if req.status != CanarySignStatus.pending:
         return
@@ -1134,15 +1238,58 @@ def submit_signature(
     consent: bool = True,
     form_responses: dict[str, Any] | None = None,
 ) -> CanarySignRequest:
+    req = _lock_request(db, req)
+    _refresh_recipient(db, req, recipient)
     mark_expired_if_needed(db, req)
+    if recipient.status == CanarySignRecipientStatus.signed and req.status in (
+        CanarySignStatus.pending,
+        CanarySignStatus.completed,
+    ):
+        fields = [
+            f for f in _fields_for_request(db, req.id) if f.recipient_id == recipient.id
+        ]
+        expected = {str(f.id): f.value for f in fields if f.value is not None}
+        replay_values = {
+            key: {k: v for k, v in value.items() if k not in ("page", "x_pct", "y_pct", "w_pct", "h_pct")}
+            if isinstance(value, dict) else value
+            for key, value in field_values.items()
+        }
+        if (
+            not consent
+            or replay_values != expected
+            or (
+                form_responses is not None
+                and form_responses != (req.form_responses or {})
+            )
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail="This recipient has already signed with different values",
+            )
+        recipients = _recipients_for_request(db, req.id)
+        if req.status == CanarySignStatus.pending and all(
+            r.status == CanarySignRecipientStatus.signed for r in recipients
+        ):
+            complete_signing_request(db, req)
+        return req
     if req.status != CanarySignStatus.pending:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This signing request is no longer active")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This signing request is no longer active",
+        )
     if not consent:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Consent is required to sign")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Consent is required to sign",
+        )
     if not _recipient_can_sign_now(db, req, recipient):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="It is not your turn to sign yet" if req.order_mode == CanarySignOrderMode.sequential else "Cannot sign",
+            detail=(
+                "It is not your turn to sign yet"
+                if req.order_mode == CanarySignOrderMode.sequential
+                else "Cannot sign"
+            ),
         )
 
     now = utcnow()
@@ -1161,7 +1308,11 @@ def submit_signature(
                     name = str(key).strip()
                     if not name:
                         continue
-                    merged[name] = value if isinstance(value, bool) or value is None else str(value)
+                    merged[name] = (
+                        value
+                        if isinstance(value, bool) or value is None
+                        else str(value)
+                    )
             req.form_responses = merged
             req.form_completed_at = now
             req.updated_at = now
@@ -1176,31 +1327,50 @@ def submit_signature(
                 user_agent=ua,
             )
 
-    fields = [f for f in _fields_for_request(db, req.id) if f.recipient_id == recipient.id]
+    fields = [
+        f for f in _fields_for_request(db, req.id) if f.recipient_id == recipient.id
+    ]
     by_id = {str(f.id): f for f in fields}
 
     for field in fields:
         raw = field_values.get(str(field.id))
         if raw is None and field.required:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Missing value for field {field.label or field.field_type.value}")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Missing value for field {field.label or field.field_type.value}",
+            )
         if raw is None:
             continue
         if not isinstance(raw, dict):
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid field value")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid field value"
+            )
         value = _validate_field_value(field, raw)
-        if field.page is None or field.x_pct is None or field.y_pct is None or field.w_pct is None or field.h_pct is None:
+        if (
+            field.page is None
+            or field.x_pct is None
+            or field.y_pct is None
+            or field.w_pct is None
+            or field.h_pct is None
+        ):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Field {field.label or field.field_type.value} has no placement; ask the sender to amend and re-send",
             )
-        stored = {k: v for k, v in value.items() if k not in ("page", "x_pct", "y_pct", "w_pct", "h_pct")}
+        stored = {
+            k: v
+            for k, v in value.items()
+            if k not in ("page", "x_pct", "y_pct", "w_pct", "h_pct")
+        }
         field.value = stored
         field.filled_at = now
         db.add(field)
 
     for key in field_values:
         if str(key) not in by_id:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Unknown field {key}")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail=f"Unknown field {key}"
+            )
 
     recipient.status = CanarySignRecipientStatus.signed
     recipient.signed_at = now
@@ -1219,6 +1389,7 @@ def submit_signature(
         user_agent=ua,
     )
 
+    db.flush()
     all_recipients = _recipients_for_request(db, req.id)
     for i, r in enumerate(all_recipients):
         if r.id == recipient.id:
@@ -1242,11 +1413,18 @@ def decline_signing(
     ip: str | None = None,
     ua: str | None = None,
 ) -> CanarySignRequest:
+    req = _lock_request(db, req)
+    _refresh_recipient(db, req, recipient)
     mark_expired_if_needed(db, req)
     if req.status != CanarySignStatus.pending:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This signing request is no longer active")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This signing request is no longer active",
+        )
     if recipient.status == CanarySignRecipientStatus.signed:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Already signed")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Already signed"
+        )
 
     now = utcnow()
     reason_text = (reason or "").strip()[:2000] or "Declined"
@@ -1323,6 +1501,17 @@ def complete_signing_request(
     ).scalar_one()
     if req.status == CanarySignStatus.completed:
         return
+    recipients = _recipients_for_request(db, req.id)
+    if (
+        req.status != CanarySignStatus.pending
+        or not recipients
+        or not all(r.status == CanarySignRecipientStatus.signed for r in recipients)
+    ):
+        raise HTTPException(
+            status_code=409, detail="Signing request is not ready for completion"
+        )
+    if req.expires_at and _aware(req.expires_at) <= utcnow():
+        raise HTTPException(status_code=409, detail="This signing request has expired")
 
     snapshot = (
         db.get(DbFile, req.snapshot_pdf_file_id) if req.snapshot_pdf_file_id else None
@@ -1341,7 +1530,7 @@ def complete_signing_request(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Signing snapshot missing on disk",
         )
-    pdf_bytes = abs_path.read_bytes()
+    pdf_bytes = _verified_pdf_bytes(snapshot, abs_path)
 
     # Apply fillable form answers and flatten before stamping Canary Sign overlays
     if getattr(req, "has_fillable_form", False) and req.form_responses:
@@ -1599,7 +1788,20 @@ def list_case_requests(db: Session, case_id: uuid.UUID) -> list[CanarySignReques
     return rows
 
 
-def _read_case_pdf_bytes(db: Session, file_id: uuid.UUID | None, *, missing: str) -> tuple[bytes, str]:
+def _verified_pdf_bytes(row: DbFile, path: Path) -> bytes:
+    raw = path.read_bytes()
+    if not row.checksum or hashlib.sha256(raw).hexdigest() != row.checksum:
+        log.error("Canary Sign file integrity failure: file_id=%s", row.id)
+        raise HTTPException(
+            status_code=409,
+            detail="Document integrity check failed; contact staff to recover the file",
+        )
+    return raw
+
+
+def _read_case_pdf_bytes(
+    db: Session, file_id: uuid.UUID | None, *, missing: str
+) -> tuple[bytes, str]:
     if not file_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=missing)
     row = db.get(DbFile, file_id)
@@ -1609,7 +1811,7 @@ def _read_case_pdf_bytes(db: Session, file_id: uuid.UUID | None, *, missing: str
     abs_path = (FILES_ROOT / row.storage_path).resolve()
     if not abs_path.is_file():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=missing)
-    return abs_path.read_bytes(), row.original_filename or "document.pdf"
+    return _verified_pdf_bytes(row, abs_path), row.original_filename or "document.pdf"
 
 
 def read_snapshot_pdf_bytes(db: Session, req: CanarySignRequest) -> bytes:
@@ -1621,9 +1823,12 @@ def read_portal_preview_pdf(db: Session, req: CanarySignRequest) -> tuple[bytes,
     """Prefer the signed PDF once complete; otherwise the signing snapshot."""
     if req.signed_file_id:
         try:
-            return _read_case_pdf_bytes(db, req.signed_file_id, missing="Signed PDF not available")
-        except HTTPException:
-            pass
+            return _read_case_pdf_bytes(
+                db, req.signed_file_id, missing="Signed PDF not available"
+            )
+        except HTTPException as exc:
+            if exc.status_code != 404:
+                raise
     raw = read_snapshot_pdf_bytes(db, req)
     return raw, f"{(req.subject or 'document')[:80]}.pdf"
 
