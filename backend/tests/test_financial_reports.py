@@ -205,6 +205,8 @@ def test_invoice_and_ledger_share_the_same_approval_and_void_instant(monkeypatch
     from tests.ledger_test_helpers import ledger_test_session,add_user,add_case
     db=ledger_test_session(); user=add_user(db); case=add_case(db,fee_earner_user_id=user.id)
     inv=create_case_invoice(case.id,_invoice_payload(credit_user_id=user.id),user,db)
+    from app.models import CaseInvoice
+    inv=db.get(CaseInvoice,inv.id)
     inv.created_at=dt(1); db.flush()
     monkeypatch.setattr(ledger_service,'utcnow',lambda:dt(2))
     approve_case_invoice(case.id,inv.id,user,db); db.commit()
