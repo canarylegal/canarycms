@@ -24,7 +24,7 @@ test('allocation retry after a lost response pays once without changing the dial
   const ledger = await (await page.request.get(`/api/cases/${id}/ledger`)).json()
   const pair = ledger.entries.find((entry: { description: string }) => entry.description === description).pair_id
   await page.getByRole('row').filter({ hasText: '900001' }).dblclick()
-  await page.getByRole('button', { name: /^Accounts/ }).click()
+  await page.locator('button.accHead').filter({ hasText: 'Accounts' }).click()
   await page.getByRole('button', { name: 'Open accounts', exact: true }).click()
   await page.getByRole('row').filter({ hasText: inv.invoice_number }).getByRole('button', { name: 'Allocate', exact: true }).click()
   const dialog = page.getByRole('dialog', { name: `Allocate — ${inv.invoice_number}` })
