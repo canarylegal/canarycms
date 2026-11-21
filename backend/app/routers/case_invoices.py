@@ -21,10 +21,12 @@ from app.invoice_service import (
     notify_invoice_rejected_after_commit,
     void_case_invoice,
 )
-from app.models import Case, CaseInvoice, User
+from sqlalchemy import select
+from app.models import Case, CaseInvoice, User, InvoiceAllocationReversal
+from app.invoice_allocation_corrections import reverse_allocation, check_invoice_allocations, authorise_source
 from app.invoice_allocation_service import allocate_to_invoice, list_allocations
 from app.schemas import CaseInvoiceCreate, CaseInvoiceOut, CaseInvoicesOut, InvoiceBillingDefaultsOut, RejectCommentIn
-from app.schemas.bank import InvoiceAllocationIn, InvoiceAllocationOut
+from app.schemas.bank import InvoiceAllocationIn, InvoiceAllocationOut, InvoiceAllocationReversalIn, InvoiceAllocationReversalOut
 
 router = APIRouter(prefix="/cases", tags=["case-invoices"])
 
@@ -113,8 +115,14 @@ def read_invoice_allocations(
     inv = db.get(CaseInvoice, invoice_id)
     if not inv or inv.case_id != case_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invoice not found")
+    allocations = list_allocations(db, invoice_id)
+    for pair_id in {a.ledger_pair_id for a in allocations}:
+        authorise_source(db, user, pair_id)
+    reversals = {r.allocation_id: r for r in db.scalars(select(InvoiceAllocationReversal).where(
+        InvoiceAllocationReversal.allocation_id.in_([a.id for a in allocations])))}
     return [
         InvoiceAllocationOut(
+            reversal=InvoiceAllocationReversalOut.model_validate(reversals[r.id]) if r.id in reversals else None,
             id=r.id,
             invoice_id=r.invoice_id,
             ledger_pair_id=r.ledger_pair_id,
@@ -122,7 +130,7 @@ def read_invoice_allocations(
             allocated_at=r.allocated_at,
             notes=r.notes,
         )
-        for r in list_allocations(db, invoice_id)
+        for r in allocations
     ]
 
 
@@ -153,7 +161,9 @@ def add_invoice_allocation(
     )
     db.commit()
     db.refresh(row)
+    reversal = db.scalar(select(InvoiceAllocationReversal).where(InvoiceAllocationReversal.allocation_id == row.id))
     return InvoiceAllocationOut(
+        reversal=InvoiceAllocationReversalOut.model_validate(reversal) if reversal else None,
         id=row.id,
         invoice_id=row.invoice_id,
         ledger_pair_id=row.ledger_pair_id,
@@ -181,3 +191,26 @@ def delete_invoice(
         actor=user,
         reject_comment=payload.comment,
     )
+
+
+@router.post('/{case_id}/invoices/{invoice_id}/allocations/{allocation_id}/reverse', response_model=InvoiceAllocationReversalOut)
+def reverse_invoice_allocation(case_id: uuid.UUID, invoice_id: uuid.UUID, allocation_id: uuid.UUID,
+                               payload: InvoiceAllocationReversalIn, user: User = Depends(get_current_user),
+                               db: Session = Depends(get_db)):
+    require_case_access(case_id, user, db)
+    inv = db.get(CaseInvoice, invoice_id)
+    if inv is None or inv.case_id != case_id:
+        raise HTTPException(404, 'Invoice not found')
+    result = reverse_allocation(db, invoice_id=invoice_id, allocation_id=allocation_id, payload=payload, actor=user)
+    db.commit()
+    return InvoiceAllocationReversalOut.model_validate(result)
+
+
+@router.get('/{case_id}/invoices/{invoice_id}/allocation-consistency')
+def invoice_allocation_consistency(case_id: uuid.UUID, invoice_id: uuid.UUID,
+                                   user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    require_case_access(case_id, user, db)
+    inv = db.get(CaseInvoice, invoice_id)
+    if inv is None or inv.case_id != case_id:
+        raise HTTPException(404, 'Invoice not found')
+    return check_invoice_allocations(db, invoice_id=invoice_id, actor=user)

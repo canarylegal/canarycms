@@ -160,13 +160,29 @@ class ClientAccountEomCreate(BaseModel):
 class InvoiceAllocationIn(BaseModel):
     idempotency_key: uuid.UUID | None = None
     ledger_pair_id: uuid.UUID
-    amount_pence: int = Field(gt=0, strict=True)
+    amount_pence: int = Field(gt=0, le=2147483647, strict=True)
     notes: str | None = Field(default=None, max_length=2000)
 
     model_config = {"extra": "forbid"}
 
 
+class InvoiceAllocationReversalIn(BaseModel):
+    idempotency_key: uuid.UUID
+    reason: str = Field(min_length=1, max_length=2000)
+    model_config = {"extra": "forbid"}
+
+
+class InvoiceAllocationReversalOut(BaseModel):
+    id: uuid.UUID
+    allocation_id: uuid.UUID
+    actor_user_id: uuid.UUID
+    reason: str
+    reversed_at: datetime
+    model_config = {"from_attributes": True}
+
+
 class InvoiceAllocationOut(BaseModel):
+    reversal: InvoiceAllocationReversalOut | None = None
     id: uuid.UUID
     invoice_id: uuid.UUID
     ledger_pair_id: uuid.UUID

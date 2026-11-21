@@ -5,13 +5,13 @@ import uuid
 from datetime import datetime, timezone
 
 from fastapi import HTTPException
-from sqlalchemy import func, or_, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.invoice_allocation_integrity import active_allocation, allocation_total, require_consistent_totals, receipt_capacity, source_allocation_inconsistent
 from app.audit import log_event
 from app.deps import require_case_access
-from app.models import (CaseInvoice, CaseInvoiceAllocation, LedgerAccount, LedgerAccountType,
-                        LedgerDirection, LedgerEntry, User)
+from app.models import (CaseInvoice, CaseInvoiceAllocation, LedgerAccount, LedgerEntry, User)
 from app.permission_checks import user_may_approve_ledger
 
 
@@ -26,8 +26,8 @@ def allocate_to_invoice(db: Session, *, invoice_id: uuid.UUID, ledger_pair_id: u
                         idempotency_key: uuid.UUID | None = None) -> CaseInvoiceAllocation:
     if not actor.is_active or not user_may_approve_ledger(actor, db):
         raise HTTPException(403, "Not permitted to allocate invoice payments")
-    if type(amount_pence) is not int or amount_pence <= 0:
-        raise HTTPException(400, "Allocation must be a positive integer number of pence")
+    if type(amount_pence) is not int or not 0 < amount_pence <= 2147483647:
+        raise HTTPException(400, "Allocation must be a positive integer number of pence within the supported range")
     inv = db.get(CaseInvoice, invoice_id)
     if inv is None:
         raise HTTPException(404, "Invoice not found")
@@ -72,40 +72,19 @@ def allocate_to_invoice(db: Session, *, invoice_id: uuid.UUID, ledger_pair_id: u
     require_external_receipt(db, ledger_pair_id)
     if inv.status != "approved":
         raise HTTPException(400, "Only approved invoices can receive allocations")
-    # A single client/office receipt, or a balanced client-debit/office-credit bill
-    # payment. A transfer to client, two credits, anticipated funds or reversals
-    # cannot serve as a receipt. Count a two-leg payment once, never twice.
-    kinds = [account.account_type for account in accounts]
-    credits = [leg for leg in legs if leg.direction == LedgerDirection.credit]
-    valid = (len(legs) in (1, 2) and len(set(kinds)) == len(legs) and len(credits) == 1
-             and all(leg.is_approved and not leg.is_anticipated and leg.amount_pence > 0 for leg in legs)
-             and len({leg.amount_pence for leg in legs}) == 1)
-    if len(legs) == 2:
-        valid = valid and all(leg.direction == (LedgerDirection.credit if account.account_type == LedgerAccountType.office
-                                              else LedgerDirection.debit)
-                              for leg, account in zip(legs, accounts))
-    linked_invoice = db.scalar(select(CaseInvoice.id).where(or_(
-        CaseInvoice.ledger_pair_id == ledger_pair_id, CaseInvoice.reversal_pair_id == ledger_pair_id)).limit(1))
-    if not valid or linked_invoice is not None:
-        raise HTTPException(400, "Allocation requires an approved, non-anticipated receipt or bill payment")
-
+    capacity, _ = receipt_capacity(db, ledger_pair_id)
     invalid_previous = db.scalar(select(CaseInvoiceAllocation.id).where(
-        or_(CaseInvoiceAllocation.invoice_id == invoice_id,
-            CaseInvoiceAllocation.ledger_pair_id == ledger_pair_id),
+        CaseInvoiceAllocation.ledger_pair_id == ledger_pair_id, active_allocation(),
         CaseInvoiceAllocation.amount_pence <= 0).limit(1))
     if invalid_previous is not None:
         raise HTTPException(409, "Existing allocations need review before allocating")
-    invoice_total = int(db.scalar(select(func.coalesce(func.sum(CaseInvoiceAllocation.amount_pence), 0))
-        .where(CaseInvoiceAllocation.invoice_id == invoice_id)))
-    if invoice_total != int(inv.amount_allocated_pence or 0) or invoice_total < 0:
-        raise HTTPException(409, "Invoice allocation totals are inconsistent; review them before allocating")
-    source_total = int(db.scalar(select(func.coalesce(func.sum(CaseInvoiceAllocation.amount_pence), 0))
-        .where(CaseInvoiceAllocation.ledger_pair_id == ledger_pair_id)))
-    if source_total < 0:
+    invoice_total = require_consistent_totals(db, inv)
+    source_total = allocation_total(db, pair_id=ledger_pair_id)
+    if source_allocation_inconsistent(db, ledger_pair_id, capacity, inv.case_id):
         raise HTTPException(409, "Receipt allocation totals are inconsistent; review them before allocating")
     if amount_pence > int(inv.total_pence) - invoice_total:
         raise HTTPException(400, "Allocation exceeds the invoice's remaining balance")
-    if amount_pence > credits[0].amount_pence - source_total:
+    if amount_pence > capacity - source_total:
         raise HTTPException(400, "Allocation exceeds the receipt's unallocated value")
 
     now = datetime.now(timezone.utc)
