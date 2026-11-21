@@ -171,8 +171,8 @@ class InterMatterJournal(Base):
     )
     amount_pence: Mapped[int] = mapped_column(Integer, nullable=False)
     description: Mapped[str] = mapped_column(Text, nullable=False)
-    from_pair_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
-    to_pair_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    from_pair_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    to_pair_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
     created_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("user.id", ondelete="SET NULL"), nullable=True
     )

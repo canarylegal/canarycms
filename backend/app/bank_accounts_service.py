@@ -55,8 +55,8 @@ def enforce_client_post_bank_fields(
 ) -> tuple[uuid.UUID | None, str | None]:
     """When client banks are configured, require bank + payment method on actual client posts."""
     banks = active_client_banks(db)
-    if not banks:
-        return firm_bank_account_id, payment_method
+    if not banks and firm_bank_account_id is None:
+        return None, payment_method
     bank_id = firm_bank_account_id
     if bank_id is None:
         d = default_client_bank(db)

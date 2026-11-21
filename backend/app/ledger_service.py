@@ -10,6 +10,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.exc import ObjectDeletedError, StaleDataError
 
+from app.ledger_integrity import lock_matters, require_posting_period
 from app.ledger_party import resolve_ledger_party
 from app.models import (
     Case,
@@ -109,16 +110,20 @@ def _get_or_create_accounts(case_id: uuid.UUID, db: Session, *, for_update: bool
     approved posts cannot both pass the SAR deficit check.
     """
 
+    if for_update:
+        lock_matters(db, case_id)
+
     def _load() -> dict[str, LedgerAccount]:
         q = select(LedgerAccount).where(LedgerAccount.case_id == case_id)
         if for_update:
-            q = q.with_for_update()
+            q = q.order_by(LedgerAccount.id).with_for_update()
         rows = db.execute(q).scalars().all()
         return {r.account_type.value: r for r in rows}
 
     by_type = _load()
     missing = [atype for atype in (LedgerAccountType.client, LedgerAccountType.office) if atype.value not in by_type]
     if missing:
+        lock_matters(db, case_id)
         now = utcnow()
         try:
             with db.begin_nested():
@@ -143,15 +148,17 @@ def _get_or_create_accounts(case_id: uuid.UUID, db: Session, *, for_update: bool
     return by_type
 
 
-def _balance(account_id: uuid.UUID, db: Session, *, approved_only: bool = True) -> int:
+def _balance(account_id: uuid.UUID, db: Session, *, approved_only: bool = True, bank_id: uuid.UUID | None = None, bank_only: bool = False) -> int:
     """Net balance in pence: sum(credits) - sum(debits)."""
     signed = case(
         (LedgerEntry.direction == LedgerDirection.credit, LedgerEntry.amount_pence),
         else_=-LedgerEntry.amount_pence,
     )
     q = select(func.coalesce(func.sum(signed), 0)).where(LedgerEntry.account_id == account_id)
+    if bank_only:
+        q = q.where(LedgerEntry.firm_bank_account_id == bank_id)
     if approved_only:
-        q = q.where(LedgerEntry.is_approved.is_(True))
+        q = q.where(LedgerEntry.is_approved.is_(True), LedgerEntry.is_anticipated.is_(False))
     return int(db.execute(q).scalar_one())
 
 
@@ -238,6 +245,8 @@ def post_transaction(
             payment_method=payment_method,
         )
 
+    if is_approved and payload.client_direction:
+        require_posting_period(db, {bank_id})
     accounts = _get_or_create_accounts(case_id, db, for_update=is_approved)
     if is_approved and payload.client_direction:
         current = _balance(accounts["client"].id, db, approved_only=True)
@@ -247,6 +256,8 @@ def post_transaction(
             client_direction=payload.client_direction,
         )
         _reject_client_deficit(projected)
+        if payload.client_direction == "debit":
+            _reject_client_deficit(_balance(accounts["client"].id, db, bank_id=bank_id, bank_only=True) - payload.amount_pence)
 
     pair_id = uuid.uuid4()
     now = utcnow()
@@ -592,6 +603,7 @@ def approve_ledger_pair(
         )
 
     if client_direction:
+        require_posting_period(db, {e.firm_bank_account_id for e in legs if e.account_id == accounts["client"].id})
         current = _balance(accounts["client"].id, db, approved_only=True)
         projected = _projected_client_balance_after_debit(
             current_balance=current,
@@ -606,6 +618,10 @@ def approve_ledger_pair(
                     f"(balance would be £{abs(projected)/100:.2f} DR)."
                 ),
             )
+
+    if client_direction == "debit":
+        client_leg = next(e for e in legs if e.account_id == accounts["client"].id)
+        _reject_client_deficit(_balance(accounts["client"].id, db, bank_id=client_leg.firm_bank_account_id, bank_only=True) - client_leg.amount_pence)
 
     for e in legs:
         e.is_approved = True

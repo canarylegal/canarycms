@@ -176,9 +176,10 @@ class InvoiceAllocationOut(BaseModel):
 
 
 class InterMatterJournalCreate(BaseModel):
+    idempotency_key: uuid.UUID | None = None
     from_case_id: uuid.UUID
     to_case_id: uuid.UUID
-    amount_pence: int = Field(gt=0)
+    amount_pence: int = Field(gt=0, le=2147483647, strict=True)
     description: str = Field(min_length=1, max_length=500)
     firm_bank_account_id: uuid.UUID | None = None
     reference: str | None = Field(default=None, max_length=200)

@@ -21,14 +21,18 @@ trap cleanup EXIT
 "${compose[@]}" exec -T backend python scripts/ensure_core_workflow_fixture.py
 "${compose[@]}" run --rm --no-deps -T -v "$(pwd)/backend/tests:/app/tests:ro" \
   -e DATABASE_URL=postgresql+psycopg://canary:isolated-core-database-secret@db:5432/canary_core_test \
-  backend pytest -q tests/test_upload_recovery_postgres.py tests/test_document_durability_postgres.py tests/test_invoice_allocation_postgres.py tests/test_bank_integrity_postgres.py
+  backend pytest -q tests/test_upload_recovery_postgres.py tests/test_document_durability_postgres.py tests/test_invoice_allocation_postgres.py tests/test_bank_integrity_postgres.py tests/test_ledger_operations_postgres.py
 "${compose[@]}" --profile test run --rm --no-deps --user "$(id -u):$(id -g)" -e HOME=/tmp tests
 
 # The receipt must survive a real backend restart, not just a browser retry.
 "${compose[@]}" exec -T backend python < backend/scripts/check_import_restart.py > "$CORE_TEST_OUTPUT/import-before-restart.json"
 "${compose[@]}" exec -T backend python scripts/check_document_recovery_restart.py prepare
+"${compose[@]}" exec -T backend python < backend/scripts/check_ledger_restart.py > "$CORE_TEST_OUTPUT/ledger-before-restart.json"
 "${compose[@]}" restart backend
 "${compose[@]}" up -d --wait --wait-timeout 120 backend
 "${compose[@]}" exec -T backend python < backend/scripts/check_import_restart.py > "$CORE_TEST_OUTPUT/import-after-restart.json"
 cmp "$CORE_TEST_OUTPUT/import-before-restart.json" "$CORE_TEST_OUTPUT/import-after-restart.json"
 "${compose[@]}" exec -T backend python scripts/check_document_recovery_restart.py verify
+
+"${compose[@]}" exec -T backend python < backend/scripts/check_ledger_restart.py > "$CORE_TEST_OUTPUT/ledger-after-restart.json"
+cmp "$CORE_TEST_OUTPUT/ledger-before-restart.json" "$CORE_TEST_OUTPUT/ledger-after-restart.json"

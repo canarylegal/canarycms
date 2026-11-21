@@ -46,6 +46,8 @@ def _authorise_pair(db: Session, pair_id: uuid.UUID, actor: User) -> None:
 def _eligible_pair(db: Session, line: BankStatementLine, pair_id: uuid.UUID, actor: User) -> None:
     _try_lock_ledger_pair(db, pair_id)
     _authorise_pair(db, pair_id, actor)
+    from app.ledger_integrity import require_external_receipt
+    require_external_receipt(db, pair_id)
     legs = list(db.scalars(select(LedgerEntry).join(LedgerAccount).where(
         LedgerEntry.pair_id == pair_id, LedgerAccount.account_type == LedgerAccountType.client)))
     if len(legs) != 1:

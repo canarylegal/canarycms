@@ -68,6 +68,8 @@ def allocate_to_invoice(db: Session, *, invoice_id: uuid.UUID, ledger_pair_id: u
                 raise HTTPException(409, "This allocation request ID was already used for different details")
             return previous
 
+    from app.ledger_integrity import require_external_receipt
+    require_external_receipt(db, ledger_pair_id)
     if inv.status != "approved":
         raise HTTPException(400, "Only approved invoices can receive allocations")
     # A single client/office receipt, or a balanced client-debit/office-credit bill

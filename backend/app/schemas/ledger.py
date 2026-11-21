@@ -30,7 +30,8 @@ class LedgerPostCreate(BaseModel):
     contact_label: str | None = Field(default=None, max_length=300)
     case_contact_id: uuid.UUID | None = None
     contact_id: uuid.UUID | None = None
-    amount_pence: int = Field(gt=0, description="Amount in pence (integer)")
+    idempotency_key: uuid.UUID | None = None
+    amount_pence: int = Field(gt=0, le=2147483647, strict=True, description="Amount in pence (integer)")
     # Which account(s) to affect and in which direction.
     # At least one leg is required; both may be supplied.
     client_direction: Literal["debit", "credit"] | None = None
@@ -62,7 +63,7 @@ class LedgerPostCreate(BaseModel):
 class LedgerPairUpdate(BaseModel):
     """Edit an unapproved or anticipated posting before approval."""
 
-    amount_pence: int | None = Field(default=None, gt=0)
+    amount_pence: int | None = Field(default=None, gt=0, le=2147483647, strict=True)
     description: str | None = Field(default=None, min_length=1, max_length=500)
     reference: str | None = Field(default=None, max_length=200)
     anticipated_for_date: date | None = None
@@ -215,3 +216,9 @@ class InvoiceBillingDefaultsOut(BaseModel):
     fee_templates: list[BillingLineTemplateOut]
     disbursement_templates: list[BillingLineTemplateOut]
     users: list[InvoiceBillingDefaultsUser]
+
+
+class LedgerReversalCreate(BaseModel):
+    idempotency_key: uuid.UUID
+    reason: str = Field(min_length=1, max_length=500)
+    model_config = {"extra": "forbid"}

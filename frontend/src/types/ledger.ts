@@ -106,6 +106,7 @@ export type LedgerOut = {
 }
 
 export type LedgerPostCreate = {
+  idempotency_key?: string
   description: string
   reference?: string | null
   contact_label?: string | null
