@@ -1,6 +1,8 @@
 """Case file upload and Office/quote compose helpers."""
 
 from __future__ import annotations
+from app.document_operations import document_operation
+from app.document_durability import create_document_bytes
 
 import logging
 import mimetypes
@@ -366,6 +368,7 @@ def _compose_pdf_from_precedent(
     return raw, mime, orig
 
 
+@document_operation("create.office")
 def compose_office_document(
     case_id: uuid.UUID,
     body: ComposeOfficeDocumentIn,
@@ -407,8 +410,7 @@ def compose_office_document(
 
     file_id = uuid.uuid4()
     folder = _prepare_upload_folder(db, case_id, body.folder or "")
-    paths = case_file_paths(case_id=case_id, file_id=file_id, original_filename=orig, folder_path=folder)
-    paths.abs_path.write_bytes(src_bytes)
+    paths = create_document_bytes(src_bytes, root=FILES_ROOT, file_id=file_id, filename=orig)
     size = len(src_bytes)
     now = _utcnow()
     row = DbFile(
@@ -417,7 +419,7 @@ def compose_office_document(
         owner_id=user.id,
         category=FileCategory.case_document,
         storage_path=paths.rel_path,
-        folder_path=paths.folder_path,
+        folder_path=folder,
         parent_file_id=None,
         source_imap_mbox=None,
         source_imap_uid=None,
@@ -426,7 +428,7 @@ def compose_office_document(
         mime_type=mime,
         size_bytes=size,
         version=1,
-        checksum=None,
+        checksum=paths.checksum,
         # PDFs are produced ready for the file list; Word still uses the compose publish flow.
         oo_compose_pending=not pdf_compose,
         created_at=now,
@@ -441,7 +443,7 @@ def compose_office_document(
         entity_id=str(row.id),
         meta={"case_id": str(case_id), "precedent_id": str(body.precedent_id) if body.precedent_id else None},
     )
-    commit_keeping_stored_file(db, paths.abs_path)
+    db.flush()
     db.refresh(row)
     return {
         "id": str(row.id),
@@ -452,6 +454,7 @@ def compose_office_document(
     }
 
 
+@document_operation("create.quote")
 def compose_quote_spreadsheet(
     case_id: uuid.UUID,
     body: ComposeQuoteIn,
@@ -471,9 +474,8 @@ def compose_quote_spreadsheet(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(ve)) from ve
 
     file_id = uuid.uuid4()
-    folder = sanitize_folder_path(body.folder or "")
-    paths = case_file_paths(case_id=case_id, file_id=file_id, original_filename=orig, folder_path=folder)
-    paths.abs_path.write_bytes(src_bytes)
+    folder = _prepare_upload_folder(db, case_id, body.folder or "")
+    paths = create_document_bytes(src_bytes, root=FILES_ROOT, file_id=file_id, filename=orig)
     size = len(src_bytes)
     now = _utcnow()
     row = DbFile(
@@ -482,7 +484,7 @@ def compose_quote_spreadsheet(
         owner_id=user.id,
         category=FileCategory.case_document,
         storage_path=paths.rel_path,
-        folder_path=paths.folder_path,
+        folder_path=folder,
         parent_file_id=None,
         source_imap_mbox=None,
         source_imap_uid=None,
@@ -491,7 +493,7 @@ def compose_quote_spreadsheet(
         mime_type=mime,
         size_bytes=size,
         version=1,
-        checksum=None,
+        checksum=paths.checksum,
         oo_compose_pending=True,
         is_portal_quote=False,
         created_at=now,
@@ -525,7 +527,7 @@ def compose_quote_spreadsheet(
             "fee_scale_id": str(body.fee_scale_id) if body.fee_scale_id else None,
         },
     )
-    commit_keeping_stored_file(db, paths.abs_path)
+    db.flush()
     db.refresh(row)
     return {
         "id": str(row.id),

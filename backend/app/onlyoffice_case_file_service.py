@@ -1,6 +1,7 @@
 """ONLYOFFICE in-browser edit + desktop WebDAV checkout helpers for case files."""
 
 from __future__ import annotations
+from app.document_operations import document_operation
 
 from app.document_durability import lock_document, stage_document_bytes, safe_path
 
@@ -360,6 +361,7 @@ async def oo_force_save(
     raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Unknown phase: {phase}")
 
 
+@document_operation("create.pdf")
 async def oo_export_pdf(
     case_id: uuid.UUID,
     file_id: uuid.UUID,

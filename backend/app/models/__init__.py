@@ -325,3 +325,4 @@ from app.models.document_recovery import DocumentRecovery
 from app.models.ledger_operation import LedgerOperation
 from app.models.invoice_allocation_reversal import InvoiceAllocationReversal
 from app.models.financial_report_snapshot import FinancialReportSnapshot
+from app.models.document_operation import DocumentOperation

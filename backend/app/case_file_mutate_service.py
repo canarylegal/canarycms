@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from app.document_durability import retain_document, stage_document_bytes, lock_document
 
-import shutil
+from app.document_operations import document_operation
+from app.document_durability import safe_path
 import uuid
 import zlib
 from datetime import datetime
@@ -24,7 +25,7 @@ from app.case_folder_service import (
 )
 from app.deps import require_case_access
 from app.desktop_edit_session import raise_if_files_checked_out
-from app.file_storage import FILES_ROOT, case_file_paths, ensure_files_root, sanitize_folder_path
+from app.file_storage import FILES_ROOT, ensure_files_root, sanitize_folder_path
 from app.models import File as DbFile, FileCategory, User
 from app.schemas import CaseFileMoveUpdate, CaseFileRenameUpdate, CommentFileUpdate, FilePinUpdate
 
@@ -83,6 +84,7 @@ def set_file_pin(
     return {"id": str(row.id), "is_pinned": row.is_pinned}
 
 
+@document_operation("rename")
 def rename_case_file(
     case_id: uuid.UUID,
     file_id: uuid.UUID,
@@ -124,30 +126,9 @@ def rename_case_file(
 
     old_filename = row.original_filename
     ensure_files_root()
-    folder = row.folder_path or ""
-    new_paths = case_file_paths(
-        case_id=case_id,
-        file_id=row.id,
-        original_filename=new_name,
-        folder_path=folder,
-    )
-    old_abs = (FILES_ROOT / row.storage_path).resolve()
-    new_abs = new_paths.abs_path
-    if str(old_abs) != str(new_abs):
-        if not old_abs.is_file():
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=_FILE_RENAME_CONFLICT_DETAIL,
-            )
-        if new_abs.exists():
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=_FILE_RENAME_CONFLICT_DETAIL,
-            )
-        shutil.move(str(old_abs), str(new_abs))
-
-    row.storage_path = new_paths.rel_path
-    row.folder_path = new_paths.folder_path
+    if not safe_path(FILES_ROOT, row.storage_path).is_file():
+        raise HTTPException(409, 'Document bytes are missing; restore before renaming.')
+    # Filing names are database metadata; physical bytes never move before commit.
     row.original_filename = new_name
     row.updated_at = datetime.utcnow()
     db.add(row)
@@ -163,7 +144,7 @@ def rename_case_file(
             "new_filename": row.original_filename,
         },
     )
-    db.commit()
+    db.flush()
     db.refresh(row)
     return {"id": str(row.id), "original_filename": row.original_filename}
 
@@ -217,6 +198,7 @@ def update_comment_file(
     return {"id": str(row.id), "original_filename": row.original_filename}
 
 
+@document_operation("move")
 def move_case_file(
     case_id: uuid.UUID,
     file_id: uuid.UUID,
@@ -262,35 +244,9 @@ def move_case_file(
 
     try:
         for r in rows_to_move:
-            new_paths = case_file_paths(
-                case_id=case_id,
-                file_id=r.id,
-                original_filename=r.original_filename,
-                folder_path=new_folder,
-            )
-            old_abs = (FILES_ROOT / r.storage_path).resolve()
-            new_abs = new_paths.abs_path
-            if str(old_abs) != str(new_abs):
-                if not old_abs.is_file():
-                    raise HTTPException(
-                        status_code=status.HTTP_409_CONFLICT,
-                        detail=_FILE_MOVE_CONFLICT_DETAIL,
-                    )
-                if new_abs.exists():
-                    raise HTTPException(
-                        status_code=status.HTTP_409_CONFLICT,
-                        detail=_FILE_MOVE_CONFLICT_DETAIL,
-                    )
-                try:
-                    shutil.move(str(old_abs), str(new_abs))
-                except OSError as exc:
-                    raise HTTPException(
-                        status_code=status.HTTP_409_CONFLICT,
-                        detail=_FILE_MOVE_CONFLICT_DETAIL,
-                    ) from exc
-
-            r.storage_path = new_paths.rel_path
-            r.folder_path = new_paths.folder_path
+            if not safe_path(FILES_ROOT, r.storage_path).is_file():
+                raise HTTPException(409, 'Document bytes are missing; restore before moving.')
+            r.folder_path = new_folder
             r.updated_at = datetime.utcnow()
             db.add(r)
 
@@ -307,7 +263,7 @@ def move_case_file(
                 "new_folder_path": row.folder_path,
             },
         )
-        db.commit()
+        db.flush()
     except StaleDataError as exc:
         db.rollback()
         raise HTTPException(
@@ -317,7 +273,7 @@ def move_case_file(
 
     db.refresh(row)
     if old_folder:
-        _ensure_folder_marker_if_empty(db, case_id, user.id, old_folder)
+        _ensure_folder_marker_if_empty(db, case_id, user.id, old_folder, commit=False)
     return {"id": str(row.id), "folder_path": row.folder_path}
 
 

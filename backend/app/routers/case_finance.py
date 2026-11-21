@@ -1,5 +1,9 @@
 """Case finance endpoints."""
 from __future__ import annotations
+from app.document_operations import document_operation
+from app.document_durability import create_document_bytes
+from app.file_storage import FILES_ROOT
+from app.audit import log_event
 
 import uuid
 from datetime import datetime, timezone
@@ -10,7 +14,7 @@ from sqlalchemy.orm import Session
 from app.completion_statement_service import build_completion_statement_docx_bytes
 from app.db import get_db
 from app.deps import get_current_user, require_case_access
-from app.file_storage import case_file_paths, commit_keeping_stored_file, ensure_files_root
+from app.file_storage import ensure_files_root
 from app.finance_service import (
     apply_quote_to_finance,
     create_finance_category,
@@ -139,6 +143,7 @@ def remove_finance_item(
 
 
 @router.post("/{case_id}/finance/completion-statement", status_code=status.HTTP_201_CREATED)
+@document_operation("create.completion")
 def generate_completion_statement(
     case_id: uuid.UUID,
     user: User = Depends(get_current_user),
@@ -153,7 +158,7 @@ def generate_completion_statement(
 
     sync_finance_from_quote(case_id, db, overwrite_existing=False)
     finance = get_finance(case_id, db)
-    db.commit()  # commit sync + auto-initialisation
+    db.flush()  # Sync and generated document publish in one transaction.
 
     ensure_files_root()
 
@@ -163,8 +168,7 @@ def generate_completion_statement(
     file_id = uuid.uuid4()
     src_bytes = build_completion_statement_docx_bytes(case, db)
 
-    paths = case_file_paths(case_id=case_id, file_id=file_id, original_filename=orig)
-    paths.abs_path.write_bytes(src_bytes)
+    paths = create_document_bytes(src_bytes, root=FILES_ROOT, file_id=file_id, filename=orig)
     now = datetime.now(timezone.utc)
     row = DbFile(
         id=file_id,
@@ -172,7 +176,7 @@ def generate_completion_statement(
         owner_id=user.id,
         category=FileCategory.case_document,
         storage_path=paths.rel_path,
-        folder_path=paths.folder_path,
+        folder_path="",
         parent_file_id=None,
         source_imap_mbox=None,
         source_imap_uid=None,
@@ -181,11 +185,12 @@ def generate_completion_statement(
         mime_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         size_bytes=len(src_bytes),
         version=1,
-        checksum=None,
+        checksum=paths.checksum,
         created_at=now,
         updated_at=now,
     )
     db.add(row)
-    commit_keeping_stored_file(db, paths.abs_path)
+    log_event(db, actor_user_id=user.id, action="case.file.completion", entity_type="file", entity_id=str(row.id), meta={"case_id":str(case_id)})
+    db.flush()
     db.refresh(row)
     return {"id": str(row.id)}

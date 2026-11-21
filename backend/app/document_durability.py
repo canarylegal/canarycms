@@ -82,3 +82,18 @@ def stage_document_bytes(db, row, data, *, root, kind='version', allow_missing_c
     row.checksum = hashlib.sha256(data).hexdigest()
     # Do not remove the old path or .oo_backup: rollback/ambiguous commit remains safe.
     return target
+
+
+def create_document_bytes(data, *, root, file_id, filename):
+    """Fsync a fresh immutable candidate; never delete after an ambiguous DB commit."""
+    from types import SimpleNamespace
+    root = Path(root).resolve()
+    relative = str(Path('.created') / str(file_id) / str(uuid.uuid4()) / Path(filename).name)
+    target = safe_path(root, relative)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with target.open('xb') as stream:
+        stream.write(data)
+        stream.flush()
+        os.fsync(stream.fileno())
+    sync_path(target, root)
+    return SimpleNamespace(abs_path=target,rel_path=relative,checksum=hashlib.sha256(data).hexdigest())

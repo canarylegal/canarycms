@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from app.document_durability import retain_document
 
-import shutil
+from app.document_operations import document_operation
+from app.document_durability import safe_path
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -233,6 +234,7 @@ def _ensure_folder_marker_if_empty(
     case_id: uuid.UUID,
     user_id: uuid.UUID,
     folder_path: str,
+    *, commit: bool = True,
 ) -> None:
     """Folders created implicitly (files only, no marker) vanish when emptied unless we add a marker."""
     try:
@@ -247,7 +249,8 @@ def _ensure_folder_marker_if_empty(
         return
     ensure_files_root()
     _insert_folder_marker(db, case_id, user_id, normalized)
-    db.commit()
+    db.flush()
+    if commit: db.commit()
 
 
 def create_case_folder(
@@ -282,6 +285,7 @@ def create_case_folder(
     return {"folder_path": row.folder_path}
 
 
+@document_operation("folder.rename")
 def rename_case_folder(
     case_id: uuid.UUID,
     payload: CaseFolderRenameUpdate,
@@ -302,17 +306,16 @@ def rename_case_folder(
     ensure_files_root()
     from app.file_storage import FILES_ROOT
 
-    # Serialize folder renames per matter so concurrent races cannot 500 on shutil.move (CL-05).
+    # Serialize folder renames per matter and their metadata transactions (CL-05).
     _lock_case_folder_ops(db, case_id, blocking=True)
 
     old_prefix = old_path
-    old_like = f"{old_prefix}/%"
 
     rows = list(
         db.execute(
-            select(DbFile).where(
+            select(DbFile).with_for_update().execution_options(populate_existing=True).where(
                 (DbFile.case_id == case_id)
-                & ((DbFile.folder_path == old_prefix) | (DbFile.folder_path.like(old_like)))
+                & ((DbFile.folder_path == old_prefix) | (DbFile.folder_path.startswith(old_prefix + "/", autoescape=True)))
             )
         )
         .scalars()
@@ -337,7 +340,7 @@ def rename_case_folder(
             .where(
                 DbFile.case_id == case_id,
                 ~DbFile.id.in_(moving_ids),
-                (DbFile.folder_path == new_path) | (DbFile.folder_path.like(f"{new_path}/%")),
+                (DbFile.folder_path == new_path) | (DbFile.folder_path.startswith(new_path + "/", autoescape=True)),
             )
             .limit(1)
         )
@@ -371,19 +374,8 @@ def rename_case_folder(
             if row.category == FileCategory.system and row.folder_path == old_prefix:
                 updated_original = new_last
 
-            new_paths = case_file_paths(
-                case_id=case_id,
-                file_id=row.id,
-                original_filename=updated_original,
-                folder_path=updated_fp,
-            )
-
-            old_abs = (FILES_ROOT / row.storage_path).resolve()
-            new_abs = new_paths.abs_path
-            if old_abs.exists() and str(old_abs) != str(new_abs):
-                shutil.move(str(old_abs), str(new_abs))
-
-            row.storage_path = new_paths.rel_path
+            if row.category != FileCategory.system and not safe_path(FILES_ROOT, row.storage_path).is_file():
+                raise HTTPException(409, 'Document bytes are missing; restore before filing.')
             row.folder_path = updated_fp
             if updated_original != row.original_filename:
                 row.original_filename = updated_original
@@ -407,7 +399,7 @@ def rename_case_folder(
         entity_id=str(case_id),
         meta={"old_folder_path": old_path, "new_folder_path": new_path},
     )
-    db.commit()
+    db.flush()
 
     return {"old_folder_path": old_path, "new_folder_path": new_path}
 
@@ -537,6 +529,7 @@ def delete_case_folder(
     return {"folder_path": folder_path, "deleted_count": len(rows)}
 
 
+@document_operation("folder.move")
 def move_case_folder(
     case_id: uuid.UUID,
     payload: CaseFolderMoveUpdate,
