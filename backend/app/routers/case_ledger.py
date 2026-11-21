@@ -8,14 +8,15 @@ from fastapi import APIRouter, Body, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
+from app.ledger_operations import post_ledger_operation, reverse_posting
+from app.schemas.ledger import LedgerReversalCreate
 from app.db import get_db
 from app.deps import get_current_user, require_case_access
-from app.ledger_audit import log_ledger_approve, log_ledger_edit, log_ledger_post, log_ledger_reject
+from app.ledger_audit import log_ledger_approve, log_ledger_edit, log_ledger_reject
 from app.ledger_export import build_case_ledger_workbook
 from app.ledger_service import (
     approve_ledger_pair,
     get_ledger,
-    post_transaction,
     reject_ledger_pair_unapproved,
     update_ledger_pair_unapproved,
 )
@@ -67,16 +68,7 @@ def create_posting(
     db: Session = Depends(get_db),
 ) -> None:
     require_case_access(case_id, user, db)
-    result = post_transaction(case_id, payload, user, db)
-    # Audit in the same transaction as the posting (single commit below).
-    log_ledger_post(
-        db,
-        actor_user_id=user.id,
-        case_id=case_id,
-        pair_id=result.pair_id,
-        payload=payload,
-        is_approved=result.is_approved,
-    )
+    post_ledger_operation(case_id, payload, user, db)
     db.commit()
 
 
@@ -119,3 +111,11 @@ def reject_posting(
     reject_ledger_pair_unapproved(case_id, pair_id, user, db, reject_comment=payload.comment)
     log_ledger_reject(db, actor_user_id=user.id, case_id=case_id, pair_id=pair_id)
     db.commit()
+
+
+@router.post('/{case_id}/ledger/pairs/{pair_id}/reverse')
+def reverse_ledger_posting(case_id: uuid.UUID, pair_id: uuid.UUID, payload: LedgerReversalCreate,
+                           user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    result = reverse_posting(db, case_id=case_id, pair_id=pair_id, payload=payload, user=user)
+    db.commit()
+    return result

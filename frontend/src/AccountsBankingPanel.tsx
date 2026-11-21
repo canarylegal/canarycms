@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { requestKey } from './requestKey'
 import { apiFetch, apiUrl, applyAuthHeaders, type ApiError } from './api'
 import type {
   BankReconciliationOut,
@@ -52,6 +53,7 @@ export function AccountsBankingPanel({
   const [exports, setExports] = useState<XeroExportOut[]>([])
   const [xeroFrom, setXeroFrom] = useState('')
   const [xeroTo, setXeroTo] = useState('')
+  const journalRequest = useRef<{ payload: string; key: string } | null>(null)
   const [journalFrom, setJournalFrom] = useState('')
   const [journalTo, setJournalTo] = useState('')
   const [journalAmt, setJournalAmt] = useState('')
@@ -246,20 +248,26 @@ export function AccountsBankingPanel({
       setErr('Journal needs from/to matter ids, amount, and description')
       return
     }
+    const payload = {
+      from_case_id: journalFrom.trim(),
+      to_case_id: journalTo.trim(),
+      amount_pence: amt,
+      description: journalDesc.trim(),
+      firm_bank_account_id: bankId || null,
+    }
+    const requestPayload = JSON.stringify(payload)
+    if (journalRequest.current?.payload !== requestPayload) {
+      journalRequest.current = { payload: requestPayload, key: requestKey() }
+    }
     setBusy(true)
     setErr(null)
     try {
       await apiFetch('/accounts/banking/journals', {
         token,
         method: 'POST',
-        json: {
-          from_case_id: journalFrom.trim(),
-          to_case_id: journalTo.trim(),
-          amount_pence: amt,
-          description: journalDesc.trim(),
-          firm_bank_account_id: bankId || null,
-        },
+        json: { ...payload, idempotency_key: journalRequest.current.key },
       })
+      journalRequest.current = null
       setJournalDesc('')
       setJournalAmt('')
       await load()

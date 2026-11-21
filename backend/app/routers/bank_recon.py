@@ -13,7 +13,8 @@ from app.bank_accounts_service import list_bank_accounts
 from app.client_account_eom_service import create_or_replace_eom, get_eom, list_eoms
 from app.db import get_db
 from app.deps import get_current_user
-from app.inter_matter_journal_service import create_inter_matter_journal, list_inter_matter_journals
+from app.schemas.ledger import LedgerReversalCreate
+from app.inter_matter_journal_service import reverse_inter_matter_journal, create_inter_matter_journal, list_inter_matter_journals
 from app.models import User
 from app.permission_checks import user_may_access_accounts_workspace
 from app.schemas.bank import (
@@ -485,3 +486,11 @@ def xero_export_download(
         media_type=row.content_type,
         headers={"Content-Disposition": f'attachment; filename="{row.filename}"'},
     )
+
+
+@router.post('/journals/{journal_id}/reverse', response_model=InterMatterJournalOut)
+def journals_reverse(journal_id: uuid.UUID, payload: LedgerReversalCreate,
+                     user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    result = reverse_inter_matter_journal(db, journal_id=journal_id, payload=payload, user=user)
+    db.commit()
+    return result

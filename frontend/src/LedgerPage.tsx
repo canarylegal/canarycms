@@ -163,6 +163,7 @@ export function LedgerPage({ caseId, token, currentUserId, onCaseChanged }: Prop
     invoiceNumber: string
     remainingPence: number
   } | null>(null)
+  const postingRequest = useRef<{ payload: string; key: string } | null>(null)
   const allocationRequest = useRef<{ payload: string; key: string } | null>(null)
   const [allocatePairId, setAllocatePairId] = useState('')
   const [allocateAmountStr, setAllocateAmountStr] = useState('')
@@ -315,6 +316,7 @@ export function LedgerPage({ caseId, token, currentUserId, onCaseChanged }: Prop
   }, [invoiceModalOpen, caseId, token])
 
   function openPost() {
+    postingRequest.current = null
     setForm(EMPTY_POST)
     setAmountStr('')
     setPostError(null)
@@ -443,13 +445,18 @@ export function LedgerPage({ caseId, token, currentUserId, onCaseChanged }: Prop
       firm_bank_account_id: needsBank ? bankAccountId : null,
       payment_method: needsBank ? (paymentMethod as PaymentMethod) : null,
     }
+    const requestPayload = JSON.stringify({ caseId, ...payload })
+    if (postingRequest.current?.payload !== requestPayload) {
+      postingRequest.current = { payload: requestPayload, key: requestKey() }
+    }
     setPostBusy(true)
     try {
       await apiFetch(`/cases/${caseId}/ledger/post`, {
         method: 'POST',
         token,
-        json: payload,
+        json: { ...payload, idempotency_key: postingRequest.current.key },
       })
+      postingRequest.current = null
       setPostOpen(false)
       await load()
       if (!postingAnticipated) onCaseChanged?.()

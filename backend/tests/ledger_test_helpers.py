@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.models import (
     AuditEvent,
     BankStatementImport, BankStatementLine, BankReconciliation, ClientAccountReconciliation,
-    DocumentRecovery,
+    DocumentRecovery, LedgerOperation, InterMatterJournal,
     Base,
     Case,
     CaseAccessRule,
@@ -64,7 +64,7 @@ def ledger_test_session() -> Session:
         Precedent.__table__,
         FirmSettings.__table__,
         AuditEvent.__table__,
-        DocumentRecovery.__table__,
+        DocumentRecovery.__table__, LedgerOperation.__table__, InterMatterJournal.__table__,
     )
     try:
         for table in tables:
