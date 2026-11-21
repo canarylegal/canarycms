@@ -76,3 +76,12 @@ def test_boundary_deletion_insert_and_cursor_scope(db,documents):
     _,_,cursor=document_page(db,case_id,folder=folder,limit=1)
     for params in ({'folder':folder+'/Other'}, {'folder':folder,'q':'different'}, {'folder':folder,'sort':'size'}):
         with pytest.raises(HTTPException): document_page(db,case_id,cursor=cursor,**params)
+
+
+def test_long_folder_path_uses_bounded_index_key(db,documents):
+    case_id,_,_,_,_,add=documents
+    folder='/'.join(uuid.uuid4().hex for _ in range(150))
+    file=add('long folder.txt',folder_path=folder)
+    rows,_,cursor=document_page(db,case_id,folder=folder)
+    assert [row[0].id for row in rows]==[file.id]
+    assert cursor is None

@@ -48,7 +48,7 @@ def document_page(db, case_id, *, folder='', q='', sort='created', direction='de
         .join(owner, owner.id == File.owner_id)
         .join(root, and_(root.id == root_id, visible(root, case_id), root.parent_file_id.is_(None), root.category != 'system', root.folder_path == folder))
         .join(root_owner, root_owner.id == root.owner_id)
-        .where(visible(File, case_id), File.category != 'system', File.folder_path == folder))
+        .where(visible(File, case_id), File.category != 'system', File.folder_path == folder, func.md5(File.folder_path) == func.md5(folder)))
     if q:
         # Recursive closure includes parents, siblings and descendants, including matches in
         # another folder. UNION (not UNION ALL) terminates even for corrupt cyclic links.

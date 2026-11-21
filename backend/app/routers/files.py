@@ -495,7 +495,7 @@ def _file_list_items(db: Session, case_id: uuid.UUID, rows):
 @router.get("/browse")
 def browse_case_files(
     case_id: uuid.UUID, user: User = Depends(get_current_user), db: Session = Depends(get_db),
-    folder: str = Query(default='', max_length=4096), q: str = Query(default='', max_length=500),
+    folder: str = Query(default=''), q: str = Query(default='', max_length=500),
     sort: Literal['description', 'size', 'created', 'user'] = 'created',
     direction: Literal['asc', 'desc'] = 'desc',
     limit: int = Query(default=100, ge=1, le=100),

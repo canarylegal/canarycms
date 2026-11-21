@@ -7,6 +7,11 @@ import {fileDocOwnerLabel} from '../src/case/caseDetailHelpers'
 test('document pages match complete legacy folder groups for every sort and preserve metadata',async({request})=>{
  await apiLogin(request,'STAFF');const id=await caseId(request)
  const files:FileSummary[]=await(await request.get(`/api/cases/${id}/files`)).json()
+ const unloaded=files.find(file=>file.original_filename==='Performance document 0100.txt')!
+ const firstPage=await(await request.get(`/api/cases/${id}/files/browse`)).json()
+ expect(firstPage.items.map((file:FileSummary)=>file.id)).not.toContain(unloaded.id)
+ expect(await(await request.get(`/api/cases/${id}/files/${unloaded.id}/metadata`)).json()).toEqual(unloaded)
+ expect((await request.get(`/api/cases/${id}/files/${unloaded.id}`)).ok()).toBe(true)
  const metadata=await(await request.get(`/api/cases/${id}/files/folder-metadata`)).json()
  for(const folder of ['',...metadata.paths]) {
    const expected=files.filter(f=>f.category!=='system'&&(f.folder_path??'')===folder)
