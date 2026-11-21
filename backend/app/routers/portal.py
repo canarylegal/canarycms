@@ -230,7 +230,7 @@ def portal_list_quote_deliveries(
     rows = [
         d
         for d in list_pending_quote_deliveries_for_contact(db, contact_id=contact.id)
-        if visible(db, d.case_id)
+        if visible(db, d.case_id, resource_kind="quote", resource_id=d.id)
     ]
     return [_quote_delivery_view(db, d) for d in rows]
 

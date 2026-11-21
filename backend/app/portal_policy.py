@@ -32,7 +32,22 @@ def fresh(db, model, identity, *, lock=False):
         return db.scalar(stmt)
 
 
-def authorize(db, case_id, *, signing_request_id=None, lock=False, client_only=False):
+def validate_preview(db, principal):
+    if not principal.staff_preview:
+        return
+    from app.models import User
+    from app.deps import require_case_access
+    try:
+        staff = fresh(db, User, uuid.UUID(principal.staff_user_id))
+        case_id = uuid.UUID(principal.case_id)
+    except (ValueError, TypeError, AttributeError):
+        raise HTTPException(401, "Preview expired; open a new preview")
+    if staff is None or not staff.is_active or principal.staff_version != staff.auth_token_version:
+        raise HTTPException(401, "Staff preview access has expired")
+    require_case_access(case_id, staff, db)
+
+
+def authorize(db, case_id, *, signing_request_id=None, resource_kind=None, resource_id=None, lock=False, client_only=False):
     principal = db.info.get("portal_session")
     if principal is None:
         return
@@ -42,6 +57,17 @@ def authorize(db, case_id, *, signing_request_id=None, lock=False, client_only=F
         raise HTTPException(
             403, "This action is not available for matter exchange access"
         )
+    validate_preview(db, principal)
+    if principal.case_id and str(case_id) != principal.case_id:
+        raise HTTPException(404, "Area not found")
+    if principal.invitation:
+        if resource_kind != principal.resource_kind or str(resource_id) != principal.resource_id:
+            raise HTTPException(403, "This invitation is limited to its form or quote")
+        from app.portal_invitation import resolve
+        try:
+            resolve(db, principal.invitation, principal.resource_kind, completed=True, lock=lock)
+        except ValueError as exc:
+            raise HTTPException(401, str(exc)) from exc
     contact_id = uuid.UUID(principal.contact_id)
     if principal.audience == "exchange" and str(case_id) != principal.case_id:
         raise HTTPException(404, "Area not found")
@@ -115,9 +141,9 @@ def authorize(db, case_id, *, signing_request_id=None, lock=False, client_only=F
         raise HTTPException(403, "Portal access to this matter has been revoked")
 
 
-def visible(db, case_id, *, signing_request_id=None):
+def visible(db, case_id, *, signing_request_id=None, resource_kind=None, resource_id=None):
     try:
-        authorize(db, case_id, signing_request_id=signing_request_id)
+        authorize(db, case_id, signing_request_id=signing_request_id, resource_kind=resource_kind, resource_id=resource_id)
         return True
     except HTTPException:
         return False

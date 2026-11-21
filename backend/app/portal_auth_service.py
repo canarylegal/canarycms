@@ -106,6 +106,7 @@ def portal_auth(payload: PortalAuthIn, request: Request, db: Session) -> PortalA
         return PortalAuthOut(
             session_token=token,
             contact_name=contact_display_name(contact),
+            contact_id=contact.id,
             grants=grant_summaries(db, contact.id, case_id=matter_row.case_id),
             focus_case_id=matter_row.case_id,
             staff_preview=False,
@@ -140,6 +141,7 @@ def portal_auth(payload: PortalAuthIn, request: Request, db: Session) -> PortalA
     return PortalAuthOut(
         session_token=token,
         contact_name=contact_display_name(contact),
+        contact_id=contact.id,
         grants=grant_summaries(db, contact.id),
         staff_preview=False,
         audience="client",
@@ -242,8 +244,18 @@ def portal_preview_exchange(payload: PortalPreviewExchangeIn, db: Session) -> Po
             status_code=status.HTTP_403_FORBIDDEN,
             detail="No portal content on this matter for this contact",
         )
+    from app.security import PortalSessionPayload
+    from app.portal_policy import validate_preview
+    principal = PortalSessionPayload(contact_id=str(contact.id), staff_preview=True,
+        case_id=str(case_id), staff_user_id=str(staff_user_id), staff_version=preview.staff_version,
+        session_version=portal_session_version(access_row))
+    validate_preview(db, principal)
+    db.info["portal_session"] = principal
+    from app.portal_policy import authorize
+    authorize(db, case_id)
     token = create_portal_session_token(
         contact_id=str(contact.id),
+        staff_user_id=str(staff_user_id), staff_version=preview.staff_version, case_id=str(case_id),
         staff_preview=True,
         session_version=portal_session_version(access_row),
     )
@@ -259,6 +271,7 @@ def portal_preview_exchange(payload: PortalPreviewExchangeIn, db: Session) -> Po
     return PortalAuthOut(
         session_token=token,
         contact_name=contact_display_name(contact),
+        contact_id=contact.id,
         grants=grant_summaries(db, contact.id),
         focus_case_id=case_id,
         staff_preview=True,
@@ -290,6 +303,8 @@ def portal_quote_exchange(payload: PortalQuoteExchangeIn, db: Session) -> Portal
     token = create_portal_session_token(
         contact_id=str(contact.id),
         session_version=portal_session_version(access_row),
+        case_id=str(case_id), invitation=payload.exchange_token,
+        resource_kind="quote", resource_id=str(delivery.id),
     )
     log_event(
         db,
@@ -303,7 +318,8 @@ def portal_quote_exchange(payload: PortalQuoteExchangeIn, db: Session) -> Portal
     return PortalQuoteExchangeOut(
         session_token=token,
         contact_name=contact_display_name(contact),
-        grants=grant_summaries(db, contact.id),
+        contact_id=contact.id,
+        grants=[],
         quote=quote_delivery_view(db, delivery),
     )
 
@@ -332,6 +348,8 @@ def portal_form_exchange(payload: PortalFormExchangeIn, db: Session) -> PortalFo
     token = create_portal_session_token(
         contact_id=str(contact.id),
         session_version=portal_session_version(access_row),
+        case_id=str(case_id), invitation=payload.exchange_token,
+        resource_kind="form", resource_id=str(submission.id),
     )
     log_event(
         db,
@@ -345,7 +363,8 @@ def portal_form_exchange(payload: PortalFormExchangeIn, db: Session) -> PortalFo
     return PortalFormExchangeOut(
         session_token=token,
         contact_name=contact_display_name(contact),
-        grants=grant_summaries(db, contact.id),
+        contact_id=contact.id,
+        grants=[],
         form=form_pending_out(db, submission),
     )
 

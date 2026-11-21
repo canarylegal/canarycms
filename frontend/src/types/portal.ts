@@ -56,6 +56,7 @@ export type PortalQuoteDeliveryViewOut = {
 }
 
 export type PortalQuoteExchangeOut = {
+  contact_id?: string | null
   session_token: string
   contact_name: string
   grants: PortalGrantSummaryOut[]
@@ -63,6 +64,7 @@ export type PortalQuoteExchangeOut = {
 }
 
 export type PortalFormExchangeOut = {
+  contact_id?: string | null
   session_token: string
   contact_name: string
   grants: PortalGrantSummaryOut[]
@@ -83,6 +85,7 @@ export type PortalGrantSummaryOut = {
 }
 
 export type PortalAuthOut = {
+  contact_id?: string | null
   session_token: string
   contact_name: string
   grants: PortalGrantSummaryOut[]
@@ -92,6 +95,7 @@ export type PortalAuthOut = {
 }
 
 export type PortalSessionOut = {
+  contact_id?: string | null
   contact_name: string
   grants: PortalGrantSummaryOut[]
   staff_preview?: boolean

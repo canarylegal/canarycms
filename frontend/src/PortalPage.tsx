@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type Dispatch, type SetStateAction } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react'
 import { applyAuthHeaders, apiUrl, browserAbsoluteApiUrl, formatApiErrorDetail } from './api'
 import { DocMimeIcon } from './case/DocCells'
 import { decodeFolderPathForDisplay, decodeFolderPathSegment } from './case/folderPathCodec'
@@ -22,6 +22,8 @@ import type {
   PortalQuoteExchangeOut,
   PortalSessionOut,
 } from './types'
+
+import { portalRequestError, PortalRequestError, type PortalDraft } from './portal/sessionErrors'
 
 const PORTAL_FILES_GRID = '36px minmax(0, 1fr) 72px max-content'
 
@@ -59,15 +61,16 @@ function storePortalToken(token: string) {
 
 async function portalFetch<T>(
   path: string,
-  opts: RequestInit & { portalToken?: string; json?: unknown } = {},
+  opts: RequestInit & { portalToken?: string; json?: unknown; isCurrent?: () => boolean } = {},
 ): Promise<T> {
-  const { portalToken, json, ...rest } = opts
+  const { portalToken, json, isCurrent, ...rest } = opts
   const headers = new Headers(rest.headers ?? {})
   const auth = (portalToken ?? getStoredPortalToken()).trim()
   if (auth) applyAuthHeaders(headers, auth)
   if (json !== undefined) headers.set('Content-Type', 'application/json')
   const res = await fetch(apiUrl(path), { ...rest, headers, body: json !== undefined ? JSON.stringify(json) : rest.body })
   const body = await res.text()
+  if (isCurrent && !isCurrent()) throw new Error('Superseded portal request')
   let parsed: unknown = null
   if (body) {
     try {
@@ -77,7 +80,7 @@ async function portalFetch<T>(
     }
   }
   if (!res.ok) {
-    throw new Error(formatApiErrorDetail(parsed, res.statusText, apiUrl(path)))
+    throw portalRequestError(res.status, formatApiErrorDetail(parsed, res.statusText, apiUrl(path)), auth)
   }
   return parsed as T
 }
@@ -243,6 +246,33 @@ export default function PortalPage() {
   const [resetCodeSent, setResetCodeSent] = useState(false)
   const [sessionToken, setSessionToken] = useState(() => getStoredPortalToken())
   const [contactName, setContactName] = useState('')
+  const [contactId, setContactId] = useState<string | null>(null)
+  const [recoveryNeeded, setRecoveryNeeded] = useState(false)
+  const [sessionUnavailable, setSessionUnavailable] = useState(false)
+  const draft = useRef<PortalDraft | null>(null)
+  const recoveryForm = useRef<string | null>(null)
+  const sessionEpoch = useRef(0)
+  const currentToken = useRef(sessionToken)
+  currentToken.current = sessionToken
+  const captureSession = useCallback((token: string) => {
+    const epoch = sessionEpoch.current
+    return () => epoch === sessionEpoch.current && token === currentToken.current
+  }, [])
+  const sessionFetch = useCallback(<T,>(path: string, opts: RequestInit & { portalToken: string; json?: unknown }) => {
+    const isCurrent = captureSession(opts.portalToken)
+    if (!isCurrent()) return Promise.reject(new Error('Superseded portal request'))
+    return portalFetch<T>(path, { ...opts, isCurrent })
+  }, [captureSession])
+  useEffect(() => {
+    const expired = (event: Event) => {
+      const detail = (event as CustomEvent<{token: string; message: string}>).detail
+      if (detail.token !== currentToken.current) return
+      setRecoveryNeeded(true)
+      setErr(detail.message)
+    }
+    window.addEventListener('portal-session-expired', expired)
+    return () => window.removeEventListener('portal-session-expired', expired)
+  }, [])
   const [grants, setGrants] = useState<PortalGrantSummaryOut[]>([])
   const [activeCaseId, setActiveCaseId] = useState<string | null>(null)
   const [activeGrantId, setActiveGrantId] = useState<string | null>(null)
@@ -272,6 +302,8 @@ export default function PortalPage() {
   const [previewFocusCaseId, setPreviewFocusCaseId] = useState<string | null>(null)
   const [staffPreviewSession, setStaffPreviewSession] = useState(false)
   const [portalAudience, setPortalAudience] = useState<'client' | 'exchange'>('client')
+
+  const isRenderedSessionCurrent = captureSession(sessionToken)
 
   const matterGroups = useMemo(
     () => buildMatterGroups(grants, allPendingForms, pendingQuoteDeliveries, clientActions),
@@ -324,14 +356,19 @@ export default function PortalPage() {
     const params = new URLSearchParams(window.location.search)
     const exchange = params.get('preview_exchange')?.trim()
     if (!exchange) return
+    const authEpoch = sessionEpoch.current
     void (async () => {
       setPreviewExchangeBusy(true)
       setErr(null)
       try {
         const out = await portalFetch<PortalAuthOut>('/portal/auth/preview-exchange', {
           method: 'POST',
+          isCurrent: () => authEpoch === sessionEpoch.current,
           json: { exchange_token: exchange },
         })
+        if (authEpoch !== sessionEpoch.current) return
+        sessionEpoch.current += 1
+        currentToken.current = out.session_token
         storePortalToken(out.session_token)
         setSessionToken(out.session_token)
         setContactName(out.contact_name)
@@ -348,6 +385,9 @@ export default function PortalPage() {
         const qs = params.toString()
         window.history.replaceState(null, '', `${window.location.pathname}${qs ? `?${qs}` : ''}${window.location.hash}`)
       } catch (e: unknown) {
+        if (authEpoch !== sessionEpoch.current) return
+        sessionEpoch.current += 1
+        currentToken.current = ''
         storePortalToken('')
         setSessionToken('')
         setErr((e as { message?: string }).message ?? 'Preview link expired or invalid')
@@ -360,14 +400,19 @@ export default function PortalPage() {
   useEffect(() => {
     const quoteToken = quoteExchangeTokenFromLocation()
     if (!quoteToken) return
+    const authEpoch = sessionEpoch.current
     void (async () => {
       setQuoteExchangeBusy(true)
       setErr(null)
       try {
         const out = await portalFetch<PortalQuoteExchangeOut>('/portal/quote-exchange', {
           method: 'POST',
+          isCurrent: () => authEpoch === sessionEpoch.current,
           json: { exchange_token: quoteToken },
         })
+        if (authEpoch !== sessionEpoch.current) return
+        sessionEpoch.current += 1
+        currentToken.current = out.session_token
         storePortalToken(out.session_token)
         setSessionToken(out.session_token)
         setContactName(out.contact_name)
@@ -388,6 +433,9 @@ export default function PortalPage() {
         }
         window.history.replaceState(null, '', '/portal')
       } catch (e: unknown) {
+        if (authEpoch !== sessionEpoch.current) return
+        sessionEpoch.current += 1
+        currentToken.current = ''
         storePortalToken('')
         setSessionToken('')
         setErr((e as { message?: string }).message ?? 'Quote link expired or invalid')
@@ -400,14 +448,19 @@ export default function PortalPage() {
   useEffect(() => {
     const formToken = formExchangeTokenFromLocation()
     if (!formToken) return
+    const authEpoch = sessionEpoch.current
     void (async () => {
       setFormExchangeBusy(true)
       setErr(null)
       try {
         const out = await portalFetch<PortalFormExchangeOut>('/portal/form-exchange', {
           method: 'POST',
+          isCurrent: () => authEpoch === sessionEpoch.current,
           json: { exchange_token: formToken },
         })
+        if (authEpoch !== sessionEpoch.current) return
+        sessionEpoch.current += 1
+        currentToken.current = out.session_token
         storePortalToken(out.session_token)
         setSessionToken(out.session_token)
         setContactName(out.contact_name)
@@ -421,6 +474,9 @@ export default function PortalPage() {
         }
         window.history.replaceState(null, '', '/portal')
       } catch (e: unknown) {
+        if (authEpoch !== sessionEpoch.current) return
+        sessionEpoch.current += 1
+        currentToken.current = ''
         storePortalToken('')
         setSessionToken('')
         setErr((e as { message?: string }).message ?? 'Form link expired or invalid')
@@ -433,14 +489,19 @@ export default function PortalPage() {
   useEffect(() => {
     const signToken = canarySignTokenFromLocation()
     if (!signToken) return
+    const authEpoch = sessionEpoch.current
     void (async () => {
       setCanaryExchangeBusy(true)
       setErr(null)
       try {
         const out = await portalFetch<PortalCanarySignExchangeOut>('/portal/canary-sign-exchange', {
           method: 'POST',
+          isCurrent: () => authEpoch === sessionEpoch.current,
           json: { sign_token: signToken },
         })
+        if (authEpoch !== sessionEpoch.current) return
+        sessionEpoch.current += 1
+        currentToken.current = out.session_token
         storePortalToken(out.session_token)
         setSessionToken(out.session_token)
         setContactName(out.contact_name)
@@ -454,6 +515,9 @@ export default function PortalPage() {
         }
         window.history.replaceState(null, '', '/portal')
       } catch (e: unknown) {
+        if (authEpoch !== sessionEpoch.current) return
+        sessionEpoch.current += 1
+        currentToken.current = ''
         storePortalToken('')
         setSessionToken('')
         setErr((e as { message?: string }).message ?? 'Signing link expired or invalid')
@@ -464,14 +528,19 @@ export default function PortalPage() {
   }, [])
 
   const refreshSession = useCallback(async (token: string) => {
-    const sess = await portalFetch<PortalSessionOut>('/portal/session', { portalToken: token })
+    const isCurrent = captureSession(token)
+    if (!isCurrent()) return
+    const sess = await sessionFetch<PortalSessionOut>('/portal/session', { portalToken: token })
+    if (!isCurrent()) return sess
+    setContactId(sess.contact_id ?? null)
+    setSessionUnavailable(false)
     setContactName(sess.contact_name)
     setGrants(sess.grants)
     setStaffPreviewSession(Boolean(sess.staff_preview))
     setPortalAudience(sess.audience === 'exchange' ? 'exchange' : 'client')
     if (sess.focus_case_id) setActiveCaseId(sess.focus_case_id)
     return sess
-  }, [])
+  }, [captureSession, sessionFetch])
 
   const isRevokedGrantError = useCallback((message: string) => {
     const msg = message.toLowerCase()
@@ -505,44 +574,60 @@ export default function PortalPage() {
   }, [grants, sessionToken, allPendingForms, pendingQuoteDeliveries, clientActions, previewFocusCaseId])
 
   const loadBrowse = useCallback(async (grantId: string, subfolder: string, token: string) => {
+    const isCurrent = captureSession(token)
+    if (!isCurrent()) return
     const q = subfolder ? `?subfolder=${encodeURIComponent(subfolder)}` : ''
-    const data = await portalFetch<PortalBrowseOut>(`/portal/grants/${grantId}/browse${q}`, { portalToken: token })
+    const data = await sessionFetch<PortalBrowseOut>(`/portal/grants/${grantId}/browse${q}`, { portalToken: token })
+    if (!isCurrent()) return
     setBrowse(data)
     setBrowseSubfolder(data.subfolder)
     // Mark this visit so the next session clears folder "new" badges.
     try {
-      await portalFetch(`/portal/grants/${grantId}/viewed`, { method: 'POST', portalToken: token })
+      await sessionFetch(`/portal/grants/${grantId}/viewed`, { method: 'POST', portalToken: token })
     } catch {
+      if (!isCurrent()) return
       /* non-fatal */
     }
-  }, [])
+  }, [captureSession, sessionFetch])
 
   const loadPendingForms = useCallback(async (token: string) => {
+    const isCurrent = captureSession(token)
+    if (!isCurrent()) return
     try {
-      const rows = await portalFetch<PortalFormPendingOut[]>('/portal/forms', { portalToken: token })
+      const rows = await sessionFetch<PortalFormPendingOut[]>('/portal/forms', { portalToken: token })
+      if (!isCurrent()) return
       setAllPendingForms(Array.isArray(rows) ? rows : [])
     } catch {
+      if (!isCurrent()) return
       setAllPendingForms([])
     }
-  }, [])
+  }, [captureSession, sessionFetch])
 
   const loadPendingQuotes = useCallback(async (token: string) => {
+    const isCurrent = captureSession(token)
+    if (!isCurrent()) return
     try {
-      const rows = await portalFetch<PortalQuoteDeliveryViewOut[]>('/portal/quote-deliveries', { portalToken: token })
+      const rows = await sessionFetch<PortalQuoteDeliveryViewOut[]>('/portal/quote-deliveries', { portalToken: token })
+      if (!isCurrent()) return
       setPendingQuoteDeliveries(Array.isArray(rows) ? rows : [])
     } catch {
+      if (!isCurrent()) return
       setPendingQuoteDeliveries([])
     }
-  }, [])
+  }, [captureSession, sessionFetch])
 
   const loadClientActions = useCallback(async (token: string) => {
+    const isCurrent = captureSession(token)
+    if (!isCurrent()) return
     try {
-      const data = await portalFetch<PortalClientActionsOut>('/portal/client-actions', { portalToken: token })
+      const data = await sessionFetch<PortalClientActionsOut>('/portal/client-actions', { portalToken: token })
+      if (!isCurrent()) return
       setClientActions(data)
     } catch {
+      if (!isCurrent()) return
       setClientActions(null)
     }
-  }, [])
+  }, [captureSession, sessionFetch])
 
   useEffect(() => {
     const token = sessionToken.trim()
@@ -592,6 +677,7 @@ export default function PortalPage() {
 
   useEffect(() => {
     const token = sessionToken.trim()
+    const isCurrent = captureSession(token)
     if (!token || previewExchangeBusy || quoteExchangeBusy || formExchangeBusy || canaryExchangeBusy) return
     void (async () => {
       setBusy(true)
@@ -599,20 +685,25 @@ export default function PortalPage() {
       try {
         await refreshSession(token)
       } catch (e: unknown) {
-        storePortalToken('')
-        setSessionToken('')
-        setErr((e as { message?: string }).message ?? 'Session expired')
+        if (!isCurrent()) return
+        setSessionUnavailable(!(e instanceof PortalRequestError && e.status === 401))
+        setErr((e as { message?: string }).message ?? 'Could not check session. Please retry.')
       } finally {
-        setBusy(false)
+        if (isCurrent()) setBusy(false)
       }
     })()
-  }, [sessionToken, refreshSession, previewExchangeBusy, quoteExchangeBusy, formExchangeBusy, canaryExchangeBusy])
+  }, [captureSession, sessionToken, refreshSession, previewExchangeBusy, quoteExchangeBusy, formExchangeBusy, canaryExchangeBusy])
 
   useEffect(() => {
     const token = sessionToken.trim()
+    const isCurrent = captureSession(token)
     if (!token) return
     const refresh = () => {
-      void refreshSession(token).catch(() => {})
+      void refreshSession(token).catch((e: unknown) => {
+        if (!isCurrent()) return
+        setSessionUnavailable(!(e instanceof PortalRequestError && e.status === 401))
+        setErr((e as Error).message || 'Could not check session. Please retry.')
+      })
     }
     const onVisibility = () => {
       if (document.visibilityState === 'visible') refresh()
@@ -623,7 +714,7 @@ export default function PortalPage() {
       window.removeEventListener('focus', refresh)
       document.removeEventListener('visibilitychange', onVisibility)
     }
-  }, [sessionToken, refreshSession])
+  }, [captureSession, sessionToken, refreshSession])
 
   useEffect(() => {
     const token = sessionToken.trim()
@@ -633,11 +724,13 @@ export default function PortalPage() {
 
   useEffect(() => {
     const token = sessionToken.trim()
+    const isCurrent = captureSession(token)
     if (!token || !activeGrantId) return
     void (async () => {
       try {
         await loadBrowse(activeGrantId, browseSubfolder, token)
       } catch (e: unknown) {
+        if (!isCurrent()) return
         const msg = (e as { message?: string }).message ?? 'Could not load folder'
         if (isRevokedGrantError(msg)) {
           setBrowse(null)
@@ -648,18 +741,20 @@ export default function PortalPage() {
           } catch {
             /* session refresh may sign out if no grants remain */
           }
+          if (!isCurrent()) return
           setInfo('This shared folder is no longer available.')
         } else {
           setErr(msg)
         }
       } finally {
-        setBusy(false)
+        if (isCurrent()) setBusy(false)
       }
     })()
-  }, [activeGrantId, sessionToken, browseSubfolder, loadBrowse, isRevokedGrantError, refreshSession])
+  }, [captureSession, activeGrantId, sessionToken, browseSubfolder, loadBrowse, isRevokedGrantError, refreshSession])
 
   async function signInWithCode(e: React.FormEvent) {
     e.preventDefault()
+    let authEpoch = sessionEpoch.current
     setBusy(true)
     setErr(null)
     setInfo(null)
@@ -668,6 +763,33 @@ export default function PortalPage() {
         method: 'POST',
         json: { access_code: accessCode },
       })
+      if (authEpoch !== sessionEpoch.current) return
+      const verified = await portalFetch<PortalSessionOut>('/portal/session', { portalToken: out.session_token })
+      if (authEpoch !== sessionEpoch.current) return
+      let resumeId: string | null = null
+      if (recoveryForm.current && draft.current && verified.contact_id &&
+          verified.contact_id === draft.current.contactId && !verified.staff_preview && verified.audience !== 'exchange') {
+        try {
+          const form = await portalFetch<{contact_id: string; status: string}>(`/portal/forms/${recoveryForm.current}`, { portalToken: out.session_token })
+          if (form.contact_id === verified.contact_id && form.status === 'pending') resumeId = recoveryForm.current
+        } catch (error: unknown) {
+          // Permission loss is definitive; an outage is not. Keep the draft hidden
+          // until a subsequent sign-in can verify this same client's form access.
+          if (!(error instanceof PortalRequestError && [403, 404, 410].includes(error.status))) {
+            throw new Error('Could not verify form access. Your unsent draft is still held in this tab. Sign in again to retry.')
+          }
+        }
+      }
+      if (authEpoch !== sessionEpoch.current) return
+      if (!resumeId) draft.current = null
+      recoveryForm.current = null
+      setActiveFormId(resumeId)
+      setContactId(verified.contact_id ?? null)
+      setRecoveryNeeded(false)
+      setSessionUnavailable(false)
+      sessionEpoch.current += 1
+      authEpoch = sessionEpoch.current
+      currentToken.current = out.session_token
       storePortalToken(out.session_token)
       setSessionToken(out.session_token)
       setContactName(out.contact_name)
@@ -680,14 +802,16 @@ export default function PortalPage() {
       setBrowseSubfolder('')
       setAccessCode('')
     } catch (e: unknown) {
+      if (authEpoch !== sessionEpoch.current) return
       setErr((e as { message?: string }).message ?? 'Sign-in failed')
     } finally {
-      setBusy(false)
+      if (authEpoch === sessionEpoch.current) setBusy(false)
     }
   }
 
   async function requestCodeReset(e: React.FormEvent) {
     e.preventDefault()
+    const authEpoch = sessionEpoch.current
     setBusy(true)
     setErr(null)
     setInfo(null)
@@ -696,17 +820,20 @@ export default function PortalPage() {
         method: 'POST',
         json: { email: resetEmail.trim() },
       })
+      if (authEpoch !== sessionEpoch.current) return
       setResetCodeSent(true)
       setInfo('If this e-mail has portal access, a verification code has been sent.')
     } catch (e: unknown) {
+      if (authEpoch !== sessionEpoch.current) return
       setErr((e as { message?: string }).message ?? 'Could not send verification code')
     } finally {
-      setBusy(false)
+      if (authEpoch === sessionEpoch.current) setBusy(false)
     }
   }
 
   async function confirmCodeReset(e: React.FormEvent) {
     e.preventDefault()
+    const authEpoch = sessionEpoch.current
     setBusy(true)
     setErr(null)
     setInfo(null)
@@ -718,6 +845,7 @@ export default function PortalPage() {
           json: { email: resetEmail.trim(), code: resetVerifyCode.trim() },
         },
       )
+      if (authEpoch !== sessionEpoch.current) return
       setAccessCode(out.access_code)
       setResetVerifyCode('')
       setResetCodeSent(false)
@@ -728,13 +856,37 @@ export default function PortalPage() {
           : 'A new access code is ready below (and was e-mailed). Sign in to continue.',
       )
     } catch (e: unknown) {
+      if (authEpoch !== sessionEpoch.current) return
       setErr((e as { message?: string }).message ?? 'Could not reset access code')
     } finally {
-      setBusy(false)
+      if (authEpoch === sessionEpoch.current) setBusy(false)
     }
   }
 
+  function beginRecovery() {
+    const retainedDraft = draft.current
+    const retainedForm = activeFormId
+    signOut()
+    draft.current = retainedDraft
+    recoveryForm.current = retainedForm
+    setSignInMode('code')
+    setInfo('Sign in to resume. Your unsent form is held only in this tab until your access is checked.')
+  }
+
   function signOut() {
+    sessionEpoch.current += 1
+    setBusy(false)
+    setUploadBusy(false)
+    setQuoteRespondBusy(false)
+    setSessionUnavailable(false)
+    setPreviewFocusCaseId(null)
+    setStaffPreviewSession(false)
+    setPortalAudience('client')
+    draft.current = null
+    recoveryForm.current = null
+    setRecoveryNeeded(false)
+    setContactId(null)
+    currentToken.current = ''
     storePortalToken('')
     setSessionToken('')
     setContactName('')
@@ -759,6 +911,7 @@ export default function PortalPage() {
   async function downloadQuoteFile() {
     if (!quoteDelivery) return
     const token = sessionToken.trim()
+    const isCurrent = captureSession(token)
     if (!token) return
     setErr(null)
     try {
@@ -766,8 +919,14 @@ export default function PortalPage() {
       const headers = new Headers()
       applyAuthHeaders(headers, token)
       const res = await fetch(url, { headers })
-      if (!res.ok) throw new Error(formatApiErrorDetail(await res.text(), res.statusText))
+      if (!isCurrent()) return
+      if (!res.ok) {
+        const detail = await res.text()
+        if (!isCurrent()) return
+        throw portalRequestError(res.status, formatApiErrorDetail(detail, res.statusText), token)
+      }
       const blob = await res.blob()
+      if (!isCurrent()) return
       const obj = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = obj
@@ -775,13 +934,16 @@ export default function PortalPage() {
       a.click()
       URL.revokeObjectURL(obj)
     } catch (e: unknown) {
+      if (!isCurrent()) return
       setErr((e as { message?: string }).message ?? 'Download failed')
     }
   }
 
   async function respondToQuote(accepted: boolean) {
     if (!quoteDelivery) return
+    const isCurrent = captureSession(sessionToken)
     await respondToApproval(quoteDelivery.id, accepted, quoteDeclineReason.trim() || null)
+    if (!isCurrent()) return
     setQuoteDeclineOpen(false)
     setQuoteDeclineReason('')
   }
@@ -792,11 +954,12 @@ export default function PortalPage() {
     declineReason: string | null = null,
   ) {
     const token = sessionToken.trim()
+    const isCurrent = captureSession(token)
     if (!token) return
     setQuoteRespondBusy(true)
     setErr(null)
     try {
-      const out = await portalFetch<PortalQuoteDeliveryViewOut>(
+      const out = await sessionFetch<PortalQuoteDeliveryViewOut>(
         `/portal/quote-deliveries/${deliveryId}/respond`,
         {
           method: 'POST',
@@ -807,17 +970,20 @@ export default function PortalPage() {
           },
         },
       )
+      if (!isCurrent()) return
       if (quoteDelivery?.id === deliveryId) setQuoteDelivery(out)
       setInfo(accepted ? 'Thank you — your acceptance has been recorded.' : 'Your response has been recorded.')
       void loadPendingQuotes(token)
       void loadClientActions(token)
       if (activeGrantId) {
         await loadBrowse(activeGrantId, browseSubfolder, token)
+        if (!isCurrent()) return
       }
     } catch (e: unknown) {
+      if (!isCurrent()) return
       setErr((e as { message?: string }).message ?? 'Could not submit response')
     } finally {
-      setQuoteRespondBusy(false)
+      if (isCurrent()) setQuoteRespondBusy(false)
     }
   }
 
@@ -834,6 +1000,7 @@ export default function PortalPage() {
   async function uploadFiles(fileList: FileList | null) {
     if (!fileList?.length || !activeGrantId || !activeGrant?.can_upload) return
     const token = sessionToken.trim()
+    const isCurrent = captureSession(token)
     if (!token) return
     setUploadBusy(true)
     setErr(null)
@@ -846,57 +1013,68 @@ export default function PortalPage() {
         const headers = new Headers()
         applyAuthHeaders(headers, token)
         const res = await fetch(apiUrl(`/portal/grants/${activeGrantId}/files`), { method: 'POST', headers, body: fd })
+        if (!isCurrent()) return
         if (!res.ok) {
           const text = await res.text()
+          if (!isCurrent()) return
           let parsed: unknown = text
           try {
             parsed = JSON.parse(text)
           } catch {
             /* keep text */
           }
-          throw new Error(formatApiErrorDetail(parsed, res.statusText))
+          throw portalRequestError(res.status, formatApiErrorDetail(parsed, res.statusText), token)
         }
       }
       await loadBrowse(activeGrantId, browseSubfolder, token)
+      if (!isCurrent()) return
     } catch (e: unknown) {
+      if (!isCurrent()) return
       setErr((e as { message?: string }).message ?? 'Upload failed')
     } finally {
-      setUploadBusy(false)
+      if (isCurrent()) setUploadBusy(false)
     }
   }
 
   async function fetchFileBlob(file: PortalFileOut, download: boolean): Promise<Blob> {
     const token = sessionToken.trim()
+    const isCurrent = captureSession(token)
     if (!token || !activeGrantId) throw new Error('Not signed in')
     const q = download ? '?download=1' : ''
     const url = apiUrl(`/portal/grants/${activeGrantId}/files/${file.id}${q}`)
     const headers = new Headers()
     applyAuthHeaders(headers, token)
     const res = await fetch(url, { headers })
+    if (!isCurrent()) throw new Error('Superseded portal request')
     if (!res.ok) {
       const text = await res.text()
+      if (!isCurrent()) throw new Error('Superseded portal request')
       let parsed: unknown = text
       try {
         parsed = JSON.parse(text)
       } catch {
         /* keep text */
       }
-      throw new Error(formatApiErrorDetail(parsed, res.statusText))
+      throw portalRequestError(res.status, formatApiErrorDetail(parsed, res.statusText), token)
     }
-    return res.blob()
+    const blob = await res.blob()
+    if (!isCurrent()) throw new Error('Superseded portal request')
+    return blob
   }
 
   async function openFile(file: PortalFileOut) {
+    const isCurrent = captureSession(sessionToken)
     const token = sessionToken.trim()
     if (!token || !activeGrantId) return
     setErr(null)
     try {
       // Prefer a real navigation URL so the browser applies its normal content-type handling
       // (PDF viewer, image tab, etc.) instead of a blob: address bar.
-      const minted = await portalFetch<{ token: string }>(
+      const minted = await sessionFetch<{ token: string }>(
         `/portal/grants/${activeGrantId}/files/${file.id}/open-token`,
         { method: 'POST', portalToken: token },
       )
+      if (!isCurrent()) return
       const openUrl = browserAbsoluteApiUrl(
         apiUrl(
           `/portal/grants/${activeGrantId}/files/${file.id}/open?token=${encodeURIComponent(minted.token)}`,
@@ -908,14 +1086,17 @@ export default function PortalPage() {
         window.location.assign(openUrl)
       }
     } catch (e: unknown) {
+      if (!isCurrent()) return
       setErr((e as { message?: string }).message ?? 'Could not open file')
     }
   }
 
   async function downloadFile(file: PortalFileOut) {
+    const isCurrent = captureSession(sessionToken)
     setErr(null)
     try {
       const blob = await fetchFileBlob(file, true)
+      if (!isCurrent()) return
       const obj = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = obj
@@ -923,12 +1104,14 @@ export default function PortalPage() {
       a.click()
       URL.revokeObjectURL(obj)
     } catch (e: unknown) {
+      if (!isCurrent()) return
       setErr((e as { message?: string }).message ?? 'Download failed')
     }
   }
 
   async function downloadAllFiles() {
     const token = sessionToken.trim()
+    const isCurrent = captureSession(token)
     if (!token || !activeGrantId) return
     setBusy(true)
     setErr(null)
@@ -937,17 +1120,20 @@ export default function PortalPage() {
       const headers = new Headers()
       applyAuthHeaders(headers, token)
       const res = await fetch(url, { headers })
+      if (!isCurrent()) return
       if (!res.ok) {
         const text = await res.text()
+        if (!isCurrent()) return
         let parsed: unknown = text
         try {
           parsed = JSON.parse(text)
         } catch {
           /* keep text */
         }
-        throw new Error(formatApiErrorDetail(parsed, res.statusText))
+        throw portalRequestError(res.status, formatApiErrorDetail(parsed, res.statusText), token)
       }
       const blob = await res.blob()
+      if (!isCurrent()) return
       const obj = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = obj
@@ -955,9 +1141,10 @@ export default function PortalPage() {
       a.click()
       URL.revokeObjectURL(obj)
     } catch (e: unknown) {
+      if (!isCurrent()) return
       setErr((e as { message?: string }).message ?? 'Download failed')
     } finally {
-      setBusy(false)
+      if (isCurrent()) setBusy(false)
     }
   }
 
@@ -970,10 +1157,12 @@ export default function PortalPage() {
 
   async function openMatter(caseId: string) {
     const token = sessionToken.trim()
+    const isCurrent = captureSession(token)
     let visibleGrants = grants
     if (token) {
       try {
         const sess = await refreshSession(token)
+        if (!isCurrent() || !sess) return
         visibleGrants = sess.grants
       } catch {
         return
@@ -1003,6 +1192,7 @@ export default function PortalPage() {
 
   async function backToAllMatters() {
     const token = sessionToken.trim()
+    const isCurrent = captureSession(token)
     if (token) {
       try {
         await refreshSession(token)
@@ -1010,6 +1200,7 @@ export default function PortalPage() {
         /* ignore */
       }
     }
+    if (!isCurrent()) return
     setActiveCaseId(null)
     setActiveGrantId(null)
     setPreviewFocusCaseId(null)
@@ -1025,6 +1216,7 @@ export default function PortalPage() {
 
   async function backToFolderList() {
     const token = sessionToken.trim()
+    const isCurrent = captureSession(token)
     if (token) {
       try {
         await refreshSession(token)
@@ -1032,6 +1224,7 @@ export default function PortalPage() {
         /* ignore */
       }
     }
+    if (!isCurrent()) return
     setActiveGrantId(null)
     setBrowse(null)
     setBrowseSubfolder('')
@@ -1208,6 +1401,7 @@ export default function PortalPage() {
 
   async function openClientAction(item: PortalClientActionItemOut) {
     const token = sessionToken.trim()
+    const isCurrent = captureSession(token)
     if (!token) return
     setErr(null)
     if (item.case_id) {
@@ -1222,9 +1416,10 @@ export default function PortalPage() {
         if (existing) {
           setQuoteDelivery(existing)
         } else {
-          const q = await portalFetch<PortalQuoteDeliveryViewOut>(`/portal/quote-deliveries/${item.id}`, {
+          const q = await sessionFetch<PortalQuoteDeliveryViewOut>(`/portal/quote-deliveries/${item.id}`, {
             portalToken: token,
           })
+          if (!isCurrent()) return
           setQuoteDelivery(q)
         }
         return
@@ -1235,9 +1430,10 @@ export default function PortalPage() {
       }
       if (item.kind === 'canary_sign') {
         setBusy(true)
-        const signing = await portalFetch<PortalCanarySignOut>(`/portal/canary-sign/${item.id}`, {
+        const signing = await sessionFetch<PortalCanarySignOut>(`/portal/canary-sign/${item.id}`, {
           portalToken: token,
         })
+        if (!isCurrent()) return
         setActiveCanarySign(signing)
         return
       }
@@ -1250,11 +1446,13 @@ export default function PortalPage() {
           recipient_id: '',
           sign_token: '',
         })
+        if (!isCurrent()) return
       }
     } catch (e: unknown) {
+      if (!isCurrent()) return
       setErr((e as { message?: string }).message ?? 'Could not open action')
     } finally {
-      setBusy(false)
+      if (isCurrent()) setBusy(false)
     }
   }
 
@@ -1442,13 +1640,24 @@ export default function PortalPage() {
       config={portalConfig}
       // When false, signed-in view keeps Canary default chrome (login still uses custom colours).
       useCustomCanvas={portalConfig.portal_background_on_signed_in !== false}
-      subtitle={contactName ? `Signed in as ${contactName}` : null}
+      subtitle={recoveryNeeded ? "Session expired or access changed" : contactName ? `Signed in as ${contactName}` : null}
       headerActions={
         <button type="button" className="btn portalSignOutBtn" onClick={signOut}>
           Sign out
         </button>
       }
     >
+      {recoveryNeeded ? <div className="notice" role="alert">
+        Your session expired or access changed. Sign in again to check access and resume your unsent form.
+        <button type="button" className="btn primary" onClick={beginRecovery}>Sign in</button>
+      </div> : sessionUnavailable ? <div className="notice" role="alert">
+        Your session could not be checked. Your work and login have been kept.
+        <button type="button" className="btn" onClick={() => {
+          const isCurrent = captureSession(sessionToken)
+          void refreshSession(sessionToken).then(() => { if (isCurrent()) setErr(null) }).catch((e: Error) => { if (isCurrent()) setErr(e.message) })
+        }}>Retry</button>
+      </div> : null}
+
         {err ? <div className="error" style={{ marginTop: 12 }}>{err}</div> : null}
         {info ? <div className="notice" style={{ marginTop: 12 }}>{info}</div> : null}
 
@@ -1573,9 +1782,15 @@ export default function PortalPage() {
             submissionId={activeFormId}
             portalToken={sessionToken}
             previewMode={staffPreview}
+            sessionBlocked={recoveryNeeded}
+            isSessionCurrent={isRenderedSessionCurrent}
+            recoveryDraft={contactId && draft.current?.contactId === contactId ? draft.current : null}
+            onDraftChange={(next) => { if (isRenderedSessionCurrent()) draft.current = next }}
             onBack={() => setActiveFormId(null)}
             onSubmitted={() => {
+              if (!isRenderedSessionCurrent()) return
               setActiveFormId(null)
+              draft.current = null
               setInfo('Thank you — your form has been submitted.')
               const token = sessionToken.trim()
               if (token) {
@@ -1590,9 +1805,10 @@ export default function PortalPage() {
             signing={activeCanarySign}
             portalToken={sessionToken}
             previewMode={staffPreview}
-            onSigningUpdated={(next) => setActiveCanarySign(next)}
+            onSigningUpdated={(next) => { if (isRenderedSessionCurrent()) setActiveCanarySign(next) }}
             onBack={() => setActiveCanarySign(null)}
             onCompleted={(next) => {
+              if (!isRenderedSessionCurrent()) return
               const done = (next.status || '').toLowerCase() === 'completed' || Boolean(next.has_signed_document)
               setInfo(
                 done
@@ -1606,6 +1822,7 @@ export default function PortalPage() {
               }
             }}
             onDeclined={() => {
+              if (!isRenderedSessionCurrent()) return
               setActiveCanarySign(null)
               setInfo('Your decline has been recorded.')
               const token = sessionToken.trim()
