@@ -77,6 +77,7 @@ test('large document browsing has bounded rendering and preserves interaction st
   await parent.click({button:'right'})
   await expect(page.getByRole('menuitem',{name:'Download 2 files',exact:true})).toBeVisible()
   await page.keyboard.press('Escape')
+  await page.screenshot({path:info.outputPath('large-document-window.png')})
   await scroll.evaluate(el=>{el.scrollTop=el.scrollHeight/2})
   const visibleFiles=scroll.locator('[data-doc-key]:not([data-doc-key^="folder:"])')
   await expect(visibleFiles.last()).toBeVisible()

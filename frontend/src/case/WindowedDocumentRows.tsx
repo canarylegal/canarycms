@@ -83,6 +83,7 @@ export function WindowedDocumentRows({keys, focusKey, renderRow}: {
   return <div ref={body} data-windowed={enabled ? 'true' : 'false'} data-loaded-rows={keys.length}>
     {window.before > 0 ? <div aria-hidden style={{height: window.before}} /> : null}
     {keys.slice(window.start, window.end).map((_, index) => renderRow(window.start + index))}
-    {window.after > 0 ? <div aria-hidden style={{height: window.after}} /> : null}
+    {/* Keep the last row's existing border: it was followed by the load sentinel. */}
+    <div aria-hidden style={{height: window.after}} />
   </div>
 }
