@@ -149,6 +149,7 @@ def add_invoice_allocation(
         amount_pence=payload.amount_pence,
         actor=user,
         notes=payload.notes,
+        idempotency_key=payload.idempotency_key,
     )
     db.commit()
     db.refresh(row)

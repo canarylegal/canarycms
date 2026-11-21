@@ -143,8 +143,9 @@ class ClientAccountEomCreate(BaseModel):
 
 
 class InvoiceAllocationIn(BaseModel):
+    idempotency_key: uuid.UUID | None = None
     ledger_pair_id: uuid.UUID
-    amount_pence: int = Field(gt=0)
+    amount_pence: int = Field(gt=0, strict=True)
     notes: str | None = Field(default=None, max_length=2000)
 
     model_config = {"extra": "forbid"}

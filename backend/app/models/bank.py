@@ -6,6 +6,7 @@ from datetime import date, datetime
 
 from sqlalchemy import (
     Boolean,
+    CheckConstraint,
     Date,
     DateTime,
     ForeignKey,
@@ -128,6 +129,12 @@ class ClientAccountEom(Base):
 
 class CaseInvoiceAllocation(Base):
     __tablename__ = "case_invoice_allocation"
+    __table_args__ = (
+        UniqueConstraint("invoice_id", "idempotency_key", name="uq_invoice_allocation_request"),
+        CheckConstraint("amount_pence > 0", name="ck_invoice_allocation_positive"),
+    )
+
+    idempotency_key: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     invoice_id: Mapped[uuid.UUID] = mapped_column(

@@ -405,6 +405,13 @@ def void_case_invoice(
         if inv.status == INV_VOIDED:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invoice already voided.")
 
+        # Paid allocations must not be stranded by a concurrent invoice void.
+        from app.models import CaseInvoiceAllocation
+        allocated = db.scalar(select(CaseInvoiceAllocation.id).where(
+            CaseInvoiceAllocation.invoice_id == invoice_id).limit(1))
+        if allocated is not None or int(inv.amount_allocated_pence or 0) > 0:
+            raise HTTPException(409, "This invoice has payment allocations; review them before voiding")
+
         now = datetime.utcnow()
         if inv.status == INV_PENDING:
             if inv.ledger_pair_id:
