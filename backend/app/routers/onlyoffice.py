@@ -574,6 +574,11 @@ async def persist_onlyoffice_browser_url_to_file(
 
     if attempt_id is not None and row.oo_save_attempt_id == attempt_id and row.oo_save_state == "confirmed":
         return int(row.version)
+    expected_session_id = None
+    if actor_user_id is not None:
+        from app.desktop_edit_session import get_active_edit_session_for_file
+        original_session = get_active_edit_session_for_file(db, row.id)
+        expected_session_id = original_session.id if original_session is not None else None
     expected_version = row.version
     data = await _fetch_onlyoffice_download_bytes(browser_url, log_label=f"oo-persist file={row.id}")
     row = lock_document(db, row, expected_version=expected_version)
@@ -589,7 +594,10 @@ async def persist_onlyoffice_browser_url_to_file(
             raise HTTPException(status_code=403, detail="Document access has been revoked.")
         if case_id is not None:
             require_case_access(case_id, actor, db)
-        require_user_active_edit_session(db, row.id, actor)
+        session = require_user_active_edit_session(db, row.id, actor)
+        if session.id != expected_session_id or (attempt_id is not None
+                and session.document_key != row.oo_save_document_key):
+            raise HTTPException(409, "The editor session changed during export. Retry from the current editor.")
 
     if attempt_id is not None and row.oo_save_attempt_id != attempt_id:
         raise HTTPException(409, "This save attempt has been superseded. Retry saving.")

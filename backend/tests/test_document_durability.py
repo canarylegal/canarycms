@@ -140,7 +140,9 @@ def test_unrelated_version_change_and_stale_attempt_do_not_confirm(document):
 async def test_browser_save_only_confirms_after_durable_commit(document, monkeypatch, fail_commit):
     from app.routers import onlyoffice as service
     db, user, case, row, root = document
-    _open_session(db, case, row, user)
+    session = _open_session(db, case, row, user)
+    session.document_key = "editor-key"
+    db.commit()
     base = oo_force_save_arm(db, row, 'editor-key')
     attempt = row.oo_save_attempt_id
     monkeypatch.setattr(service, 'FILES_ROOT', root)
@@ -325,3 +327,30 @@ async def test_pdf_export_remains_a_separate_document(document, monkeypatch):
     assert exported.mime_type == 'application/pdf'
     assert (root / exported.storage_path).read_bytes().startswith(b'%PDF')
     assert (root / row.storage_path).read_bytes() == b'original'
+
+
+@pytest.mark.asyncio
+async def test_browser_export_from_replaced_session_is_refused(document, monkeypatch):
+    from datetime import datetime, timezone
+    from app.routers import onlyoffice as service
+    db, user, case, row, root = document
+    old = _open_session(db, case, row, user)
+    old.document_key = 'old-key'
+    db.commit()
+    oo_force_save_arm(db, row, 'old-key')
+    attempt = row.oo_save_attempt_id
+    async def download(*args, **kwargs):
+        old.released_at = datetime.now(timezone.utc)
+        db.commit()
+        replacement = _open_session(db, case, row, user)
+        replacement.document_key = 'new-key'
+        db.commit()
+        return b'old editor export'
+    monkeypatch.setattr(service, '_fetch_onlyoffice_download_bytes', download)
+    with pytest.raises(HTTPException) as error:
+        await service.persist_onlyoffice_browser_url_to_file(db, row, browser_url='unused',
+            case_id=case.id, precedent_id=None, actor_user_id=user.id, attempt_id=attempt)
+    assert error.value.status_code == 409
+    db.rollback()
+    assert (root / row.storage_path).read_bytes() == b'original'
+    assert row.oo_save_state == 'pending'
