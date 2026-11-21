@@ -1,3 +1,4 @@
+import { useLayoutEffect } from 'react'
 import { act, cleanup, renderHook } from '@testing-library/react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { apiFetch } from './api'
@@ -62,4 +63,30 @@ it('does not request a hidden, never-opened menu and clears old rows on session 
   rerender({enabled:true,token:'two'})
   expect(result.current.rows).toEqual([])
   await tick(); expect(result.current.rows.map(r=>r.id)).toEqual(['two'])
+})
+
+
+it.each(['query', 'token', 'revision', 'disabled'])('rejects a stale continuation before reset effects run: %s', async changed => {
+  fetch.mockResolvedValueOnce(page(['old'], 'old-cursor')).mockResolvedValue(page(['new']))
+  const initial = { q: 'sort=created', token: 'one', revision: 0, enabled: true, trigger: false }
+  const { rerender } = renderHook(props => {
+    const pages = useMatterPages(props.token, props.q, props.revision, props.enabled)
+    const { loadMore } = pages
+    // A child observer/layout effect can run before the hook's passive reset effect.
+    useLayoutEffect(() => {
+      if (props.trigger) loadMore()
+    }, [props.trigger, loadMore])
+    return pages
+  }, { initialProps: initial })
+  await tick()
+  rerender({ ...initial, trigger: true,
+    ...(changed === 'query' ? { q: 'sort=feeEarner' } : {}),
+    ...(changed === 'token' ? { token: 'two' } : {}),
+    ...(changed === 'revision' ? { revision: 1 } : {}),
+    ...(changed === 'disabled' ? { enabled: false } : {}),
+  })
+  expect(fetch).toHaveBeenCalledTimes(1)
+  await tick()
+  expect(fetch).toHaveBeenCalledTimes(changed === 'disabled' ? 1 : 2)
+  expect(fetch.mock.calls.every(([path]) => !String(path).includes('cursor='))).toBe(true)
 })

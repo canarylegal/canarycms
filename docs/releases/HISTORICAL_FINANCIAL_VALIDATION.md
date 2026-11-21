@@ -90,3 +90,11 @@ Synthetic versions of restored-data findings, valid cash/debt differences, damag
 invoice/ledger/transfer links, reversal chronology, saved snapshot arithmetic, deterministic
 SELECT-only execution, explicit CLI failures, and real PostgreSQL read-only snapshot
 behaviour under concurrent changes. No real client data is committed as test fixtures.
+
+## Pagination regression found during CI
+
+The unchanged workload test exposed a sort/continuation race: an observer could send
+an old cursor with a newly rendered sort before the reset effect ran. Cursor ownership
+now includes query, session, revision and retry state; disabled menus cannot continue.
+A regression test reproduces the pre-effect window for each transition. Request-count
+and timing budgets remain unchanged. No layout, controls or saved-preference changes.
