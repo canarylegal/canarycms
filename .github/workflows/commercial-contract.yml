@@ -66,7 +66,7 @@ jobs:
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           repository: canarylegal/canary-commercial
-          ref: 29a396e1b22e2c52aa45c3f70f6b450a3306d258 # paired staff outbox package
+          ref: a60b7ddbf4dc5668af09826b54822fa2e454a5d7 # paired staff outbox package
           token: ${{ secrets.CANARY_COMMERCIAL_TOKEN }}
           path: canary-commercial
 
