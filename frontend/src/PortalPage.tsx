@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type Dispatch, type SetStateAction } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react'
 import { applyAuthHeaders, apiUrl, browserAbsoluteApiUrl, formatApiErrorDetail } from './api'
 import { DocMimeIcon } from './case/DocCells'
 import { decodeFolderPathForDisplay, decodeFolderPathSegment } from './case/folderPathCodec'
@@ -22,6 +22,8 @@ import type {
   PortalQuoteExchangeOut,
   PortalSessionOut,
 } from './types'
+
+import { portalRequestError, PortalRequestError, type PortalDraft } from './portal/sessionErrors'
 
 const PORTAL_FILES_GRID = '36px minmax(0, 1fr) 72px max-content'
 
@@ -77,7 +79,7 @@ async function portalFetch<T>(
     }
   }
   if (!res.ok) {
-    throw new Error(formatApiErrorDetail(parsed, res.statusText, apiUrl(path)))
+    throw portalRequestError(res.status, formatApiErrorDetail(parsed, res.statusText, apiUrl(path)), auth)
   }
   return parsed as T
 }
@@ -243,6 +245,23 @@ export default function PortalPage() {
   const [resetCodeSent, setResetCodeSent] = useState(false)
   const [sessionToken, setSessionToken] = useState(() => getStoredPortalToken())
   const [contactName, setContactName] = useState('')
+  const [contactId, setContactId] = useState<string | null>(null)
+  const [recoveryNeeded, setRecoveryNeeded] = useState(false)
+  const [sessionUnavailable, setSessionUnavailable] = useState(false)
+  const draft = useRef<PortalDraft | null>(null)
+  const recoveryForm = useRef<string | null>(null)
+  const currentToken = useRef(sessionToken)
+  currentToken.current = sessionToken
+  useEffect(() => {
+    const expired = (event: Event) => {
+      const detail = (event as CustomEvent<{token: string; message: string}>).detail
+      if (detail.token !== currentToken.current) return
+      setRecoveryNeeded(true)
+      setErr(detail.message)
+    }
+    window.addEventListener('portal-session-expired', expired)
+    return () => window.removeEventListener('portal-session-expired', expired)
+  }, [])
   const [grants, setGrants] = useState<PortalGrantSummaryOut[]>([])
   const [activeCaseId, setActiveCaseId] = useState<string | null>(null)
   const [activeGrantId, setActiveGrantId] = useState<string | null>(null)
@@ -465,6 +484,9 @@ export default function PortalPage() {
 
   const refreshSession = useCallback(async (token: string) => {
     const sess = await portalFetch<PortalSessionOut>('/portal/session', { portalToken: token })
+    if (token !== currentToken.current) return sess
+    setContactId(sess.contact_id ?? null)
+    setSessionUnavailable(false)
     setContactName(sess.contact_name)
     setGrants(sess.grants)
     setStaffPreviewSession(Boolean(sess.staff_preview))
@@ -599,9 +621,9 @@ export default function PortalPage() {
       try {
         await refreshSession(token)
       } catch (e: unknown) {
-        storePortalToken('')
-        setSessionToken('')
-        setErr((e as { message?: string }).message ?? 'Session expired')
+        if (token !== currentToken.current) return
+        setSessionUnavailable(!(e instanceof PortalRequestError && e.status === 401))
+        setErr((e as { message?: string }).message ?? 'Could not check session. Please retry.')
       } finally {
         setBusy(false)
       }
@@ -612,7 +634,11 @@ export default function PortalPage() {
     const token = sessionToken.trim()
     if (!token) return
     const refresh = () => {
-      void refreshSession(token).catch(() => {})
+      void refreshSession(token).catch((e: unknown) => {
+        if (token !== currentToken.current) return
+        setSessionUnavailable(!(e instanceof PortalRequestError && e.status === 401))
+        setErr((e as Error).message || 'Could not check session. Please retry.')
+      })
     }
     const onVisibility = () => {
       if (document.visibilityState === 'visible') refresh()
@@ -668,7 +694,23 @@ export default function PortalPage() {
         method: 'POST',
         json: { access_code: accessCode },
       })
+      const verified = await portalFetch<PortalSessionOut>('/portal/session', { portalToken: out.session_token })
+      let resumeId: string | null = null
+      if (recoveryForm.current && draft.current && verified.contact_id &&
+          verified.contact_id === draft.current.contactId && !verified.staff_preview && verified.audience !== 'exchange') {
+        try {
+          const form = await portalFetch<{contact_id: string; status: string}>(`/portal/forms/${recoveryForm.current}`, { portalToken: out.session_token })
+          if (form.contact_id === verified.contact_id && form.status === 'pending') resumeId = recoveryForm.current
+        } catch { /* No draft is restored without current resource permission. */ }
+      }
+      if (!resumeId) draft.current = null
+      recoveryForm.current = null
+      setActiveFormId(resumeId)
+      setContactId(verified.contact_id ?? null)
+      setRecoveryNeeded(false)
+      setSessionUnavailable(false)
       storePortalToken(out.session_token)
+      currentToken.current = out.session_token
       setSessionToken(out.session_token)
       setContactName(out.contact_name)
       setGrants(out.grants)
@@ -734,7 +776,22 @@ export default function PortalPage() {
     }
   }
 
+  function beginRecovery() {
+    const retainedDraft = draft.current
+    const retainedForm = activeFormId
+    signOut()
+    draft.current = retainedDraft
+    recoveryForm.current = retainedForm
+    setSignInMode('code')
+    setInfo('Sign in to resume. Your unsent form is held only in this tab until your access is checked.')
+  }
+
   function signOut() {
+    draft.current = null
+    recoveryForm.current = null
+    setRecoveryNeeded(false)
+    setContactId(null)
+    currentToken.current = ''
     storePortalToken('')
     setSessionToken('')
     setContactName('')
@@ -766,7 +823,7 @@ export default function PortalPage() {
       const headers = new Headers()
       applyAuthHeaders(headers, token)
       const res = await fetch(url, { headers })
-      if (!res.ok) throw new Error(formatApiErrorDetail(await res.text(), res.statusText))
+      if (!res.ok) throw portalRequestError(res.status, formatApiErrorDetail(await res.text(), res.statusText), token)
       const blob = await res.blob()
       const obj = URL.createObjectURL(blob)
       const a = document.createElement('a')
@@ -854,7 +911,7 @@ export default function PortalPage() {
           } catch {
             /* keep text */
           }
-          throw new Error(formatApiErrorDetail(parsed, res.statusText))
+          throw portalRequestError(res.status, formatApiErrorDetail(parsed, res.statusText), token)
         }
       }
       await loadBrowse(activeGrantId, browseSubfolder, token)
@@ -881,7 +938,7 @@ export default function PortalPage() {
       } catch {
         /* keep text */
       }
-      throw new Error(formatApiErrorDetail(parsed, res.statusText))
+      throw portalRequestError(res.status, formatApiErrorDetail(parsed, res.statusText), token)
     }
     return res.blob()
   }
@@ -945,7 +1002,7 @@ export default function PortalPage() {
         } catch {
           /* keep text */
         }
-        throw new Error(formatApiErrorDetail(parsed, res.statusText))
+        throw portalRequestError(res.status, formatApiErrorDetail(parsed, res.statusText), token)
       }
       const blob = await res.blob()
       const obj = URL.createObjectURL(blob)
@@ -1442,13 +1499,23 @@ export default function PortalPage() {
       config={portalConfig}
       // When false, signed-in view keeps Canary default chrome (login still uses custom colours).
       useCustomCanvas={portalConfig.portal_background_on_signed_in !== false}
-      subtitle={contactName ? `Signed in as ${contactName}` : null}
+      subtitle={recoveryNeeded ? "Session expired or access changed" : contactName ? `Signed in as ${contactName}` : null}
       headerActions={
         <button type="button" className="btn portalSignOutBtn" onClick={signOut}>
           Sign out
         </button>
       }
     >
+      {recoveryNeeded ? <div className="notice" role="alert">
+        Your session expired or access changed. Sign in again to check access and resume your unsent form.
+        <button type="button" className="btn primary" onClick={beginRecovery}>Sign in</button>
+      </div> : sessionUnavailable ? <div className="notice" role="alert">
+        Your session could not be checked. Your work and login have been kept.
+        <button type="button" className="btn" onClick={() => {
+          void refreshSession(sessionToken).then(() => setErr(null)).catch((e: Error) => setErr(e.message))
+        }}>Retry</button>
+      </div> : null}
+
         {err ? <div className="error" style={{ marginTop: 12 }}>{err}</div> : null}
         {info ? <div className="notice" style={{ marginTop: 12 }}>{info}</div> : null}
 
@@ -1573,9 +1640,13 @@ export default function PortalPage() {
             submissionId={activeFormId}
             portalToken={sessionToken}
             previewMode={staffPreview}
+            sessionBlocked={recoveryNeeded}
+            recoveryDraft={contactId && draft.current?.contactId === contactId ? draft.current : null}
+            onDraftChange={(next) => { draft.current = next }}
             onBack={() => setActiveFormId(null)}
             onSubmitted={() => {
               setActiveFormId(null)
+              draft.current = null
               setInfo('Thank you — your form has been submitted.')
               const token = sessionToken.trim()
               if (token) {

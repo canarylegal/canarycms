@@ -50,6 +50,7 @@ class PortalGrantSummaryOut(BaseModel):
     last_viewed_at: datetime | None = None
 
 class PortalAuthOut(BaseModel):
+    contact_id: uuid.UUID | None = None
     session_token: str
     contact_name: str
     grants: list[PortalGrantSummaryOut]
@@ -58,6 +59,7 @@ class PortalAuthOut(BaseModel):
     audience: Literal["client", "exchange"] = "client"
 
 class PortalSessionOut(BaseModel):
+    contact_id: uuid.UUID | None = None
     contact_name: str
     grants: list[PortalGrantSummaryOut]
     staff_preview: bool = False
@@ -270,12 +272,14 @@ class PortalQuoteRespondIn(BaseModel):
     decline_reason: str | None = Field(default=None, max_length=2000)
 
 class PortalQuoteExchangeOut(BaseModel):
+    contact_id: uuid.UUID | None = None
     session_token: str
     contact_name: str
     grants: list[PortalGrantSummaryOut]
     quote: PortalQuoteDeliveryViewOut
 
 class PortalFormExchangeOut(BaseModel):
+    contact_id: uuid.UUID | None = None
     session_token: str
     contact_name: str
     grants: list[PortalGrantSummaryOut]

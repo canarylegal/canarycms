@@ -260,7 +260,7 @@ def portal_session(
 ) -> PortalSessionOut:
     focus_case_id = None
     case_filter = None
-    if getattr(session, "audience", "client") == "exchange" and session.case_id:
+    if session.case_id:
         try:
             focus_case_id = uuid.UUID(session.case_id)
             case_filter = focus_case_id
@@ -268,9 +268,10 @@ def portal_session(
             focus_case_id = None
     return PortalSessionOut(
         contact_name=contact_display_name(contact),
+        contact_id=contact.id,
         grants=(
             []
-            if session.signing_request_id
+            if session.signing_request_id or session.invitation
             else grant_summaries(db, contact.id, case_id=case_filter)
         ),
         staff_preview=session.staff_preview,
@@ -294,7 +295,7 @@ def browse_grant(
     from app.portal_grant_views import file_is_new_since, get_grant_last_viewed_at
 
     grant = get_grant_for_contact(db, contact_id=contact.id, grant_id=grant_id)
-    if getattr(session, "audience", "client") == "exchange" and session.case_id:
+    if session.case_id:
         if str(grant.case_id) != session.case_id:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Area not found")
     if not grant.can_download:
@@ -564,7 +565,7 @@ def upload_file(
 
     require_portal_not_preview(session)
     grant = get_grant_for_contact(db, contact_id=contact.id, grant_id=grant_id)
-    if getattr(session, "audience", "client") == "exchange" and session.case_id:
+    if session.case_id:
         if str(grant.case_id) != session.case_id:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, detail="Area not found"
@@ -785,7 +786,7 @@ def client_actions(contact: Contact, db: Session) -> PortalClientActionsOut:
     for d in quote_rows:
         from app.portal_policy import visible
 
-        if not visible(db, d.case_id):
+        if not visible(db, d.case_id, resource_kind="quote", resource_id=d.id):
             continue
         if d.status == QuotePortalDeliveryStatus.pending:
             continue
@@ -827,7 +828,7 @@ def client_actions(contact: Contact, db: Session) -> PortalClientActionsOut:
     for sub in form_all:
         from app.portal_policy import visible
 
-        if not visible(db, sub.case_id):
+        if not visible(db, sub.case_id, resource_kind="form", resource_id=sub.id):
             continue
         if sub.status == PortalFormSubmissionStatus.pending:
             continue
@@ -874,7 +875,7 @@ def client_actions(contact: Contact, db: Session) -> PortalClientActionsOut:
     principal = db.info.get("portal_session")
     for req, recip in (
         []
-        if principal and principal.signing_request_id
+        if principal and (principal.signing_request_id or principal.invitation)
         else list_pending_docusign_for_contact(db, contact.id)
     ):
         sync_envelope_status(db, req)

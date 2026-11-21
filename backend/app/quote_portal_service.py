@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 import uuid
 from datetime import datetime, timezone
 
@@ -35,69 +34,23 @@ from app.portal_service import (
     resolve_matter_contact_email,
 )
 from app.quote_portal_pdf import create_portal_quote_pdf_snapshot
-from app.security import PORTAL_QUOTE_EXCHANGE_TTL_SECONDS, decode_portal_quote_exchange_token
 
-_QUOTE_DELIVERY_ID_RE = re.compile(
-    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
-    re.IGNORECASE,
-)
+
 
 
 def utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def quote_link_for_delivery(delivery_id: uuid.UUID) -> str:
+def quote_link_for_delivery(delivery_id: str | uuid.UUID) -> str:
     """Short client portal link for a quote delivery (used in e-mail)."""
     base = portal_public_url().rstrip("/")
     return f"{base}/q/{delivery_id}"
 
 
-def _quote_delivery_link_expired(delivery: QuotePortalDelivery) -> bool:
-    sent_at = delivery.sent_at
-    if sent_at.tzinfo is None:
-        sent_at = sent_at.replace(tzinfo=timezone.utc)
-    age = (utcnow() - sent_at).total_seconds()
-    return age > PORTAL_QUOTE_EXCHANGE_TTL_SECONDS
-
-
 def resolve_quote_exchange_delivery(db: Session, exchange_token: str) -> QuotePortalDelivery:
-    """Resolve a quote e-mail link token (delivery UUID or legacy JWT) to a delivery row."""
-    token = (exchange_token or "").strip()
-    if not token:
-        raise ValueError("Invalid or expired quote link")
-
-    if _QUOTE_DELIVERY_ID_RE.match(token):
-        delivery_id = uuid.UUID(token)
-        delivery = db.get(QuotePortalDelivery, delivery_id)
-        if delivery is None:
-            raise ValueError("Invalid or expired quote link")
-        if _quote_delivery_link_expired(delivery):
-            raise ValueError("Invalid or expired quote link")
-        return delivery
-
-    try:
-        exchange = decode_portal_quote_exchange_token(token)
-    except ValueError as exc:
-        raise ValueError("Invalid or expired quote link") from exc
-
-    try:
-        delivery_id = uuid.UUID(exchange.delivery_id)
-        contact_id = uuid.UUID(exchange.contact_id)
-        case_id = uuid.UUID(exchange.case_id)
-        file_id = uuid.UUID(exchange.file_id)
-    except ValueError as exc:
-        raise ValueError("Invalid or expired quote link") from exc
-
-    delivery = db.get(QuotePortalDelivery, delivery_id)
-    if (
-        delivery is None
-        or delivery.contact_id != contact_id
-        or delivery.case_id != case_id
-        or delivery.file_id != file_id
-    ):
-        raise ValueError("Invalid or expired quote link")
-    return delivery
+    from app.portal_invitation import resolve
+    return resolve(db, exchange_token.strip(), "quote")
 
 
 def supersede_pending_quote_deliveries(db: Session, file_id: uuid.UUID) -> int:
@@ -321,7 +274,8 @@ def send_quote_via_portal(
     portal_pdf_generated = pdf_row is not None
     client_filename = pdf_row.original_filename if pdf_row else row.original_filename
 
-    quote_url = quote_link_for_delivery(delivery.id)
+    from app.portal_invitation import issue
+    quote_url = quote_link_for_delivery(issue(db, "quote", delivery))
     log_portal_activity(
         db,
         case_id=case_id,
@@ -411,7 +365,8 @@ def resend_quote_delivery(
     db.add(delivery)
     db.flush()
 
-    quote_url = quote_link_for_delivery(delivery.id)
+    from app.portal_invitation import issue
+    quote_url = quote_link_for_delivery(issue(db, "quote", delivery))
     log_portal_activity(
         db,
         case_id=delivery.case_id,
@@ -504,7 +459,7 @@ def respond_to_quote_delivery(
 ) -> QuotePortalDelivery:
     from app.portal_policy import authorize
 
-    authorize(db, delivery.case_id, lock=True, client_only=True)
+    authorize(db, delivery.case_id, resource_kind="quote", resource_id=delivery.id, lock=True, client_only=True)
     delivery = db.scalar(
         select(QuotePortalDelivery)
         .where(QuotePortalDelivery.id == delivery.id)
@@ -594,7 +549,7 @@ def get_delivery_for_contact(db: Session, delivery_id: uuid.UUID, contact_id: uu
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Quote not found")
     from app.portal_policy import authorize
 
-    authorize(db, delivery.case_id, client_only=True)
+    authorize(db, delivery.case_id, resource_kind="quote", resource_id=delivery.id, client_only=True)
     return delivery
 
 
@@ -679,7 +634,7 @@ def list_pending_quote_deliveries_for_contact(
     for delivery in rows:
         from app.portal_policy import visible
 
-        if not visible(db, delivery.case_id):
+        if not visible(db, delivery.case_id, resource_kind="quote", resource_id=delivery.id):
             continue
         if not delivery_can_respond(db, delivery):
             continue
@@ -737,7 +692,7 @@ def list_pending_approvals_for_grant(
     for delivery in rows:
         from app.portal_policy import visible
 
-        if not visible(db, delivery.case_id):
+        if not visible(db, delivery.case_id, resource_kind="quote", resource_id=delivery.id):
             continue
         if not delivery_can_respond(db, delivery):
             continue

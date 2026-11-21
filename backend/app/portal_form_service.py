@@ -51,13 +51,9 @@ from app.portal_service import (
 from app.portal_case import require_case_portal_enabled
 from app.portal_notifications import ALERTS_NOT_CONFIGURED_MSG
 from app.quote_portal_service import pick_portal_grant_for_case
-from app.security import PORTAL_QUOTE_EXCHANGE_TTL_SECONDS
 
 _FIELD_KEY_RE = re.compile(r"^[a-z][a-z0-9_]{0,79}$")
-_FORM_SUBMISSION_ID_RE = re.compile(
-    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
-    re.IGNORECASE,
-)
+
 
 FORM_EMAIL_SEND_FAILED_MSG = (
     "The notification e-mail could not be delivered. The form is still available on the portal."
@@ -76,35 +72,15 @@ def utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def form_link_for_submission(submission_id: uuid.UUID) -> str:
-    """Short client portal link for a form submission (used in e-mail)."""
+def form_link_for_submission(submission_id: str | uuid.UUID) -> str:
+    """Format a form invitation URL; callers must supply an issued credential."""
     base = portal_public_url().rstrip("/")
     return f"{base}/f/{submission_id}"
 
 
-def _form_submission_link_expired(submission: PortalFormSubmission) -> bool:
-    sent_at = submission.sent_at
-    if sent_at.tzinfo is None:
-        sent_at = sent_at.replace(tzinfo=timezone.utc)
-    age = (utcnow() - sent_at).total_seconds()
-    return age > PORTAL_QUOTE_EXCHANGE_TTL_SECONDS
-
-
 def resolve_form_exchange_submission(db: Session, exchange_token: str) -> PortalFormSubmission:
-    """Resolve a form e-mail link token (submission UUID) to a pending submission row."""
-    token = (exchange_token or "").strip()
-    if not token or not _FORM_SUBMISSION_ID_RE.match(token):
-        raise ValueError("Invalid or expired form link")
-
-    submission_id = uuid.UUID(token)
-    submission = db.get(PortalFormSubmission, submission_id)
-    if submission is None:
-        raise ValueError("Invalid or expired form link")
-    if submission.status != PortalFormSubmissionStatus.pending:
-        raise ValueError("Invalid or expired form link")
-    if _form_submission_link_expired(submission):
-        raise ValueError("Invalid or expired form link")
-    return submission
+    from app.portal_invitation import resolve
+    return resolve(db, exchange_token.strip(), "form")
 
 
 def _normalize_field_key(key: str) -> str:
@@ -331,7 +307,8 @@ def send_form_to_contact(
     db.add(submission)
     db.flush()
 
-    form_url = form_link_for_submission(submission.id)
+    from app.portal_invitation import issue
+    form_url = form_link_for_submission(issue(db, "form", submission))
     email_sent = dispatch_alert(
         db,
         AlertKind.portal_form_sent,
@@ -422,7 +399,8 @@ def resend_form_submission(
     db.add(submission)
     db.flush()
 
-    form_url = form_link_for_submission(submission.id)
+    from app.portal_invitation import issue
+    form_url = form_link_for_submission(issue(db, "form", submission))
     email_sent = dispatch_alert(
         db,
         AlertKind.portal_form_sent,
@@ -477,7 +455,7 @@ def list_pending_for_contact(db: Session, contact_id: uuid.UUID) -> list[PortalF
 
     from app.portal_policy import visible
 
-    return [row for row in rows if visible(db, row.case_id)]
+    return [row for row in rows if visible(db, row.case_id, resource_kind="form", resource_id=row.id)]
 
 
 def get_submission_for_contact(db: Session, submission_id: uuid.UUID, contact_id: uuid.UUID) -> PortalFormSubmission:
@@ -486,7 +464,7 @@ def get_submission_for_contact(db: Session, submission_id: uuid.UUID, contact_id
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Form not found")
     from app.portal_policy import authorize
 
-    authorize(db, row.case_id, client_only=True)
+    authorize(db, row.case_id, resource_kind="form", resource_id=row.id, client_only=True)
     return row
 
 
@@ -774,7 +752,7 @@ def _save_snapshot_on_matter(
 def _lock_pending_submission(db, submission, contact):
     from app.portal_policy import authorize
 
-    authorize(db, submission.case_id, lock=True, client_only=True)
+    authorize(db, submission.case_id, resource_kind="form", resource_id=submission.id, lock=True, client_only=True)
     with db.no_autoflush:
         row = db.scalar(
             select(PortalFormSubmission)

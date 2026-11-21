@@ -254,6 +254,11 @@ class PortalSessionPayload:
     case_id: str | None = None
     signing_request_id: str | None = None
     expires_at: int | None = None
+    staff_user_id: str | None = None
+    staff_version: int | None = None
+    invitation: str | None = None
+    resource_kind: str | None = None
+    resource_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -261,6 +266,7 @@ class PortalPreviewExchangePayload:
     contact_id: str
     case_id: str
     staff_user_id: str
+    staff_version: int | None = None
 
 
 @dataclass(frozen=True)
@@ -279,6 +285,11 @@ def create_portal_session_token(
     audience: str = "client",
     case_id: str | None = None,
     signing_request_id: str | None = None,
+    staff_user_id: str | None = None,
+    staff_version: int | None = None,
+    invitation: str | None = None,
+    resource_kind: str | None = None,
+    resource_id: str | None = None,
 ) -> str:
     now = int(time.time())
     aud = (audience or "client").strip().lower() or "client"
@@ -291,10 +302,12 @@ def create_portal_session_token(
         "sv": int(session_version),
         "portal_audience": aud,
         "signing_request_id": signing_request_id,
+        "staff_user_id": staff_user_id, "staff_version": staff_version,
+        "invitation": invitation, "resource_kind": resource_kind, "resource_id": resource_id,
         "iat": now,
         "exp": now + PORTAL_SESSION_TTL_SECONDS,
     }
-    if aud == "exchange" and case_id:
+    if case_id:
         payload["case_id"] = case_id
     return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALG)
 
@@ -332,16 +345,19 @@ def decode_portal_session_token(token: str) -> PortalSessionPayload:
         case_id=case_id,
         signing_request_id=payload.get("signing_request_id"),
         expires_at=payload.get("exp"),
+        staff_user_id=payload.get("staff_user_id"), staff_version=payload.get("staff_version"),
+        invitation=payload.get("invitation"), resource_kind=payload.get("resource_kind"), resource_id=payload.get("resource_id"),
     )
 
 
-def create_portal_preview_exchange_token(*, contact_id: str, case_id: str, staff_user_id: str) -> str:
+def create_portal_preview_exchange_token(*, contact_id: str, case_id: str, staff_user_id: str, staff_version: int | None = None) -> str:
     now = int(time.time())
     payload = {
         "contact_id": contact_id,
         "case_id": case_id,
         "staff_user_id": staff_user_id,
         "purpose": "portal_preview_exchange",
+        "staff_version": staff_version,
         "iat": now,
         "exp": now + PORTAL_PREVIEW_EXCHANGE_TTL_SECONDS,
     }
@@ -364,6 +380,7 @@ def decode_portal_preview_exchange_token(token: str) -> PortalPreviewExchangePay
         contact_id=contact_id.strip(),
         case_id=case_id.strip(),
         staff_user_id=staff_user_id.strip(),
+        staff_version=payload.get("staff_version"),
     )
 
 

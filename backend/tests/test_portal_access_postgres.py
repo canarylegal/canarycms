@@ -538,7 +538,8 @@ def test_nonclient_sessions_cannot_sign_or_submit_forms(data, audience):
 
         version = decode_portal_session_token(data["token"]).session_version
         token = create_portal_session_token(
-            contact_id=str(data["contact"]), staff_preview=True, session_version=version
+            contact_id=str(data["contact"]), staff_preview=True, session_version=version,
+            staff_user_id=str(data["uid"]), staff_version=1, case_id=str(data["cid"])
         )
     h = {"Authorization": "Bearer " + token}
     assert (
