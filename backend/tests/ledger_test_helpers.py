@@ -108,7 +108,7 @@ def add_user(
         email=email or f"user-{uid.hex[:8]}@example.com",
         password_hash="x",
         display_name="Test User",
-        initials=f"U{uid.hex[:4].upper()}",
+        initials=f"U{uid.hex[:11].upper()}",
         role=role,
         permission_category_id=permission_category_id,
         created_at=datetime.utcnow(),
