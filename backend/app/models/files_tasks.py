@@ -95,7 +95,11 @@ class File(Base):
     outlook_web_link: Mapped[str | None] = mapped_column(Text, nullable=True)
     # True for new docs from compose-office until the user finishes OnlyOffice "Save & Close" (published).
     oo_compose_pending: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    # Set while /oo-force-save waits for DS callback; cleared when bytes are saved or unchanged save is ack'd.
+    # Correlate host save attempts; only committed bytes can confirm an attempt.
+    oo_save_attempt_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    oo_save_document_key: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    oo_save_state: Mapped[str | None] = mapped_column(String(24), nullable=True)
+    oo_save_base_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
     oo_force_save_pending: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     uploaded_via_portal: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     is_portal_quote: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)

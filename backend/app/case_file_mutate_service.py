@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from app.document_durability import retain_document, stage_document_bytes, lock_document
+
 import shutil
 import uuid
 import zlib
@@ -190,29 +192,10 @@ def update_comment_file(
     old_filename = row.original_filename
     new_name = first_line + ".txt"
 
-    folder = row.folder_path or ""
-    new_paths = case_file_paths(
-        case_id=case_id,
-        file_id=row.id,
-        original_filename=new_name,
-        folder_path=folder,
-    )
-    old_abs = (FILES_ROOT / row.storage_path).resolve()
-
-    # Write new content
+    row = lock_document(db, row)
     encoded = payload.text.encode("utf-8")
-    new_paths.abs_path.parent.mkdir(parents=True, exist_ok=True)
-    new_paths.abs_path.write_bytes(encoded)
-
-    # Remove old file if path changed
-    if old_abs.exists() and str(old_abs) != str(new_paths.abs_path):
-        try:
-            old_abs.unlink()
-        except OSError:
-            pass
-
-    row.storage_path = new_paths.rel_path
-    row.folder_path = new_paths.folder_path
+    stage_document_bytes(db, row, encoded, root=FILES_ROOT)
+    row.version = (row.version or 1) + 1
     row.original_filename = new_name
     row.size_bytes = len(encoded)
     row.updated_at = datetime.utcnow()
@@ -339,30 +322,24 @@ def move_case_file(
 
 
 def _erase_case_file_tree(db: Session, case_id: uuid.UUID, file_id: uuid.UUID) -> DbFile | None:
-    """Delete a case file (and child rows) from disk and database. Returns the parent row if deleted."""
-    row = db.get(DbFile, file_id)
+    """Retain bytes and recovery metadata before deleting a case file and child rows. Returns the parent row if deleted."""
+    row = db.execute(select(DbFile).where(DbFile.id == file_id).with_for_update()).scalar_one_or_none()
     if not row or row.case_id != case_id:
         return None
-    ensure_files_root()
+    # Capture every descendant before ON DELETE CASCADE removes its metadata.
     rows_to_delete = [row]
-    children = (
-        db.execute(select(DbFile).where(DbFile.case_id == case_id, DbFile.parent_file_id == file_id)).scalars().all()
-    )
-    rows_to_delete.extend(children)
+    seen = {row.id}
+    for parent in rows_to_delete:
+        children = db.scalars(select(DbFile).where(DbFile.case_id == case_id,
+            DbFile.parent_file_id == parent.id).with_for_update()).all()
+        for child in children:
+            if child.id not in seen:
+                seen.add(child.id)
+                rows_to_delete.append(child)
     raise_if_files_checked_out(db, [r.id for r in rows_to_delete], action="delete")
-    for r in rows_to_delete:
-        abs_path = (FILES_ROOT / r.storage_path).resolve()
-        backup = Path(str(abs_path) + ".oo_backup")
-        try:
-            if backup.exists():
-                backup.unlink()
-        except Exception:
-            pass
-        try:
-            if abs_path.exists():
-                abs_path.unlink()
-        except Exception:
-            pass
+    group_id = uuid.uuid4()
+    for item in rows_to_delete:
+        retain_document(db, item, root=FILES_ROOT, kind='deleted', group_id=group_id)
     db.delete(row)
     db.flush()
     return row
@@ -395,4 +372,5 @@ def delete_case_file(
             "folder_path": deleted.folder_path or "",
         },
     )
+    db.commit()
     return None

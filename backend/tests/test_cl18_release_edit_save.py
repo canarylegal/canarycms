@@ -19,6 +19,8 @@ from app.desktop_edit_session import (
 )
 from app.models import (
     Base,
+    DocumentRecovery,
+    AuditEvent,
     Case,
     CaseLockMode,
     CaseStatus,
@@ -40,7 +42,7 @@ def _session() -> Session:
                 patched.append((column, column.type))
                 column.type = JSON()
     try:
-        for table in (User.__table__, Case.__table__, DbFile.__table__, FileEditSession.__table__):
+        for table in (User.__table__, Case.__table__, DbFile.__table__, FileEditSession.__table__, DocumentRecovery.__table__, AuditEvent.__table__):
             table.create(engine)
     finally:
         for column, original in patched:
@@ -186,7 +188,7 @@ async def test_oo_persist_download_rejects_without_session() -> None:
     assert exc.value.status_code == 409
 
 
-def test_release_edit_clears_force_save_pending_and_bumps_version(monkeypatch) -> None:
+def test_release_edit_fails_pending_save_without_bumping_version(monkeypatch) -> None:
     db = _session()
     user = _user(db)
     case = _case(db, user)
@@ -197,7 +199,8 @@ def test_release_edit_clears_force_save_pending_and_bumps_version(monkeypatch) -
     release_desktop_edit(case.id, row.id, user, db)
     db.refresh(row)
     assert row.oo_force_save_pending is False
-    assert row.version == 2
+    assert row.version == 1
+    assert row.oo_save_state == "failed"
     assert get_active_edit_session_for_file(db, row.id) is None
 
 
@@ -213,7 +216,8 @@ def test_release_sessions_for_user_clears_force_save_pending() -> None:
     db.refresh(row)
     assert n == 1
     assert row.oo_force_save_pending is False
-    assert row.version == 2
+    assert row.version == 1
+    assert row.oo_save_state == "failed"
 
 
 @pytest.mark.asyncio
@@ -229,6 +233,8 @@ async def test_callback_refuses_byte_persist_without_session(tmp_path, monkeypat
     abs_path = tmp_path / "doc.docx"
     abs_path.write_bytes(b"ORIGINAL_BYTES_XXXX")
     row.storage_path = "doc.docx"
+    row.oo_save_attempt_id = uuid.uuid4()
+    row.oo_save_state = "pending"
     db.add(row)
     db.commit()
 
@@ -270,7 +276,8 @@ async def test_callback_refuses_byte_persist_without_session(tmp_path, monkeypat
     req = MagicMock()
 
     async def _body() -> bytes:
-        return b'{"status":6,"url":"http://ds/cache/x"}'
+        import json
+        return json.dumps({"status":6,"url":"http://ds/cache/x", "userdata":str(row.oo_save_attempt_id)}).encode()
 
     req.body = _body
 
@@ -284,7 +291,8 @@ async def test_callback_refuses_byte_persist_without_session(tmp_path, monkeypat
     assert abs_path.read_bytes() == b"ORIGINAL_BYTES_XXXX"
     db.refresh(row)
     assert row.oo_force_save_pending is False
-    assert row.version == 2
+    assert row.version == 1
+    assert row.oo_save_state == "failed"
 
 def test_other_user_release_does_not_cancel_owners_pending_save(monkeypatch) -> None:
     db = _session()

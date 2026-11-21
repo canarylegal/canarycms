@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from app.document_durability import retain_document
+
 import shutil
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -437,6 +439,7 @@ def delete_case_folder(
 
     rows = db.execute(
         select(DbFile).where((DbFile.case_id == case_id) & ((DbFile.folder_path == prefix) | (DbFile.folder_path.like(like))))
+        .order_by(DbFile.id).with_for_update().execution_options(populate_existing=True)
     ).scalars().all()
     if not rows:
         raise HTTPException(
@@ -495,21 +498,25 @@ def delete_case_folder(
             detail=_FOLDER_MODIFIED_DURING_DELETE_DETAIL,
         )
 
+    # Cascaded attachments may have a different virtual folder; retain them too.
+    seen = {r.id for r in rows}
+    for parent in rows:
+        for child in db.scalars(select(DbFile).where(DbFile.parent_file_id == parent.id)
+                                .order_by(DbFile.id).with_for_update()):
+            if child.id not in seen:
+                seen.add(child.id)
+                rows.append(child)
+
     raise_if_files_checked_out(
         db,
         [r.id for r in rows if r.category != FileCategory.system],
         action="delete this folder",
     )
 
-    # Delete physical files first (best effort).
+    # Retain recoverable bytes/metadata in the same transaction as the deletion.
+    group_id = uuid.uuid4()
     for row in rows:
-        abs_path = (FILES_ROOT / row.storage_path).resolve()
-        try:
-            if abs_path.exists():
-                abs_path.unlink()
-        except Exception:
-            # Avoid hard failing on filesystem inconsistencies.
-            pass
+        retain_document(db, row, root=FILES_ROOT, kind='deleted', group_id=group_id)
 
     for row in rows:
         db.delete(row)

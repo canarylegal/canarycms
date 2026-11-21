@@ -177,6 +177,7 @@ class FileEditSessionStatusOut(BaseModel):
     webdav_file_url: str | None = None
 
 class OoPersistDownloadIn(BaseModel):
+    attempt_id: uuid.UUID | None = None
     """ONLYOFFICE ``downloadAs`` export URL for persisting edits to Canary storage."""
 
     browser_url: str = Field(..., min_length=8, max_length=8000)

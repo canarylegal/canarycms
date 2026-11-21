@@ -320,3 +320,5 @@ __all__ = [
 ]
 
 from app.models.upload_receipts import UploadReceipt
+
+from app.models.document_recovery import DocumentRecovery

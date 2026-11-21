@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from app.document_durability import lock_document, stage_document_bytes, safe_path
+
+from app.onlyoffice_force_save import oo_save_status as save_attempt_status
+
 import logging
 import os
 import re
@@ -315,24 +319,26 @@ async def oo_force_save(
     base_version: int | None,
     user: User,
     db: Session,
+    attempt_id: uuid.UUID | None = None,
 ):
     """Persist in-browser ONLYOFFICE edits to Canary storage.
 
-    Preferred flow (matches toolbar Save): arm → host ``serviceCommand('save')`` → wait.
+    Preferred flow: arm → CommandService with attempt_id → poll that attempt.
     """
-    from app.desktop_edit_session import require_user_active_edit_session
-
     require_case_access(case_id, user, db)
     row = db.get(DbFile, file_id)
     if not row or row.case_id != case_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
 
-    # Arm/command must not start a save after release-edit (CL-18). Wait may finish an in-flight arm.
     if phase in ("arm", "command", "command_wait"):
-        require_user_active_edit_session(db, file_id, user)
+        from app.desktop_edit_session import require_user_active_edit_session, session_matches_document_key
+        session = require_user_active_edit_session(db, row.id, user)
+        if not session_matches_document_key(session, doc_key):
+            raise HTTPException(409, "The editor session changed. Reload before saving.")
 
     if phase == "arm":
-        return JSONResponse({"base_version": oo_force_save_arm(db, row)})
+        base = oo_force_save_arm(db, row, doc_key)
+        return JSONResponse({"base_version": base, "attempt_id": str(row.oo_save_attempt_id)})
 
     if phase == "wait":
         if base_version is None:
@@ -340,15 +346,15 @@ async def oo_force_save(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="base_version is required when phase=wait",
             )
-        await oo_force_save_wait(db, row, base_version=base_version)
+        await oo_force_save_wait(db, row, base_version=base_version, attempt_id=attempt_id)
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     if phase == "command":
-        await oo_force_save_issue_command(db, row, doc_key=doc_key, file_id=file_id)
+        await oo_force_save_issue_command(db, row, doc_key=doc_key, file_id=file_id, attempt_id=attempt_id)
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     if phase == "command_wait":
-        await oo_force_save_command_service(db, row, doc_key=doc_key, file_id=file_id)
+        await oo_force_save_command_service(db, row, doc_key=doc_key, file_id=file_id, attempt_id=attempt_id)
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Unknown phase: {phase}")
@@ -398,6 +404,7 @@ async def oo_persist_download(
         db,
         row,
         browser_url=body.browser_url,
+        attempt_id=body.attempt_id,
         case_id=case_id,
         precedent_id=None,
         actor_user_id=user.id,
@@ -410,14 +417,14 @@ def oo_save_status(
     base_version: int,
     user: User,
     db: Session,
-) -> dict[str, int | bool]:
-    """Poll whether ONLYOFFICE callback has persisted edits (version bumped past ``base_version``)."""
+    attempt_id: uuid.UUID | None = None,
+) -> dict[str, int | bool | str | None]:
+    """Poll whether the matching save attempt committed document bytes."""
     require_case_access(case_id, user, db)
     row = db.get(DbFile, file_id)
     if not row or row.case_id != case_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
-    version = row.version or 1
-    return {"saved": version > base_version, "version": version}
+    return save_attempt_status(row, base_version, attempt_id)
 
 
 def publish_compose_office_file(
@@ -502,17 +509,17 @@ def discard_onlyoffice_edit(
         row.oo_force_save_pending = False
         db.add(row)
 
-    # Restore backup if available.
+    # Publish restored bytes transactionally; failure leaves the session open.
+    row = lock_document(db, row)
+    row.oo_force_save_pending = False
+    row.oo_save_state = "failed"
     ensure_files_root()
-    try:
-        abs_path = (FILES_ROOT / row.storage_path).resolve()
-        backup = Path(str(abs_path) + ".oo_backup")
-        if backup.exists():
-            shutil.copy2(backup, abs_path)
-            backup.unlink()
-            log.info("discard_edit: restored backup for file %s", file_id)
-    except Exception as exc:
-        log.warning("discard_edit: could not restore backup for file %s: %s", file_id, exc)
+    abs_path = safe_path(FILES_ROOT, row.storage_path)
+    backup = Path(str(abs_path) + ".oo_backup")
+    if backup.exists():
+        stage_document_bytes(db, row, backup.read_bytes(), root=FILES_ROOT, kind="discard")
+        row.version = (row.version or 1) + 1
+        row.updated_at = now
 
     sess.released_at = now
     db.add(sess)
@@ -579,6 +586,7 @@ def release_desktop_edit(
     if not row or row.case_id != case_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
 
+    row = lock_document(db, row)
     now = _utcnow()
     sessions = (
         db.execute(
@@ -595,10 +603,10 @@ def release_desktop_edit(
     for s in sessions:
         s.released_at = now
         db.add(s)
-    # CL-18: complete any in-flight force-save waiter without accepting later DS bytes.
+    # Release fails an in-flight save; it never confirms bytes that were not persisted.
     had_pending = bool(sessions and row.oo_force_save_pending)
     if had_pending:
-        row.version = (row.version or 1) + 1
+        row.oo_save_state = "failed"
         row.oo_force_save_pending = False
         row.updated_at = now
         db.add(row)

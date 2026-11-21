@@ -133,53 +133,7 @@ const OO_PDF_TOOLBAR_POLL_MS = 12_000
 const OO_OFFICE_SAVE_POLL_MS = 45_000
 const OO_SYNC_WAIT_MS = 3_000
 
-type OoForceSaveArmOut = { base_version: number }
-
-const OO_TOOLBAR_SAVE_SELECTORS = [
-  '#id-toolbar-btn-save',
-  '#slot-btn-save',
-  'li[data-id="save"]',
-  'button[data-layout-name="toolbar-save"]',
-  '[data-hint="Save"]',
-  'button[aria-label="Save"]',
-]
-
-/** Walk ONLYOFFICE nested iframes and click the native Save control (forcesave callback path). */
-function triggerOnlyofficeToolbarSave(): boolean {
-  function findSaveButton(doc: Document): HTMLElement | null {
-    for (const sel of OO_TOOLBAR_SAVE_SELECTORS) {
-      const el = doc.querySelector(sel) as HTMLElement | null
-      if (el) return el
-    }
-    for (const iframe of doc.querySelectorAll('iframe')) {
-      try {
-        const nested = iframe.contentDocument
-        if (!nested) continue
-        const found = findSaveButton(nested)
-        if (found) return found
-      } catch {
-        /* cross-origin */
-      }
-    }
-    return null
-  }
-
-  const host = document.getElementById('oo-editor-page')
-  for (const iframe of host?.querySelectorAll('iframe') ?? []) {
-    try {
-      const doc = iframe.contentDocument
-      if (!doc) continue
-      const btn = findSaveButton(doc)
-      if (btn) {
-        btn.click()
-        return true
-      }
-    } catch {
-      /* ignore */
-    }
-  }
-  return false
-}
+type OoForceSaveArmOut = { base_version: number; attempt_id: string }
 
 function resolveOoDocumentType(cfg: OoConfig, dsMajor: number): string {
   const fromApi = (cfg.document_type || '').trim().toLowerCase()
@@ -313,7 +267,10 @@ export default function EditorPage() {
   const saveAsPdfNoticeTimeoutRef = useRef<ReturnType<typeof window.setTimeout> | undefined>(undefined)
   /** After downloadAs: print staging, Save as PDF (new file), or persist edits to Canary storage. */
   const pendingDownloadAsRef = useRef<'print' | 'saveAsPdf' | 'persist' | null>(null)
+  // downloadAs events carry no request ID. Do not let a late export satisfy a newer save.
+  const exportUncertainRef = useRef(false)
   const persistSaveWaitRef = useRef<{
+    attemptId: string
     resolve: () => void
     reject: (err: Error) => void
     timeout: ReturnType<typeof window.setTimeout>
@@ -367,6 +324,10 @@ export default function EditorPage() {
       if (!ev.ctrlKey && !ev.metaKey) return
       if (!cfg || !apiRef.current?.downloadAs || pdfExportBusy || saving || closing || unsavedSaveBusy) return
       ev.preventDefault()
+      if (exportUncertainRef.current || pendingDownloadAsRef.current) {
+        setErr('An earlier export is still pending. Wait before retrying.')
+        return
+      }
       const w = window.open(
         'about:blank',
         'canary_oo_print',
@@ -382,6 +343,7 @@ export default function EditorPage() {
       if (pdfExportTimeoutRef.current !== undefined) clearTimeout(pdfExportTimeoutRef.current)
       pdfExportTimeoutRef.current = window.setTimeout(() => {
         pdfExportTimeoutRef.current = undefined
+        exportUncertainRef.current = true
         pendingDownloadAsRef.current = null
         printTabRef.current = null
         setPdfExportBusy(false)
@@ -391,6 +353,7 @@ export default function EditorPage() {
       } catch {
         if (pdfExportTimeoutRef.current !== undefined) clearTimeout(pdfExportTimeoutRef.current)
         pdfExportTimeoutRef.current = undefined
+        exportUncertainRef.current = true
         pendingDownloadAsRef.current = null
         printTabRef.current = null
         setPdfExportBusy(false)
@@ -483,6 +446,10 @@ export default function EditorPage() {
             },
             // Required for downloadAs(); Print + Save as PDF use conversion URLs under /cache/files/.
             onDownloadAs: (event: unknown) => {
+              if (exportUncertainRef.current) {
+                exportUncertainRef.current = false
+                return // consume the timed-out export without associating it with another operation
+              }
               if (pdfExportTimeoutRef.current !== undefined) {
                 clearTimeout(pdfExportTimeoutRef.current)
                 pdfExportTimeoutRef.current = undefined
@@ -514,7 +481,7 @@ export default function EditorPage() {
                     await apiFetch(persistPath, {
                       method: 'POST',
                       token,
-                      json: { browser_url: url },
+                      json: { browser_url: url, attempt_id: wait.attemptId },
                     })
                     clearTimeout(wait.timeout)
                     wait.resolve()
@@ -674,8 +641,12 @@ export default function EditorPage() {
     }
   }
 
-  function saveDocumentViaDownloadAs(format: string): Promise<void> {
+  function saveDocumentViaDownloadAs(format: string, attemptId: string): Promise<void> {
     return new Promise((resolve, reject) => {
+      if (exportUncertainRef.current || pendingDownloadAsRef.current) {
+        reject(new Error('An earlier export is still pending. Keep the editor open and wait before retrying.'))
+        return
+      }
       const editor = apiRef.current
       if (!editor?.downloadAs) {
         reject(new Error('ONLYOFFICE editor is not ready. Wait for the document to finish loading.'))
@@ -683,12 +654,14 @@ export default function EditorPage() {
       }
       const timeout = window.setTimeout(() => {
         if (pendingDownloadAsRef.current === 'persist') {
+          exportUncertainRef.current = true
           pendingDownloadAsRef.current = null
           persistSaveWaitRef.current = null
           reject(new Error('Save timed out waiting for ONLYOFFICE to export the document.'))
         }
       }, OO_PERSIST_SAVE_TIMEOUT_MS)
       persistSaveWaitRef.current = {
+        attemptId,
         resolve: () => {
           clearTimeout(timeout)
           resolve()
@@ -723,7 +696,7 @@ export default function EditorPage() {
   }
 
   /**
-   * Office save: prefer forcesave callback (native OO save path). ``downloadAs`` exports can
+   * Office save: use a correlated CommandService forcesave callback. ``downloadAs`` exports can
    * produce .docx files that ONLYOFFICE fails to reopen (``changesError`` on next open).
    */
   async function performOfficeSave(format: string): Promise<void> {
@@ -740,17 +713,15 @@ export default function EditorPage() {
       method: 'POST',
       token,
     })
-    const statusUrl = ooSaveStatusPath(saveBase, arm.base_version)
+    const statusUrl = ooSaveStatusPath(saveBase, arm.base_version, arm.attempt_id)
 
-    let saveTriggered = triggerOnlyofficeToolbarSave()
-    if (!saveTriggered) {
-      try {
-        await apiFetch(ooForceSavePath(saveBase, docKey, 'command'), { method: 'POST', token })
-        saveTriggered = true
-      } catch (e: unknown) {
-        if ([401, 403, 404].includes((e as { status?: number }).status ?? 0)) throw e
-        console.warn('[ONLYOFFICE] command forcesave failed:', e)
-      }
+    let saveTriggered = false
+    try {
+      await apiFetch(ooForceSavePath(saveBase, docKey, 'command', arm.attempt_id), { method: 'POST', token })
+      saveTriggered = true
+    } catch (e: unknown) {
+      if ([401, 403, 404, 409].includes((e as { status?: number }).status ?? 0)) throw e
+      console.warn('[ONLYOFFICE] command forcesave failed:', e)
     }
 
     if (saveTriggered) {
@@ -762,15 +733,14 @@ export default function EditorPage() {
         console.warn('[ONLYOFFICE] forcesave not confirmed; using downloadAs:', pollErr)
       }
     } else {
-      console.info('[ONLYOFFICE] toolbar Save not reachable; using downloadAs persist')
+      console.info('[ONLYOFFICE] forcesave unavailable; using downloadAs persist')
     }
 
-    await saveDocumentViaDownloadAs(format)
+    await saveDocumentViaDownloadAs(format, arm.attempt_id)
   }
 
   /**
-   * PDF save: prefer native toolbar forcesave (correct form appearances). CommandService
-   * forcesave does not bump version for PDFs in practice — do not poll 45s waiting for it.
+   * PDF save: attempt a correlated forcesave, with a short deadline.
    * Fall back quickly to ``downloadAs`` + backend NeedAppearances fix.
    */
   async function performPdfSave(): Promise<void> {
@@ -783,29 +753,20 @@ export default function EditorPage() {
 
     await waitForOoServerSync()
 
-    if (triggerOnlyofficeToolbarSave()) {
-      const arm = await apiFetch<OoForceSaveArmOut>(ooForceSavePath(saveBase, docKey, 'arm'), {
-        method: 'POST',
-        token,
-      })
-      const statusUrl = ooSaveStatusPath(saveBase, arm.base_version)
-      try {
-        await pollOnlyofficeSaveConfirmed(
-          statusUrl,
-          arm.base_version,
-          token,
-          OO_PDF_TOOLBAR_POLL_MS,
-        )
-        return
-      } catch (pollErr: unknown) {
-        if ([401, 403, 404].includes((pollErr as { status?: number }).status ?? 0)) throw pollErr
-        console.warn('[ONLYOFFICE] toolbar forcesave not confirmed; using downloadAs:', pollErr)
-      }
-    } else {
-      console.info('[ONLYOFFICE] toolbar Save not reachable; using downloadAs persist')
+    const arm = await apiFetch<OoForceSaveArmOut>(ooForceSavePath(saveBase, docKey, 'arm'), {
+      method: 'POST', token,
+    })
+    const statusUrl = ooSaveStatusPath(saveBase, arm.base_version, arm.attempt_id)
+    try {
+      await apiFetch(ooForceSavePath(saveBase, docKey, 'command', arm.attempt_id), { method: 'POST', token })
+      await pollOnlyofficeSaveConfirmed(statusUrl, arm.base_version, token, OO_PDF_TOOLBAR_POLL_MS)
+      return
+    } catch (error: unknown) {
+      if ([401, 403, 404, 409].includes((error as { status?: number }).status ?? 0)) throw error
+      console.warn('[ONLYOFFICE] PDF save not confirmed; using downloadAs:', error)
     }
 
-    await saveDocumentViaDownloadAs('pdf')
+    await saveDocumentViaDownloadAs('pdf', arm.attempt_id)
   }
 
   const canUseSaveAsPdf =
@@ -1016,6 +977,10 @@ export default function EditorPage() {
           onClick={() => {
             if (pdfExportBusy || !apiRef.current?.downloadAs || !cfg || saving || closing || unsavedSaveBusy)
               return
+            if (exportUncertainRef.current || pendingDownloadAsRef.current) {
+              setErr('An earlier export is still pending. Wait before retrying.')
+              return
+            }
             const w = window.open(
               'about:blank',
               'canary_oo_print',
@@ -1031,6 +996,7 @@ export default function EditorPage() {
             if (pdfExportTimeoutRef.current !== undefined) clearTimeout(pdfExportTimeoutRef.current)
             pdfExportTimeoutRef.current = window.setTimeout(() => {
               pdfExportTimeoutRef.current = undefined
+              exportUncertainRef.current = true
               pendingDownloadAsRef.current = null
               printTabRef.current = null
               setPdfExportBusy(false)
@@ -1040,6 +1006,7 @@ export default function EditorPage() {
             } catch {
               if (pdfExportTimeoutRef.current !== undefined) clearTimeout(pdfExportTimeoutRef.current)
               pdfExportTimeoutRef.current = undefined
+              exportUncertainRef.current = true
               pendingDownloadAsRef.current = null
               printTabRef.current = null
               setPdfExportBusy(false)
@@ -1089,12 +1056,17 @@ export default function EditorPage() {
               return
             }
             setSaveAsPdfNotice(null)
+            if (exportUncertainRef.current || pendingDownloadAsRef.current) {
+              setErr('An earlier export is still pending. Wait before retrying.')
+              return
+            }
             pendingDownloadAsRef.current = 'saveAsPdf'
             setSaveAsPdfBusy(true)
             setPdfExportBusy(true)
             if (pdfExportTimeoutRef.current !== undefined) clearTimeout(pdfExportTimeoutRef.current)
             pdfExportTimeoutRef.current = window.setTimeout(() => {
               pdfExportTimeoutRef.current = undefined
+              exportUncertainRef.current = true
               pendingDownloadAsRef.current = null
               setPdfExportBusy(false)
               setSaveAsPdfBusy(false)
@@ -1105,6 +1077,7 @@ export default function EditorPage() {
             } catch {
               if (pdfExportTimeoutRef.current !== undefined) clearTimeout(pdfExportTimeoutRef.current)
               pdfExportTimeoutRef.current = undefined
+              exportUncertainRef.current = true
               pendingDownloadAsRef.current = null
               setPdfExportBusy(false)
               setSaveAsPdfBusy(false)

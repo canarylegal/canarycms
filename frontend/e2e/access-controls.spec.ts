@@ -62,12 +62,13 @@ test('another authorised user cannot release an active editors pending save', as
     const response = await owner.post(`/api/cases/${id}/files`, { multipart: { upload: { name: `ownership-${Date.now()}.docx`, mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', buffer: await readFile('e2e/fixtures/workflow.docx') } } })
     const file = await response.json(); const root = `/api/cases/${id}/files/${file.id}`
     expect((await owner.post(`${root}/checkout-edit`)).status()).toBe(201)
-    const arm = await owner.post(`${root}/oo-force-save?phase=arm&doc_key=ownership-test`)
+    const config = await (await owner.get(`${root}/onlyoffice-config`)).json()
+    const arm = await owner.post(`${root}/oo-force-save?phase=arm&doc_key=${encodeURIComponent(config.document.key)}`)
     expect(arm.ok()).toBe(true)
-    const { base_version } = await arm.json()
+    const { base_version, attempt_id } = await arm.json()
     expect((await other.post(`${root}/release-edit`)).status()).toBe(204)
     expect((await (await owner.get(`${root}/edit-session`)).json()).active).toBe(true)
-    expect((await (await owner.get(`${root}/oo-save-status?base_version=${base_version}`)).json()).saved).toBe(false)
+    expect((await (await owner.get(`${root}/oo-save-status?base_version=${base_version}&attempt_id=${attempt_id}`)).json()).saved).toBe(false)
     expect((await other.post(`${root}/oo-force-save?phase=arm&doc_key=ownership-test`)).status()).toBe(409)
     expect((await owner.post(`${root}/release-edit`)).status()).toBe(204)
   } finally { await owner.dispose(); await other.dispose() }

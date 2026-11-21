@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from app.onlyoffice_force_save import oo_save_status as save_attempt_status
+
 import logging
 import mimetypes
 import uuid
@@ -842,23 +844,31 @@ async def _firm_letterhead_oo_force_save(
     base_version: int | None,
     admin: User,
     db: Session,
+    attempt_id: uuid.UUID | None = None,
 ):
     row = firm_letterhead_file_row(db, kind)
+    if phase in ("arm", "command", "command_wait"):
+        from app.desktop_edit_session import require_user_active_edit_session, session_matches_document_key
+        session = require_user_active_edit_session(db, row.id, admin)
+        if not session_matches_document_key(session, doc_key):
+            raise HTTPException(409, "The editor session changed. Reload before saving.")
+
     if phase == "arm":
-        return JSONResponse({"base_version": oo_force_save_arm(db, row)})
+        base = oo_force_save_arm(db, row, doc_key)
+        return JSONResponse({"base_version": base, "attempt_id": str(row.oo_save_attempt_id)})
     if phase == "wait":
         if base_version is None:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="base_version is required when phase=wait",
             )
-        await oo_force_save_wait(db, row, base_version=base_version)
+        await oo_force_save_wait(db, row, base_version=base_version, attempt_id=attempt_id)
         return Response(status_code=status.HTTP_204_NO_CONTENT)
     if phase == "command":
-        await oo_force_save_issue_command(db, row, doc_key=doc_key, file_id=row.id)
+        await oo_force_save_issue_command(db, row, doc_key=doc_key, file_id=row.id, attempt_id=attempt_id)
         return Response(status_code=status.HTTP_204_NO_CONTENT)
     if phase == "command_wait":
-        await oo_force_save_command_service(db, row, doc_key=doc_key, file_id=row.id)
+        await oo_force_save_command_service(db, row, doc_key=doc_key, file_id=row.id, attempt_id=attempt_id)
         return Response(status_code=status.HTTP_204_NO_CONTENT)
     raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Unknown phase: {phase}")
 
@@ -874,9 +884,11 @@ async def _firm_letterhead_oo_persist_download(
         db,
         row,
         browser_url=body.browser_url,
+        attempt_id=body.attempt_id,
         case_id=None,
         precedent_id=None,
         firm_letterhead_kind=kind,
+        actor_user_id=admin.id,
     )
 
 
@@ -885,10 +897,10 @@ def _firm_letterhead_oo_save_status(
     base_version: int,
     admin: User,
     db: Session,
-) -> dict[str, int | bool]:
+    attempt_id: uuid.UUID | None = None,
+) -> dict[str, int | bool | str | None]:
     row = firm_letterhead_file_row(db, kind)
-    version = row.version or 1
-    return {"saved": version > base_version, "version": version}
+    return save_attempt_status(row, base_version, attempt_id)
 
 
 @router.get("/letterhead/onlyoffice-config", response_model=OnlyofficeEditorConfigOut)
@@ -916,10 +928,11 @@ async def oo_force_save_letterhead(
     doc_key: str,
     phase: OoForceSavePhase = Query("command"),
     base_version: int | None = Query(None),
+    attempt_id: uuid.UUID | None = Query(None),
     admin: User = Depends(require_firm_admin),
     db: Session = Depends(get_db),
 ):
-    return await _firm_letterhead_oo_force_save("letterhead", doc_key, phase, base_version, admin, db)
+    return await _firm_letterhead_oo_force_save("letterhead", doc_key, phase, base_version, admin, db, attempt_id)
 
 
 @router.post("/quote-letterhead/oo-force-save")
@@ -927,10 +940,11 @@ async def oo_force_save_quote_letterhead(
     doc_key: str,
     phase: OoForceSavePhase = Query("command"),
     base_version: int | None = Query(None),
+    attempt_id: uuid.UUID | None = Query(None),
     admin: User = Depends(require_firm_admin),
     db: Session = Depends(get_db),
 ):
-    return await _firm_letterhead_oo_force_save("quote_letterhead", doc_key, phase, base_version, admin, db)
+    return await _firm_letterhead_oo_force_save("quote_letterhead", doc_key, phase, base_version, admin, db, attempt_id)
 
 
 @router.post("/letterhead/oo-persist-download", status_code=status.HTTP_204_NO_CONTENT)
@@ -954,16 +968,18 @@ async def oo_persist_download_quote_letterhead(
 @router.get("/letterhead/oo-save-status")
 def oo_save_status_letterhead(
     base_version: int = Query(...),
+    attempt_id: uuid.UUID | None = Query(None),
     admin: User = Depends(require_firm_admin),
     db: Session = Depends(get_db),
-) -> dict[str, int | bool]:
-    return _firm_letterhead_oo_save_status("letterhead", base_version, admin, db)
+) -> dict[str, int | bool | str | None]:
+    return _firm_letterhead_oo_save_status("letterhead", base_version, admin, db, attempt_id)
 
 
 @router.get("/quote-letterhead/oo-save-status")
 def oo_save_status_quote_letterhead(
     base_version: int = Query(...),
+    attempt_id: uuid.UUID | None = Query(None),
     admin: User = Depends(require_firm_admin),
     db: Session = Depends(get_db),
-) -> dict[str, int | bool]:
-    return _firm_letterhead_oo_save_status("quote_letterhead", base_version, admin, db)
+) -> dict[str, int | bool | str | None]:
+    return _firm_letterhead_oo_save_status("quote_letterhead", base_version, admin, db, attempt_id)

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from app.onlyoffice_force_save import oo_save_status as save_attempt_status
+
 import mimetypes
 import os
 import secrets
@@ -595,6 +597,7 @@ async def oo_force_save_precedent(
     doc_key: str,
     phase: OoForceSavePhase = Query("command"),
     base_version: int | None = Query(None),
+    attempt_id: uuid.UUID | None = Query(None),
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -605,8 +608,15 @@ async def oo_force_save_precedent(
     if not row:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Precedent file missing")
 
+    if phase in ("arm", "command", "command_wait"):
+        from app.desktop_edit_session import require_user_active_edit_session, session_matches_document_key
+        session = require_user_active_edit_session(db, row.id, user)
+        if not session_matches_document_key(session, doc_key):
+            raise HTTPException(409, "The editor session changed. Reload before saving.")
+
     if phase == "arm":
-        return JSONResponse({"base_version": oo_force_save_arm(db, row)})
+        base = oo_force_save_arm(db, row, doc_key)
+        return JSONResponse({"base_version": base, "attempt_id": str(row.oo_save_attempt_id)})
 
     if phase == "wait":
         if base_version is None:
@@ -614,15 +624,15 @@ async def oo_force_save_precedent(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="base_version is required when phase=wait",
             )
-        await oo_force_save_wait(db, row, base_version=base_version)
+        await oo_force_save_wait(db, row, base_version=base_version, attempt_id=attempt_id)
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     if phase == "command":
-        await oo_force_save_issue_command(db, row, doc_key=doc_key, file_id=row.id)
+        await oo_force_save_issue_command(db, row, doc_key=doc_key, file_id=row.id, attempt_id=attempt_id)
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     if phase == "command_wait":
-        await oo_force_save_command_service(db, row, doc_key=doc_key, file_id=row.id)
+        await oo_force_save_command_service(db, row, doc_key=doc_key, file_id=row.id, attempt_id=attempt_id)
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Unknown phase: {phase}")
@@ -645,8 +655,10 @@ async def oo_persist_download_precedent(
         db,
         row,
         browser_url=body.browser_url,
+        attempt_id=body.attempt_id,
         case_id=None,
         precedent_id=precedent_id,
+        actor_user_id=user.id,
     )
 
 
@@ -654,17 +666,17 @@ async def oo_persist_download_precedent(
 def oo_save_status_precedent(
     precedent_id: uuid.UUID,
     base_version: int = Query(...),
+    attempt_id: uuid.UUID | None = Query(None),
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
-) -> dict[str, int | bool]:
+) -> dict[str, int | bool | str | None]:
     p = db.get(Precedent, precedent_id)
     if not p:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Precedent not found")
     row = db.get(DbFile, p.file_id)
     if not row:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Precedent file missing")
-    version = row.version or 1
-    return {"saved": version > base_version, "version": version}
+    return save_attempt_status(row, base_version, attempt_id)
 
 
 @router.delete("/{precedent_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -684,7 +696,11 @@ def delete_precedent(
     f = db.get(DbFile, p.file_id)
     db.delete(p)
     if f:
-        abs_path = (FILES_ROOT / f.storage_path).resolve()
+        from app.document_durability import lock_document, retain_document
+        from app.desktop_edit_session import raise_if_files_checked_out
+        f = lock_document(db, f)
+        raise_if_files_checked_out(db, [f.id], action="delete")
+        retain_document(db, f, root=FILES_ROOT, kind="deleted")
         db.delete(f)
     log_event(
         db,
@@ -695,8 +711,3 @@ def delete_precedent(
         meta={},
     )
     db.commit()
-    if f and path_is_under_files_root(abs_path) and abs_path.is_file():
-        try:
-            abs_path.unlink()
-        except OSError:
-            pass
