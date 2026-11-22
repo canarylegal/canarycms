@@ -7,12 +7,12 @@ Run `make test-performance`. It builds a new `canaryperf-*` Docker Compose proje
 - 5,002 matters (5,000 synthetic open property transactions plus the two core fixtures), 200 additional fee earners.
 - One case with 1,200 real small text files: 400 at the root including 100 attachments, another 800 in folders, five pinned documents, and 100 portal form snapshots sharing five templates and referencing 100 contacts.
 - Five measured warm route calls after one discarded warm-up, including serialization and SQL query counts. The SQL profiler uses TestClient against the real migrated PostgreSQL database; the browser/load tests use the actual nginx/HTTP path.
-- Chromium sign-in, complete list rendering, fee-earner sorting, search, right-click matter/document menus, double-click matter/folder navigation and the existing display labels. Record renderer heap use after the workflow and count matter-list fetches.
-- Four distinct staff accounts, each making five requests to both the complete matter list and the document-heavy case: 20 measurements per endpoint, with status and complete row-count assertions.
+- Chromium sign-in, bounded matter-page rendering and keyboard loading, fee-earner sorting, search, right-click matter/document menus, double-click matter/folder navigation and the existing display labels. Record renderer heap use after the workflow and count matter-list fetches.
+- Four distinct staff accounts, each making five requests to both the first 100-matter page and the complete 1,200-document case: 20 measurements per endpoint, with status and complete row-count assertions.
 
 CPU/memory limits are explicit in `docker-compose.performance.yml`: backend 2 CPUs/2 GiB, PostgreSQL 1 CPU/1 GiB, nginx 0.5 CPU/256 MiB, Chromium runner 2 CPUs/3 GiB, ONLYOFFICE 2 CPUs/2 GiB. `resource-samples.jsonl` records backend/infrastructure CPU and memory samples during browser/load testing. These are container resource limits, not dedicated physical cores. The document server is started for realistic app routing but editor concurrency is not load-tested here.
 
-## First measured improvements
+## Historical measurements before matter pagination
 
 Baseline source: `e9fe086`. All measurements used disposable containers. Local paired measurements on the same host with the capped synthetic stack:
 
@@ -36,14 +36,14 @@ The staff microbenchmark counts property reads to detect algorithmic regressions
 
 ## Regression gates
 
-CI runs `.github/workflows/performance.yml` on PRs and main updates. The ordinary frontend suite also asserts that the 5,000-row search/sort performs at most 400 staff-ID reads and retains correct order/results.
+`.github/workflows/performance.yml` defines PR/main checks when repository Actions are enabled. Actions are currently disabled; run these checks locally in isolation. The ordinary frontend suite also asserts that the 5,000-row search/sort performs at most 400 staff-ID reads and retains correct order/results.
 
 The disposable API/browser job fails on:
 
 - More than 30 queries for the document list or 20 for the matter list; a reintroduced per-form lookup fails deterministically.
 - Any incorrect row counts, portal-form contact/template/status metadata, HTTP error or broken tested interaction.
 - A warm single-route call over 5 seconds, concurrent p95 over 5 seconds, initial UI load over 15 seconds, sorting/search over 5 seconds, or opening the matter over 10 seconds.
-- More than three matter-list fetches during the browser workflow.
+- More than four matter-list fetches during the browser workflow.
 
 Timing limits deliberately allow shared-runner variation. They catch large regressions rather than claiming an SLA; smaller changes should be reviewed using the uploaded JSON measurements and the same workload/resource settings. The query/lookup gates provide tighter, hardware-independent protection for the specific bottlenecks fixed here. Ordinary core workflow tests separately cover actual editing/save, access controls, session recovery, upload/download failure handling and column preferences.
 
@@ -51,7 +51,7 @@ Evidence is written beneath `artifacts/performance/` (override with a scratch `C
 
 A fresh-stack verification also passed the fee-earner UI sort (about 1.5 seconds for 5,002 rows). Its sampled maximum backend memory was about 265 MiB, PostgreSQL 62 MiB, nginx 15 MiB and idle ONLYOFFICE 549 MiB; the renderer reported about 57 MiB of JavaScript heap after the workflow. These are short-run samples, not proven long-term peaks. `resource-summary.json` accompanies the normalized resource samples.
 
-This is a short metadata/list workload test, not a soak test, large-file transfer benchmark, multi-editor benchmark, external integration benchmark or proof of performance at arbitrary database sizes. Repeat with larger agreed workloads before increasing a deployment's expected load.
+The original short workload does not establish sustained capacity; the sustained workload below adds a bounded-duration mixed HTTP check. Neither covers large-file transfers, multi-editor load, external integrations or arbitrary database sizes. Repeat with larger agreed workloads before increasing a deployment's expected load.
 
 ## Large matter document rendering
 
@@ -80,4 +80,16 @@ Paired local Chromium measurements on the same capped stack (about 2,000–2,100
 
 After all 10,000 root documents were loaded, the windowed renderer retained 29 rows, 2,682 DOM nodes and 12.0 MB of JavaScript heap. Loading the remaining pages took 9.0 seconds. These local observations are not CI timing guarantees; full JSON measurements are retained as synthetic test evidence.
 
-This bounds DOM/rendering work, not the amount of loaded metadata: loaded pages remain in memory so selection and operations retain their existing semantics. Folder metadata still grows with distinct paths. Native browser Find only sees mounted rows; the app's server-side document search covers the matter. These tests are not a long-running soak test or a production capacity guarantee.
+This bounds DOM/rendering work, not the amount of loaded metadata: loaded pages remain in memory so selection and operations retain their existing semantics. Folder metadata still grows with distinct paths. Native browser Find only sees mounted rows; the app's server-side document search covers the matter. These rendering checks are not a multi-hour soak test or a production capacity guarantee.
+
+## Current pagination measurements
+
+A local isolated run of reviewed main `562a592` measured the first 100-matter page at 79,608 bytes and 14.12 ms median, versus 3,966,542 bytes and 189.69 ms for the legacy complete 5,002-matter route. Browser initial load was 620 ms. Four-session p95 was 105 ms for matter pages and 377 ms for complete 1,200-document lists. These are historical observations on one host, not latency guarantees. The browser traverses every matter separately to verify completeness; its initial display and concurrent matter workload use bounded pages.
+
+## Sustained mixed workload
+
+`make test-performance` also runs four distinct synthetic users for five minutes. Each user repeatedly reads a matter page and document page, writes and reads back its own sort preference, and downloads a synthetic document with byte-for-byte verification. Responses are disposed after each request and latency histograms use fixed-size buckets, so the load generator does not accumulate response bodies. Each cycle has a 100 ms pause. This is a closed-loop workload, not a fixed requests-per-second capacity test.
+
+Set `CANARY_SOAK_SECONDS=1800 make test-performance` for a 30-minute run (allowed range 60–3600 seconds; default 300). There must be at least 20 completed cycles per user, no incorrect response/data, per-operation p95 at most 3 seconds, and final-third p95 no greater than the larger of 1 second or three times first-third p95. Histograms report conservative upper bucket bounds. Requests time out after 10 seconds. Runtime failures fail the test; containers must finish running with no restarts or OOM kills. The runner retains resource samples, peak usage, first/last-third median memory and their difference throughout browser/load testing (including the short browser tests). `test-results/sustained-metrics.json` records duration, cycles and latency distributions even on an assertion failure.
+
+This adds sustained HTTP reads, small writes and downloads; it does not establish large-upload, financial-write/report, multi-editor or multi-hour capacity. Resource samples expose trends for review but are not a leak detector. Loaded document metadata still remains in memory. Choose representative workload and recovery objectives before making a production capacity claim. No external integrations or DocuSign are exercised, no jobs are enabled, and the disposable network blocks provider access.

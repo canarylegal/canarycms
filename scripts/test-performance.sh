@@ -35,4 +35,9 @@ trap cleanup EXIT
 mapfile -t containers < <("${compose[@]}" ps -q)
 docker stats --format '{{json .}}' "${containers[@]}" > "$CORE_TEST_OUTPUT/resource-samples.raw" &
 stats_pid=$!
-"${compose[@]}" --profile test run --rm --no-deps --user "$(id -u):$(id -g)" -e HOME=/tmp tests npx playwright test -c playwright.performance.config.ts
+"${compose[@]}" --profile test run --rm --no-deps --user "$(id -u):$(id -g)" -e HOME=/tmp -e CANARY_SOAK_SECONDS="${CANARY_SOAK_SECONDS:-300}" tests npx playwright test -c playwright.performance.config.ts
+# Assert the load did not restart or OOM any infrastructure container.
+for container in "${containers[@]}"; do
+  state=$(docker inspect --format '{{.RestartCount}} {{.State.OOMKilled}} {{.State.Running}}' "$container")
+  [[ "$state" == "0 false true" ]] || { echo "Unexpected container state: $state" >&2; exit 1; }
+done

@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 import re
 import sys
+from statistics import median
 
 ANSI=re.compile(r'\x1b\[[0-?]*[ -/]*[@-~]')
 
@@ -27,6 +28,12 @@ def normalize(raw):
         peak['peak_memory_bytes']=max(peak['peak_memory_bytes'],sample['memory_bytes'])
         peak['peak_cpu_percent']=max(peak['peak_cpu_percent'],sample['cpu_percent'])
     if not samples: raise RuntimeError('No resource samples were collected.')
+    for name, peak in summary.items():
+        memory = [row['memory_bytes'] for row in samples if row['container'] == name]
+        window = max(1, len(memory) // 3)
+        peak['first_third_median_memory_bytes'] = int(median(memory[:window]))
+        peak['last_third_median_memory_bytes'] = int(median(memory[-window:]))
+        peak['median_memory_growth_bytes'] = peak['last_third_median_memory_bytes'] - peak['first_third_median_memory_bytes']
     return samples,summary
 
 if __name__=='__main__':

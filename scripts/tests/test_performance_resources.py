@@ -17,3 +17,13 @@ class ResourceSamplesTests(unittest.TestCase):
         self.assertEqual(summary[row['Name']]['peak_cpu_percent'],17.45)
     def test_missing_measurements_fail_instead_of_publishing_empty_evidence(self):
         with self.assertRaises(RuntimeError):module.normalize('Docker is unavailable\n')
+
+    def test_memory_trend_separates_interleaved_containers_and_ignores_single_peak(self):
+        rows=[]
+        for a,b in zip([10,10,200,20,30,30],[90,90,60,60,40,40]):
+            for name,value in [('backend',a),('db',b)]:
+                rows.append(json.dumps({'Name':name,'MemUsage':f'{value}MiB / 2GiB','CPUPerc':'1%'}))
+        _,summary=module.normalize('\n'.join(rows))
+        self.assertEqual(summary['backend']['peak_memory_bytes'],200*2**20)
+        self.assertEqual(summary['backend']['median_memory_growth_bytes'],20*2**20)
+        self.assertEqual(summary['db']['median_memory_growth_bytes'],-50*2**20)

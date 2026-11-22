@@ -66,3 +66,11 @@ Host unit tests cover corruption/traversal, retention, shared locking, failed sn
 
 See [Staff notification outbox](STAFF_NOTIFICATION_OUTBOX.md) for on-demand delivery,
 audited recovery and restore precautions. This release installs no notification job.
+
+## Container log retention
+
+The base deployment, dev tunnel companions and isolated Core test stack use Docker `json-file` logging with `max-size: "10m"` and `max-file: "5"`: approximately 50 MiB per container, plus record/filesystem overhead. Old container stdout/stderr logs rotate automatically. `docker logs` and request-ID correlation remain available within that retention window. This does not rotate application files, journals, backup/export archives or private recovery evidence; their retention remains a separate operational decision.
+
+These defaults apply when containers are created from the updated Compose definitions. They do not modify running containers. The release helper intentionally preserves the deployment's existing resolved configuration; a code-only release from an old resolved config does not import the new logging defaults. Plan a separate reviewed configuration update and recreation of affected services (including database, document server and tunnel companions), with a maintenance window and verified backup. Preserve all mounts, credentials and service settings, and verify each container's `HostConfig.LogConfig` afterward. Do not edit Docker's live log files. No recreation or deployment is performed by this change.
+
+Run `python3 scripts/test_log_rotation.py --image <local-python-capable-image>` to resolve the base/tunnel/test Compose policies with synthetic values and verify actual rollover in a uniquely named, network-disabled disposable container. The probe emits 60 MiB of synthetic stdout, verifies old records are discarded while the final marker remains, then removes only its own container. It does not start the deployment or enable jobs/Actions.

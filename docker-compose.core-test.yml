@@ -1,3 +1,9 @@
+x-bounded-logging: &bounded-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
 # Standalone disposable stack. No host data mounts, fixed container names or published ports.
 x-credentials: &credentials
   CANARY_TEST_FIXTURE: "1"
@@ -10,6 +16,7 @@ x-credentials: &credentials
 
 services:
   db:
+    logging: *bounded-logging
     image: postgres:16.6@sha256:557fea37a744d5f4c8faab304b0a90858b53ab119735a88c131fd19dab802f36
     environment:
       POSTGRES_USER: canary
@@ -22,6 +29,7 @@ services:
       timeout: 3s
       retries: 30
   backend:
+    logging: *bounded-logging
     build:
       context: ./backend
       args:
@@ -58,6 +66,7 @@ services:
       retries: 40
       start_period: 60s
   onlyoffice:
+    logging: *bounded-logging
     image: onlyoffice/documentserver:9.0.3@sha256:6cf2c2727696954fb25f3f6061f195a6b1a366e1e7c66a3d53fb004322544d21
     environment:
       # Core workflows do not use optional plugins or their online update service.
@@ -77,6 +86,7 @@ services:
       retries: 90
       start_period: 120s
   frontend:
+    logging: *bounded-logging
     build:
       context: ./frontend
       target: production
@@ -87,6 +97,7 @@ services:
       backend: {condition: service_healthy}
       onlyoffice: {condition: service_healthy}
   tests:
+    logging: *bounded-logging
     profiles: [test]
     build:
       context: ./frontend
