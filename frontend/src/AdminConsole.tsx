@@ -3,6 +3,7 @@ import { AdminAudit } from './AdminAudit'
 import { AdminBilling } from './AdminBilling'
 import { AdminBankAccounts } from './AdminBankAccounts'
 import { AdminDeploy } from './AdminDeploy'
+import { CommercialConnectionPanel } from './commercial/CommercialConnectionPanel'
 import { AdminEmail } from './AdminEmail'
 import { CommercialAdminIntegrationsSlot } from './commercial/CommercialSlotHosts'
 import { AdminPortalForms } from './AdminPortalForms'
@@ -163,7 +164,10 @@ export function AdminConsole({ token, refreshMe }: { token: string; refreshMe: (
         ) : activeTab === 'portalForms' ? (
           <AdminPortalForms token={token} />
         ) : activeTab === 'deploy' ? (
-          <AdminDeploy token={token} />
+          <>
+            <CommercialConnectionPanel token={token} />
+            <AdminDeploy token={token} />
+          </>
         ) : activeTab === 'submenus' ? (
           <AdminSubMenus token={token} />
         ) : activeTab === 'tasks' ? (

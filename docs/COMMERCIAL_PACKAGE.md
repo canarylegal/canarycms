@@ -97,3 +97,7 @@ Proves Core alone (no connector routes; `/commercial-modules/active` disabled; U
 attached (connector routes; active slots + exports; IIFE served).
 
 Actions: `.github/workflows/commercial-contract.yml` (secret `CANARY_COMMERCIAL_TOKEN`).
+
+## Optional hosted-service foundation
+
+The current mounted integrations remain unchanged. The disabled-by-default [hosted service contract](COMMERCIAL_SERVICE_CONTRACT.md) describes the Core connection, local credential vault and operation receipts for future adapters. It does not install a service, migrate providers or start jobs.

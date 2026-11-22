@@ -62,3 +62,7 @@ test-operations:
 .PHONY: test-performance
 test-performance:
 	./scripts/test-performance.sh
+
+.PHONY: test-commercial-foundations
+test-commercial-foundations:
+	./scripts/test-commercial-foundations.sh

@@ -1,0 +1,43 @@
+# Synthetic, internal-network-only foundation tests. Never uses a live .env or mounts.
+services:
+  db:
+    image: postgres:16.6@sha256:557fea37a744d5f4c8faab304b0a90858b53ab119735a88c131fd19dab802f36
+    environment:
+      POSTGRES_USER: canary
+      POSTGRES_PASSWORD: synthetic-foundation-password
+      POSTGRES_DB: foundation
+    tmpfs: [/var/lib/postgresql/data]
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -U canary -d foundation]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+  tests:
+    build:
+      context: ./backend
+      args:
+        GIT_COMMIT: isolated-commercial-foundations
+    environment:
+      DATABASE_URL: postgresql+psycopg://canary:synthetic-foundation-password@db/foundation
+      JWT_SECRET: synthetic-foundation-jwt-secret
+      DATA_ENCRYPTION_KEY: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+      CANARY_BACKGROUND_JOBS_ENABLED: "0"
+      CANARY_COMMERCIAL_SERVICE_ENABLED: "0"
+      COMMERCIAL_FOUNDATION_TEST: "1"
+      PYTHONDONTWRITEBYTECODE: "1"
+      PYTHONPATH: /app
+      MASTER_ADMIN_LOGIN: isolated-foundation-admin
+      MASTER_ADMIN_PASSWORD: isolated-foundation-password
+      MASTER_ADMIN_REQUIRE_2FA: "false"
+    entrypoint: [sh, -ec]
+    command:
+      - >-
+        alembic upgrade fea7a8b9c0d1 &&
+        python tests/commercial_migration_probe.py prepare &&
+        alembic upgrade head &&
+        python tests/commercial_migration_probe.py verify &&
+        python -m pytest -p no:cacheprovider -q tests/test_commercial_connection.py tests/test_commercial_connection_postgres.py tests/test_brand_config.py tests/test_notification_outbox.py
+    volumes: [./backend/tests:/app/tests:ro]
+networks:
+  default:
+    internal: true
