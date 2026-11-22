@@ -119,7 +119,7 @@ def test_preview_flags_portal_reset_and_email_mismatch() -> None:
             store_portal_access_code(row, code)
         db.commit()
 
-    preview = preview_contact_merge(db, survivor_id=survivor.id, source_id=source.id)
+    preview = preview_contact_merge(db, survivor_id=survivor.id, source_id=source.id, actor=user)
     assert preview.will_reset_client_portal is True
     assert preview.email_mismatch is True
     assert preview.survivor_client_portal_active is True

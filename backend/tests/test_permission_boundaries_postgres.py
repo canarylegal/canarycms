@@ -112,7 +112,7 @@ def test_email_conflict_cannot_target_restricted_contact(sample,resolution,opera
         assert c.get('/contacts/'+s['contact']+'/portal/access',headers=s['admin_headers']).json()['access_code']==s['code']
 
 
-def test_merge_requires_admin_and_admin_merge_still_works(sample):
+def test_merge_denies_inaccessible_records_and_admin_merge_still_works(sample):
     s=sample
     with SessionLocal() as db:
         survivor=Contact(type=ContactType.person,name='Synthetic survivor',email=uuid.uuid4().hex+'@example.com')
