@@ -132,6 +132,21 @@ def list_case_invoices(case_id: uuid.UUID, db: Session) -> CaseInvoicesOut:
 
 
 def create_case_invoice(case_id: uuid.UUID, payload: CaseInvoiceCreate, user: User, db: Session) -> CaseInvoiceOut:
+    from app.models import UserPermissionCategory
+    from app.deps import require_case_access
+    from app.permission_checks import user_may_create_invoice
+
+    # Refresh and lock authorization before numbering, posting or binding any time.
+    user = db.execute(select(User).where(User.id == user.id).with_for_update()
+        .execution_options(populate_existing=True)).scalar_one_or_none()
+    if user is None or not user.is_active:
+        raise HTTPException(403, "Active staff account required")
+    if user.permission_category_id:
+        db.execute(select(UserPermissionCategory).where(UserPermissionCategory.id == user.permission_category_id)
+            .with_for_update().execution_options(populate_existing=True)).scalar_one_or_none()
+    if not user_may_create_invoice(user, db):
+        raise HTTPException(403, "Creating invoices requires office-posting or invoice-approval permission.")
+    require_case_access(case_id, user, db)
     if not payload.lines and not payload.time_entry_ids:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="At least one invoice line or time entry is required.")
     case = db.get(Case, case_id)

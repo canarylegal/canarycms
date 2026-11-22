@@ -501,6 +501,7 @@ export function LedgerPage({ caseId, token, currentUserId, onCaseChanged }: Prop
 
   const canApprove = ledgerPerm != null
   const canApproveInvoices = ledgerPerm?.can_approve_invoices ?? false
+  const canCreateInvoice = Boolean(ledgerPerm?.can_post_office || canApproveInvoices)
 
   async function approvePair(pairId: string) {
     setBusy(true)
@@ -585,6 +586,10 @@ export function LedgerPage({ caseId, token, currentUserId, onCaseChanged }: Prop
   }, [invLines, selectedWipEntries, invBillingDefaults])
 
   async function submitInvoice() {
+    if (!canCreateInvoice) {
+      setInvErr('Creating invoices requires office-posting or invoice-approval permission.')
+      return
+    }
     setInvErr(null)
     if (!invCreditUserId) {
       setInvErr('Select credit (user).')
@@ -794,7 +799,8 @@ export function LedgerPage({ caseId, token, currentUserId, onCaseChanged }: Prop
               setSelectedWipIds(new Set())
               setInvoiceModalOpen(true)
             }}
-            disabled={busy}
+            disabled={busy || !canCreateInvoice}
+            title={canCreateInvoice ? undefined : 'Office-posting or invoice-approval permission required'}
           >
             New invoice
           </button>

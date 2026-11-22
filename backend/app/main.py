@@ -265,7 +265,35 @@ def _install_proxy_headers_middleware(application: FastAPI) -> None:
 
 configure_request_logging()
 
-app = FastAPI(title="Case Management Backend", lifespan=lifespan)
+app = FastAPI(title="Case Management Backend", lifespan=lifespan,
+              docs_url=None, redoc_url=None, openapi_url=None)
+
+
+@app.get("/openapi.json", include_in_schema=False, dependencies=[Depends(require_admin)])
+def restricted_openapi():
+    schema = dict(app.openapi())
+    schema["servers"] = [{"url": "."}]
+    return JSONResponse(schema, headers={"Cache-Control": "private, no-store"})
+
+
+@app.get("/docs", include_in_schema=False, dependencies=[Depends(require_admin)])
+def restricted_docs():
+    from fastapi.openapi.docs import get_swagger_ui_html
+    response = get_swagger_ui_html(openapi_url="./openapi.json", title="Canary API")
+    response.headers["Cache-Control"] = "private, no-store"
+    return response
+
+
+@app.get("/redoc", include_in_schema=False, dependencies=[Depends(require_admin)])
+def restricted_redoc():
+    from fastapi.openapi.docs import get_redoc_html
+    response = get_redoc_html(openapi_url="./openapi.json", title="Canary API")
+    response.headers["Cache-Control"] = "private, no-store"
+    return response
+
+
+from app.upload_body_limit import UploadBodyLimitMiddleware
+app.add_middleware(UploadBodyLimitMiddleware)
 
 _cors_kwargs: dict = {
     "allow_origins": _cors_allow_origins(),

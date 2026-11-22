@@ -187,3 +187,7 @@ def user_may_access_accounts_workspace(user: User, db: Session) -> bool:
         return True
     cat = _category(user, db)
     return bool(cat and (cat.perm_approve_payments or cat.perm_approve_invoices))
+
+
+def user_may_create_invoice(user: User, db: Session) -> bool:
+    return user_may_post_office(user, db) or user_may_approve_invoice(user, db)

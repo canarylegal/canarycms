@@ -95,3 +95,11 @@ Before activating any schedule, the operator must choose and record: maximum acc
 For cold-host acceptance, use an empty, separate Docker daemon with registry access unavailable; recover using only the encrypted bundle, separately held export key and matching recovery tooling. Verify original-secret counts, document/history checks, calendar and package hashes, authenticated matter/document/ledger access and removal of isolated resources. Do not remove images from a live daemon to simulate a disaster. Record acquisition, data restore, readiness and verification times separately.
 
 Keep `DATA_LEGACY_JWT_SECRET` private and preserve it through later deployments/backups until all legacy ciphertext has been migrated and verified. The existing re-encryption utility does not cover every optional-provider field; running it alone is not evidence that this recovery key can be discarded.
+
+## API documentation and upload ingress
+
+`/api/docs`, `/api/redoc` and `/api/openapi.json` require an authenticated firm administrator (including the existing administrative permission category). An administrator's normal session cookie works; Bearer tokens are also supported. Responses are private and not cacheable. Direct backend routes enforce the same checks.
+
+Invoice creation requires matter access and either office-posting or invoice-approval permission. The service refreshes and locks the actor and permission category before allocating an invoice number, reserving time or posting a pending office debit. Invoice approval remains a separate permission check.
+
+The nginx API upload locations for case files, portal grant files, portal form uploads and precedents cap request bodies at 26 MiB: the default 25 MiB file limit plus 1 MiB for multipart metadata. The backend independently counts request bytes before multipart parsing, including chunked requests. Accepted bodies are staged with a bounded temporary spool; allow temporary disk capacity for concurrent uploads. Per-file validation still rejects files over 25 MiB. If changing `CANARY_UPLOAD_MAX_BYTES`, coordinate the matching nginx route limits and rebuild the frontend image. OnlyOffice and WebDAV retain their separate existing limits; the general nginx ceiling remains 500 MiB.
