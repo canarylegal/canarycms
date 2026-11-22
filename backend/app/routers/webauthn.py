@@ -6,6 +6,7 @@ import base64
 import json
 import logging
 import os
+import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -24,6 +25,7 @@ from webauthn import (
 )
 from webauthn.helpers.parse_authentication_credential_json import parse_authentication_credential_json
 from webauthn.helpers.parse_registration_credential_json import parse_registration_credential_json
+from webauthn.helpers.exceptions import WebAuthnException
 from webauthn.helpers.structs import (
     AuthenticatorSelectionCriteria,
     PublicKeyCredentialDescriptor,
@@ -40,6 +42,7 @@ from app.password_reset_service import login_access_token
 from app.schemas import TokenResponse
 from app.security import create_access_token, bump_auth_token_version
 from app.session_cookie import attach_session_cookie
+from app.webauthn_rate_limit import limit_passkey_request
 
 router = APIRouter(prefix="/auth/webauthn", tags=["webauthn"])
 log = logging.getLogger(__name__)
@@ -151,6 +154,27 @@ class WebAuthnCredentialOut(BaseModel):
     created_at: datetime
 
 
+def _password_session(request: Request, db: Session, email: str):
+    """Allow legacy credential discovery only to a current session for that account."""
+    from fastapi.security import HTTPAuthorizationCredentials
+    from fastapi.security.utils import get_authorization_scheme_param
+    from app.deps import _jwt_raw_from_request
+    from app.security import decode_access_token
+
+    scheme, token = get_authorization_scheme_param(request.headers.get("authorization"))
+    creds = HTTPAuthorizationCredentials(scheme=scheme, credentials=token) if scheme.lower() == "bearer" and token else None
+    try:
+        claims = decode_access_token(_jwt_raw_from_request(request, creds) or "")
+        user_id = uuid.UUID(claims.user_id)
+    except (ValueError, TypeError):
+        return None
+    user = db.execute(select(User).where(User.id == user_id)).scalar_one_or_none()
+    if (user is None or not user.is_active or user.email.lower().strip() != email
+            or claims.auth_token_version != user.auth_token_version):
+        return None
+    return user
+
+
 @router.post("/login/begin")
 def webauthn_login_begin(
     payload: WebAuthnLoginBeginIn,
@@ -158,23 +182,27 @@ def webauthn_login_begin(
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
     email = str(payload.email).lower().strip()
-    user = db.execute(select(User).where(User.email == email)).scalar_one_or_none()
-    if not user or not user.is_active:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
-
-    creds = db.execute(select(WebAuthnCredential).where(WebAuthnCredential.user_id == user.id)).scalars().all()
-    if not creds:
-        # Same status/body as unknown accounts (CL-16 account enumeration).
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
-
+    limit_passkey_request(db, request, email, "begin")
+    # Anonymous options never depend on whether the supplied account exists.
+    session_user = _password_session(request, db, email)
+    allow = []
+    if session_user is not None:
+        creds = db.execute(select(WebAuthnCredential).where(WebAuthnCredential.user_id == session_user.id)).scalars().all()
+        allow = [PublicKeyCredentialDescriptor(id=c.credential_id) for c in creds]
+    attempt = uuid.uuid4()
+    challenge = attempt.bytes + secrets.token_bytes(16)
     rp_id = _rp_id_for_request(request)
-    allow = [PublicKeyCredentialDescriptor(id=c.credential_id) for c in creds]
+    origin = _expected_origin(request)
     options = generate_authentication_options(
-        rp_id=rp_id,
-        allow_credentials=allow,
-        user_verification=UserVerificationRequirement.PREFERRED,
+        rp_id=rp_id, challenge=challenge, allow_credentials=allow,
+        user_verification=UserVerificationRequirement.PREFERRED if session_user else UserVerificationRequirement.REQUIRED,
     )
-    _store_challenge(db, kind="login_begin", subject=email, challenge=options.challenge)
+    _purge_expired_challenges(db)
+    db.add(WebAuthnChallenge(id=attempt, kind="login_v2", subject=email,
+        challenge_b64=json.dumps({"challenge": _b64url_encode(challenge), "origin": origin, "rp_id": rp_id,
+            "session_version": session_user.auth_token_version if session_user else None}),
+        expires_at=datetime.now(timezone.utc) + _CHALLENGE_TTL))
+    db.commit()
     return json.loads(options_to_json(options))
 
 
@@ -186,50 +214,53 @@ def webauthn_login_finish(
     db: Session = Depends(get_db),
 ) -> TokenResponse:
     email = str(payload.email).lower().strip()
-    user = db.execute(select(User).where(User.email == email)).scalar_one_or_none()
-    if not user or not user.is_active:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
-
-    expected_challenge = _pop_challenge(db, kind="login_begin", subject=email)
-    rp_id = _rp_id_for_request(request)
-    origin = _expected_origin(request)
-
-    auth_cred = parse_authentication_credential_json(json.dumps(payload.credential))
-
-    raw_id = auth_cred.raw_id
-    cred_row = (
-        db.execute(
-            select(WebAuthnCredential).where(
-                WebAuthnCredential.user_id == user.id,
-                WebAuthnCredential.credential_id == raw_id,
-            )
+    limit_passkey_request(db, request, email, "finish")
+    try:
+        auth_cred = parse_authentication_credential_json(json.dumps(payload.credential))
+        client_data = json.loads(auth_cred.response.client_data_json)
+        challenge = base64url_to_bytes(client_data["challenge"])
+        if len(challenge) != 32:
+            raise ValueError("Invalid challenge")
+        # DELETE RETURNING makes each independent attempt single-use, including races.
+        stored = db.execute(delete(WebAuthnChallenge).where(
+            WebAuthnChallenge.id == uuid.UUID(bytes=challenge[:16]),
+            WebAuthnChallenge.kind == "login_v2", WebAuthnChallenge.subject == email,
+            WebAuthnChallenge.expires_at > datetime.now(timezone.utc),
+        ).returning(WebAuthnChallenge.challenge_b64)).scalar_one_or_none()
+        db.commit()
+        if stored is None:
+            raise ValueError("Missing challenge")
+        attempt = json.loads(stored)
+        if attempt["origin"] != _expected_origin(request) or attempt["rp_id"] != _rp_id_for_request(request):
+            raise ValueError("Origin changed")
+        user = db.execute(select(User).where(User.email == email).with_for_update()
+            .execution_options(populate_existing=True)).scalar_one_or_none()
+        if user is None or not user.is_active:
+            raise ValueError("Invalid account")
+        version = attempt["session_version"]
+        if version is not None and version != user.auth_token_version:
+            raise ValueError("Session revoked")
+        cred_row = db.execute(select(WebAuthnCredential).where(
+            WebAuthnCredential.user_id == user.id, WebAuthnCredential.credential_id == auth_cred.raw_id,
+        ).with_for_update().execution_options(populate_existing=True)).scalar_one_or_none()
+        if cred_row is None:
+            raise ValueError("Invalid credential")
+        handle = auth_cred.response.user_handle
+        if (handle is not None and handle != user.id.bytes) or (version is None and handle is None):
+            raise ValueError("Invalid user handle")
+        verification = verify_authentication_response(
+            credential=auth_cred, expected_challenge=base64url_to_bytes(attempt["challenge"]),
+            expected_origin=attempt["origin"], expected_rp_id=attempt["rp_id"],
+            credential_public_key=cred_row.public_key, credential_current_sign_count=cred_row.sign_count,
+            require_user_verification=version is None,
         )
-        .scalars()
-        .first()
-    )
-    if cred_row is None:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unknown passkey.")
-
-    verification = verify_authentication_response(
-        credential=auth_cred,
-        expected_challenge=expected_challenge,
-        expected_origin=origin,
-        expected_rp_id=rp_id,
-        credential_public_key=cred_row.public_key,
-        credential_current_sign_count=cred_row.sign_count,
-        require_user_verification=False,
-    )
-
+    except (ValueError, TypeError, KeyError, HTTPException, WebAuthnException) as exc:
+        db.rollback()
+        raise HTTPException(401, "Passkey sign-in failed. Start again.") from exc
     cred_row.sign_count = verification.new_sign_count
     db.add(cred_row)
-    log_event(
-        db,
-        actor_user_id=user.id,
-        action="auth.login.passkey",
-        entity_type="user",
-        entity_id=str(user.id),
-        meta={"email": user.email},
-    )
+    log_event(db, actor_user_id=user.id, action="auth.login.passkey", entity_type="user",
+        entity_id=str(user.id), meta={"email": user.email})
     db.commit()
     token = login_access_token(db, user, mfa_verified=True)
     attach_session_cookie(response, token, request=request)
@@ -259,7 +290,7 @@ def webauthn_register_begin(
         user_display_name=user.display_name,
         exclude_credentials=exclude or None,
         authenticator_selection=AuthenticatorSelectionCriteria(
-            resident_key=ResidentKeyRequirement.PREFERRED,
+            resident_key=ResidentKeyRequirement.REQUIRED,
             user_verification=UserVerificationRequirement.PREFERRED,
         ),
     )

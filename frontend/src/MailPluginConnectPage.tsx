@@ -251,6 +251,26 @@ export default function MailPluginConnectPage() {
     void loadMe(COOKIE_SESSION_TOKEN, { quiet: true })
   }, [loadMe, params])
 
+  async function verifyPasskey() {
+    if (!me || busy) return
+    setBusy(true)
+    setError(null)
+    try {
+      const options = await apiFetch<PublicKeyCredentialRequestOptionsJSON>('/auth/webauthn/login/begin', {
+        method: 'POST', token, json: { email: me.email },
+      })
+      const credential = await startAuthentication({ optionsJSON: options })
+      await apiFetch<TokenResponse>('/auth/webauthn/login/finish', {
+        method: 'POST', token, json: { email: me.email, credential },
+      })
+      await loadMe(COOKIE_SESSION_TOKEN)
+    } catch (e: unknown) {
+      setError((e as ApiError).message ?? 'Passkey sign-in failed')
+    } finally {
+      setBusy(false)
+    }
+  }
+
   async function authorize() {
     if ('error' in params || !signedIn || !me) return
     const block = sessionReadyForAuthorize(me)
@@ -326,6 +346,11 @@ export default function MailPluginConnectPage() {
             computer?
           </p>
           {authorizeBlock ? <div className="error">{authorizeBlock}</div> : null}
+          {me.session_second_factor_verified === false ? (
+            <button type="button" className="btn" disabled={busy} onClick={() => void verifyPasskey()}>
+              Verify with passkey
+            </button>
+          ) : null}
           {error ? <div className="error">{error}</div> : null}
           <div className="loginActionsRow" style={{ marginTop: 16 }}>
             <button

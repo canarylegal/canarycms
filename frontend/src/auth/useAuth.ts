@@ -163,6 +163,8 @@ export function useAuth() {
           json: { email: emailNorm, credential: assertion },
         })
         setToken(COOKIE_SESSION_TOKEN)
+        // The cookie marker may already be set after password login; refresh MFA state explicitly.
+        setMe(await apiFetch<UserPublic>('/auth/me', { token: COOKIE_SESSION_TOKEN }))
       } catch (e: unknown) {
         setLoginError((e as ApiError).message ?? 'Passkey sign-in failed')
       }

@@ -1,0 +1,13 @@
+# Passkey login privacy
+
+Anonymous login/begin responses use discoverable credentials and contain no credential IDs. Active users with keys, users without keys, inactive users and unknown addresses receive the same options apart from a random challenge. User verification is required for passwordless login. New registrations request resident credentials.
+
+Existing non-resident security keys remain usable: sign in with a password, then use the passkey verification button. Only a current session for the exact account can obtain its credential allow-list. This flow requires possession of the key; passwordless discovery additionally requires authenticator user verification. The existing session version is captured in the attempt and checked again on completion, so a reset invalidates pending legacy-key verification. The main app and mail-plugin connection page refresh session verification after completion.
+
+Each attempt lasts five minutes and has an independent, single-use challenge. Login completion atomically consumes the challenge, checks the stored RP and origin, locks the active user and credential, validates the user handle and signature, and updates the signature counter. Invalid accounts, malformed assertions, unknown keys, replay and expired attempts receive the same 401 message. Old email-scoped in-flight login challenges must be restarted after deployment; registered keys are retained. No schema migration is required.
+
+Both public endpoints count all requests using PostgreSQL atomic upserts. Defaults are 60 requests per client IP and 10 per account/IP pair per 60-second fixed window, independently for begin and finish. Limits never depend on account existence. A different IP cannot lock an entire account. Client IP comes from the ASGI scope after trusted-proxy handling, never directly from an arbitrary forwarded header. Responses include Retry-After when limited. Expired buckets are pruned after ten minutes.
+
+Settings: WEBAUTHN_RATE_WINDOW_SECONDS; WEBAUTHN_BEGIN_IP_MAX_ATTEMPTS; WEBAUTHN_BEGIN_ACCOUNT_IP_MAX_ATTEMPTS; WEBAUTHN_FINISH_IP_MAX_ATTEMPTS; WEBAUTHN_FINISH_ACCOUNT_IP_MAX_ATTEMPTS. These budgets are shared by users behind the same public IP, so review them for unusually large shared networks.
+
+Regression coverage: tests/test_passkey_privacy.py uses actual ES256 signatures and migrated PostgreSQL, including concurrent challenge consumption and first-insert rate-limit races. Frontend tests cover refreshing an existing cookie session and both mail-plugin connection flows. Browser validation uses Chromium virtual authenticators with synthetic resident and non-resident credentials; physical hardware and other browsers still require release acceptance testing.
