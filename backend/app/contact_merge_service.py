@@ -9,6 +9,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import delete, func, inspect, select
 from sqlalchemy.orm import Session
 
+from app.admin_access import user_effective_admin
 from app.audit import log_event
 from app.models import (
     CanarySignRecipient,
@@ -364,6 +365,8 @@ def merge_contacts(
     source_id: uuid.UUID,
     actor: User,
 ) -> ContactMergeResult:
+    if not user_effective_admin(actor, db):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin required to merge contacts")
     preview = preview_contact_merge(db, survivor_id=survivor_id, source_id=source_id)
     survivor = preview.survivor
     source = preview.source

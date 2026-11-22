@@ -378,8 +378,24 @@ def outlook_plugin_get_pending_eml_open(
     if not cid or not fid or not exp:
         db.commit()
         return OutlookPluginPendingEmlOpenOut(active=False)
+    try:
+        require_case_access(cid, user, db)
+    except HTTPException:
+        row.outlook_pending_eml_open_case_id = None
+        row.outlook_pending_eml_open_file_id = None
+        row.outlook_pending_eml_open_expires_at = None
+        row.updated_at = _utcnow()
+        db.commit()
+        return OutlookPluginPendingEmlOpenOut(active=False)
     frow = db.get(DbFile, fid)
-    filename = frow.original_filename if frow else None
+    if not frow or frow.case_id != cid or not _row_is_eml_like(frow):
+        row.outlook_pending_eml_open_case_id = None
+        row.outlook_pending_eml_open_file_id = None
+        row.outlook_pending_eml_open_expires_at = None
+        row.updated_at = _utcnow()
+        db.commit()
+        return OutlookPluginPendingEmlOpenOut(active=False)
+    filename = frow.original_filename
     db.commit()
     return OutlookPluginPendingEmlOpenOut(
         active=True,

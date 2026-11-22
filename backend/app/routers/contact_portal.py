@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.contact_permissions import require_contact_portal_access
 from app.audit import log_event
 from app.db import get_db
 from app.deps import get_current_user, require_case_access
@@ -187,6 +188,7 @@ def get_contact_portal_access(
     db: Session = Depends(get_db),
 ) -> ContactPortalAccessOut:
     _get_contact_or_404(db, contact_id)
+    require_contact_portal_access(db, user, contact_id)
     row = db.execute(select(ContactPortalAccess).where(ContactPortalAccess.contact_id == contact_id)).scalar_one_or_none()
     out = _access_out(row)
     if row is None:
@@ -202,6 +204,7 @@ def update_contact_portal_notification_prefs(
     db: Session = Depends(get_db),
 ) -> ContactPortalNotificationPrefsOut:
     _get_contact_or_404(db, contact_id)
+    require_contact_portal_access(db, user, contact_id)
     row = db.execute(select(ContactPortalAccess).where(ContactPortalAccess.contact_id == contact_id)).scalar_one_or_none()
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Portal access is not set up for this contact")
@@ -215,6 +218,12 @@ def update_contact_portal_notification_prefs(
         notify_files_added=bool(row.notify_files_added),
         notify_folder_shared=bool(row.notify_folder_shared),
     )
+
+
+def _require_conflict_access(db: Session, user: User, contact_id: uuid.UUID) -> None:
+    conflict = find_active_portal_email_conflict(db, contact_id=contact_id)
+    if conflict is not None:
+        require_contact_portal_access(db, user, conflict.other_contact.id)
 
 
 def _require_matter_portal_for_access_action(
@@ -247,6 +256,7 @@ def create_contact_portal_access(
     db: Session = Depends(get_db),
 ) -> ContactPortalAccessCreateOut:
     _get_contact_or_404(db, contact_id)
+    require_contact_portal_access(db, user, contact_id)
     _require_matter_portal_for_access_action(db, user=user, contact_id=contact_id, case_id=payload.case_id)
     contact = db.get(Contact, contact_id)
     assert contact is not None
@@ -254,6 +264,7 @@ def create_contact_portal_access(
     if existing is not None and portal_access_is_active(existing):
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Portal access already exists; rotate the code instead")
 
+    _require_conflict_access(db, user, contact_id)
     conflict = require_no_unresolved_portal_email_conflict(
         db, contact_id=contact_id, conflict_resolution=payload.conflict_resolution
     )
@@ -335,6 +346,7 @@ def send_contact_portal_access_email(
 ) -> None:
     """Send portal access invite e-mail when staff opts in (code must match current access)."""
     contact = _get_contact_or_404(db, contact_id)
+    require_contact_portal_access(db, user, contact_id)
     row = db.execute(select(ContactPortalAccess).where(ContactPortalAccess.contact_id == contact_id)).scalar_one_or_none()
     if row is None or not portal_access_is_active(row):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Portal access is not active for this contact")
@@ -355,6 +367,7 @@ def rotate_contact_portal_access(
     db: Session = Depends(get_db),
 ) -> ContactPortalAccessCreateOut:
     _get_contact_or_404(db, contact_id)
+    require_contact_portal_access(db, user, contact_id)
     _require_matter_portal_for_access_action(db, user=user, contact_id=contact_id, case_id=payload.case_id)
     contact = db.get(Contact, contact_id)
     assert contact is not None
@@ -362,6 +375,7 @@ def rotate_contact_portal_access(
     # Rotating an already-active login on this contact does not create a second e-mail login.
     needs_conflict_check = row is None or not portal_access_is_active(row)
     if needs_conflict_check:
+        _require_conflict_access(db, user, contact_id)
         conflict = require_no_unresolved_portal_email_conflict(
             db, contact_id=contact_id, conflict_resolution=payload.conflict_resolution
         )
@@ -439,6 +453,7 @@ def update_contact_portal_access(
     db: Session = Depends(get_db),
 ) -> ContactPortalAccessOut:
     _get_contact_or_404(db, contact_id)
+    require_contact_portal_access(db, user, contact_id)
     row = db.execute(select(ContactPortalAccess).where(ContactPortalAccess.contact_id == contact_id)).scalar_one_or_none()
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Portal access is not set up for this contact")
@@ -446,6 +461,7 @@ def update_contact_portal_access(
     disabling = "enabled" in data and data["enabled"] is False and bool(row.enabled)
     enabling = "enabled" in data and data["enabled"] is True and not portal_access_is_active(row)
     if enabling:
+        _require_conflict_access(db, user, contact_id)
         conflict = find_active_portal_email_conflict(db, contact_id=contact_id)
         if conflict is not None:
             from app.portal_email_conflict import raise_portal_email_conflict
@@ -479,6 +495,7 @@ def delete_contact_portal_access(
     db: Session = Depends(get_db),
 ) -> None:
     _get_contact_or_404(db, contact_id)
+    require_contact_portal_access(db, user, contact_id)
     row = db.execute(select(ContactPortalAccess).where(ContactPortalAccess.contact_id == contact_id)).scalar_one_or_none()
     grants = db.execute(select(ContactPortalGrant).where(ContactPortalGrant.contact_id == contact_id)).scalars().all()
     for grant in grants:
@@ -506,6 +523,7 @@ def list_contact_portal_grants(
     db: Session = Depends(get_db),
 ) -> list[ContactPortalGrantOut]:
     _get_contact_or_404(db, contact_id)
+    require_contact_portal_access(db, user, contact_id)
     rows = db.execute(select(ContactPortalGrant).where(ContactPortalGrant.contact_id == contact_id).order_by(ContactPortalGrant.created_at.desc())).scalars().all()
     return [_grant_out(db, g) for g in rows]
 

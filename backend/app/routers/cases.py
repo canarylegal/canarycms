@@ -418,6 +418,16 @@ def update_case(
         if not firm_client_portal_enabled(db):
             data["portal_enabled"] = False
 
+    if (
+        "fee_earner_user_id" in data
+        and data["fee_earner_user_id"] != case.fee_earner_user_id
+        and not (user_effective_admin(user, db) or user.id == case.fee_earner_user_id)
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only the fee earner or an administrator may reassign the fee earner.",
+        )
+
     if "fee_earner_user_id" in data:
         if data["fee_earner_user_id"] is None:
             raise HTTPException(

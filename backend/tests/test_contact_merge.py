@@ -23,6 +23,7 @@ from app.models import (
     ContactType,
     MatterPortalAccess,
     User,
+    UserRole,
 )
 from app.portal_service import hash_access_code, store_matter_portal_access_code, store_portal_access_code
 
@@ -59,7 +60,8 @@ def _user(db: Session) -> User:
         id=uid,
         email=f"u-{uid.hex[:6]}@example.com",
         password_hash="x",
-        display_name="Staff",
+        display_name="Administrator",
+        role=UserRole.admin,
         initials="ST",
         created_at=datetime.utcnow(),
         updated_at=datetime.utcnow(),

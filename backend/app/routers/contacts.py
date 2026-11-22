@@ -9,7 +9,7 @@ from app.audit import log_event
 from app.contact_merge_service import merge_contacts, preview_contact_merge
 from app.contact_validation import ensure_organisation_trading_name
 from app.db import get_db
-from app.deps import get_current_user
+from app.deps import get_current_user, require_firm_admin
 from app.list_search import reject_search_nul, search_contacts
 from app.models import Contact, ContactType, User
 from app.schemas import (
@@ -105,7 +105,7 @@ def update_contact(
 def get_contact_merge_preview(
     contact_id: uuid.UUID,
     source_contact_id: uuid.UUID = Query(..., description="Duplicate contact to absorb"),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_firm_admin),
     db: Session = Depends(get_db),
 ) -> ContactMergePreviewOut:
     preview = preview_contact_merge(db, survivor_id=contact_id, source_id=source_contact_id)
@@ -131,7 +131,7 @@ def get_contact_merge_preview(
 def post_contact_merge(
     contact_id: uuid.UUID,
     payload: ContactMergeIn,
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_firm_admin),
     db: Session = Depends(get_db),
 ) -> ContactMergeOut:
     result = merge_contacts(
