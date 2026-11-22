@@ -1,4 +1,4 @@
-"""Authorize both sides of a global merge before disclosing or changing records."""
+"""Authorize shared-contact operations across every affected matter and record."""
 
 import uuid
 
@@ -30,12 +30,13 @@ INDIRECT_MATTER_RECORDS = (
 GLOBAL_RECORDS = (ContactPortalAccess, PortalLoginOtp)
 
 
-def require_contact_merge_access(
-    db: Session, actor: User, contact_ids: tuple[uuid.UUID, uuid.UUID], *, lock: bool = False,
+def require_contact_mutation_access(
+    db: Session, actor: User, contact_ids: tuple[uuid.UUID, ...], *, lock: bool = True,
+    operation: str = "Shared contact changes",
 ) -> None:
     """Matter access is also the existing read permission for affected record types.
 
-    On merge, lock contacts (blocking new FK references), existing references and
+    For mutations, lock contacts (blocking new FK references), existing references and
     their parents, then matters and ACL rows. Check fresh state in the same
     transaction as the merge. Preview is advisory and takes no write locks.
     """
@@ -90,4 +91,10 @@ def require_contact_merge_access(
                 require_case_access(case_id, actor, db)
             except HTTPException as exc:
                 # Do not disclose which inaccessible matter or record was found.
-                raise HTTPException(403, 'Merge requires access to every affected matter and record') from exc
+                raise HTTPException(403, f'{operation} require access to every affected matter and record') from exc
+
+
+def require_contact_merge_access(
+    db: Session, actor: User, contact_ids: tuple[uuid.UUID, uuid.UUID], *, lock: bool = False,
+) -> None:
+    require_contact_mutation_access(db, actor, contact_ids, lock=lock, operation="Contact merges")

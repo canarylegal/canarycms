@@ -79,6 +79,8 @@ def update_contact(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> ContactOut:
+    from app.contact_merge_permissions import require_contact_mutation_access
+    require_contact_mutation_access(db, user, (contact_id,))
     contact = db.get(Contact, contact_id)
     if not contact:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Contact not found")

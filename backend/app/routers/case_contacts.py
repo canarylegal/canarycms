@@ -142,6 +142,16 @@ def update_case_contact(
 
     data = payload.model_dump(exclude_unset=True)
     push_to_global = bool(data.pop("push_to_global", False))
+    if push_to_global and cc.contact_id:
+        from app.contact_merge_permissions import require_contact_mutation_access
+        original_contact_id = cc.contact_id
+        # Authorize before mutating either the snapshot or the shared card.
+        # Use the same contact -> references -> matters lock order as merges.
+        require_contact_mutation_access(db, user, (original_contact_id,))
+        cc = db.execute(select(CaseContact).where(CaseContact.id == case_contact_id)
+            .with_for_update().execution_options(populate_existing=True)).scalar_one_or_none()
+        if cc is None or cc.case_id != case_id or cc.contact_id != original_contact_id:
+            raise HTTPException(409, "Matter contact changed. Reload before saving.")
     lawyer_ids_in_payload = "lawyer_client_ids" in data
     lawyer_ids_value = data.pop("lawyer_client_ids", None) if lawyer_ids_in_payload else None
 
