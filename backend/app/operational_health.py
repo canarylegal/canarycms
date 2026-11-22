@@ -4,9 +4,18 @@ import json
 import os
 import shutil
 import tempfile
+from functools import lru_cache
+from pathlib import Path
+from alembic.script import ScriptDirectory
 from urllib.request import urlopen
 from sqlalchemy import create_engine, text
 from sqlalchemy.pool import NullPool
+
+
+@lru_cache(maxsize=1)
+def _expected_schema_heads():
+    # Resolve relative to the installed backend, not the process working directory.
+    return frozenset(ScriptDirectory(str(Path(__file__).resolve().parents[1] / 'alembic')).get_heads())
 
 
 def database_probe():
@@ -16,7 +25,17 @@ def database_probe():
     engine = create_engine(DATABASE_URL, poolclass=NullPool, connect_args=options)
     try:
         with engine.connect() as connection:
-            connection.execute(text('SELECT 1'))
+            heads = frozenset(connection.execute(text('SELECT version_num FROM alembic_version')).scalars())
+            if not heads or heads != _expected_schema_heads():
+                return {'status': 'failed', 'code': 'database_schema_mismatch'}
+            # A stamped but empty/partial database is not ready. Zero-row selects
+            # check essential tables/columns without reading any firm records.
+            for statement in (
+                'SELECT id, email FROM "user" WHERE 1=0',
+                'SELECT id, fee_earner_user_id FROM "case" WHERE 1=0',
+                'SELECT id, case_id, storage_path, version FROM "file" WHERE 1=0',
+            ):
+                connection.execute(text(statement))
         return {'status': 'ok'}
     finally:
         engine.dispose()

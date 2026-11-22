@@ -120,7 +120,7 @@ def test_get_db_commits_pending_work_on_success() -> None:
         dbmod.SessionLocal = original
 
 
-def test_commit_keeping_stored_file_unlinks_on_commit_failure(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_commit_keeping_stored_file_retains_on_uncertain_commit(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
     from pathlib import Path
 
     from app import file_storage as fs
@@ -135,7 +135,8 @@ def test_commit_keeping_stored_file_unlinks_on_commit_failure(tmp_path, monkeypa
 
     with pytest.raises(RuntimeError, match="db down"):
         fs.commit_keeping_stored_file(BoomDb(), target)
-    assert not target.exists()
+    # Failure may mean the acknowledgement was lost after a successful commit.
+    assert target.read_bytes() == b"x"
 
 
 def test_pending_stored_file_keeps_after_keep(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:

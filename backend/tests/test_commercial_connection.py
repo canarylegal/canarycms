@@ -214,12 +214,12 @@ def test_service_status_and_vault_routes_require_admin(env):
 
 def test_transport_redacts_errors_and_refuses_redirect(monkeypatch):
     import httpx
-    real=httpx.Client
+    real=httpx.AsyncClient
     seen=[]
     def respond(request):
         seen.append(str(request.url))
         return httpx.Response(302,headers={'Location':'https://evil.test'},json={'password':'must-not-escape'})
-    monkeypatch.setattr(t.httpx,'Client',lambda **kw:real(transport=httpx.MockTransport(respond),**kw))
+    monkeypatch.setattr(t.httpx,'AsyncClient',lambda **kw:real(transport=httpx.MockTransport(respond),**kw))
     with pytest.raises(t.ConnectionError,match='remote_rejected') as err:
         t.Transport('https://commercial.example.test').request('POST','/v1/operations/x',{'credentials':{'password':'synthetic'}})
     assert 'must-not-escape' not in str(err.value) and len(seen)==1
@@ -265,7 +265,7 @@ def test_concurrent_disconnect_response_cannot_reconnect_or_apply(env,monkeypatc
 
 def test_serialized_contract_through_real_http_transport(env,monkeypatch):
     import httpx
-    real=httpx.Client
+    real=httpx.AsyncClient
     fake=FakeService('https://commercial.example.test')
     captured=[]
     def respond(request):
@@ -274,7 +274,7 @@ def test_serialized_contract_through_real_http_transport(env,monkeypatch):
         body=json.loads(request.content) if request.content else None
         captured.append(body)
         return httpx.Response(200,json=fake.request(request.method,request.url.path,body))
-    monkeypatch.setattr(t.httpx,'Client',lambda **kw:real(transport=httpx.MockTransport(respond),**kw))
+    monkeypatch.setattr(t.httpx,'AsyncClient',lambda **kw:real(transport=httpx.MockTransport(respond),**kw))
     monkeypatch.setattr(c,'Transport',t.Transport)
     op=prepare(env)
     assert c.exchange(env.db,env.actor,op.id).state=='completed'
@@ -304,6 +304,6 @@ def test_adapter_rollback_cannot_be_recorded_as_applied(env):
 
 def test_transport_size_limit(env,monkeypatch):
     import httpx
-    real=httpx.Client
-    monkeypatch.setattr(t.httpx,'Client',lambda **kw:real(transport=httpx.MockTransport(lambda r:httpx.Response(200,content=b'x'*(t.MAX_BYTES+1))),**kw))
+    real=httpx.AsyncClient
+    monkeypatch.setattr(t.httpx,'AsyncClient',lambda **kw:real(transport=httpx.MockTransport(lambda r:httpx.Response(200,content=b'x'*(t.MAX_BYTES+1))),**kw))
     with pytest.raises(t.ConnectionError,match='invalid_response'):t.Transport('https://commercial.example.test').request('GET','/v1/operations/synthetic')

@@ -5,7 +5,7 @@ These host jobs are **opt-in**. Building, testing or deploying this code does no
 ## Health and diagnostics
 
 - `/api/health` remains the lightweight process/build liveness endpoint.
-- `/api/health/ready` returns only `ready` (200) or `not_ready` (503), based on a bounded database query and file-storage write/read/free-space check. It does not create a missing storage directory. `CANARY_STORAGE_MIN_FREE_BYTES` defaults to 512 MiB.
+- `/api/health/ready` returns only `ready` (200) or `not_ready` (503), based on bounded database checks and a file-storage write/read/free-space check. Database readiness requires the installed Core Alembic heads and essential user, matter and file tables/columns; a reachable empty, outdated or partially stamped database is not ready. These checks do not migrate or repair the schema and are not a complete schema-integrity audit. It does not create a missing storage directory. `CANARY_STORAGE_MIN_FREE_BYTES` defaults to 512 MiB.
 - `/api/admin/health` requires an administrator and reports database, storage and ONLYOFFICE independently. An ONLYOFFICE failure degrades document editing without marking the whole application unavailable.
 - The host monitor checks the same dependencies, public HTTPS reachability, latest backup success and latest recovery success. Missing, failed, future-dated or stale results fail the check. Public access failure may be caused by VPN, DNS, connectivity or ingress; it is not attributed to an application defect.
 

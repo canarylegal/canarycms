@@ -164,6 +164,14 @@ def update_comment_file(
 
     raise_if_files_checked_out(db, [file_id], action="edit")
 
+    row = lock_document(db, row)
+    if row.case_id != case_id:
+        raise HTTPException(status_code=404, detail="File not found")
+    if (row.category != FileCategory.case_document
+            or Path(row.original_filename or "").suffix.lower() != ".txt"
+            or (row.mime_type or "").split(";", 1)[0].strip().lower() != "text/plain"):
+        raise HTTPException(status_code=400, detail="Only plain-text documents can be edited as comments")
+
     ensure_files_root()
 
     # Derive new filename from first line (≤80 chars)
@@ -173,7 +181,6 @@ def update_comment_file(
     old_filename = row.original_filename
     new_name = first_line + ".txt"
 
-    row = lock_document(db, row)
     encoded = payload.text.encode("utf-8")
     stage_document_bytes(db, row, encoded, root=FILES_ROOT)
     row.version = (row.version or 1) + 1

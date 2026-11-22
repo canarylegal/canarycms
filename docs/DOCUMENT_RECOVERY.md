@@ -117,3 +117,18 @@ session-release tests assert that no synthetic version bump occurs.
 and real foreign-key cascade recovery. `scripts/test-core-workflows.sh` runs the
 PostgreSQL checks and browser workflows in a disposable stack. No live data or
 scheduled jobs are needed.
+
+## Precedent uploads and comment edits
+
+New precedent upload bytes and parent directories are flushed before publishing
+rows. A failed commit acknowledgement never triggers deletion: the commit may
+already have succeeded. After an error, inspect the precedent reference before
+retrying. A definite rollback can leave an unreferenced candidate; retain it for
+review against committed database references rather than automatically deleting
+it. This change adds no cleanup job or retry receipt for precedent uploads.
+
+The comment-edit endpoint accepts only matter documents with a `.txt` filename
+and `text/plain` MIME type (including charset parameters). It checks the current
+locked row before touching bytes. Other document types and system files cannot
+be converted to text through this endpoint; valid comments retain the existing
+version and recovery behaviour.

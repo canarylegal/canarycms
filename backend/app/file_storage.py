@@ -93,13 +93,15 @@ def unlink_stored_file(abs_path: Path) -> None:
 
 
 def commit_keeping_stored_file(db, abs_path: Path | None) -> None:
-    """Commit ``db``; if commit fails, unlink ``abs_path`` when set (disk/DB orphan guard)."""
-    try:
-        db.commit()
-    except Exception:
-        if abs_path is not None:
-            unlink_stored_file(abs_path)
-        raise
+    """Publish durable bytes without deleting them on an ambiguous commit failure.
+
+    A failed acknowledgement does not prove rollback. Keep the candidate for
+    reconciliation even on a definite rollback; never destroy a committed file.
+    """
+    if abs_path is not None:
+        from app.document_durability import sync_path
+        sync_path(assert_under_files_root(abs_path), FILES_ROOT)
+    db.commit()
 
 
 def commit_keeping_file_row(db, row) -> None:

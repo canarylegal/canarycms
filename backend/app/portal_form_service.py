@@ -767,6 +767,21 @@ def _lock_pending_submission(db, submission, contact):
     return row
 
 
+_MAX_SUBMISSION_UPLOAD_BYTES = 25 * 1024 * 1024
+
+
+async def _read_submission_upload(upload: UploadFile) -> bytearray:
+    """Read no more than the limit plus one sentinel byte, regardless of headers."""
+    raw = bytearray()
+    while True:
+        chunk = await upload.read(min(64 * 1024, _MAX_SUBMISSION_UPLOAD_BYTES + 1 - len(raw)))
+        if not chunk:
+            return raw
+        if len(raw) + len(chunk) > _MAX_SUBMISSION_UPLOAD_BYTES:
+            raise HTTPException(status_code=413, detail="File too large (max 25 MB)")
+        raw.extend(chunk)
+
+
 async def upload_submission_file(
     db: Session,
     *,
@@ -785,11 +800,9 @@ async def upload_submission_file(
     if field is None or field.field_type not in (PortalFormFieldType.file, PortalFormFieldType.files):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid file field")
 
-    raw = await upload.read()
+    raw = await _read_submission_upload(upload)
     if not raw:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Empty file")
-    if len(raw) > 25 * 1024 * 1024:
-        raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="File too large (max 25 MB)")
 
     original = Path(upload.filename or "upload").name
     mime = upload.content_type or "application/octet-stream"
