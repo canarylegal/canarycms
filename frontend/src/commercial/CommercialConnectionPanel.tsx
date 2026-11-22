@@ -14,23 +14,32 @@ export function CommercialConnectionPanel({ token }: { token: string }) {
   const [status, setStatus] = useState<ConnectionStatus | null>(null)
   const [code, setCode] = useState('')
   const [busy, setBusy] = useState(false)
+  const [replacing, setReplacing] = useState(false)
   const [error, setError] = useState('')
-  const generation = useRef(0)
+  const generation = useRef({ value: 0 })
   useEffect(() => {
-    const current = ++generation.current
+    const clock = generation.current
+    const current = ++clock.value
     setStatus(null)
     setCode('')
+    setReplacing(false)
     setError('')
     setBusy(false)
-    void apiFetch<ConnectionStatus>('/commercial-connection/status', { token })
-      .then(value => { if (generation.current === current) setStatus(value) })
-      .catch(() => { if (generation.current === current) setError('Could not read the Commercial connection.') })
-    return () => { generation.current = current + 1 }
+    async function readStatus() {
+      try {
+        const value = await apiFetch<ConnectionStatus>('/commercial-connection/status', { token })
+        if (clock.value === current) setStatus(value)
+      } catch {
+        if (clock.value === current) setError('Could not read the Commercial connection.')
+      }
+    }
+    void readStatus()
+    return () => { clock.value++ }
   }, [token])
 
   async function change(action: 'activate' | 'disconnect') {
     if (!status || busy) return
-    const current = generation.current
+    const current = ++generation.current.value
     setBusy(true)
     setError('')
     const activationCode = code
@@ -42,31 +51,54 @@ export function CommercialConnectionPanel({ token }: { token: string }) {
           ...(action === 'activate' ? { activation_code: activationCode } : {}),
         },
       })
-      if (generation.current === current) setStatus(next)
+      if (generation.current.value === current) { setStatus(next); setReplacing(false) }
     } catch {
-      if (generation.current === current) {
+      if (generation.current.value === current) {
         setError('Connection change could not be confirmed. Check the status before trying again.')
         try {
           const next = await apiFetch<ConnectionStatus>('/commercial-connection/status', { token })
-          if (generation.current === current) setStatus(next)
+          if (generation.current.value === current) setStatus(next)
         } catch { /* Preserve last known status; never infer success. */ }
       }
     } finally {
-      if (generation.current === current) setBusy(false)
+      if (generation.current.value === current) setBusy(false)
     }
   }
 
-  if (!status?.enabled && !status?.connected) return error ? <p role="alert">{error}</p> : null
-  return <section aria-label="Hosted Commercial connection" className="card" style={{ padding: 16, marginBottom: 16 }}>
-    <h3>Hosted Commercial connection</h3>
-    <p>{status.connected ? 'Connected' : 'Not connected'}{!status.enabled ? ' — outbound connection disabled' : ''}</p>
-    <p>Firm credentials and existing matter records stay in this installation. Existing integrations continue to use their current connections.</p>
-    {status.installation_id && <p>Installation: {status.installation_id}</p>}
-    {status.enabled && !status.connected && <form onSubmit={event => { event.preventDefault(); void change('activate') }}>
-      <label>Commercial activation code <input type="password" autoComplete="off" value={code} maxLength={512} disabled={busy} onChange={event => setCode(event.target.value)} /></label>
-      <button type="submit" disabled={busy || !code.trim()}>Connect Commercial</button>
-    </form>}
-    {status.connected && <button type="button" disabled={busy} onClick={() => void change('disconnect')}>Disconnect hosted service locally</button>}
+  async function refresh() {
+    const current = ++generation.current.value
+    setBusy(true)
+    setError('')
+    try {
+      const next = await apiFetch<ConnectionStatus>('/commercial-connection/status', { token })
+      if (generation.current.value === current) setStatus(next)
+    } catch {
+      if (generation.current.value === current) setError('Could not check the Commercial connection. Your saved settings have been retained.')
+    } finally {
+      if (generation.current.value === current) setBusy(false)
+    }
+  }
+
+  return <section aria-label="Canary Commercial licence" className="card" style={{ padding: 16, marginBottom: 16 }}>
+    <h3>Canary Commercial</h3>
+    <p>Connect your self-hosted Canary installation to optional commercial integrations. Your firm uses its own provider accounts and is billed directly by those providers.</p>
+    {!status ? <p>{error ? 'Connection status unavailable.' : 'Loading licence connection…'}</p> : <>
+      <p><strong>{status.connected ? 'Activation recorded on this installation' : 'Not activated'}</strong></p>
+      {status.connected && <p>Live subscription details and included integrations are not available yet. Activation does not automatically connect your provider accounts.</p>}
+      {!status.enabled && <p>Hosted activation is not enabled for this installation. Your existing local integrations and records remain available.</p>}
+      <p>Firm credentials stay in this installation. Existing results and matter records remain accessible if you disconnect.</p>
+      {(!status.connected || replacing) && <form onSubmit={event => { event.preventDefault(); void change('activate') }}>
+        <label>Canary Commercial licence key <input type="password" autoComplete="off" value={code} maxLength={512} disabled={busy || !status.enabled} onChange={event => setCode(event.target.value)} /></label>
+        <button type="submit" disabled={busy || !status.enabled || !code.trim()}>{replacing ? 'Replace licence key' : 'Activate licence'}</button>
+        {replacing && <button type="button" disabled={busy} onClick={() => { setReplacing(false); setCode('') }}>Cancel</button>}
+        <p className="muted">The key is exchanged for a secure local connection and is not displayed or retained afterward.</p>
+      </form>}
+      {status.connected && <div className="row" style={{ gap: 8 }}>
+        {!replacing && <button type="button" disabled={busy || !status.enabled} onClick={() => setReplacing(true)}>Replace licence key</button>}
+        <button type="button" disabled={busy} onClick={() => void change('disconnect')}>Disconnect hosted service locally</button>
+      </div>}
+    </>}
     {error && <p role="alert">{error}</p>}
+    <button type="button" disabled={busy} onClick={() => void refresh()}>Refresh connection status</button>
   </section>
 }
