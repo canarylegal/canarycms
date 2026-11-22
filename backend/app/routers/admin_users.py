@@ -279,12 +279,18 @@ def disable_2fa(
     operator: AuthPrincipal = Depends(require_recovery_operator),
     db: Session = Depends(get_db),
 ) -> None:
-    user = db.get(User, user_id)
+    user = db.execute(select(User).where(User.id == user_id).with_for_update()
+        .execution_options(populate_existing=True)).scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
     user.totp_secret = None
     user.is_2fa_enabled = False
     _clear_user_second_factors(db, user.id)
+    # Serialize with enrollment/redemption and invalidate every pre-reset session.
+    bump_auth_token_version(user)
+    from app.models import WebAuthnChallenge
+    db.execute(delete(WebAuthnChallenge).where(
+        WebAuthnChallenge.kind == "register_begin", WebAuthnChallenge.subject == str(user.id)))
     user.updated_at = datetime.utcnow()
     db.add(user)
     log_event(

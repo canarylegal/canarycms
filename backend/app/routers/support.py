@@ -93,13 +93,11 @@ def submit_support_ticket(
                 body_text=body_text,
             ),
         )
-    except RuntimeError as e:
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(e)) from e
     except Exception as e:
         log.exception("support ticket send failed user=%s", user.email)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"Could not send the ticket e-mail: {e}",
+            detail="Could not send the ticket e-mail. Please try again later.",
         ) from e
 
     log_event(

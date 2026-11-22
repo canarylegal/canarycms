@@ -271,9 +271,13 @@ export default function MailPluginConnectPage() {
         },
       })
       const target = new URL(params.redirectUri)
-      target.searchParams.set('code', res.code)
-      target.searchParams.set('state', params.state)
-      target.searchParams.set('client', params.client)
+      if (params.client === 'thunderbird') {
+        target.hash = new URLSearchParams({ code: res.code, state: params.state, client: params.client }).toString()
+      } else {
+        target.searchParams.set('code', res.code)
+        target.searchParams.set('state', params.state)
+        target.searchParams.set('client', params.client)
+      }
       window.location.replace(target.toString())
     } catch (e: unknown) {
       setError((e as ApiError).message ?? 'Could not authorize the add-in.')
