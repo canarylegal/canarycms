@@ -1,3 +1,9 @@
+x-bounded-logging: &bounded-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
 # Local dev: cloudflared reaches nginx via 127.0.0.1:8080 inside the frontend network namespace.
 # Requires Cloudflare tunnel origin: http://127.0.0.1:8080 (not 172.17.0.1:8080).
 #
@@ -14,6 +20,7 @@ services:
     ports: !reset []
 
   cloudflared-socat:
+    logging: *bounded-logging
     profiles: [prod]
     image: alpine/socat:1.0.5@sha256:539ad796e9d359596dbf4b7b7ce626e37f71bcce0a8af7bd1d2adad7c29ea787
     container_name: canary-cloudflared-socat
@@ -33,6 +40,7 @@ services:
         exec socat TCP-LISTEN:8080,bind=172.17.0.1,fork,reuseaddr TCP:127.0.0.1:80
 
   cloudflared-dev:
+    logging: *bounded-logging
     profiles: [prod]
     image: cloudflare/cloudflared:latest@sha256:6b599ca3e974349ead3286d178da61d291961182ec3fe9c505e1dd02c8ac31b0
     container_name: canary-cloudflared-dev
