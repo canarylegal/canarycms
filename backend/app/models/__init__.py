@@ -330,3 +330,5 @@ from app.models.notification_outbox import NotificationOutbox, NotificationAttem
 from app.models.canary_sign_recovery import CanarySignRecovery
 
 from .portal_contact import PortalMatterBlock
+
+from app.models.commercial_connection import CommercialConnection, CommercialCredential, CommercialOperation, CommercialApplication

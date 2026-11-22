@@ -16,6 +16,7 @@ from app.canary_public_url import get_canary_public_base
 from app.calendar_notification_job import start_calendar_notification_job
 from app.event_tracked_task_job import start_event_tracked_task_job
 from app.webdav_cors_middleware import WebdavPublicCORSMiddleware
+from app.routers import commercial_connection
 from app.commercial_runtime import register_commercial_routers
 from app.routers import (
     admin_audit,
@@ -336,6 +337,7 @@ app.include_router(admin_bank_accounts.router)
 app.include_router(bank_recon.router)
 app.include_router(admin_email_integration.router)
 app.include_router(commercial_package.router)
+app.include_router(commercial_connection.router)
 app.include_router(commercial_modules.router)
 register_commercial_routers(app)
 app.include_router(admin_portal_forms.router)

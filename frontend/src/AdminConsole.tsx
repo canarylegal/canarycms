@@ -1,10 +1,10 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { AdminAudit } from './AdminAudit'
 import { AdminBilling } from './AdminBilling'
 import { AdminBankAccounts } from './AdminBankAccounts'
 import { AdminDeploy } from './AdminDeploy'
+import { CommercialIntegrationsPage } from './commercial/CommercialIntegrationsPage'
 import { AdminEmail } from './AdminEmail'
-import { CommercialAdminIntegrationsSlot } from './commercial/CommercialSlotHosts'
 import { AdminPortalForms } from './AdminPortalForms'
 import { AdminFirmDetails } from './AdminFirmDetails'
 import { AdminMatterContacts } from './AdminMatterContacts'
@@ -13,11 +13,6 @@ import { AdminPrecedents } from './AdminPrecedents'
 import { AdminSubMenus } from './AdminSubMenus'
 import { AdminTasks } from './AdminTasks'
 import { AdminUsers } from './AdminUsers'
-import { apiFetch } from './api'
-import {
-  commercialPackageActive,
-  type CommercialPackageStatus,
-} from './types/commercial'
 
 export { AdminUsers } from './AdminUsers'
 
@@ -38,25 +33,7 @@ export function AdminConsole({ token, refreshMe }: { token: string; refreshMe: (
     | 'precedents'
     | 'audit'
   >('firm')
-  const [commercial, setCommercial] = useState<CommercialPackageStatus | null>(null)
-
-  useEffect(() => {
-    let cancelled = false
-    void apiFetch<CommercialPackageStatus>('/commercial-package/status', { token })
-      .then((s) => {
-        if (!cancelled) setCommercial(s)
-      })
-      .catch(() => {
-        if (!cancelled) setCommercial(null)
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [token])
-
-  const showIntegrations = commercialPackageActive(commercial)
-  // Fall back when Integrations is selected but the commercial package is not attached.
-  const activeTab = tab === 'integrations' && commercial !== null && !showIntegrations ? 'firm' : tab
+  const activeTab = tab
 
   const adminSubtitle =
     activeTab === 'firm'
@@ -64,7 +41,7 @@ export function AdminConsole({ token, refreshMe }: { token: string; refreshMe: (
       : activeTab === 'email'
       ? 'Org-wide e-mail integration (mailto vs Microsoft 365).'
       : activeTab === 'integrations'
-        ? 'Commercial connectors (DocuSign, Searches, Land Registry, SDLT).'
+        ? 'Canary Commercial licence and provider connections.'
         : activeTab === 'portalForms'
           ? 'Portal form templates sent manually to clients.'
           : activeTab === 'deploy'
@@ -117,11 +94,9 @@ export function AdminConsole({ token, refreshMe }: { token: string; refreshMe: (
           <button type="button" role="tab" aria-selected={activeTab === 'email'} className={`adminTab${activeTab === 'email' ? ' is-active' : ''}`} onClick={() => setTab('email')}>
             E-mail
           </button>
-          {showIntegrations ? (
-            <button type="button" role="tab" aria-selected={activeTab === 'integrations'} className={`adminTab${activeTab === 'integrations' ? ' is-active' : ''}`} onClick={() => setTab('integrations')}>
-              Integrations
-            </button>
-          ) : null}
+          <button type="button" role="tab" aria-selected={activeTab === 'integrations'} className={`adminTab${activeTab === 'integrations' ? ' is-active' : ''}`} onClick={() => setTab('integrations')}>
+            Integrations
+          </button>
           <button type="button" role="tab" aria-selected={activeTab === 'portalForms'} className={`adminTab${activeTab === 'portalForms' ? ' is-active' : ''}`} onClick={() => setTab('portalForms')}>
             Portal forms
           </button>
@@ -158,8 +133,8 @@ export function AdminConsole({ token, refreshMe }: { token: string; refreshMe: (
           <AdminBankAccounts token={token} />
         ) : activeTab === 'email' ? (
           <AdminEmail token={token} onSaved={() => void refreshMe()} />
-        ) : activeTab === 'integrations' && showIntegrations ? (
-          <CommercialAdminIntegrationsSlot token={token} />
+        ) : activeTab === 'integrations' ? (
+          <CommercialIntegrationsPage key={token} token={token} />
         ) : activeTab === 'portalForms' ? (
           <AdminPortalForms token={token} />
         ) : activeTab === 'deploy' ? (
