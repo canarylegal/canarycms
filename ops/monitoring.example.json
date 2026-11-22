@@ -1,0 +1,15 @@
+{
+  "enabled": false,
+  "endpoint": "https://monitoring.example.com/v1/events",
+  "installation_id": "f2db25ec-83e0-4617-87a2-968f45cb3512",
+  "state_dir": "/var/lib/canary-monitoring",
+  "report_file": "/srv/canary-operations/health-status.json",
+  "token_file": "/etc/canary/monitoring-token",
+  "expected_checks": [
+    "application",
+    "database",
+    "storage",
+    "onlyoffice",
+    "public_access"
+  ]
+}
