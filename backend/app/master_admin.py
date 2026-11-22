@@ -11,7 +11,7 @@ import os
 import secrets
 from dataclasses import dataclass
 
-from app.security import verify_totp
+from app.totp_replay import consume_totp
 
 log = logging.getLogger(__name__)
 
@@ -98,6 +98,7 @@ def try_authenticate_master(
     login: str,
     password: str,
     totp_code: str | None,
+    db,
 ) -> tuple[bool, str | None]:
     """Return (ok, error_detail). error_detail is a short client-safe message."""
 
@@ -116,7 +117,7 @@ def try_authenticate_master(
         code = (totp_code or "").strip()
         if not code or not cfg.totp_secret:
             return False, "2FA required"
-        if not verify_totp(secret=cfg.totp_secret, code=code):
+        if not consume_totp(db, secret=cfg.totp_secret, code=code):
             return False, "Invalid 2FA code"
 
     log.info("Master recovery operator signed in (login=%s)", norm)

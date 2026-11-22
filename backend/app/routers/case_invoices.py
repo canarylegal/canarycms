@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from app.download_headers import attachment_content_disposition_headers
+
 import uuid
 
 from fastapi import APIRouter, Body, Depends, HTTPException, status
@@ -99,7 +101,7 @@ def download_invoice_document(
     return StreamingResponse(
         iter([data]),
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        headers={**attachment_content_disposition_headers(filename)},
     )
 
 

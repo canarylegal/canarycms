@@ -1,6 +1,8 @@
 """Staff: bank statement import, match, line recon, EOM, journals, Xero export."""
 from __future__ import annotations
 
+from app.download_headers import attachment_content_disposition_headers
+
 import uuid
 from datetime import date
 
@@ -370,7 +372,7 @@ def eom_download(
     return Response(
         content=row.content,
         media_type=row.content_type,
-        headers={"Content-Disposition": f'attachment; filename="{row.filename}"'},
+        headers={**attachment_content_disposition_headers(row.filename)},
     )
 
 
@@ -484,7 +486,7 @@ def xero_export_download(
     return Response(
         content=row.content,
         media_type=row.content_type,
-        headers={"Content-Disposition": f'attachment; filename="{row.filename}"'},
+        headers={**attachment_content_disposition_headers(row.filename)},
     )
 
 

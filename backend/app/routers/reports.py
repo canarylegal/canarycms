@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from app.download_headers import attachment_content_disposition_headers
+
 from io import BytesIO
 from typing import Annotated, Literal
 
@@ -61,7 +63,7 @@ def _wb_response(wb: Workbook, download_name: str) -> StreamingResponse:
     return StreamingResponse(
         bio,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": f'attachment; filename="{download_name}"'},
+        headers={**attachment_content_disposition_headers(download_name)},
     )
 
 
@@ -1059,7 +1061,7 @@ def post_accountant_pack(
     return StreamingResponse(
         bio,
         media_type="application/zip",
-        headers={"Content-Disposition": f'attachment; filename="{result.filename}"', "Cache-Control": "private, no-store"},
+        headers={**attachment_content_disposition_headers(result.filename), "Cache-Control": "private, no-store"},
     )
 
 

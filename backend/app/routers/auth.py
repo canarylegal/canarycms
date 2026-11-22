@@ -68,8 +68,9 @@ from app.security import (
     generate_totp_secret,
     hash_password,
     verify_password,
-    verify_totp,
+    verify_and_upgrade_password,
 )
+from app.totp_replay import consume_totp
 from app.audit import log_event
 
 log = logging.getLogger(__name__)
@@ -133,6 +134,7 @@ def login(
         login=login_id,
         password=payload.password,
         totp_code=payload.totp_code,
+        db=db,
     )
     if master_err == "Invalid credentials":
         record_staff_login_failure(db, email=login_id, ip=ip)
@@ -145,6 +147,7 @@ def login(
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid 2FA code")
     if master_ok:
         clear_staff_login_rate_limits(db, email=login_id)
+        db.commit()
         token = create_master_recovery_token()
         attach_session_cookie(response, token, request=request)
         return TokenResponse(access_token=token)
@@ -153,10 +156,21 @@ def login(
     if not user or not user.is_active:
         record_staff_login_failure(db, email=login_id, ip=ip)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
-    if not verify_password(payload.password, user.password_hash):
+    checked_hash, checked_version = user.password_hash, user.auth_token_version
+    password_ok, upgraded_hash = verify_and_upgrade_password(payload.password, checked_hash)
+    if not password_ok:
         record_staff_login_failure(db, email=login_id, ip=ip)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
 
+    # Recheck mutable credentials under the same user lock as reset/enrollment.
+    user = db.execute(select(User).where(User.id == user.id).with_for_update()
+        .execution_options(populate_existing=True)).scalar_one()
+    if not user.is_active or user.auth_token_version != checked_version:
+        raise HTTPException(401, "Invalid credentials")
+    if user.password_hash != checked_hash:
+        password_ok, upgraded_hash = verify_and_upgrade_password(payload.password, user.password_hash)
+        if not password_ok:
+            raise HTTPException(401, "Invalid credentials")
     mandate = firm_mandates_second_factor(db)
 
     if user.is_2fa_enabled:
@@ -164,7 +178,7 @@ def login(
         if not payload.totp_code or not totp_plain:
             record_staff_login_failure(db, email=login_id, ip=ip)
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="2FA required")
-        if not verify_totp(secret=totp_plain, code=payload.totp_code):
+        if not consume_totp(db, secret=totp_plain, code=payload.totp_code):
             record_staff_login_failure(db, email=login_id, ip=ip)
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid 2FA code")
 
@@ -185,7 +199,10 @@ def login(
         if not db_ok:
             mfa_verified = False
 
-    clear_staff_login_rate_limits(db, email=login_id)
+    if upgraded_hash:
+        user.password_hash = upgraded_hash
+        db.add(user)
+    clear_staff_login_rate_limits(db, email=login_id, commit=False)
     token = login_access_token(db, user, mfa_verified=mfa_verified)
     log_event(
         db,
@@ -363,7 +380,7 @@ def verify_2fa(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="2FA is already enabled")
     if not user.totp_secret:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="2FA not set up")
-    if not verify_totp(secret=decrypt_totp_secret(user.totp_secret) or "", code=payload.code):
+    if not consume_totp(db, secret=decrypt_totp_secret(user.totp_secret) or "", code=payload.code):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid code")
 
     user.is_2fa_enabled = True
@@ -386,16 +403,19 @@ def verify_2fa(
 @router.post("/2fa/disable", status_code=status.HTTP_204_NO_CONTENT)
 def disable_my_2fa(
     payload: UserDisable2FARequest,
+    request: Request,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> None:
+    from app.session_security import lock_current_staff_session
+    user, _ = lock_current_staff_session(request, user, db)
     if not user.is_2fa_enabled:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="2FA is not enabled")
     if not user.totp_secret:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="2FA secret missing")
     if not verify_password(payload.password, user.password_hash):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Incorrect password")
-    if not verify_totp(secret=decrypt_totp_secret(user.totp_secret) or "", code=payload.totp_code.strip()):
+    if not consume_totp(db, secret=decrypt_totp_secret(user.totp_secret) or "", code=payload.totp_code.strip()):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid authenticator code")
 
     if firm_mandates_second_factor(db) and not user_has_any_passkey(db, user.id):

@@ -24,6 +24,9 @@ def content_disposition_headers(filename: str, *, disposition: str = "attachment
     kind = (disposition or "attachment").strip().lower()
     if kind not in ("attachment", "inline"):
         kind = "attachment"
+    # Sanitize both the quoted fallback and the RFC 5987 value before encoding.
+    filename = "".join(c for c in (filename or "") if not (ord(c) < 32 or 127 <= ord(c) <= 159 or c in "\u2028\u2029"))
+    filename = filename.replace('"', "'").replace("\\", "_").replace("/", "_").strip() or "download"
     fallback = _latin1_safe_filename(filename)
     if fallback == filename:
         return {"Content-Disposition": f'{kind}; filename="{fallback}"'}

@@ -1,6 +1,8 @@
 """Ledger endpoints: GET /cases/{case_id}/ledger and POST /cases/{case_id}/ledger/post."""
 from __future__ import annotations
 
+from app.download_headers import attachment_content_disposition_headers
+
 import uuid
 from io import BytesIO
 
@@ -56,7 +58,7 @@ def export_ledger(
     return StreamingResponse(
         bio,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        headers={**attachment_content_disposition_headers(filename)},
     )
 
 

@@ -191,3 +191,10 @@ class WebAuthnCredential(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
 
     __table_args__ = (UniqueConstraint("credential_id", name="uq_webauthn_credential_credential_id"),)
+
+
+class TotpReplayState(Base):
+    __tablename__ = "totp_replay_state"
+
+    factor_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    last_step: Mapped[int] = mapped_column(BigInteger, nullable=False)

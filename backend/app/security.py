@@ -8,11 +8,18 @@ from passlib.context import CryptContext
 
 
 # Use PBKDF2 to avoid bcrypt backend quirks in containers and the 72-byte limit.
-pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
+PASSWORD_HASH_ROUNDS = 600_000
+pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto",
+    pbkdf2_sha256__default_rounds=PASSWORD_HASH_ROUNDS,
+    pbkdf2_sha256__min_rounds=PASSWORD_HASH_ROUNDS)
 
 
 def hash_password(password: str) -> str:
     return pwd_context.hash(password)
+
+
+def verify_and_upgrade_password(password: str, password_hash: str) -> tuple[bool, str | None]:
+    return pwd_context.verify_and_update(password, password_hash)
 
 
 def verify_password(password: str, password_hash: str) -> bool:

@@ -227,7 +227,7 @@ def record_rate_limit_failure(
     db.commit()
 
 
-def clear_rate_limit(db: Session, *, scope: str, identifier: str | None) -> None:
+def clear_rate_limit(db: Session, *, scope: str, identifier: str | None, commit: bool = True) -> None:
     if not identifier:
         return
     row = db.execute(
@@ -244,7 +244,10 @@ def clear_rate_limit(db: Session, *, scope: str, identifier: str | None) -> None
     row.locked_until = None
     row.updated_at = utcnow()
     db.add(row)
-    db.commit()
+    if commit:
+        db.commit()
+    else:
+        db.flush()
 
 
 def check_staff_login_rate_limits(db: Session, *, email: str, ip: str | None) -> None:
@@ -269,8 +272,8 @@ def record_staff_login_failure(db: Session, *, email: str, ip: str | None) -> No
     )
 
 
-def clear_staff_login_rate_limits(db: Session, *, email: str) -> None:
-    clear_rate_limit(db, scope=SCOPE_STAFF_LOGIN_EMAIL, identifier=email)
+def clear_staff_login_rate_limits(db: Session, *, email: str, commit: bool = True) -> None:
+    clear_rate_limit(db, scope=SCOPE_STAFF_LOGIN_EMAIL, identifier=email, commit=commit)
 
 
 def check_forgot_password_rate_limits(db: Session, *, email: str, ip: str | None) -> None:
