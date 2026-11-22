@@ -2,36 +2,26 @@
 
 from __future__ import annotations
 
-import pytest
-from sqlalchemy import select
+from tests.document_fixture_helpers import document_compose_fixture
 
 from app.compose_merge import merge_compose_docx_bytes, resolve_blank_email_compose_body
 from app.docx_util import extract_plain_text_from_docx_bytes
-from app.models import Case, Precedent
-from app.precedent_constants import BLANK_EMAIL_PRECEDENT_REFERENCE, BLANK_LETTER_PRECEDENT_REFERENCE
+from app.precedent_constants import BLANK_EMAIL_PRECEDENT_REFERENCE
 from app.schemas import ComposeOfficeDocumentIn
 
 
-def test_blank_email_compose_resolves_to_blank_email_precedent(db) -> None:
-    blank_email = db.execute(
-        select(Precedent).where(Precedent.reference == BLANK_EMAIL_PRECEDENT_REFERENCE)
-    ).scalar_one_or_none()
-    if blank_email is None:
-        pytest.skip("BLANK_EMAIL precedent not seeded")
+def test_blank_email_compose_resolves_to_blank_email_precedent(db, document_compose_fixture) -> None:
+    blank_email = document_compose_fixture.precedents[BLANK_EMAIL_PRECEDENT_REFERENCE]
 
     body = ComposeOfficeDocumentIn(original_filename="Email draft.docx", folder="", precedent_id=None)
     resolved = resolve_blank_email_compose_body(db, body)
     assert resolved.precedent_id == blank_email.id
 
 
-def test_blank_email_merges_without_contact(db) -> None:
+def test_blank_email_merges_without_contact(db, document_compose_fixture) -> None:
     """Matter-level codes must resolve even when no recipient contact is selected."""
-    case = db.execute(select(Case).limit(1)).scalar_one_or_none()
-    blank_email = db.execute(
-        select(Precedent).where(Precedent.reference == BLANK_EMAIL_PRECEDENT_REFERENCE)
-    ).scalar_one_or_none()
-    if case is None or blank_email is None:
-        pytest.skip("seed data required")
+    case = document_compose_fixture.case
+    blank_email = document_compose_fixture.precedents[BLANK_EMAIL_PRECEDENT_REFERENCE]
 
     body = ComposeOfficeDocumentIn(
         original_filename="Email draft.docx",
@@ -49,16 +39,9 @@ def test_blank_email_merges_without_contact(db) -> None:
     assert case.case_number in text
 
 
-def test_blank_email_compose_body_is_not_letter_layout(db) -> None:
-    case = db.execute(select(Case).limit(1)).scalar_one_or_none()
-    blank_email = db.execute(
-        select(Precedent).where(Precedent.reference == BLANK_EMAIL_PRECEDENT_REFERENCE)
-    ).scalar_one_or_none()
-    blank_letter = db.execute(
-        select(Precedent).where(Precedent.reference == BLANK_LETTER_PRECEDENT_REFERENCE)
-    ).scalar_one_or_none()
-    if case is None or blank_email is None or blank_letter is None:
-        pytest.skip("seed data required")
+def test_blank_email_compose_body_is_not_letter_layout(db, document_compose_fixture) -> None:
+    case = document_compose_fixture.case
+    blank_email = document_compose_fixture.precedents[BLANK_EMAIL_PRECEDENT_REFERENCE]
 
     body = ComposeOfficeDocumentIn(
         original_filename="Email draft.docx",

@@ -2,19 +2,14 @@
 
 import io
 import re
-from pathlib import Path
-
-import pytest
+from tests.document_fixture_helpers import quote_document, docx_bytes
 from docx import Document
 
 from app.docx_util import merge_precedent_codes, strip_empty_quote_table_rows
 
 
 def test_strip_empty_quote_table_rows_removes_unused_slots() -> None:
-    src_path = Path("/home/colin/Downloads/Letterhead.docx")
-    if not src_path.is_file():
-        pytest.skip("Letterhead.docx not available")
-    src = src_path.read_bytes()
+    src = docx_bytes(quote_document())
     fields = {}
     for i in range(1, 16):
         tag = f"{i:02d}"

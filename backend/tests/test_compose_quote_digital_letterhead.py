@@ -4,12 +4,12 @@ import io
 import zipfile
 from types import SimpleNamespace
 
-import pytest
-from sqlalchemy import select
+from tests.document_fixture_helpers import document_compose_fixture
+from lxml import etree
 
 from app.compose_merge import apply_quote_digital_letterhead_from_settings
 from app.compose_quote import merge_compose_quote_docx_bytes
-from app.models import Case, FirmSettings, LetterheadStyle
+from app.models import LetterheadStyle
 from app.schemas import ComposeQuoteIn, ComposeQuoteLineIn
 
 
@@ -29,13 +29,8 @@ def test_apply_quote_digital_letterhead_skips_when_preprinted() -> None:
     assert lh_bytes is None
 
 
-def test_compose_quote_applies_digital_letterhead_when_configured(db) -> None:
-    case = db.execute(select(Case).limit(1)).scalar_one_or_none()
-    firm = db.get(FirmSettings, 1)
-    if case is None or firm is None:
-        pytest.skip("seed data required")
-    if firm.quote_letterhead_style != LetterheadStyle.digital or not firm.quote_letterhead_file_id:
-        pytest.skip("quote digital letterhead not configured in firm settings")
+def test_compose_quote_applies_digital_letterhead_when_configured(db, document_compose_fixture) -> None:
+    case = document_compose_fixture.case
 
     body = ComposeQuoteIn(
         original_filename="Quote — Test.docx",
@@ -48,7 +43,13 @@ def test_compose_quote_applies_digital_letterhead_when_configured(db) -> None:
     assert _has_header_media(out), "quote compose should copy letterhead header media when digital mode is on"
     # Demo quote letterheads may prepend a body masthead with merge codes;
     # those must be filled after the letterhead overlay (not left as literal [CASE_REF] etc.).
-    text = out.decode("latin-1", errors="ignore")
+    # DOCX is a compressed ZIP: inspect actual XML text, not compressed bytes.
+    with zipfile.ZipFile(io.BytesIO(out)) as package:
+        text = '\n'.join(
+            ''.join(etree.fromstring(package.read(name)).itertext())
+            for name in package.namelist() if name.startswith('word/') and name.endswith('.xml')
+        )
+    assert 'Synthetic letterhead' in text
     assert "[ORG_AND_ADDRESS_BLOCK]" not in text
     assert "[DATE]" not in text
     assert "[MATTER_DESCRIPTION]" not in text
