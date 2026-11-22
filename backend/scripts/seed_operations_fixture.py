@@ -26,3 +26,13 @@ payload = (b'--canary-fixture\r\nContent-Disposition: form-data; name="upload"; 
 assert request(f'/cases/{case_id}/files',payload,'multipart/form-data; boundary=canary-fixture') == 201
 assert request(f'/cases/{case_id}/ledger/post',{'description':'Synthetic recovery receipt','amount_pence':12345,'client_direction':'credit'}) == 204
 print('Synthetic document and nonzero ledger balance created.')
+
+# Backup must authenticate pre-existing primary and legacy secrets after JWT rotation.
+from app.models import User
+from app.email_crypt import _fernet_from_jwt_secret, encrypt_password
+with SessionLocal() as db:
+    user = db.scalar(select(User).where(User.email == os.environ['E2E_APPROVER_EMAIL']))
+    user.caldav_password_enc = _fernet_from_jwt_secret(os.environ['JWT_SECRET']).encrypt(b'synthetic-legacy-caldav').decode()
+    another = db.scalar(select(User).where(User.email == os.environ['E2E_STAFF_EMAIL']))
+    another.caldav_password_enc = encrypt_password('synthetic-primary-caldav')
+    db.commit()

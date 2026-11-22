@@ -16,7 +16,7 @@ import urllib.request
 import uuid
 
 import deploy
-from recovery_drill import archive_manifest, digest, assert_isolated
+from recovery_drill import archive_manifest, digest, assert_isolated, validate_bundle
 
 
 def now():
@@ -222,8 +222,8 @@ def backup_job(settings):
                         result = subprocess.check_output(deploy.compose(stage / 'previous.json', 'run', '--rm', '--no-deps', '-T',
                             '--entrypoint', 'python', 'backend', '-'), stdin=source, stderr=log, timeout=300)
                     inventory = json.loads(result)
-                    if inventory['missing_file_ids']:
-                        raise RuntimeError('Database references missing documents.')
+                    if inventory['missing_file_ids'] or not inventory.get('integrity', {}).get('ok', True):
+                        raise RuntimeError('Database content or credential integrity failed.')
                     atomic_json(stage / 'inventory.json', inventory)
                     for mount in active['backend']['Mounts']:
                         if mount['Destination'] in ('/radicale-data', '/commercial'):
@@ -237,15 +237,21 @@ def backup_job(settings):
                     execute(deploy.compose(stage / 'previous.json', 'start', '--wait', '--wait-timeout', '240', *targets), stdout=log, stderr=log, timeout=300)
                 # Image export does not need application downtime.
                 if settings.get('archive_images', False):
+                    roles = ('backend', 'frontend', 'db', 'onlyoffice')
+                    if any(role not in active for role in roles):
+                        raise RuntimeError('Complete backup requires all recovery image roles running.')
+                    images = {role: active[role]['Image'] for role in roles}
                     with (stage / 'images.tar').open('wb') as stream:
-                        execute(['docker', 'image', 'save', active['backend']['Image'], active['frontend']['Image']], stdout=stream, stderr=log, timeout=3600)
+                        execute(['docker', 'image', 'save', *sorted(set(images.values()))], stdout=stream, stderr=log, timeout=3600)
+                    atomic_json(stage / 'recovery-bundle.json', {'version': 1, 'images': images})
                 checksums = {p.name: digest(p) for p in stage.iterdir() if p.name in (
-                    'database.dump', 'files.tar', 'previous.json', 'inventory.json', 'calendars.tar', 'commercial.tar', 'images.tar')}
+                    'database.dump', 'files.tar', 'previous.json', 'inventory.json', 'calendars.tar', 'commercial.tar', 'images.tar', 'recovery-bundle.json')}
                 atomic_json(stage / 'checksums.json', checksums)
                 record = {'status': 'verified', 'created_at': now(), 'project': config['name'],
                           'schema_fingerprint': manifest['schema_before'], 'files_included': True}
                 atomic_json(stage / 'backup.json', record)
-                verify_backup(stage)
+                checks = verify_backup(stage)
+                if settings.get('archive_images', False): validate_bundle(stage, checks)
             final = root / ('backup-' + datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S') + '-' + uuid.uuid4().hex[:8])
             stage.rename(final)
             status.update(last_verified_backup=str(final), last_verified_at=now())
@@ -319,7 +325,7 @@ def recovery_input(backup, settings, state):
             for member in archive:
                 if Path(member.name).name != member.name or member.name not in (
                     'database.dump', 'files.tar', 'previous.json', 'inventory.json', 'checksums.json',
-                    'backup.json', 'calendars.tar', 'commercial.tar', 'images.tar'):
+                    'backup.json', 'calendars.tar', 'commercial.tar', 'images.tar', 'recovery-bundle.json'):
                     raise RuntimeError('Unexpected encrypted bundle member.')
             archive.extractall(restored, filter='data')
         bundle.unlink()
@@ -349,7 +355,7 @@ def recovery_job(settings):
             previous = read_json(source / 'previous.json')
             destination = state / ('recovery-' + uuid.uuid4().hex)
             command = [sys.executable, str(Path(__file__).with_name('recovery_drill.py')), '--release', str(source),
-                       '--state', str(destination), '--backend-image', previous['services']['backend']['image'],
+                       '--state', str(destination), '--require-complete', '--backend-image', previous['services']['backend']['image'],
                        '--frontend-image', previous['services']['frontend']['image'], '--verify', '--cleanup']
             with (state / 'recovery-job.log').open('w') as log:
                 execute(command, stdout=log, stderr=log, timeout=1800)

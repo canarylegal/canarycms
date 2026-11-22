@@ -6,6 +6,8 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from sqlalchemy import text
 from app.db import engine
+from app.recovery_integrity import audit
+import os
 
 with engine.connect() as db:
     counts = {name: db.execute(text(f'SELECT count(*) FROM "{name}"')).scalar_one()
@@ -24,5 +26,6 @@ with engine.connect() as db:
         p = Path(file['storage_path'])
         if not p.is_absolute(): p = Path('/data/files') / p
         if not p.is_file(): missing.append(file['id'])
+    integrity = audit(db, os.getenv('FILES_ROOT', '/data/files'))
     revision = db.execute(text('SELECT version_num FROM alembic_version ORDER BY version_num')).scalars().all()
-print(json.dumps(dict(counts=counts, ledger_fingerprint=ledger_fingerprint, balances=balances, missing_file_ids=missing, alembic_revision=revision), default=str, sort_keys=True))
+print(json.dumps(dict(counts=counts, ledger_fingerprint=ledger_fingerprint, balances=balances, missing_file_ids=missing, alembic_revision=revision, integrity=integrity), default=str, sort_keys=True))

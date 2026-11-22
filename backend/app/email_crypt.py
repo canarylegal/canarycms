@@ -1,7 +1,9 @@
 """Symmetric encryption for stored secrets (IMAP, Graph, portal codes, CalDAV).
 
 Uses ``DATA_ENCRYPTION_KEY`` when set. Decrypt falls back to the legacy JWT_SECRET-derived
-key for ciphertext written before the split. New ciphertext is always written with the primary key.
+key for ciphertext written before the split. DATA_LEGACY_JWT_SECRET may retain that
+decryption-only secret during recovery while JWT_SECRET is rotated for new sessions.
+New ciphertext is always written with the primary key.
 """
 from __future__ import annotations
 
@@ -48,7 +50,7 @@ def _legacy_fernet() -> Fernet | None:
     """JWT-derived Fernet used before DATA_ENCRYPTION_KEY was introduced."""
     if not _data_encryption_key_raw():
         return None
-    jwt = _jwt_secret_raw()
+    jwt = (os.getenv("DATA_LEGACY_JWT_SECRET") or "").strip() or _jwt_secret_raw()
     if not jwt:
         return None
     return _fernet_from_jwt_secret(jwt)

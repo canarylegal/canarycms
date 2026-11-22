@@ -25,7 +25,7 @@ export = root / 'export'; export.mkdir(mode=0o700)
 secret = root / 'export-passphrase'; secret.write_text(secrets.token_urlsafe(48)); secret.chmod(0o600)
 gnupg = root / 'gnupg'; gnupg.mkdir(mode=0o700); os.environ['GNUPGHOME'] = str(gnupg)
 settings = dict(deployment_config=str(root / 'compose.json'),backup_dir=str(root/'backups'),
-                state_dir=str(root/'state'),public_url=url,keep_backups=2,archive_images=False,
+                state_dir=str(root/'state'),public_url=url,keep_backups=2,archive_images=True,
                 export=dict(directory=str(export),target_id='isolated-fixture',passphrase_file=str(secret)))
 ops.atomic_json(root / 'operations.json', settings)
 backup = ops.backup_job(settings)
@@ -66,6 +66,10 @@ recovery = ops.recovery_job(settings)
 assert recovery['status'] == 'ok'
 report = ops.read_json(recovery['report'])
 assert report['cleanup'] == 'ok'
+assert report['complete_bundle']
+assert report['integrity']['secrets']['checked'] >= 2
+assert report['integrity']['secrets']['failed'] == 0
+assert report['optional_package_files']
 assert report['verification']['documents_checked'] >= 1
 assert report['verification']['ledger_accounts_checked'] >= 1
 assert ops.monitor_job(settings)['status'] == 'ok'

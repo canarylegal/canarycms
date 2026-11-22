@@ -18,6 +18,12 @@ from app.totp_secrets import encrypt_totp_secret
 if engine.url.database != 'canary_recovery' or os.getenv('CANARY_BACKGROUND_JOBS_ENABLED') != '0':
     raise RuntimeError('Verification is restricted to the isolated recovery database.')
 
+from app.recovery_integrity import audit
+with engine.connect() as connection:
+    original_integrity = audit(connection, os.getenv('FILES_ROOT', '/data/files'))
+if not original_integrity['ok']:
+    raise RuntimeError('Original restored content or credentials failed integrity checks.')
+
 password = secrets.token_urlsafe(32)
 totp_secret = generate_totp_secret()
 with SessionLocal() as db:
@@ -79,7 +85,7 @@ try:
     with request('/auth/logout', {}) as response:
         assert response.status in (200, 204)
     print(json.dumps({'status': 'verified', 'login': True, 'matter_checked': bool(cases),
-                      'documents_checked': len(files), 'ledger_accounts_checked': len(balances), 'logout': True}))
+                      'documents_checked': len(files), 'ledger_accounts_checked': len(balances), 'logout': True, 'original_integrity': original_integrity}))
 finally:
     with SessionLocal() as db:
         user = db.get(User, user_id)

@@ -28,7 +28,7 @@ python3 scripts/recovery_drill.py \
 
 Omit `--commercial-source` for backups without that package or with a captured `commercial.tar`. The supplied directory is **copied** into private drill storage. Its original `/commercial/module` path is retained; the original directory is never mounted into recovery containers.
 
-The tool refuses existing state directories, unsafe tar entries, checksum mismatches, and an existing target volume. It generates a new `canaryrestore-*` project with new database/file volumes, no published ports, no host/container namespace sharing and an `internal: true` network. Only the data-encryption key is carried over from the original environment. Database, JWT, recovery-master and document-server secrets are regenerated. Live SMTP/Graph/tunnel settings are not inherited. Background jobs and update checks are disabled in the clone.
+The tool refuses existing state directories, unsafe tar entries, checksum mismatches, and an existing target volume. It generates a new `canaryrestore-*` project with new database/file volumes, no published ports, no host/container namespace sharing and an `internal: true` network. The data-encryption key and a decryption-only `DATA_LEGACY_JWT_SECRET` are carried over from the original environment; the latter preserves old ciphertext without accepting old sessions. Database, JWT, recovery-master and document-server secrets are regenerated. Live SMTP/Graph/tunnel settings are not inherited. Background jobs and update checks are disabled in the clone.
 
 ## 2. Restore and verify stored data
 
@@ -95,3 +95,19 @@ Using the paired pre-PR-3 deployment backup and newly pinned candidate images:
 - No published recovery ports; external egress blocked. All seven live containers retained their IDs, images, start times and restart counts.
 
 The commercial source was supplied separately because the existing backup pair did not include that bind-mounted code. Its copy was hashed in the private recovery record. Preserve this additional artifact for a real host-loss recovery. External fonts/integrations were unavailable by design on the isolated network.
+
+## Complete bundle acceptance
+
+Use the maintained operations backup with `archive_images: true` and encrypted export for disaster recovery. Deployment rollback snapshots remain narrower and must not be mistaken for complete bundles. `--require-complete` rejects missing configuration/inventory/image manifest and required calendar/package archives, then imports the exact backend/frontend/database/document-server images from `images.tar`. Explicit image overrides must match the manifest; an external optional-package source is not accepted in complete mode. No registry pull is necessary. Each archive is verified before data is restored into fresh volumes.
+
+```sh
+umask 077
+python3 scripts/recovery_drill.py --release /private/verified-bundle \
+  --state /private/new-rehearsal --require-complete --verify --cleanup
+```
+
+Only use a trusted private bundle: hashes detect accidental corruption, not an attacker replacing both the data and manifest. The exported encrypted bundle must be decrypted using its separately retained passphrase and its integrity checked before use. Keep originals, and use new empty state directories. See OPERATIONS.md for key custody, cold-host acceptance and recovery objectives. Retired shell commands perform no backup or restore.
+
+The read-only inventory now verifies stored document and retained recovery checksums, attachment relationships and original encrypted values. Unknown historical checksums are reported; they are not backfilled by a rehearsal. A failed secret authentication or known checksum mismatch prevents verification even if a new administrator can sign in. No provider calls are made. Calendar restoration validates archived bytes but does not activate a calendar service or external sync; separate cutover acceptance remains necessary.
+
+Image identity is checked across Docker storage backends: OCI manifest/index IDs are resolved through the verified archive to their image-config digest when the target daemon uses the classic image store. A missing or ambiguous platform is rejected rather than selecting a mutable tag. Recovery on another CPU architecture requires a separately prepared compatible bundle; it is not silently emulated.
