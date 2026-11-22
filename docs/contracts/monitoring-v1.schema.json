@@ -1,0 +1,186 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:canary:monitoring:1",
+  "title": "Canary optional monitoring v1",
+  "oneOf": [
+    {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "const": 1
+        },
+        "kind": {
+          "const": "observation"
+        },
+        "event_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "installation_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "stream_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "created_at": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "sequence": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "source_observed_at": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "checks": {
+          "type": "object",
+          "properties": {
+            "application": {
+              "enum": [
+                "up",
+                "down",
+                "unknown",
+                "disabled",
+                "not_configured"
+              ]
+            },
+            "database": {
+              "enum": [
+                "up",
+                "down",
+                "unknown",
+                "disabled",
+                "not_configured"
+              ]
+            },
+            "storage": {
+              "enum": [
+                "up",
+                "down",
+                "unknown",
+                "disabled",
+                "not_configured"
+              ]
+            },
+            "onlyoffice": {
+              "enum": [
+                "up",
+                "down",
+                "unknown",
+                "disabled",
+                "not_configured"
+              ]
+            },
+            "public_access": {
+              "enum": [
+                "up",
+                "down",
+                "unknown",
+                "disabled",
+                "not_configured"
+              ]
+            },
+            "backup": {
+              "enum": [
+                "up",
+                "down",
+                "unknown",
+                "disabled",
+                "not_configured"
+              ]
+            },
+            "recovery": {
+              "enum": [
+                "up",
+                "down",
+                "unknown",
+                "disabled",
+                "not_configured"
+              ]
+            },
+            "monitor_source": {
+              "enum": [
+                "up",
+                "down",
+                "unknown",
+                "disabled",
+                "not_configured"
+              ]
+            }
+          },
+          "required": [
+            "application",
+            "database",
+            "storage",
+            "onlyoffice",
+            "public_access",
+            "backup",
+            "recovery",
+            "monitor_source"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "schema_version",
+        "kind",
+        "event_id",
+        "installation_id",
+        "stream_id",
+        "created_at",
+        "sequence",
+        "source_observed_at",
+        "checks"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "const": 1
+        },
+        "kind": {
+          "const": "heartbeat"
+        },
+        "event_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "installation_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "stream_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "created_at": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "last_observation_sequence": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "required": [
+        "schema_version",
+        "kind",
+        "event_id",
+        "installation_id",
+        "stream_id",
+        "created_at",
+        "last_observation_sequence"
+      ],
+      "additionalProperties": false
+    }
+  ]
+}
