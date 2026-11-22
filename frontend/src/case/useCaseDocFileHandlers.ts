@@ -8,7 +8,6 @@ import type {
   UserPublic,
 } from '../types'
 import { composeMatterEmail } from './caseComposeEmail'
-import { documentRequest } from './documentRequests'
 import {
   formatFileOpError,
   isCommentFile,
@@ -51,6 +50,7 @@ export type UseCaseDocFileHandlersArgs = {
   setBusy: Dispatch<SetStateAction<boolean>>
   setActionErr: Dispatch<SetStateAction<string | null>>
   setTextPrompt: Dispatch<SetStateAction<CaseDocTextPrompt | null>>
+  setCommentVersion: Dispatch<SetStateAction<number | null>>
   setCommentText: Dispatch<SetStateAction<string>>
   setCommentEditFileId: Dispatch<SetStateAction<string | null>>
   setCommentErr: Dispatch<SetStateAction<string | null>>
@@ -78,6 +78,7 @@ export function useCaseDocFileHandlers({
   setBusy,
   setActionErr,
   setTextPrompt,
+  setCommentVersion,
   setCommentText,
   setCommentEditFileId,
   setCommentErr,
@@ -197,8 +198,9 @@ export function useCaseDocFileHandlers({
       setBusy(true)
       setActionErr(null)
       try {
-        const text = await documentRequest(`/cases/${caseId}/files/${f.id}`, token, (res) => res.text())
-        setCommentText(text)
+        const comment = await apiFetch<{ text: string; version: number }>(`/cases/${caseId}/files/${f.id}/comment`, { token })
+        setCommentText(comment.text)
+        setCommentVersion(comment.version)
         setCommentEditFileId(f.id)
         setCommentErr(null)
         setCommentOpen(true)
@@ -213,6 +215,7 @@ export function useCaseDocFileHandlers({
       setBusy,
       setActionErr,
       token,
+      setCommentVersion,
       setCommentText,
       setCommentEditFileId,
       setCommentErr,

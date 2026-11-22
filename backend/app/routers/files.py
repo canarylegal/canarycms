@@ -4,11 +4,12 @@ from typing import Literal
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File as FastAPIFile, HTTPException, Query, Request, Response, UploadFile, status, Form, Header
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.document_io import document_io
 from app.db import get_db
 from app.deps import get_current_user, require_case_access
 from app.file_storage import FILES_ROOT, ensure_files_root, path_is_under_files_root
@@ -73,7 +74,7 @@ from app.onlyoffice_case_file_service import (
 )
 from app.upload_limits import content_disposition_for_mime
 from app.models import Contact as GlobalContactRow, ContactPortalGrant
-from app.models import File as DbFile, User
+from app.models import File as DbFile, FileCategory, User
 from app.portal_service import grant_is_client_visible
 from app.portal_case import require_case_portal_enabled
 from app.audit import log_event
@@ -669,6 +670,39 @@ def rename_case_file(
     return rename_case_file_service(case_id=case_id, file_id=file_id, payload=payload, user=user, db=db)
 
 
+@router.get("/{file_id}/comment")
+def read_comment_file(
+    case_id: uuid.UUID,
+    file_id: uuid.UUID,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Read bytes and their version from the same immutable storage revision."""
+    require_case_access(case_id, user, db)
+    row = db.get(DbFile, file_id)
+    if not row or row.case_id != case_id:
+        raise HTTPException(404, "File not found")
+    if (row.category != FileCategory.case_document
+            or Path(row.original_filename or "").suffix.lower() != ".txt"
+            or (row.mime_type or "").split(";", 1)[0].strip().lower() != "text/plain"):
+        raise HTTPException(400, "Only plain-text documents can be edited as comments")
+    from app.file_storage import FILES_ROOT
+    path = (FILES_ROOT / row.storage_path).resolve()
+    if not path_is_under_files_root(path) or not path.is_file():
+        raise HTTPException(404, "File missing on disk")
+    # A .txt upload can be much larger than the inline editor accepts. Bound
+    # server memory before decoding; UTF-8 uses at most four bytes per character.
+    with path.open("rb") as stream:
+        raw = stream.read(2_000_001)
+    content = raw.decode("utf-8", errors="replace")
+    if len(raw) > 2_000_000 or len(content) > 500_000:
+        raise HTTPException(413, "This text document is too large to edit as a comment. Download it instead.")
+    log_event(db, actor_user_id=user.id, action="case.file.read", entity_type="file",
+              entity_id=str(row.id), meta={"case_id": str(case_id)})
+    return JSONResponse({"text": content, "version": row.version or 1},
+                        headers={"Cache-Control": "no-store"})
+
+
 @router.patch("/{file_id}/comment", status_code=status.HTTP_200_OK)
 def update_comment_file(
     case_id: uuid.UUID,
@@ -727,6 +761,7 @@ def get_onlyoffice_editor_config(
 
 
 @router.post("/{file_id}/oo-force-save")
+@document_io
 async def oo_force_save(
     case_id: uuid.UUID,
     file_id: uuid.UUID,
@@ -765,6 +800,7 @@ async def oo_force_save(
 
 
 @router.post("/{file_id}/oo-export-pdf", response_model=OoExportPdfOut)
+@document_io
 async def oo_export_pdf(
     case_id: uuid.UUID,
     file_id: uuid.UUID,
@@ -777,6 +813,7 @@ async def oo_export_pdf(
 
 
 @router.post("/{file_id}/oo-persist-download", status_code=status.HTTP_204_NO_CONTENT)
+@document_io
 async def oo_persist_download(
     case_id: uuid.UUID,
     file_id: uuid.UUID,

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from app.document_io import document_io
 from app.onlyoffice_force_save import oo_save_status as save_attempt_status
 
 import logging
@@ -884,6 +885,7 @@ def get_quote_letterhead_onlyoffice_config(
 
 
 @router.post("/letterhead/oo-force-save")
+@document_io
 async def oo_force_save_letterhead(
     doc_key: str,
     phase: OoForceSavePhase = Query("command"),
@@ -896,6 +898,7 @@ async def oo_force_save_letterhead(
 
 
 @router.post("/quote-letterhead/oo-force-save")
+@document_io
 async def oo_force_save_quote_letterhead(
     doc_key: str,
     phase: OoForceSavePhase = Query("command"),
@@ -908,6 +911,7 @@ async def oo_force_save_quote_letterhead(
 
 
 @router.post("/letterhead/oo-persist-download", status_code=status.HTTP_204_NO_CONTENT)
+@document_io
 async def oo_persist_download_letterhead(
     body: OoPersistDownloadIn,
     admin: User = Depends(require_firm_admin),
@@ -917,6 +921,7 @@ async def oo_persist_download_letterhead(
 
 
 @router.post("/quote-letterhead/oo-persist-download", status_code=status.HTTP_204_NO_CONTENT)
+@document_io
 async def oo_persist_download_quote_letterhead(
     body: OoPersistDownloadIn,
     admin: User = Depends(require_firm_admin),

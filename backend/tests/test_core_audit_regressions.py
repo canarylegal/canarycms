@@ -90,7 +90,7 @@ def test_comment_rejects_other_file_types_without_side_effects(audit_db, tmp_pat
     before = db.scalar(select(func.count()).select_from(AuditEvent))
     with pytest.raises(HTTPException) as error:
         update_comment_file(case_id=case.id, file_id=row.id,
-            payload=CommentFileUpdate(text='Replacement'), user=user, db=db)
+            payload=CommentFileUpdate(expected_version=row.version or 1, text='Replacement'), user=user, db=db)
     assert error.value.status_code == 400
     db.refresh(row)
     assert (row.original_filename, row.storage_path, row.mime_type, row.version) == (name, name, mime, 1)
@@ -113,7 +113,7 @@ def test_valid_comment_keeps_recovery_and_updates_text(audit_db, tmp_path, monke
         storage_path=path.name, original_filename=path.name, folder_path='',
         mime_type='text/plain; charset=utf-8', size_bytes=8, version=1)
     db.add(row); db.commit()
-    service.update_comment_file(case.id, row.id, CommentFileUpdate(text='Changed comment'), user, db)
+    service.update_comment_file(case.id, row.id, CommentFileUpdate(expected_version=row.version or 1, text='Changed comment'), user, db)
     db.refresh(row)
     assert row.version == 2 and row.original_filename == 'Changed comment.txt'
     assert (tmp_path / row.storage_path).read_bytes() == b'Changed comment'
@@ -173,17 +173,17 @@ def test_comment_checks_type_after_locked_reload(audit_db, tmp_path, monkeypatch
     db.add(row); db.commit()
     identity = row.id
     real_lock = service.lock_document
-    def concurrent_change(session, stale):
+    def concurrent_change(session, stale, **kwargs):
         # Simulate replacement after the initial identity-map read, before FOR UPDATE.
         with SessionLocal() as other:
             current = other.get(File, identity)
             current.original_filename = 'replacement.pdf'
             current.mime_type = 'application/pdf'
             other.commit()
-        return real_lock(session, stale)
+        return real_lock(session, stale, **kwargs)
     monkeypatch.setattr(service, 'lock_document', concurrent_change)
     with pytest.raises(HTTPException) as error:
-        service.update_comment_file(case.id, row.id, CommentFileUpdate(text='Must not replace'), user, db)
+        service.update_comment_file(case.id, row.id, CommentFileUpdate(expected_version=row.version or 1, text='Must not replace'), user, db)
     assert error.value.status_code == 400
     assert path.read_bytes() == b'original'
     assert list(tmp_path.iterdir()) == [path]

@@ -148,6 +148,7 @@ class CaseFileRenameUpdate(BaseModel):
     expected_original_filename: str = Field(min_length=1, max_length=512)
 
 class CommentFileUpdate(BaseModel):
+    expected_version: int = Field(ge=1, strict=True)
     text: str = Field(min_length=0, max_length=500_000)
 
 class CaseFileMoveUpdate(BaseModel):

@@ -281,7 +281,7 @@ async def test_callback_refuses_byte_persist_without_session(tmp_path, monkeypat
 
     req.body = _body
 
-    out = await oo.onlyoffice_callback(
+    out = await oo._onlyoffice_callback(
         request=req,
         case_id=case.id,
         file_id=row.id,

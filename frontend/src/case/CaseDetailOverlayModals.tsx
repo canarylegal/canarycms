@@ -45,6 +45,8 @@ export type CaseDetailOverlayModalsProps = {
   commentOpen: boolean
   docFolder: string
   commentEditFileId: string | null
+  commentVersion: number | null
+  setCommentVersion: (v: number | null) => void
   commentBusy: boolean
   setCommentBusy: (v: boolean) => void
   commentErr: string | null
@@ -209,6 +211,8 @@ export function CaseDetailOverlayModals(props: CaseDetailOverlayModalsProps) {
           token={token}
           docFolder={props.docFolder}
           commentEditFileId={props.commentEditFileId}
+          commentVersion={props.commentVersion}
+          setCommentVersion={props.setCommentVersion}
           commentBusy={props.commentBusy}
           setCommentBusy={props.setCommentBusy}
           commentErr={props.commentErr}

@@ -195,7 +195,7 @@ async def test_callback_failure_paths(document, monkeypatch, mode):
     monkeypatch.setattr(service, '_download_oo_document_bytes', download)
     monkeypatch.setattr('app.quote_portal_service.supersede_pending_quote_deliveries', lambda *a: None)
     async def callback():
-        return await service.onlyoffice_callback(request, case_id=case.id, file_id=row.id,
+        return await service._onlyoffice_callback(request, case_id=case.id, file_id=row.id,
             precedent_id=None, fee_scale_id=None, firm_letterhead_kind=None, db=db)
     if mode == 'commit_failure':
         monkeypatch.setattr(db, 'commit', MagicMock(side_effect=RuntimeError('failed commit')))

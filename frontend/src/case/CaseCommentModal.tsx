@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { apiFetch, apiUrl } from '../api'
 import { caseAuthHeaders } from './caseDetailHelpers'
 
@@ -6,6 +7,8 @@ export type CaseCommentModalProps = {
   token: string
   docFolder: string
   commentEditFileId: string | null
+  commentVersion: number | null
+  setCommentVersion: (v: number | null) => void
   commentBusy: boolean
   setCommentBusy: (v: boolean) => void
   commentErr: string | null
@@ -21,6 +24,8 @@ export function CaseCommentModal({
   token,
   docFolder,
   commentEditFileId,
+  commentVersion,
+  setCommentVersion,
   commentBusy,
   setCommentBusy,
   commentErr,
@@ -30,6 +35,9 @@ export function CaseCommentModal({
   onClose,
   onSaved,
 }: CaseCommentModalProps) {
+  const [conflict, setConflict] = useState(false)
+  const [latest, setLatest] = useState<{ text: string; version: number } | null>(null)
+
   return (
       <div
         className="modalOverlay"
@@ -53,8 +61,9 @@ export function CaseCommentModal({
             </button>
           </div>
           <div className="stack" style={{ marginTop: 12 }}>
-            {commentErr ? <div className="error">{commentErr}</div> : null}
+            {commentErr ? <div className="error" role="alert">{commentErr}</div> : null}
             <textarea
+              aria-label="Your comment draft"
               autoFocus
               rows={8}
               style={{ resize: 'vertical', width: '100%', boxSizing: 'border-box', fontFamily: 'inherit', fontSize: 14, padding: 8, borderRadius: 6, border: '1px solid #cbd5e1' }}
@@ -63,11 +72,28 @@ export function CaseCommentModal({
               disabled={commentBusy}
               onChange={(e) => setCommentText(e.target.value)}
             />
+            {conflict && commentEditFileId ? (
+              <div className="stack">
+                <p>Your draft is kept above. Load the latest comment, then combine both versions in your draft before saving.</p>
+                <button type="button" className="btn" disabled={commentBusy} onClick={async () => {
+                  setCommentBusy(true)
+                  try {
+                    const value = await apiFetch<{ text: string; version: number }>(`/cases/${caseId}/files/${commentEditFileId}/comment`, { token })
+                    setLatest(value)
+                    setCommentVersion(value.version)
+                    setCommentErr(null)
+                  } catch (e: unknown) {
+                    setCommentErr((e as { message?: string })?.message ?? 'Could not load the latest comment')
+                  } finally { setCommentBusy(false) }
+                }}>Load latest comment</button>
+                {latest ? <label>Latest saved comment<textarea readOnly rows={5} value={latest.text} /></label> : null}
+              </div>
+            ) : null}
             <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
               <button
                 type="button"
                 className="btn primary"
-                disabled={commentBusy || !commentText.trim()}
+                disabled={commentBusy || !commentText.trim() || (!!commentEditFileId && (commentVersion === null || (conflict && !latest)))}
                 onClick={async () => {
                   if (!caseId) return
                   setCommentBusy(true)
@@ -78,7 +104,7 @@ export function CaseCommentModal({
                       await apiFetch(`/cases/${caseId}/files/${commentEditFileId}/comment`, {
                         token,
                         method: 'PATCH',
-                        json: { text: commentText },
+                        json: { text: commentText, expected_version: commentVersion },
                       })
                     } else {
                       // Create mode: upload as new .txt file
@@ -103,7 +129,11 @@ export function CaseCommentModal({
                     onClose()
                     onSaved()
                   } catch (e: any) {
-                    setCommentErr(e?.message ?? 'Failed to save comment')
+                    if (e?.status === 409 && commentEditFileId) {
+                      setConflict(true)
+                      setLatest(null)
+                      setCommentErr('The comment changed or is being edited. Your draft has not been saved. Review the latest comment before retrying.')
+                    } else setCommentErr(e?.message ?? 'Failed to save comment')
                   } finally {
                     setCommentBusy(false)
                   }

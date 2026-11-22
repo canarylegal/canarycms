@@ -283,6 +283,7 @@ export function CaseDetail({
   const [taskCreatePreset, setTaskCreatePreset] = useState<{ standardTaskId?: string; title?: string } | null>(null)
   const [commentOpen, setCommentOpen] = useState(false)
   const [commentText, setCommentText] = useState('')
+  const [commentVersion, setCommentVersion] = useState<number | null>(null)
   const [commentBusy, setCommentBusy] = useState(false)
   const [commentErr, setCommentErr] = useState<string | null>(null)
   // When set, the comment modal is in edit mode for this file ID
@@ -1021,6 +1022,7 @@ export function CaseDetail({
     setActionErr,
     setTextPrompt,
     setCommentText,
+    setCommentVersion,
     setCommentEditFileId,
     setCommentErr,
     setCommentOpen,
@@ -1413,6 +1415,8 @@ export function CaseDetail({
           commentOpen={commentOpen}
           docFolder={docFolder}
           commentEditFileId={commentEditFileId}
+          commentVersion={commentVersion}
+          setCommentVersion={setCommentVersion}
           commentBusy={commentBusy}
           setCommentBusy={setCommentBusy}
           commentErr={commentErr}

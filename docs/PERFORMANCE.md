@@ -93,3 +93,26 @@ A local isolated run of reviewed main `562a592` measured the first 100-matter pa
 Set `CANARY_SOAK_SECONDS=1800 make test-performance` for a 30-minute run (allowed range 60–3600 seconds; default 300). There must be at least 20 completed cycles per user, no incorrect response/data, per-operation p95 at most 3 seconds, and final-third p95 no greater than the larger of 1 second or three times first-third p95. Histograms report conservative upper bucket bounds. Requests time out after 10 seconds. Runtime failures fail the test; containers must finish running with no restarts or OOM kills. The runner retains resource samples, peak usage, first/last-third median memory and their difference throughout browser/load testing (including the short browser tests). `test-results/sustained-metrics.json` records duration, cycles and latency distributions even on an assertion failure.
 
 This adds sustained HTTP reads, small writes and downloads; it does not establish large-upload, financial-write/report, multi-editor or multi-hour capacity. Resource samples expose trends for review but are not a leak detector. Loaded document metadata still remains in memory. Choose representative workload and recovery objectives before making a production capacity claim. No external integrations or DocuSign are exercised, no jobs are enabled, and the disposable network blocks provider access.
+
+## Document save concurrency
+
+Inline comment reads now return text and its storage version together from
+`GET /cases/{case_id}/files/{file_id}/comment`. Updates require an integer
+`expected_version`; stale writes return 409 without altering current bytes,
+revision history or audit history. The editor retains a rejected draft and lets
+the user load the current saved text alongside it before reconciling. Older API
+clients without a version fail closed and must be updated. Inline reads are
+bounded to the editor's 500,000-character limit.
+
+ONLYOFFICE save/restore-download/export operations run their complete service in
+a worker, including synchronous database and filesystem work. The same boundary
+covers precedent/letterhead saves and callbacks; callbacks consume their ASGI
+body before entering the worker. Each operation uses its request Session
+sequentially. This removes event-loop stalls from document row-lock waits;
+it does not provide unlimited worker or database-pool capacity.
+
+Regressions include a real PostgreSQL held-row-lock test that checks an unrelated
+request completes before releasing the lock, callback durability tests, and a
+Chromium comment-conflict test with simultaneous writes. Export profiling remains
+separate from these fixes: the balance report performs repeated per-matter
+fee-earner lookups, and no report query changes are included here.

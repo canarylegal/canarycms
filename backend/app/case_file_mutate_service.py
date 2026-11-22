@@ -164,7 +164,7 @@ def update_comment_file(
 
     raise_if_files_checked_out(db, [file_id], action="edit")
 
-    row = lock_document(db, row)
+    row = lock_document(db, row, expected_version=payload.expected_version)
     if row.case_id != case_id:
         raise HTTPException(status_code=404, detail="File not found")
     if (row.category != FileCategory.case_document

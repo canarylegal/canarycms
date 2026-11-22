@@ -10,6 +10,7 @@ so Firefox does not hand off ``application/pdf`` to the global PDF handler.
 from __future__ import annotations
 
 import asyncio
+from app.document_io import run_document_io
 from app.document_durability import create_document_bytes
 
 from app.document_durability import lock_document, stage_document_bytes
@@ -887,6 +888,24 @@ def _oo_refuse_force_save(
 
 @router.post("/callback")
 async def onlyoffice_callback(
+    request: Request,
+    case_id: uuid.UUID | None = Query(None),
+    file_id: uuid.UUID | None = Query(None),
+    precedent_id: uuid.UUID | None = Query(None),
+    fee_scale_id: uuid.UUID | None = Query(None),
+    firm_letterhead_kind: str | None = Query(None),
+    db: Session = Depends(get_db),
+) -> dict[str, int]:
+    # ASGI receive must stay on its owning loop. The service reads the cached body.
+    await request.body()
+    return await run_document_io(
+        _onlyoffice_callback, request=request, case_id=case_id, file_id=file_id,
+        precedent_id=precedent_id, fee_scale_id=fee_scale_id,
+        firm_letterhead_kind=firm_letterhead_kind, db=db,
+    )
+
+
+async def _onlyoffice_callback(
     request: Request,
     case_id: uuid.UUID | None = Query(None),
     file_id: uuid.UUID | None = Query(None),

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from app.document_io import document_io
 from app.onlyoffice_force_save import oo_save_status as save_attempt_status
 
 import mimetypes
@@ -623,6 +624,7 @@ def get_precedent_onlyoffice_config(
 
 
 @router.post("/{precedent_id}/oo-force-save")
+@document_io
 async def oo_force_save_precedent(
     precedent_id: uuid.UUID,
     doc_key: str,
@@ -670,6 +672,7 @@ async def oo_force_save_precedent(
 
 
 @router.post("/{precedent_id}/oo-persist-download", status_code=status.HTTP_204_NO_CONTENT)
+@document_io
 async def oo_persist_download_precedent(
     precedent_id: uuid.UUID,
     body: OoPersistDownloadIn,
