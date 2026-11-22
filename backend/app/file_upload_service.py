@@ -33,7 +33,6 @@ from app.file_eml_service import (
     convert_case_upload_msg_to_eml_if_applicable,
     _eml_parse_date_header,
     _eml_parse_from_header,
-    _eml_parse_message_id_from_header,
     _infer_source_mail_is_outbound,
 )
 from app.file_storage import (
@@ -158,15 +157,17 @@ def upload_case_file(
             outlook_rest_id = None
             outlook_conv_id = None
 
-        internet_mid: str | None = (source_internet_message_id or "").strip() or None
-        if parent_file_id is None and not internet_mid:
-            low = original.lower()
-            if mime_base == "message/rfc822" or low.endswith(".eml"):
-                internet_mid = _eml_parse_message_id_from_header(paths.abs_path)
+        from app.mail_filing_lookup import message_id_from_email
+        parent_email = parent_file_id is None and (mime_base == "message/rfc822" or original.lower().endswith(".eml"))
+        # The form's Message-ID never overrides the bytes we actually stored.
+        internet_mid = message_id_from_email(paths.abs_path) if parent_email else None
+        if not parent_email:
+            outlook_rest_id = None
+            outlook_conv_id = None
 
         smbox = (source_imap_mbox or "").strip() or None
         suid = (source_imap_uid or "").strip() or None
-        if parent_file_id is not None and (smbox is not None or suid is not None):
+        if not parent_email:
             # Only the parent email row should carry IMAP pointers.
             smbox = None
             suid = None

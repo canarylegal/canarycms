@@ -7,14 +7,13 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import and_, or_, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db import get_db
 from app.deps import get_current_user, require_case_access
 from app.graph_mail import graph_mail_configured
 from app.graph_outlook_categories import ensure_master_category_for_mailbox, merge_canary_category_on_message
-from app.models import Case as CaseRow
 from app.models import File as DbFile
 from app.models import User
 from app.file_eml_service import _row_is_eml_like
@@ -24,7 +23,6 @@ from app.schemas import (
     OutlookPluginEnsureMasterCategoryOut,
     OutlookPluginGraphTagCategoryIn,
     OutlookPluginGraphTagCategoryOut,
-    OutlookPluginLinkedCaseOut,
     OutlookPluginLinkedCaseResolveIn,
     OutlookPluginLinkedCaseResolveOut,
     OutlookPluginPendingComposeHandoffOut,
@@ -98,76 +96,15 @@ def _pending_compose_handoff_out(row: User) -> OutlookPluginPendingComposeHandof
     )
 
 
-def _internet_message_id_variants(raw: str | None) -> list[str]:
-    t = (raw or "").strip()
-    if not t:
-        return []
-    out: set[str] = {t}
-    if t.startswith("<") and t.endswith(">"):
-        inner = t[1:-1].strip()
-        if inner:
-            out.add(inner)
-    elif "@" in t:
-        out.add(f"<{t}>")
-    return list(out)
-
-
 @router.post("/linked-case", response_model=OutlookPluginLinkedCaseResolveOut)
 def resolve_linked_case_for_outlook_message(
     payload: OutlookPluginLinkedCaseResolveIn,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> OutlookPluginLinkedCaseResolveOut:
-    """Return the matter a message is already filed to, if any, by Outlook item id and/or RFC5322 Message-ID."""
-    oid = (payload.outlook_item_id or "").strip() or None
-    variants = _internet_message_id_variants(payload.internet_message_id)
-    conv = (payload.conversation_id or "").strip() or None
-    imap_mbox = (payload.source_imap_mbox or "").strip() or None
-    imap_uid = (payload.source_imap_uid or "").strip() or None
-    if not oid and not variants and not conv and not (imap_mbox and imap_uid):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=(
-                "Provide outlook_item_id, internet_message_id, conversation_id, "
-                "and/or source_imap_mbox + source_imap_uid."
-            ),
-        )
-
-    top_ors = []
-    if oid:
-        top_ors.append(or_(DbFile.source_outlook_item_id == oid, DbFile.outlook_graph_message_id == oid))
-    if variants:
-        top_ors.append(DbFile.source_internet_message_id.in_(variants))
-    if conv:
-        top_ors.append(DbFile.source_outlook_conversation_id == conv)
-    if imap_mbox and imap_uid:
-        top_ors.append(and_(DbFile.source_imap_mbox == imap_mbox, DbFile.source_imap_uid == imap_uid))
-    if not top_ors:
-        return OutlookPluginLinkedCaseResolveOut(linked_case=None)
-
-    stmt = (
-        select(DbFile, CaseRow)
-        .join(CaseRow, DbFile.case_id == CaseRow.id)
-        .where(or_(*top_ors))
-        .where(DbFile.oo_compose_pending.is_(False))
-        .order_by(DbFile.created_at.desc())
-        .limit(40)
-    )
-    rows = db.execute(stmt).all()
-    for _frow, case in rows:
-        try:
-            require_case_access(case.id, user, db)
-        except HTTPException:
-            continue
-        return OutlookPluginLinkedCaseResolveOut(
-            linked_case=OutlookPluginLinkedCaseOut(
-                id=case.id,
-                case_number=case.case_number,
-                client_name=case.client_name,
-                matter_description=case.title,
-            )
-        )
-    return OutlookPluginLinkedCaseResolveOut(linked_case=None)
+    """Return accessible possible filing locations; never silently pick one."""
+    from app.mail_filing_lookup import filing_matches
+    return OutlookPluginLinkedCaseResolveOut(**filing_matches(payload, user, db))
 
 
 def resolve_message_filing_context(
@@ -175,58 +112,8 @@ def resolve_message_filing_context(
     user: User,
     db: Session,
 ) -> MailPluginMessageContextOut:
-    """Return matter and parent .eml file for reply/forward prefill (same match rules as linked-case)."""
-    oid = (payload.outlook_item_id or "").strip() or None
-    variants = _internet_message_id_variants(payload.internet_message_id)
-    conv = (payload.conversation_id or "").strip() or None
-    imap_mbox = (payload.source_imap_mbox or "").strip() or None
-    imap_uid = (payload.source_imap_uid or "").strip() or None
-    if not oid and not variants and not conv and not (imap_mbox and imap_uid):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=(
-                "Provide outlook_item_id, internet_message_id, conversation_id, "
-                "and/or source_imap_mbox + source_imap_uid."
-            ),
-        )
-
-    top_ors = []
-    if oid:
-        top_ors.append(or_(DbFile.source_outlook_item_id == oid, DbFile.outlook_graph_message_id == oid))
-    if variants:
-        top_ors.append(DbFile.source_internet_message_id.in_(variants))
-    if conv:
-        top_ors.append(DbFile.source_outlook_conversation_id == conv)
-    if imap_mbox and imap_uid:
-        top_ors.append(and_(DbFile.source_imap_mbox == imap_mbox, DbFile.source_imap_uid == imap_uid))
-    if not top_ors:
-        return MailPluginMessageContextOut(found=False)
-
-    stmt = (
-        select(DbFile, CaseRow)
-        .join(CaseRow, DbFile.case_id == CaseRow.id)
-        .where(or_(*top_ors))
-        .where(DbFile.oo_compose_pending.is_(False))
-        .order_by(DbFile.created_at.desc())
-        .limit(40)
-    )
-    rows = db.execute(stmt).all()
-    for frow, case in rows:
-        try:
-            require_case_access(case.id, user, db)
-        except HTTPException:
-            continue
-        folder = (frow.folder_path or "").strip().rstrip("/")
-        return MailPluginMessageContextOut(
-            found=True,
-            case_id=case.id,
-            file_id=frow.id,
-            folder_path=folder,
-            case_number=case.case_number,
-            client_name=case.client_name,
-            matter_description=case.title,
-        )
-    return MailPluginMessageContextOut(found=False)
+    from app.mail_filing_lookup import filing_matches
+    return MailPluginMessageContextOut(**filing_matches(payload, user, db))
 
 
 @router.get("/pending-send", response_model=OutlookPluginPendingSendOut)

@@ -19,6 +19,7 @@ class OutlookOpenHintsOut(BaseModel):
     open_in_owa_supported: bool = False
 
 class OutlookPluginLinkedCaseResolveIn(BaseModel):
+    offset: int = Field(default=0, ge=0, le=1000000)
     outlook_item_id: str | None = None
     internet_message_id: str | None = None
     conversation_id: str | None = None
@@ -71,12 +72,23 @@ class OutlookPluginLinkedCaseOut(BaseModel):
     client_name: str | None = None
     matter_description: str
 
-class OutlookPluginLinkedCaseResolveOut(BaseModel):
+class MailFilingMatch(OutlookPluginLinkedCaseOut):
+    file_id: uuid.UUID
+    file_name: str
+    folder_path: str = ""
+
+class MailFilingLookupOut(BaseModel):
+    matches: list[MailFilingMatch] = Field(default_factory=list)
+    lookup_status: Literal["no_exact_identifier", "no_match", "possible_matches"] = "no_match"
+    requires_confirmation: bool = True
+    next_offset: int | None = None
+
+class OutlookPluginLinkedCaseResolveOut(MailFilingLookupOut):
+    # Fail closed for older add-ins: a header match is not proof of filing.
     linked_case: OutlookPluginLinkedCaseOut | None = None
 
-class MailPluginMessageContextOut(BaseModel):
-    """Matter + parent e-mail file for a message already filed in Canary (Thunderbird reply prefill)."""
-
+class MailPluginMessageContextOut(MailFilingLookupOut):
+    """Unconfirmed candidates must not supply an automatic reply/forward context."""
     found: bool = False
     case_id: uuid.UUID | None = None
     file_id: uuid.UUID | None = None
