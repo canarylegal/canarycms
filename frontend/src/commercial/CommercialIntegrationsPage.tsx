@@ -10,6 +10,7 @@ export function CommercialIntegrationsPage({ token }: { token: string }) {
 }
 
 function IntegrationsSession({ token }: { token: string }) {
+  const [validated, setValidated] = useState(false)
   const [tab, setTab] = useState<'overview' | 'providers'>('overview')
   const [pkg, setPackage] = useState<CommercialPackageStatus | null>(null)
   const [error, setError] = useState(false)
@@ -35,18 +36,24 @@ function IntegrationsSession({ token }: { token: string }) {
     return () => { clock.value++ }
   }, [load])
   const available = commercialPackageActive(pkg)
+  const providersEnabled = available && validated
+  const providersOpen = tab === 'providers' && providersEnabled
+  const onValidationChange = useCallback((value: boolean) => {
+    setValidated(value)
+    if (!value) setTab('overview')
+  }, [])
   return <div className="stack" style={{ gap: 12 }}>
     <div className="adminTabStrip adminTabStrip--nested" role="tablist" aria-label="Commercial sections">
-      <button type="button" role="tab" aria-selected={tab === 'overview'} className={`adminTab${tab === 'overview' ? ' is-active' : ''}`} onClick={() => setTab('overview')}>Overview</button>
-      {available && <button type="button" role="tab" aria-selected={tab === 'providers'} className={`adminTab${tab === 'providers' ? ' is-active' : ''}`} onClick={() => setTab('providers')}>Provider settings</button>}
+      <button type="button" role="tab" aria-selected={!providersOpen} className={`adminTab${!providersOpen ? ' is-active' : ''}`} onClick={() => setTab('overview')}>Overview</button>
+      {available && <button type="button" role="tab" disabled={!providersEnabled} aria-selected={providersOpen} style={!providersEnabled ? { opacity: 0.45, cursor: 'not-allowed' } : undefined} className={`adminTab${providersOpen ? ' is-active' : ''}`} onClick={() => { if (providersEnabled) setTab('providers') }}>Provider settings</button>}
     </div>
     {error && <p role="alert">Could not check available integrations. <button type="button" disabled={loading} onClick={() => void load()}>Retry integrations</button></p>}
-    <div hidden={tab !== 'overview' && available}>
-      <CommercialConnectionPanel token={token} />
+    <div hidden={providersOpen}>
+      <CommercialConnectionPanel token={token} onValidationChange={onValidationChange} />
       {loading && !pkg && <p className="muted">Checking available integrations…</p>}
-      {available ? <p>Your existing local integrations remain available in Provider settings. They do not require hosted activation during this transition.</p>
+      {available ? !validated && <p>Validate your licence key to access Provider settings.</p>
         : pkg && !error ? <p>{pkg.fault ? 'The integration package needs attention before provider settings can be opened.' : 'No provider settings are available in this installation yet.'} Activating a licence does not connect your provider accounts automatically.</p> : null}
     </div>
-    {tab === 'providers' && available && <CommercialAdminIntegrationsSlot token={token} />}
+    {providersOpen && <CommercialAdminIntegrationsSlot token={token} />}
   </div>
 }

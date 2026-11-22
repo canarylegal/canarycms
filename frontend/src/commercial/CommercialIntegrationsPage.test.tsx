@@ -18,21 +18,71 @@ it('offers a licence overview on Core-only installations', async () => {
   expect(screen.queryByRole('tab', { name: 'Provider settings' })).toBeNull()
 })
 
-it('preserves existing local providers without a hosted licence', async () => {
+it('disables provider settings without a validated licence', async () => {
   api.mockImplementation(async path => path === '/commercial-package/status' ? pkg : connection)
   render(<CommercialIntegrationsPage token="admin" />)
-  fireEvent.click(await screen.findByRole('tab', { name: 'Provider settings' }))
-  expect(screen.getByText('Existing provider controls')).toBeVisible()
-  fireEvent.click(screen.getByRole('tab', { name: 'Overview' }))
-  expect(screen.getByLabelText('Canary Commercial licence key')).toBeVisible()
+  const tab = await screen.findByRole('tab', { name: 'Provider settings' })
+  expect(tab).toBeDisabled()
+  fireEvent.click(tab)
+  expect(screen.queryByText('Existing provider controls')).toBeNull()
+  expect(screen.queryByText(/Connect your self-hosted Canary installation/)).toBeNull()
 })
 
-it('keeps existing provider access when connection status is unavailable', async () => {
+it('keeps provider settings locked when connection status is unavailable', async () => {
   api.mockImplementation(async path => { if (path === '/commercial-package/status') return pkg; throw new Error('offline') })
   render(<CommercialIntegrationsPage token="admin" />)
   await screen.findByRole('alert')
-  fireEvent.click(await screen.findByRole('tab', { name: 'Provider settings' }))
+  expect(screen.getByRole('tab', { name: 'Provider settings' })).toBeDisabled()
+  expect(screen.queryByText('Existing provider controls')).toBeNull()
+})
+
+it('unlocks only after server activation and locks again after disconnect', async () => {
+  let finish!: (value: unknown) => void
+  api.mockImplementation(async path => {
+    if (path === '/commercial-package/status') return pkg
+    if (path === '/commercial-connection/activate') return new Promise(resolve => { finish = resolve })
+    return { ...connection, enabled: true }
+  })
+  render(<CommercialIntegrationsPage token="admin" />)
+  const input = await screen.findByLabelText('Canary Commercial licence key')
+  const tab = screen.getByRole('tab', { name: 'Provider settings' })
+  fireEvent.change(input, { target: { value: 'synthetic-key' } })
+  expect(tab).toBeDisabled()
+  fireEvent.click(screen.getByRole('button', { name: 'Activate licence' }))
+  expect(tab).toBeDisabled()
+  await act(async () => finish({ ...connection, enabled: true, connected: true, version: 1 }))
+  expect(tab).toBeEnabled()
+  fireEvent.click(tab)
   expect(screen.getByText('Existing provider controls')).toBeVisible()
+  fireEvent.click(screen.getByRole('tab', { name: 'Overview' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Disconnect hosted service locally' }))
+  await waitFor(() => expect(screen.getByLabelText('Canary Commercial licence key')).toBeVisible())
+  expect(tab).toBeDisabled()
+  expect(screen.queryByText('Existing provider controls')).toBeNull()
+})
+
+it('locks previously activated settings after a failed status refresh', async () => {
+  api.mockImplementation(async path => path === '/commercial-package/status' ? pkg : { ...connection, enabled: true, connected: true })
+  render(<CommercialIntegrationsPage token="admin" />)
+  const tab = await screen.findByRole('tab', { name: 'Provider settings' })
+  await waitFor(() => expect(tab).toBeEnabled())
+  api.mockRejectedValue(new Error('offline'))
+  fireEvent.click(screen.getByRole('button', { name: 'Refresh connection status' }))
+  await screen.findByRole('alert')
+  expect(tab).toBeDisabled()
+})
+
+it('does not unlock after an invalid licence submission', async () => {
+  api.mockImplementation(async path => {
+    if (path === '/commercial-package/status') return pkg
+    if (path === '/commercial-connection/activate') throw new Error('invalid licence')
+    return { ...connection, enabled: true }
+  })
+  render(<CommercialIntegrationsPage token="admin" />)
+  fireEvent.change(await screen.findByLabelText('Canary Commercial licence key'), { target: { value: 'invalid-key' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Activate licence' }))
+  await screen.findByRole('alert')
+  expect(screen.getByRole('tab', { name: 'Provider settings' })).toBeDisabled()
 })
 
 it('does not equate activation with live subscription entitlement', async () => {

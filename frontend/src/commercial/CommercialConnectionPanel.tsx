@@ -10,7 +10,7 @@ export type ConnectionStatus = {
   contract_version: string
 }
 
-export function CommercialConnectionPanel({ token }: { token: string }) {
+export function CommercialConnectionPanel({ token, onValidationChange }: { token: string; onValidationChange?: (validated: boolean) => void }) {
   const [status, setStatus] = useState<ConnectionStatus | null>(null)
   const [code, setCode] = useState('')
   const [busy, setBusy] = useState(false)
@@ -36,6 +36,10 @@ export function CommercialConnectionPanel({ token }: { token: string }) {
     void readStatus()
     return () => { clock.value++ }
   }, [token])
+
+  useEffect(() => {
+    onValidationChange?.(status?.enabled === true && status.connected === true && !busy && !error)
+  }, [status, busy, error, onValidationChange])
 
   async function change(action: 'activate' | 'disconnect') {
     if (!status || busy) return
@@ -81,11 +85,11 @@ export function CommercialConnectionPanel({ token }: { token: string }) {
 
   return <section aria-label="Canary Commercial licence" className="card" style={{ padding: 16, marginBottom: 16 }}>
     <h3>Canary Commercial</h3>
-    <p>Connect your self-hosted Canary installation to optional commercial integrations. Your firm uses its own provider accounts and is billed directly by those providers.</p>
+    <p>Your firm uses its own provider accounts and is billed directly by those providers.</p>
     {!status ? <p>{error ? 'Connection status unavailable.' : 'Loading licence connection…'}</p> : <>
       <p><strong>{status.connected ? 'Activation recorded on this installation' : 'Not activated'}</strong></p>
       {status.connected && <p>Live subscription details and included integrations are not available yet. Activation does not automatically connect your provider accounts.</p>}
-      {!status.enabled && <p>Hosted activation is not enabled for this installation. Your existing local integrations and records remain available.</p>}
+      {!status.enabled && <p>Licence activation is not enabled for this installation.</p>}
       <p>Firm credentials stay in this installation. Existing results and matter records remain accessible if you disconnect.</p>
       {(!status.connected || replacing) && <form onSubmit={event => { event.preventDefault(); void change('activate') }}>
         <label>Canary Commercial licence key <input type="password" autoComplete="off" value={code} maxLength={512} disabled={busy || !status.enabled} onChange={event => setCode(event.target.value)} /></label>
