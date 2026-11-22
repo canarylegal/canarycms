@@ -76,6 +76,9 @@ def data():
         code = generate_access_code()
         store_portal_access_code(access, code)
         recip.portal_access_version = access.session_version
+        import json
+        from app.document_invitation_access import binding
+        recip.document_invitation_binding=json.dumps(binding(db,cid,contact,recip.case_contact_id),sort_keys=True)
         other = Contact(
             id=uuid.uuid4(),
             type=ContactType.person,
@@ -489,14 +492,8 @@ def test_remove_contact_revokes_matter_content(data):
     from app.routers.case_contacts import remove_case_contact
 
     with SessionLocal() as db:
-        cc = CaseContact(
-            case_id=data["cid"],
-            contact_id=data["contact"],
-            type=ContactType.person,
-            name="Synthetic client",
-            matter_contact_type="client",
-        )
-        db.add(cc)
+        cc = db.scalar(select(CaseContact).where(CaseContact.case_id == data["cid"], CaseContact.contact_id == data["contact"]))
+        cc.matter_contact_type = "client"
         db.commit()
         identity = cc.id
         remove_case_contact(
@@ -621,7 +618,7 @@ def test_existing_signing_session_dies_on_rotation(data):
 
 def test_unbound_legacy_signing_link_requires_login(data):
     with SessionLocal() as db:
-        db.get(CanarySignRecipient, data["recip"]).portal_access_version = None
+        db.get(CanarySignRecipient, data["recip"]).document_invitation_binding = None
         db.commit()
     assert (
         data["client"]

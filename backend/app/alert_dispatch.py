@@ -124,6 +124,8 @@ def render_alert(
     actor_user_id: uuid.UUID | None = None,
 ) -> FirmEmailMessage | None:
     """Render without network calls or transaction commits."""
+    if kind in (AlertKind.portal_quote_sent, AlertKind.portal_form_sent, AlertKind.canary_sign_requested, AlertKind.canary_sign_reminded):
+        context = {key: value for key, value in context.items() if key != "access_code"}
     addr = (to_email or "").strip()
     if not addr:
         return None
@@ -200,7 +202,7 @@ def render_alert(
                 quote_filename=str(context.get("quote_filename") or "Quote"),
                 matter_label=str(context.get("matter_label") or "your matter"),
                 portal_url=str(context.get("portal_url") or portal_public_url()),
-                access_code=str(context.get("access_code") or "") or None,
+                access_code=None,
             )
         elif kind == AlertKind.portal_quote_accepted:
             subject, body, body_html = portal_quote_accepted(
@@ -234,7 +236,7 @@ def render_alert(
                 form_name=str(context.get("form_name") or "Form"),
                 matter_label=str(context.get("matter_label") or "your matter"),
                 portal_url=str(context.get("portal_url") or portal_public_url()),
-                access_code=str(context.get("access_code") or "") or None,
+                access_code=None,
             )
         elif kind == AlertKind.docusign_sign_requested:
             subject, body, body_html = docusign_sign_requested(
@@ -264,7 +266,7 @@ def render_alert(
                 document_name=str(context.get("document_name") or "Document"),
                 matter_label=str(context.get("matter_label") or "your matter"),
                 sign_url=str(context.get("sign_url") or portal_public_url()),
-                access_code=str(context.get("access_code") or "") or None,
+                access_code=None,
             )
         elif kind == AlertKind.canary_sign_reminded:
             subject, body, body_html = canary_sign_reminded(

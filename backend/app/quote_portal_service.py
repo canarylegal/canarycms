@@ -28,10 +28,8 @@ from app.portal_notifications import ALERTS_NOT_CONFIGURED_MSG, list_portal_staf
 from app.portal_service import (
     client_matter_description,
     contact_display_name,
-    ensure_contact_portal_access_for_delivery,
     file_folder_in_grant,
     grant_is_client_visible,
-    resolve_matter_contact_email,
 )
 from app.quote_portal_pdf import create_portal_quote_pdf_snapshot
 
@@ -227,13 +225,9 @@ def send_quote_via_portal(
     contact = db.get(Contact, contact_id)
     if contact is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Contact not found")
-    email = resolve_matter_contact_email(db, case_id=case_id, contact_id=contact_id)
+    from app.document_invitation_access import recipient
+    _cc, contact, email = recipient(db, case_id, contact_id)
 
-    _access, newly_provisioned, access_code = ensure_contact_portal_access_for_delivery(
-        db,
-        contact_id=contact_id,
-        actor_user_id=actor_user_id,
-    )
 
     # Quotes are delivery-scoped — folder grants are optional (used for portal navigation when present).
     grant = _grant_covering_file(
@@ -297,7 +291,7 @@ def send_quote_via_portal(
                 "quote_filename": client_filename,
                 "matter_label": client_matter_description(case),
                 "portal_url": quote_url,
-                **({"access_code": access_code} if newly_provisioned and access_code else {}),
+
             },
             actor_user_id=actor_user_id,
         )
@@ -344,13 +338,9 @@ def resend_quote_delivery(
     contact = db.get(Contact, delivery.contact_id)
     if contact is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Contact not found")
-    email = resolve_matter_contact_email(db, case_id=delivery.case_id, contact_id=delivery.contact_id)
+    from app.document_invitation_access import recipient
+    _cc, contact, email = recipient(db, delivery.case_id, delivery.contact_id)
 
-    _access, newly_provisioned, access_code = ensure_contact_portal_access_for_delivery(
-        db,
-        contact_id=delivery.contact_id,
-        actor_user_id=actor_user_id,
-    )
 
     client_row = client_quote_file_row(db, delivery)
     source = db.get(File, delivery.file_id)
@@ -388,7 +378,7 @@ def resend_quote_delivery(
                 "quote_filename": client_filename,
                 "matter_label": client_matter_description(case),
                 "portal_url": quote_url,
-                **({"access_code": access_code} if newly_provisioned and access_code else {}),
+
             },
             actor_user_id=actor_user_id,
         )

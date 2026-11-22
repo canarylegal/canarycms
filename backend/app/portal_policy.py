@@ -61,13 +61,29 @@ def authorize(db, case_id, *, signing_request_id=None, resource_kind=None, resou
     if principal.case_id and str(case_id) != principal.case_id:
         raise HTTPException(404, "Area not found")
     if principal.invitation:
-        if resource_kind != principal.resource_kind or str(resource_id) != principal.resource_id:
+        if principal.resource_kind == "sign":
+            if str(signing_request_id) != principal.signing_request_id:
+                raise HTTPException(403, "This invitation is limited to its signing request")
+        elif resource_kind != principal.resource_kind or str(resource_id) != principal.resource_id:
             raise HTTPException(403, "This invitation is limited to its form or quote")
-        from app.portal_invitation import resolve
+        from app.portal_invitation import resolve, coordinates
         try:
-            resolve(db, principal.invitation, principal.resource_kind, completed=True, lock=lock)
+            row = resolve(db, principal.invitation, principal.resource_kind, completed=True, lock=lock)
+            resolved_case, resolved_contact = coordinates(db, principal.resource_kind, row)
+            if str(resolved_case) != str(case_id) or str(resolved_contact) != principal.contact_id:
+                raise ValueError("Invitation identity mismatch")
+            if principal.resource_kind == "sign" and str(row.signing_request_id) != principal.signing_request_id:
+                raise ValueError("Signing identity mismatch")
         except ValueError as exc:
             raise HTTPException(401, str(exc)) from exc
+        # Preserve the fresh, locked feature checks used by ordinary portal sessions.
+        firm = fresh(db, FirmSettings, 1, lock=lock)
+        case = fresh(db, Case, case_id, lock=lock)
+        if not case or not case.portal_enabled or (firm and not firm.client_portal_enabled):
+            raise HTTPException(403, "Portal is not enabled for this matter.")
+        if principal.resource_kind == "sign" and firm and not firm.canary_sign_enabled:
+            raise HTTPException(403, "Canary Sign is disabled")
+        return
     contact_id = uuid.UUID(principal.contact_id)
     if principal.audience == "exchange" and str(case_id) != principal.case_id:
         raise HTTPException(404, "Area not found")

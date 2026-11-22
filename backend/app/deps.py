@@ -346,11 +346,11 @@ def get_portal_contact(
     from app.portal_policy import validate_preview, authorize
     validate_preview(db, session)
     if session.invitation:
-        authorize(db, uuid.UUID(session.case_id), resource_kind=session.resource_kind, resource_id=session.resource_id)
+        authorize(db, uuid.UUID(session.case_id), signing_request_id=session.signing_request_id, resource_kind=session.resource_kind, resource_id=session.resource_id)
         if request is not None:
             path = request.url.path
-            prefix = "/portal/forms/" if session.resource_kind == "form" else "/portal/quote-deliveries/"
-            base = prefix + str(session.resource_id)
+            prefix = "/portal/canary-sign/" if session.resource_kind == "sign" else "/portal/forms/" if session.resource_kind == "form" else "/portal/quote-deliveries/"
+            base = prefix + str(session.signing_request_id if session.resource_kind == "sign" else session.resource_id)
             if path not in ("/portal/session", "/portal/forms", "/portal/quote-deliveries", "/portal/client-actions", "/portal/canary-sign") and path != base and not path.startswith(base + "/"):
                 raise HTTPException(403, "This invitation is limited to its form or quote")
     if session.signing_request_id and request is not None:
@@ -373,6 +373,9 @@ def get_portal_contact(
     contact = db.get(Contact, contact_id)
     if contact is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid portal session")
+
+    if session.invitation:
+        return contact
 
     if getattr(session, "audience", "client") == "exchange":
         if not session.case_id:

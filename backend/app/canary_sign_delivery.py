@@ -15,8 +15,6 @@ from app.models import (
     NotificationAttempt,
     CanarySignRequest,
     CanarySignRecipient,
-    ContactPortalAccess,
-    Contact,
     User,
 )
 from app.notification_outbox import _locked, _audit, _message, summary, STALE_AFTER
@@ -24,7 +22,6 @@ from app.email_crypt import encrypt_password, decrypt_password
 from app.firm_email_service import resolve_alert_transport, send_firm_email
 from app.deps import require_case_access
 from app.portal_case import require_case_portal_enabled, firm_canary_sign_enabled
-from app.portal_service import portal_access_is_active
 from app.timeutil import utcnow
 
 KINDS = frozenset(("canary_sign_requested", "canary_sign_reminded"))
@@ -79,23 +76,9 @@ def enqueue(db, req, recipient, *, kind, context, event_key):
     )
     if message is None:
         raise HTTPException(400, "Signing notification could not be prepared")
-    access = (
-        db.scalar(
-            select(ContactPortalAccess).where(
-                ContactPortalAccess.contact_id == recipient.contact_id
-            )
-        )
-        if recipient.contact_id
-        else None
-    )
-    contact = db.get(Contact, recipient.contact_id) if recipient.contact_id else None
-    binding = {
-        "contact_id": str(recipient.contact_id),
-        "contact_email": getattr(contact, "email", None),
-        "token_sha256": hashlib.sha256(recipient.sign_token.encode()).hexdigest(),
-        "access_code_sha256": access.code_sha256 if access else None,
-        "session_version": access.session_version if access else None,
-    }
+    binding = {"contact_id":str(recipient.contact_id),
+        "token_sha256":hashlib.sha256(recipient.sign_token.encode()).hexdigest(),
+        "document_binding":recipient.document_invitation_binding}
     raw = json.dumps(asdict(message), sort_keys=True, separators=(",", ":"))
     row = NotificationOutbox(
         id=identity,
@@ -117,7 +100,7 @@ def enqueue(db, req, recipient, *, kind, context, event_key):
     return row
 
 
-def _eligibility(db, row, req, message):
+def _eligibility(db, row, req, message, *, lock=False):
     if req is None or req.case_id != row.case_id:
         return "request_unavailable"
     expires = (
@@ -152,30 +135,13 @@ def _eligibility(db, row, req, message):
         recipient.sign_token.encode()
     ).hexdigest() or binding["contact_id"] != str(recipient.contact_id):
         return "recipient_changed"
-    contact = db.get(Contact, recipient.contact_id) if recipient.contact_id else None
-    access = (
-        db.scalar(
-            select(ContactPortalAccess).where(
-                ContactPortalAccess.contact_id == recipient.contact_id
-            )
-        )
-        if contact
-        else None
-    )
-    if not access or not portal_access_is_active(access):
-        return "portal_access_inactive"
-    from app.models import PortalMatterBlock
-
-    if recipient.portal_access_version != access.session_version or db.get(
-        PortalMatterBlock, (req.case_id, contact.id)
-    ):
-        return "portal_access_changed"
-    if (
-        contact.email != binding["contact_email"]
-        or access.code_sha256 != binding["access_code_sha256"]
-        or access.session_version != binding["session_version"]
-    ):
-        return "portal_access_changed"
+    if not recipient.document_invitation_binding or binding.get("document_binding") != recipient.document_invitation_binding:
+        return "invitation_unverified"
+    from app.document_invitation_access import validate_binding
+    try:
+        validate_binding(db, req.case_id, recipient.contact_id, json.loads(recipient.document_invitation_binding), lock=lock)
+    except (HTTPException, ValueError, KeyError, TypeError):
+        return "document_access_changed"
     if req.order_mode.value == "sequential":
         waiting = db.scalar(
             select(func.min(CanarySignRecipient.routing_order)).where(
@@ -279,7 +245,7 @@ def deliver(notification_id, *, actor_id, session_factory=SessionLocal, sender=N
             return summary(current)
         try:
             _actor(sending, actor_id, current.case_id)
-            code = _eligibility(sending, current, req, message)
+            code = _eligibility(sending, current, req, message, lock=True)
             if code:
                 outcome = "cancelled"
             else:

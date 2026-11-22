@@ -257,6 +257,7 @@ class CanarySignRecipient(Base):
     email: Mapped[str] = mapped_column(String(320), nullable=False)
     routing_order: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     sign_token: Mapped[str] = mapped_column(String(64), nullable=False)
+    document_invitation_binding: Mapped[str | None] = mapped_column(Text, nullable=True)
     portal_access_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
     status: Mapped[CanarySignRecipientStatus] = mapped_column(
         Enum(CanarySignRecipientStatus, name="canary_sign_recipient_status"),

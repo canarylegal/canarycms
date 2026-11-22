@@ -47,8 +47,6 @@ from app.portal_notifications import notify_portal_staff_form_completed
 from app.portal_service import (
     client_matter_description,
     contact_display_name,
-    ensure_contact_portal_access_for_delivery,
-    resolve_matter_contact_email,
 )
 from app.portal_case import require_case_portal_enabled
 from app.portal_notifications import ALERTS_NOT_CONFIGURED_MSG
@@ -262,13 +260,9 @@ def send_form_to_contact(
     contact = db.get(Contact, contact_id)
     if contact is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Contact not found")
-    email = resolve_matter_contact_email(db, case_id=case_id, contact_id=contact_id)
+    from app.document_invitation_access import recipient
+    _cc, contact, email = recipient(db, case_id, contact_id)
 
-    _access, newly_provisioned, access_code = ensure_contact_portal_access_for_delivery(
-        db,
-        contact_id=contact_id,
-        actor_user_id=actor.id,
-    )
 
     # Forms are delivery-scoped — folder grants are optional (used for portal navigation when present).
     grant = pick_portal_grant_for_case(db, case_id=case_id, contact_id=contact_id)
@@ -320,7 +314,7 @@ def send_form_to_contact(
             "form_name": template.name,
             "matter_label": client_matter_description(case),
             "portal_url": form_url,
-            **({"access_code": access_code} if newly_provisioned and access_code else {}),
+
         },
         actor_user_id=actor.id,
     )
@@ -388,13 +382,9 @@ def resend_form_submission(
     contact = db.get(Contact, submission.contact_id)
     if contact is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Contact not found")
-    email = resolve_matter_contact_email(db, case_id=submission.case_id, contact_id=submission.contact_id)
+    from app.document_invitation_access import recipient
+    _cc, contact, email = recipient(db, submission.case_id, submission.contact_id)
 
-    _access, newly_provisioned, access_code = ensure_contact_portal_access_for_delivery(
-        db,
-        contact_id=submission.contact_id,
-        actor_user_id=actor.id,
-    )
 
     # Refresh sent_at so the e-mail exchange link does not expire from the original send.
     submission.sent_at = utcnow()
@@ -412,7 +402,7 @@ def resend_form_submission(
             "form_name": template.name,
             "matter_label": client_matter_description(case),
             "portal_url": form_url,
-            **({"access_code": access_code} if newly_provisioned and access_code else {}),
+
         },
         actor_user_id=actor.id,
     )

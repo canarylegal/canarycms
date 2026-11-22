@@ -95,19 +95,12 @@ export function SendPortalFormModal({ token, caseId, open, onClose, onSent }: Se
     () =>
       recipients.map((r) => ({
         value: r.contact_id,
-        label:
-          r.portal_access_active === false
-            ? `${r.contact_name} (portal access will be enabled)`
-            : r.contact_name,
+        label: r.contact_name,
       })),
     [recipients],
   )
 
-  const selectedRecipient = useMemo(
-    () => recipients.find((r) => r.contact_id === contactId) ?? null,
-    [recipients, contactId],
-  )
-  const willEnablePortal = selectedRecipient?.portal_access_active === false
+
 
 
   async function confirmSendWithoutEmail(): Promise<boolean> {
@@ -189,14 +182,8 @@ export function SendPortalFormModal({ token, caseId, open, onClose, onSent }: Se
             <>
               <p className="muted" style={{ margin: 0 }}>
                 Choose the contact who will complete the form on the portal. Sharing a document folder is not required.
-                Contacts without portal access are enabled automatically when you send.
+                The invitation opens only this document. No portal login is created or enabled.
               </p>
-              {willEnablePortal ? (
-                <div className="notice">
-                  Portal access will be enabled for {selectedRecipient?.contact_name}. Their invite e-mail will include
-                  an access code.
-                </div>
-              ) : null}
               <SingleSelectDropdown
                 label="Portal contact"
                 options={recipientOptions}

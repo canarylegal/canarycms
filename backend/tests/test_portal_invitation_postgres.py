@@ -81,7 +81,7 @@ def preview(links):
     from tests.ledger_test_helpers import add_user, add_fee_earner_category
     with SessionLocal() as db:
         staff=db.get(User,links['uid']);staff.role=UserRole.user;staff.permission_category_id=db.scalar(select(UserPermissionCategory.id).where(UserPermissionCategory.name=="Fee earner"))
-        db.add(CaseContact(case_id=links['cid'],contact_id=links['contact'],type=ContactType.person,name='Synthetic client',matter_contact_type='client'))
+        db.scalar(select(CaseContact).where(CaseContact.case_id==links['cid'],CaseContact.contact_id==links['contact'])).matter_contact_type='client'
         outsider=add_user(db)
         case=db.get(Case,links['other_case']);case.fee_earner_user_id=outsider.id;case.lock_mode=CaseLockMode.allow_list
         db.commit()

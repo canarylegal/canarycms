@@ -68,14 +68,8 @@ def test_last_contact_removal_cancels_queued_signing_invitation(data):
             kind=AlertKind.canary_sign_requested,
             event_key=str(uuid.uuid4()),
         )
-        cc = CaseContact(
-            case_id=data["cid"],
-            contact_id=data["contact"],
-            type=ContactType.person,
-            name="Synthetic client",
-            matter_contact_type="client",
-        )
-        db.add(cc)
+        cc = db.scalar(select(CaseContact).where(CaseContact.case_id == data["cid"], CaseContact.contact_id == data["contact"]))
+        cc.matter_contact_type = "client"
         db.commit()
         delivery = db.scalar(
             select(NotificationOutbox.id).where(

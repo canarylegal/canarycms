@@ -15,7 +15,6 @@ import type {
   CanarySignSendRecipientIn,
   CanarySignSigningRequestOut,
   CaseContactOut,
-  CasePortalFolderShareContactOut,
 } from './types'
 
 type RecipientRow = CanarySignSendRecipientIn & { key: string }
@@ -115,8 +114,6 @@ export function SendCanarySignModal({
   const [fillableFields, setFillableFields] = useState<CanarySignAcroFormFieldOut[]>([])
   /** null = not chosen yet; required before send when fillableFields.length > 0 */
   const [retainFillableForm, setRetainFillableForm] = useState<boolean | null>(null)
-  /** contact_id → currently has active portal access */
-  const [portalAccessByContactId, setPortalAccessByContactId] = useState<Record<string, boolean>>({})
   const pdfDocRef = useRef<CanarySignPdfDocumentHandle | null>(null)
   const bodyScrollRef = useRef<HTMLDivElement | null>(null)
   const preservedScrollTop = useRef<number | null>(null)
@@ -139,7 +136,7 @@ export function SendCanarySignModal({
   const contactOptions = useMemo(
     () =>
       caseContacts
-        .filter((c) => (c.email || '').trim())
+        .filter((c) => c.contact_id && (c.email || '').trim())
         .map((c) => ({
           value: c.id,
           label: `${c.name}${c.email ? ` (${c.email})` : ''}`,
@@ -245,31 +242,6 @@ export function SendCanarySignModal({
   useEffect(() => {
     if (!open) return
     let cancelled = false
-    setPortalAccessByContactId({})
-    void (async () => {
-      try {
-        const rows = await apiFetch<CasePortalFolderShareContactOut[]>(
-          `/cases/${caseId}/portal/folder-share?grant_scope=matter&require_portal_access=false`,
-          { token },
-        )
-        if (cancelled) return
-        const map: Record<string, boolean> = {}
-        for (const r of rows) {
-          map[r.contact_id] = r.portal_access_active !== false
-        }
-        setPortalAccessByContactId(map)
-      } catch {
-        if (!cancelled) setPortalAccessByContactId({})
-      }
-    })()
-    return () => {
-      cancelled = true
-    }
-  }, [open, caseId, token])
-
-  useEffect(() => {
-    if (!open) return
-    let cancelled = false
     setFillableFields([])
     setRetainFillableForm(null)
     setFormFieldsWarning(null)
@@ -293,20 +265,6 @@ export function SendCanarySignModal({
       cancelled = true
     }
   }, [open, caseId, fileId, token])
-
-  const recipientsNeedingPortal = useMemo(() => {
-    const names: string[] = []
-    const seen = new Set<string>()
-    for (const r of recipients) {
-      const cid = (r.contact_id || '').trim()
-      if (!cid || seen.has(cid)) continue
-      if (portalAccessByContactId[cid] === false) {
-        seen.add(cid)
-        names.push(r.name?.trim() || 'Signer')
-      }
-    }
-    return names
-  }, [recipients, portalAccessByContactId])
 
   useEffect(() => {
     if (!open) return
@@ -429,6 +387,9 @@ export function SendCanarySignModal({
         case_contact_id: r.case_contact_id,
         contact_id: r.contact_id,
       }))
+      if (cleaned.some((r) => !r.contact_id || !r.case_contact_id)) {
+        throw new Error('Select a matter contact for every signer')
+      }
       if (cleaned.some((r) => !r.name || !r.email)) {
         throw new Error('Each recipient needs a name and e-mail')
       }
@@ -535,15 +496,8 @@ export function SendCanarySignModal({
           {err ? <div className="error">{err}</div> : null}
           {notice ? <div className="notice">{notice}</div> : null}
           {formFieldsWarning ? <div className="notice">{formFieldsWarning}</div> : null}
-          {recipientsNeedingPortal.length > 0 ? (
-            <div className="notice">
-              Portal access will be enabled for{' '}
-              {recipientsNeedingPortal.length === 1
-                ? recipientsNeedingPortal[0]
-                : recipientsNeedingPortal.join(', ')}
-              . Their signing invite will include an access code.
-            </div>
-          ) : null}
+          <div className="muted">Invitations open only this signing request. No portal login is created or enabled.
+            Select a matter contact; update their matter contact record first if their email needs changing.</div>
 
           <label className="field">
             <span>Subject</span>
@@ -681,11 +635,7 @@ export function SendCanarySignModal({
                       <span>Name</span>
                       <input
                         value={r.name}
-                        onChange={(e) =>
-                          setRecipients((rows) =>
-                            rows.map((row) => (row.key === r.key ? { ...row, name: e.target.value } : row)),
-                          )
-                        }
+                        readOnly
                         disabled={busy}
                       />
                     </label>
@@ -694,11 +644,7 @@ export function SendCanarySignModal({
                       <input
                         type="email"
                         value={r.email}
-                        onChange={(e) =>
-                          setRecipients((rows) =>
-                            rows.map((row) => (row.key === r.key ? { ...row, email: e.target.value } : row)),
-                          )
-                        }
+                        readOnly
                         disabled={busy}
                       />
                     </label>

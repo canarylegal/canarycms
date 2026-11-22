@@ -239,14 +239,16 @@ def canary_request_for_contact(
     req = db.get(CanarySignRequest, request_id)
     if req is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Signing request not found")
-    recip = db.execute(
-        select(CanarySignRecipient)
+    stmt = (select(CanarySignRecipient)
         .where(
             CanarySignRecipient.signing_request_id == req.id,
             CanarySignRecipient.contact_id == contact_id,
         )
-        .limit(1)
-    ).scalar_one_or_none()
+    )
+    principal = db.info.get("portal_session")
+    if principal and principal.invitation and principal.resource_kind == "sign":
+        stmt = stmt.where(CanarySignRecipient.id == uuid.UUID(principal.resource_id))
+    recip = db.scalar(stmt.limit(1))
     if recip is None:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not a recipient on this signing request")
     from app.portal_policy import authorize

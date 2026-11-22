@@ -675,65 +675,6 @@ def regenerate_contact_portal_access_code(db: Session, contact_id: uuid.UUID) ->
     return code
 
 
-def ensure_contact_portal_access_for_delivery(
-    db: Session,
-    *,
-    contact_id: uuid.UUID,
-    actor_user_id: uuid.UUID,
-) -> tuple[ContactPortalAccess, bool, str | None]:
-    """Ensure the contact can sign in to the portal (create or re-enable access).
-
-    Used when sending quotes, forms, or Canary Sign so recipients are not blocked
-    by missing portal access. Returns ``(row, newly_provisioned, access_code)``.
-    ``access_code`` is set only when access was newly created or re-enabled.
-    """
-    contact = db.get(Contact, contact_id)
-    if contact is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Contact not found")
-
-    row = db.execute(
-        select(ContactPortalAccess).where(ContactPortalAccess.contact_id == contact_id)
-    ).scalar_one_or_none()
-    if row is not None and portal_access_is_active(row):
-        return row, False, None
-
-    from app.portal_email_conflict import find_active_portal_email_conflict, raise_portal_email_conflict
-
-    conflict = find_active_portal_email_conflict(db, contact_id=contact_id)
-    if conflict is not None:
-        raise_portal_email_conflict(conflict)
-
-    code = allocate_unique_access_code(db)
-    created = row is None
-    if row is None:
-        row = ContactPortalAccess(
-            contact_id=contact_id,
-            enabled=True,
-            created_by_user_id=actor_user_id,
-        )
-        db.add(row)
-    else:
-        row.enabled = True
-        row.failed_attempts = 0
-        row.locked_until = None
-        row.updated_at = utcnow()
-    store_portal_access_code(row, code)
-    db.add(row)
-    db.flush()
-
-    from app.audit import log_event
-
-    log_event(
-        db,
-        actor_user_id=actor_user_id,
-        action="contact.portal.access.create" if created else "contact.portal.access.reactivate",
-        entity_type="contact",
-        entity_id=str(contact_id),
-        meta={"reason": "auto_provision_for_portal_delivery"},
-    )
-    return row, True, code
-
-
 def store_matter_portal_access_code(row: MatterPortalAccess, code: str) -> None:
     from app.email_crypt import encrypt_password
 

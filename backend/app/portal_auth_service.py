@@ -292,17 +292,12 @@ def portal_quote_exchange(payload: PortalQuoteExchangeIn, db: Session) -> Portal
     contact = db.get(Contact, contact_id)
     if contact is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid quote link")
-    access_row = db.execute(
-        select(ContactPortalAccess).where(ContactPortalAccess.contact_id == contact_id)
-    ).scalar_one_or_none()
-    if access_row is None or not portal_access_is_active(access_row):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Portal access is not active")
 
     require_case_portal_enabled(db, case_id)
 
     token = create_portal_session_token(
         contact_id=str(contact.id),
-        session_version=portal_session_version(access_row),
+        session_version=1,
         case_id=str(case_id), invitation=payload.exchange_token,
         resource_kind="quote", resource_id=str(delivery.id),
     )
@@ -337,17 +332,12 @@ def portal_form_exchange(payload: PortalFormExchangeIn, db: Session) -> PortalFo
     contact = db.get(Contact, contact_id)
     if contact is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid form link")
-    access_row = db.execute(
-        select(ContactPortalAccess).where(ContactPortalAccess.contact_id == contact_id)
-    ).scalar_one_or_none()
-    if access_row is None or not portal_access_is_active(access_row):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Portal access is not active")
 
     require_case_portal_enabled(db, case_id)
 
     token = create_portal_session_token(
         contact_id=str(contact.id),
-        session_version=portal_session_version(access_row),
+        session_version=1,
         case_id=str(case_id), invitation=payload.exchange_token,
         resource_kind="form", resource_id=str(submission.id),
     )
@@ -381,48 +371,22 @@ def portal_canary_sign_exchange(payload: PortalCanarySignExchangeIn, db: Session
     contact = db.get(Contact, recipient.contact_id)
     if contact is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid signing link")
-    access_row = db.execute(
-        select(ContactPortalAccess).where(ContactPortalAccess.contact_id == contact.id)
-    ).scalar_one_or_none()
-    if access_row is None or not portal_access_is_active(access_row):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Portal access is not active")
-
-    from app.models import CanarySignStatus, CanarySignRecipientStatus
-    from app.timeutil import utcnow
-    from datetime import timezone
-
-    expires = (
-        req.expires_at.replace(tzinfo=timezone.utc)
-        if req.expires_at.tzinfo is None
-        else req.expires_at
-    )
-    if (
-        req.status != CanarySignStatus.pending
-        or expires <= utcnow()
-        or recipient.status
-        in (CanarySignRecipientStatus.signed, CanarySignRecipientStatus.declined)
-        or recipient.portal_access_version is None
-        or recipient.portal_access_version != portal_session_version(access_row)
-    ):
-        raise HTTPException(
-            401, "Invalid or expired signing link — sign in with your access code"
-        )
+    from app.portal_invitation import issue, resolve
     from app.security import PortalSessionPayload
     from app.portal_policy import authorize
-
-    principal = PortalSessionPayload(
-        contact_id=str(contact.id),
-        session_version=access_row.session_version,
-        signing_request_id=str(req.id),
-    )
+    try:
+        invitation = issue(db, "sign", recipient)
+        resolve(db, invitation, "sign")
+    except (ValueError, HTTPException) as exc:
+        raise HTTPException(401, "Invalid or expired signing link; request a new link") from exc
+    principal = PortalSessionPayload(contact_id=str(contact.id), session_version=1,
+        case_id=str(req.case_id), signing_request_id=str(req.id), invitation=invitation,
+        resource_kind="sign", resource_id=str(recipient.id))
     db.info["portal_session"] = principal
     authorize(db, req.case_id, signing_request_id=req.id, lock=True)
-
-    token = create_portal_session_token(
-        contact_id=str(contact.id),
-        session_version=portal_session_version(access_row),
-        signing_request_id=str(req.id),
-    )
+    token = create_portal_session_token(contact_id=str(contact.id), session_version=1,
+        case_id=str(req.case_id), signing_request_id=str(req.id), invitation=invitation,
+        resource_kind="sign", resource_id=str(recipient.id))
     log_event(
         db,
         actor_user_id=None,

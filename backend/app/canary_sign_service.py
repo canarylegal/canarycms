@@ -5,6 +5,7 @@ from app.document_durability import create_document_bytes
 from app.notification_outbox import enqueue_staff
 
 import hashlib
+import json
 import logging
 import secrets
 import uuid
@@ -56,7 +57,6 @@ from app.portal_case import require_case_portal_enabled
 from app.portal_notifications import list_portal_staff_recipient_users
 from app.portal_service import (
     client_matter_description,
-    ensure_contact_portal_access_for_delivery,
 )
 
 log = logging.getLogger(__name__)
@@ -239,6 +239,9 @@ def _refresh_recipient(
     db: Session, req: CanarySignRequest, recipient: CanarySignRecipient
 ) -> None:
     db.refresh(recipient)
+    principal = db.info.get("portal_session")
+    if principal and principal.invitation and principal.resource_kind == "sign" and principal.resource_id != str(recipient.id):
+        raise HTTPException(403, "This invitation is limited to its signing recipient")
     if recipient.signing_request_id != req.id:
         raise HTTPException(
             status_code=403, detail="Not a recipient on this signing request"
@@ -453,6 +456,25 @@ def send_signing_request(
             detail="expires_in_days must be between 1 and 365",
         )
 
+    from app.document_invitation_access import recipient as resolve_document_recipient
+    validated_specs = []
+    seen_contacts = set()
+    for spec in recipient_specs:
+        try:
+            cid = uuid.UUID(str(spec["contact_id"])) if spec.get("contact_id") else None
+            ccid = uuid.UUID(str(spec["case_contact_id"])) if spec.get("case_contact_id") else None
+        except ValueError as exc:
+            raise HTTPException(400, "Invalid matter contact") from exc
+        cc, contact, email = resolve_document_recipient(db, case_id, cid, ccid)
+        if spec.get("email") and str(spec["email"]).strip().lower() != email:
+            raise HTTPException(400, "Recipient email must match the matter contact")
+        if contact.id in seen_contacts:
+            raise HTTPException(400, "A contact may appear only once on a signing request")
+        seen_contacts.add(contact.id)
+        validated_specs.append({**spec, "contact_id":contact.id, "case_contact_id":cc.id,
+            "email":email, "name":cc.name or contact.name})
+    recipient_specs = validated_specs
+
     from app.canary_sign_delivery import operation, fingerprint
     operation_payload = dict(case_id=case_id, source_file_id=source_file_id, subject=subject,
         recipient_specs=recipient_specs, order_mode=order_mode.value, expires_in_days=expires_in_days,
@@ -627,22 +649,9 @@ def send_signing_request(
         detail={"recipient_count": len(recipients), "delivery": "queued"},
     )
 
-    access_codes: dict[uuid.UUID, str] = {}
-    for recipient in recipients:
-        if recipient.contact_id is None:
-            continue
-        _row, newly, code = ensure_contact_portal_access_for_delivery(
-            db,
-            contact_id=recipient.contact_id,
-            actor_user_id=actor.id,
-        )
-        recipient.portal_access_version = _row.session_version
-        if newly and code:
-            access_codes[recipient.id] = code
-
     _notify_staff_sent(db, case_id, req, actor)
     _notify_recipients(db, req, recipients, kind=AlertKind.canary_sign_requested,
-                       access_codes=access_codes, event_key=str(req.id))
+                       event_key=str(req.id))
 
     log_event(
         db,
@@ -670,39 +679,33 @@ def _notify_recipients(
     recipients: list[CanarySignRecipient],
     *,
     kind: AlertKind,
-    access_codes: dict[uuid.UUID, str] | None = None,
     event_key: str | None = None,
 ) -> None:
     from app.canary_sign_delivery import enqueue
     case = db.get(Case, req.case_id)
     matter = client_matter_description(case) if case else "your matter"
-    codes = access_codes or {}
     for r in recipients:
         if r.status in (CanarySignRecipientStatus.signed, CanarySignRecipientStatus.declined):
             continue
-        from app.models import ContactPortalAccess
-
-        access = (
-            db.scalar(
-                select(ContactPortalAccess).where(
-                    ContactPortalAccess.contact_id == r.contact_id
-                )
-            )
-            if r.contact_id
-            else None
-        )
-        if access is not None and r.portal_access_version != access.session_version:
-            r.sign_token = secrets.token_urlsafe(24)
-            r.portal_access_version = access.session_version
+        from app.models import NotificationOutbox
+        identity = uuid.uuid5(uuid.NAMESPACE_URL,
+            f"canary:sign-mail:{req.id}:{r.id}:{getattr(kind, 'value', kind)}:{event_key or str(req.id)}")
+        if db.get(NotificationOutbox, identity) is not None:
+            continue
+        from app.document_invitation_access import recipient as resolve_document_recipient, binding
+        cc, contact, email = resolve_document_recipient(db, req.case_id, r.contact_id, r.case_contact_id)
+        if email != r.email.strip().lower():
+            raise HTTPException(409, "Matter contact email changed; prepare a corrected signing request")
+        r.case_contact_id = cc.id
+        # Every delivery gets fresh, document-scoped authority. Older queued mail is invalidated.
+        r.sign_token = secrets.token_urlsafe(24)
+        r.document_invitation_binding = json.dumps(binding(db, req.case_id, contact.id, cc.id), sort_keys=True)
         ctx: dict[str, Any] = {
             "recipient_name": r.name,
             "document_name": req.subject,
             "matter_label": matter,
             "sign_url": _sign_link(r.sign_token),
         }
-        code = codes.get(r.id)
-        if code:
-            ctx["access_code"] = code
         enqueue(db, req, r, kind=kind, context=ctx, event_key=event_key or str(req.id))
 
 

@@ -23,6 +23,7 @@ from app.models import (
     CanarySignOrderMode,
     CanarySignAuditEvent,
     Contact,
+    CaseContact,
     ContactType,
     ContactPortalAccess,
     Case,
@@ -60,6 +61,10 @@ def fixture(count=1):
             db.add(contact)
             db.flush()
             r.contact_id = contact.id
+            cc = CaseContact(id=uuid.uuid4(),case_id=cid,contact_id=contact.id,type=ContactType.person,name=contact.name,email=contact.email)
+            db.add(cc);db.flush();r.case_contact_id=cc.id
+            from app.document_invitation_access import binding
+
             db.add(
                 ContactPortalAccess(
                     id=uuid.uuid4(),
@@ -70,6 +75,11 @@ def fixture(count=1):
                     session_version=1,
                 )
             )
+        db.commit()
+        from app.document_invitation_access import binding
+        for identity in recipients:
+            r=db.get(CanarySignRecipient,identity)
+            r.document_invitation_binding=json.dumps(binding(db,cid,r.contact_id,r.case_contact_id),sort_keys=True)
         db.commit()
     return rid, uid, cid, recipients, fields
 
@@ -204,8 +214,8 @@ def test_failed_and_uncertain_delivery_require_review(failure):
         ("signed", "recipient_inactive"),
         ("email", "recipient_changed"),
         ("token", "recipient_changed"),
-        ("disable", "portal_access_inactive"),
-        ("rotate", "portal_access_changed"),
+        ("disable", "document_access_changed"),
+        ("rotate", "document_access_changed"),
         ("matter", "portal_disabled"),
     ],
 )
