@@ -93,7 +93,7 @@ export function CommercialConnectionPanel({ token, onValidationChange }: { token
       <p>Firm credentials stay in this installation. Existing results and matter records remain accessible if you disconnect.</p>
       {(!status.connected || replacing) && <form onSubmit={event => { event.preventDefault(); void change('activate') }}>
         <label>Canary Commercial licence key <input type="password" autoComplete="off" value={code} maxLength={512} disabled={busy || !status.enabled} onChange={event => setCode(event.target.value)} /></label>
-        <button type="submit" disabled={busy || !status.enabled || !code.trim()}>{replacing ? 'Replace licence key' : 'Activate licence'}</button>
+        <button type="submit" style={{ marginTop: 8 }} disabled={busy || !status.enabled || !code.trim()}>{replacing ? 'Replace licence key' : 'Activate licence'}</button>
         {replacing && <button type="button" disabled={busy} onClick={() => { setReplacing(false); setCode('') }}>Cancel</button>}
         <p className="muted">The key is exchanged for a secure local connection and is not displayed or retained afterward.</p>
       </form>}
