@@ -103,6 +103,13 @@ def test_no_secret_in_metadata_or_operation_record(env):
     assert 'synthetic-receipt' not in row.result_enc
 
 
+@pytest.mark.parametrize('key', ['', ' ', '\t\n'])
+def test_blank_dedicated_key_cannot_fall_back_to_jwt(env, monkeypatch, key):
+    monkeypatch.setenv('DATA_ENCRYPTION_KEY', key)
+    with pytest.raises(t.ConnectionError, match='local_encryption_required'):
+        c.set_credential(env.db, env.actor, 'synthetic', {'password': 'synthetic'}, 1)
+
+
 def test_updated_credential_used_at_dispatch_not_queue_time(env):
     op=prepare(env)
     c.set_credential(env.db,env.actor,'synthetic',{'password':'updated'},1)

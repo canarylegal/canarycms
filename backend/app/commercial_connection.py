@@ -62,7 +62,7 @@ def digest(value: str) -> str:
 
 
 def encrypt(raw: str) -> str:
-    if not os.getenv("DATA_ENCRYPTION_KEY"):
+    if not (os.getenv("DATA_ENCRYPTION_KEY") or "").strip():
         raise ConnectionError("local_encryption_required")
     return encrypt_password(raw)
 
