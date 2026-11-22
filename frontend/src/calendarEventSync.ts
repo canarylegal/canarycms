@@ -82,7 +82,7 @@ export async function syncCaseEventToCalDav(
     calendarId?: string | null
   },
 ): Promise<void> {
-  if (!ev.track_in_calendar) return
+  if (ev.calendar_link_needs_review || !ev.track_in_calendar) return
 
   const label = (opts.caseLabel || 'Case').trim() || 'Case'
   const rangeAllDay = allDayExclusiveEnd(ev.event_date ?? null)

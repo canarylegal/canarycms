@@ -12,6 +12,7 @@ export type CaseEventOut = {
   calendar_block_all_day?: boolean | null
   track_in_calendar?: boolean
   calendar_event_uid?: string | null
+  calendar_link_needs_review?: boolean
   email_alert_enabled?: boolean
   created_at: string
   updated_at: string

@@ -1,40 +1,16 @@
-import type { CalendarEventOut } from './types'
-
-const STORAGE_PREFIX = 'canary-calendar-events:v1:'
-
-export function calendarEventCacheKey(startStr: string, endStr: string, calendarSelectionKey: string): string {
-  return `${STORAGE_PREFIX}${startStr}|${endStr}|${calendarSelectionKey}`
-}
-
-export function readCalendarEventCache(key: string): CalendarEventOut[] | null {
-  try {
-    const raw = sessionStorage.getItem(key)
-    if (!raw) return null
-    const parsed = JSON.parse(raw) as unknown
-    if (!Array.isArray(parsed)) return null
-    return parsed as CalendarEventOut[]
-  } catch {
-    return null
-  }
-}
-
-export function writeCalendarEventCache(key: string, rows: CalendarEventOut[]): void {
-  try {
-    sessionStorage.setItem(key, JSON.stringify(rows))
-  } catch {
-    /* quota or private mode */
-  }
-}
-
+// Calendar contents must not survive a session boundary in browser storage.
+// Keep this cleanup for tabs carrying caches from earlier versions.
+export const CALENDAR_SESSION_RESET = 'canary:calendar-session-reset'
 export function invalidateCalendarEventCache(): void {
   try {
     const keys: string[] = []
     for (let i = 0; i < sessionStorage.length; i += 1) {
-      const k = sessionStorage.key(i)
-      if (k?.startsWith(STORAGE_PREFIX)) keys.push(k)
+      const key = sessionStorage.key(i)
+      if (key?.startsWith('canary-calendar-events:')) keys.push(key)
     }
-    for (const k of keys) sessionStorage.removeItem(k)
-  } catch {
-    /* ignore */
-  }
+    for (const key of keys) sessionStorage.removeItem(key)
+  } catch { /* Storage can be unavailable; still discard in-memory events. */ }
+  if (typeof window !== 'undefined') window.dispatchEvent(new Event(CALENDAR_SESSION_RESET))
 }
+// Purge legacy data as soon as this module loads, including unauthenticated pages.
+invalidateCalendarEventCache()

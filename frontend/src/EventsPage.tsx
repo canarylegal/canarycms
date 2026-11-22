@@ -118,6 +118,7 @@ async function syncCalendarsForCaseEvents(
 ): Promise<void> {
   const label = caseLabel.trim() || 'Case'
   for (const ev of events) {
+    if (ev.calendar_link_needs_review) continue
     const rangeAllDay = allDayExclusiveEnd(ev.event_date ?? null)
     const timed =
       ev.calendar_block_all_day === false && ev.calendar_block_start && ev.calendar_block_end
@@ -478,6 +479,12 @@ export function EventsPage({
           className={`stack${embedded ? ' eventsPageEmbedGrow' : ''}`}
           style={{ gap: 8, marginBottom: embedded ? 0 : 12 }}
         >
+          {data.events.some(ev => ev.calendar_link_needs_review) ? (
+            <div className="muted" role="status">
+              Some existing calendar links need review. Their calendar synchronization is paused;
+              the original appointments are unchanged. Ask an administrator to verify or disconnect those links.
+            </div>
+          ) : null}
           {undatedEvents.length > 0 ? (
             <div className="muted stack" style={{ fontSize: 13, gap: 6 }}>
               <span>Events without a date do not appear on the grid — click a name to set a date and tracking:</span>

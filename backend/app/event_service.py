@@ -7,7 +7,7 @@ from datetime import datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from fastapi import HTTPException, status
-from sqlalchemy import func, select
+from sqlalchemy import func, select, or_
 from sqlalchemy.orm import Session
 
 from app.deps import map_cases_if_accessible
@@ -174,7 +174,8 @@ def _event_out(e: CaseEvent, *, email_alert_enabled: bool = False) -> CaseEventO
         calendar_block_end=ce,
         calendar_block_all_day=cad,
         track_in_calendar=e.track_in_calendar,
-        calendar_event_uid=e.calendar_event_uid,
+        calendar_event_uid=e.calendar_event_uid if e.calendar_link_verified else None,
+        calendar_link_needs_review=bool(e.calendar_event_uid and not e.calendar_link_verified),
         email_alert_enabled=email_alert_enabled,
         created_at=e.created_at,
         updated_at=e.updated_at,
@@ -314,7 +315,8 @@ def update_case_event(
             detail="Provide at least one field to update.",
         )
     _get_or_init_case_events(case_id, db)
-    e = db.get(CaseEvent, event_id)
+    e = db.execute(select(CaseEvent).where(CaseEvent.id == event_id).with_for_update()
+        .execution_options(populate_existing=True)).scalar_one_or_none()
     if not e or e.case_id != case_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Case event not found")
     if "name" in data and data["name"] is not None:
@@ -328,7 +330,18 @@ def update_case_event(
     if "track_in_calendar" in data:
         e.track_in_calendar = bool(data["track_in_calendar"])
     if "calendar_event_uid" in data:
-        e.calendar_event_uid = data["calendar_event_uid"]
+        from app.calendar_matter_links import authorize_event_link
+        ref = data["calendar_event_uid"]
+        if ref:
+            ref = authorize_event_link(db, actor_user_id, ref)
+            conflict = db.execute(select(CaseEvent.id).where(
+                CaseEvent.calendar_link_verified.is_(True),
+                CaseEvent.calendar_event_uid == ref, CaseEvent.id != e.id,
+            )).first()
+            if conflict:
+                raise HTTPException(409, "Calendar event is already linked to a matter event")
+        e.calendar_event_uid = ref or None
+        e.calendar_link_verified = bool(ref)
     if e.event_all_day:
         e.event_start_time = None
     elif e.event_date is not None and e.event_start_time is None:
@@ -393,7 +406,7 @@ def list_tracked_case_events_for_calendar_merge(
             select(CaseEvent).where(
                 CaseEvent.track_in_calendar.is_(True),
                 CaseEvent.event_date.isnot(None),
-                CaseEvent.calendar_event_uid.is_(None),
+                or_(CaseEvent.calendar_event_uid.is_(None), CaseEvent.calendar_link_verified.is_(False)),
                 CaseEvent.event_date >= start_d,
                 CaseEvent.event_date <= end_d,
             )
@@ -447,8 +460,17 @@ def enrich_caldav_events_with_linked_case_events(
     events: list[dict],
 ) -> None:
     """Attach matter metadata to CalDAV rows synced from tracked case events."""
-    refs = {str(item.get("id") or "").strip() for item in events if not item.get("case_event_id")}
-    refs.discard("")
+    from app.calendar_matter_links import canonical_event_ref
+    refs_by_id = {}
+    for item in events:
+        if item.get("case_event_id"):
+            continue
+        raw = str(item.get("id") or "")
+        try:
+            refs_by_id[raw] = canonical_event_ref(raw)
+        except HTTPException:
+            continue
+    refs = set(refs_by_id.values())
     if not refs:
         return
 
@@ -457,6 +479,7 @@ def enrich_caldav_events_with_linked_case_events(
             select(CaseEvent).where(
                 CaseEvent.track_in_calendar.is_(True),
                 CaseEvent.calendar_event_uid.in_(refs),
+                CaseEvent.calendar_link_verified.is_(True),
             )
         )
         .scalars()
@@ -476,7 +499,7 @@ def enrich_caldav_events_with_linked_case_events(
     for item in events:
         if item.get("case_event_id"):
             continue
-        ref = str(item.get("id") or "")
+        ref = refs_by_id.get(str(item.get("id") or ""))
         ev = by_ref.get(ref)
         if ev is None:
             continue
@@ -484,6 +507,6 @@ def enrich_caldav_events_with_linked_case_events(
         item["case_id"] = str(case.id)
         item["case_event_id"] = str(ev.id)
         item["track_in_calendar"] = ev.track_in_calendar
-        item["title"] = f"{display_case_number(case.case_number, case.status)} · {ev.name}"
+        # The stored calendar title remains authoritative, even for verified links.
         if ev.template_id:
             item["matter_template_id"] = str(ev.template_id)

@@ -5,6 +5,7 @@ import {
 } from '@simplewebauthn/browser'
 import { apiFetch, COOKIE_SESSION_TOKEN, type ApiError } from '../api'
 import { releaseAllBodyCursorLocks } from '../bodyCursorLock'
+import { invalidateCalendarEventCache } from '../calendarEventCache'
 import type { TokenResponse, UserPublic } from '../types'
 
 export function useAuth() {
@@ -18,6 +19,7 @@ export function useAuth() {
 
   // Migrate off legacy localStorage JWTs; prefer HttpOnly ``canary_session`` cookie.
   useEffect(() => {
+    invalidateCalendarEventCache()
     let cancelled = false
     async function bootstrap() {
       try {
@@ -124,6 +126,7 @@ export function useAuth() {
     applySessionToken,
     async login(email: string, password: string, totpCode?: string): Promise<'success' | 'needs_2fa' | 'error'> {
       setLoginError(null)
+      invalidateCalendarEventCache()
       try {
         await apiFetch<TokenResponse>('/auth/login', {
           json: { email, password, totp_code: totpCode ?? null },
@@ -170,6 +173,7 @@ export function useAuth() {
       }
     },
     logout() {
+      invalidateCalendarEventCache()
       releaseAllBodyCursorLocks()
       void apiFetch<{ ok: boolean }>('/auth/logout', { method: 'POST', token: COOKIE_SESSION_TOKEN }).catch(() => {
         /* */

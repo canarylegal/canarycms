@@ -59,6 +59,7 @@ class CaseEventOut(BaseModel):
     calendar_block_all_day: bool | None = None
     track_in_calendar: bool = False
     calendar_event_uid: str | None = None
+    calendar_link_needs_review: bool = False
     email_alert_enabled: bool = False
     created_at: datetime
     updated_at: datetime

@@ -69,6 +69,7 @@ class CaseEvent(Base):
     event_all_day: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     event_start_time: Mapped[time | None] = mapped_column(Time, nullable=True)
     track_in_calendar: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    calendar_link_verified: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     calendar_event_uid: Mapped[str | None] = mapped_column(String(512), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)

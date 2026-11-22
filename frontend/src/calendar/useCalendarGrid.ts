@@ -3,12 +3,7 @@ import type FullCalendar from '@fullcalendar/react'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { apiFetch } from '../api'
 import type { ApiError } from '../api'
-import {
-  calendarEventCacheKey,
-  invalidateCalendarEventCache,
-  readCalendarEventCache,
-  writeCalendarEventCache,
-} from '../calendarEventCache'
+import { CALENDAR_SESSION_RESET, invalidateCalendarEventCache } from '../calendarEventCache'
 import {
   addOneCalendarDayYmd,
   eventInputToYmd,
@@ -30,9 +25,9 @@ export function useCalendarGrid({
   const calendarSelectionHydratedRef = useRef(false)
   const calendarsRef = useRef<UserCalendarListItem[]>([])
   const selectedCalIdsRef = useRef<string[]>([])
-  const selectionKeyRef = useRef('')
   const prevSelectionKeyRef = useRef<string | null>(null)
   const fetchGenRef = useRef(0)
+  const sessionEpochRef = useRef(0)
   const { prefs, setPreference } = useUserUiPreferences(me, token)
   const [calendarPixelHeight, setCalendarPixelHeight] = useState(480)
   const [needCaldav, setNeedCaldav] = useState(false)
@@ -45,22 +40,43 @@ export function useCalendarGrid({
   const [calendars, setCalendars] = useState<UserCalendarListItem[]>([])
   const [selectedCalIds, setSelectedCalIds] = useState<string[]>([])
 
+  useEffect(() => {
+    const advanceEpoch = () => {
+      ++fetchGenRef.current
+      ++sessionEpochRef.current
+    }
+    const reset = () => {
+      advanceEpoch()
+      calRef.current?.getApi().removeAllEvents()
+      setCaldavSyncing(false)
+    }
+    reset()
+    window.addEventListener(CALENDAR_SESSION_RESET, reset)
+    return () => {
+      advanceEpoch()
+      window.removeEventListener(CALENDAR_SESSION_RESET, reset)
+    }
+  }, [me?.id, token])
+
   const refresh = useCallback(() => {
     invalidateCalendarEventCache()
     calRef.current?.getApi().refetchEvents()
   }, [])
 
   const loadCalendars = useCallback(async () => {
+    if (!me?.id) return
+    const epoch = sessionEpochRef.current
     try {
       const rows = await apiFetch<UserCalendarListItem[]>('/users/me/calendars', { token })
+      if (epoch !== sessionEpochRef.current) return
       setCalendars(rows)
     } catch (e: unknown) {
       const err = e as ApiError
-      if (err.status === 403) setNeedCaldav(true)
+      if (epoch === sessionEpochRef.current && err.status === 403) setNeedCaldav(true)
     } finally {
-      setCalendarsLoaded(true)
+      if (epoch === sessionEpochRef.current) setCalendarsLoaded(true)
     }
-  }, [token])
+  }, [token, me?.id])
 
   useEffect(() => {
     if (needCaldav) return
@@ -110,7 +126,6 @@ export function useCalendarGrid({
   const selectionKey = selectedCalIds.join(',')
   calendarsRef.current = calendars
   selectedCalIdsRef.current = selectedCalIds
-  selectionKeyRef.current = selectionKey
 
   useEffect(() => {
     if (!selectionReady || needCaldav) return
@@ -185,22 +200,12 @@ export function useCalendarGrid({
       const params = new URLSearchParams({ start: info.startStr, end: info.endStr })
       const cals = calendarsRef.current
       const sel = selectedCalIdsRef.current
-      const selectionKey = selectionKeyRef.current
       if (cals.length > 0 && sel.length > 0 && sel.length < cals.length) {
         params.set('calendar_ids', sel.join(','))
       }
 
-      const cacheKey = calendarEventCacheKey(info.startStr, info.endStr, selectionKey)
-      const cached = readCalendarEventCache(cacheKey)
       let painted = false
-
-      if (cached) {
-        successCallback(mapCalendarEventsToFullCalendar(cached))
-        painted = true
-        setCaldavSyncing(true)
-      }
-
-      if (!cached) {
+      {
         try {
           const localParams = new URLSearchParams(params)
           localParams.set('include_caldav', 'false')
@@ -221,7 +226,6 @@ export function useCalendarGrid({
       try {
         const rows = await apiFetch<CalendarEventOut[]>(`/users/me/calendar/events?${params}`, { token })
         if (gen !== fetchGenRef.current) return
-        writeCalendarEventCache(cacheKey, rows)
         successCallback(mapCalendarEventsToFullCalendar(rows))
         setCaldavSyncing(false)
       } catch (e: unknown) {
