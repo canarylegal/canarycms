@@ -387,6 +387,8 @@ app.include_router(support.router)
 app.include_router(canary_sign.router)
 app.include_router(canary_sign.case_router)
 app.include_router(portal.router)
+from app.routers import caldav_rights
+app.include_router(caldav_rights.router)
 
 @app.get("/health")
 def health():

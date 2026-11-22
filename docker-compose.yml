@@ -159,7 +159,7 @@ services:
       [
         "/bin/sh",
         "-c",
-        'mkdir -p /data/collections && (test -f /data/users || touch /data/users) && exec docker-entrypoint.sh /usr/bin/radicale --config /config/config',
+        'mkdir -p /data/collections && (test -f /data/users || touch /data/users) && exec docker-entrypoint.sh python3 /config/canary_server.py --config /config/config',
       ]
     volumes:
       - ./radicale/config:/config:ro

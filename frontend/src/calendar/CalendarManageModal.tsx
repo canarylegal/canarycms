@@ -472,6 +472,22 @@ export function CalendarManageModal({
           ) : null}
         </section>
 
+        <details style={{ marginTop: 20 }}>
+          <summary>Use these calendars in Thunderbird or another CalDAV app</summary>
+          <p className="muted">Add a calendar using its URL below and your own CalDAV username and app password from User settings. Shared calendars keep the access granted by their owner.</p>
+          {calendars.map((c) => (
+            <label key={c.id} style={{ display: 'block', marginBottom: 12 }}>
+              {c.name} — {c.access === 'read' ? 'Read only' : 'Editable'}
+              <input
+                readOnly
+                aria-label={`CalDAV URL for ${c.name}`}
+                value={`${window.location.origin}/${c.owner.id}/${encodeURIComponent(c.radicale_slug)}/`}
+                onFocus={(e) => e.currentTarget.select()}
+              />
+            </label>
+          ))}
+        </details>
+
         <div style={{ marginTop: 20, display: 'flex', justifyContent: 'flex-end' }}>
           <button type="button" className="btn" onClick={onClose}>
             Done
