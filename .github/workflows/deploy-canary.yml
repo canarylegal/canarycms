@@ -16,6 +16,9 @@ on:
         default: production
         type: string
 
+permissions:
+  contents: read
+
 concurrency:
   group: deploy-canary-${{ github.repository }}
   cancel-in-progress: false
@@ -34,10 +37,11 @@ jobs:
         # the in-app update prompt (/admin/deploy/update-check) silently refuses to detect new commits.
         env:
           GIT_COMMIT: ${{ github.sha }}
+          DEPLOY_LABEL: ${{ inputs.environment }}
         shell: bash
         run: |
           set -euo pipefail
-          echo "Deploy label: ${{ inputs.environment }}"
+          printf 'Deploy label: %s\n' "$DEPLOY_LABEL"
           echo "GIT_COMMIT: ${GIT_COMMIT}"
           if ! command -v docker >/dev/null 2>&1; then
             echo "docker not found on runner" >&2

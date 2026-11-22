@@ -31,7 +31,8 @@ def test_validate_plugin_state_requires_length_and_charset() -> None:
         validate_plugin_state("bad state with spaces")
 
 
-def test_validate_plugin_redirect_uri_thunderbird() -> None:
+def test_validate_plugin_redirect_uri_thunderbird(monkeypatch) -> None:
+    monkeypatch.setenv("CANARY_PUBLIC_URL", "https://canary.example.com")
     ext_uri = "moz-extension://12345678-1234-1234-1234-123456789abc/auth-callback.html"
     assert validate_plugin_redirect_uri("thunderbird", ext_uri) == ext_uri
     https_uri = "https://canary.example.com/connect/mail-plugin/callback"

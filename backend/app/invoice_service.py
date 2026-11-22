@@ -427,8 +427,9 @@ def void_case_invoice(
                 try:
                     delete_ledger_pair_unapproved(case_id, inv.ledger_pair_id, db)
                 except HTTPException as exc:
-                    # Pair already removed by a racing void/approve path.
-                    if exc.status_code not in (404, 409):
+                    # Only absence is safe to treat as already removed. A busy
+                    # pair is still present: abort the entire void and retry.
+                    if exc.status_code != 404:
                         raise
             release_billed_time_entries_for_invoice(invoice_id, db)
             inv.status = INV_VOIDED

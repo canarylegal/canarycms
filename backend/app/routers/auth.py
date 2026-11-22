@@ -168,7 +168,9 @@ def login(
             record_staff_login_failure(db, email=login_id, ip=ip)
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid 2FA code")
 
-    mfa_verified = True
+    # A password alone does not verify an existing passkey. Ordinary access
+    # remains governed by firm policy; sensitive enrollment requires MFA.
+    mfa_verified = bool(user.is_2fa_enabled or not user_has_any_passkey(db, user.id))
     if mandate:
         db_ok = user_meets_second_factor_policy(db, user.id, is_2fa_enabled=user.is_2fa_enabled)
         if db_ok and not user.is_2fa_enabled:
@@ -309,10 +311,13 @@ def reset_password(payload: ResetPasswordRequest, db: Session = Depends(get_db))
 
 @router.post("/2fa/setup", response_model=Setup2FAResponse)
 def setup_2fa(
+    request: Request,
     payload: Setup2FARequest = Body(default_factory=Setup2FARequest),
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> Setup2FAResponse:
+    from app.session_security import lock_current_staff_session
+    user, _ = lock_current_staff_session(request, user, db, enrolling=True)
     if user.is_2fa_enabled:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="2FA already enabled")
 
@@ -352,6 +357,8 @@ def verify_2fa(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> Verify2FASessionResponse:
+    from app.session_security import lock_current_staff_session
+    user, _ = lock_current_staff_session(request, user, db, enrolling=True)
     if user.is_2fa_enabled:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="2FA is already enabled")
     if not user.totp_secret:
@@ -360,6 +367,7 @@ def verify_2fa(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid code")
 
     user.is_2fa_enabled = True
+    bump_auth_token_version(user)
     db.add(user)
     log_event(
         db,
@@ -461,6 +469,8 @@ def change_password(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> ChangePasswordResponse:
+    from app.session_security import lock_current_staff_session
+    user, claims = lock_current_staff_session(request, user, db)
     if not verify_password(payload.current_password, user.password_hash):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Current password is incorrect")
 
@@ -480,6 +490,6 @@ def change_password(
     )
     db.commit()
     db.refresh(user)
-    access_token = login_access_token(db, user, mfa_verified=True)
+    access_token = login_access_token(db, user, mfa_verified=claims.mfa_verified is True)
     attach_session_cookie(response, access_token, request=request)
     return ChangePasswordResponse(access_token=access_token, user=build_user_public(user, db))

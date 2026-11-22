@@ -55,6 +55,8 @@ def authorize_plugin(
     creds: HTTPAuthorizationCredentials | None = Depends(_bearer),
     db: Session = Depends(get_db),
 ) -> PluginAuthorizeOut:
+    from app.session_security import lock_current_staff_session
+    user, _ = lock_current_staff_session(request, user, db)
     _require_verified_staff(user, request, creds)
     code = create_plugin_auth_code(
         db,

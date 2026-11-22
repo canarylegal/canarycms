@@ -28,7 +28,7 @@ class PluginAuthorizeOut(BaseModel):
 class PluginTokenIn(BaseModel):
     client: Literal["thunderbird", "outlook"]
     state: str = Field(min_length=16, max_length=128)
-    code: str | None = Field(default=None, max_length=256)
+    code: str = Field(min_length=1, max_length=256)
 
 class UserAppearanceOut(BaseModel):
     font: str = ""

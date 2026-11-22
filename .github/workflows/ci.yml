@@ -4,6 +4,9 @@ on:
   push:
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   commercial-boundary:
     runs-on: ubuntu-latest

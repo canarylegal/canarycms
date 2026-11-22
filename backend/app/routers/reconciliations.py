@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse, Response
 from sqlalchemy.orm import Session
 
+from app.bank_integrity import require_banking
 from app.db import get_db
 from app.deps import get_current_user
 from app.docx_util import write_client_account_reconcile_report_docx
@@ -47,7 +48,7 @@ def preview_totals(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> ReconciliationPreviewOut:
-    del user
+    require_banking(user, db)
     client, office = firm_wide_ledger_totals(db)
     return ReconciliationPreviewOut(
         ledger_client_total_pence=client,
@@ -60,7 +61,7 @@ def list_reconciliation_rows(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> list[ClientAccountReconciliationOut]:
-    del user
+    require_banking(user, db)
     rows = list_reconciliations(db)
     return [_to_out(r, db) for r in rows]
 
@@ -76,7 +77,7 @@ def get_reconciliation_row(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> ClientAccountReconciliationOut:
-    del user
+    require_banking(user, db)
     row = get_reconciliation(db, rec_id)
     return _to_out(row, db)
 

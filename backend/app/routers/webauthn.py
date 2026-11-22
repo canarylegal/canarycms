@@ -38,7 +38,7 @@ from app.models import User, WebAuthnChallenge, WebAuthnCredential
 from app.org_security import firm_mandates_second_factor
 from app.password_reset_service import login_access_token
 from app.schemas import TokenResponse
-from app.security import create_access_token
+from app.security import create_access_token, bump_auth_token_version
 from app.session_cookie import attach_session_cookie
 
 router = APIRouter(prefix="/auth/webauthn", tags=["webauthn"])
@@ -104,7 +104,7 @@ def _store_challenge(db: Session, *, kind: str, subject: str, challenge: bytes) 
     db.commit()
 
 
-def _pop_challenge(db: Session, *, kind: str, subject: str) -> bytes:
+def _pop_challenge(db: Session, *, kind: str, subject: str, commit: bool = True) -> bytes:
     now = datetime.now(timezone.utc)
     row = (
         db.execute(
@@ -123,7 +123,10 @@ def _pop_challenge(db: Session, *, kind: str, subject: str) -> bytes:
     if row is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="WebAuthn challenge expired or missing.")
     db.delete(row)
-    db.commit()
+    if commit:
+        db.commit()
+    else:
+        db.flush()
     return base64url_to_bytes(row.challenge_b64)
 
 
@@ -239,6 +242,8 @@ def webauthn_register_begin(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
+    from app.session_security import lock_current_staff_session
+    user, _ = lock_current_staff_session(request, user, db, enrolling=True)
     if not user.is_active:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account disabled")
 
@@ -270,10 +275,12 @@ def webauthn_register_finish(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> TokenResponse:
+    from app.session_security import lock_current_staff_session
+    user, _ = lock_current_staff_session(request, user, db, enrolling=True)
     if not user.is_active:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account disabled")
 
-    expected_challenge = _pop_challenge(db, kind="register_begin", subject=str(user.id))
+    expected_challenge = _pop_challenge(db, kind="register_begin", subject=str(user.id), commit=False)
     rp_id = _rp_id_for_request(request)
     origin = _expected_origin(request)
 
@@ -313,13 +320,10 @@ def webauthn_register_finish(
         entity_id=str(user.id),
         meta={"credential_id_prefix": _b64url_encode(cred_id)[:16]},
     )
+    bump_auth_token_version(user)
+    db.add(user)
     db.commit()
-    access_token = create_access_token(
-        user_id=str(user.id),
-        role=user.role.value,
-        mfa_verified=True,
-        auth_token_version=int(user.auth_token_version),
-    )
+    access_token = login_access_token(db, user, mfa_verified=True)
     attach_session_cookie(response, access_token, request=request)
     return TokenResponse(access_token=access_token)
 
