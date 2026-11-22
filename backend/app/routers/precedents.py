@@ -5,6 +5,12 @@ from __future__ import annotations
 from app.onlyoffice_force_save import oo_save_status as save_attempt_status
 
 import mimetypes
+from typing import Annotated
+from fastapi import Header
+from app.upload_limits import max_upload_bytes
+from app.upload_receipts import lock_receipt, fingerprint_upload, validate_replay_file
+from app.models.upload_receipts import UploadReceipt
+from app.file_storage import stream_upload_to_path, stored_file_checksum
 import os
 import secrets
 import shutil
@@ -78,6 +84,7 @@ def _ensure_precedent_reference_allowed(
     """Validate custom precedent reference: non-empty, not reserved, unique (case-insensitive)."""
 
     t = _normalize_precedent_reference(ref)
+    lock_receipt(db, uuid.uuid5(uuid.NAMESPACE_URL, "canary:precedent-reference:" + t.lower()))
     if is_reserved_precedent_reference(t):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -353,6 +360,7 @@ def upload_precedent(
     category_id: str = Form(GLOBAL_SCOPE),
     admin: User = Depends(require_admin),
     db: Session = Depends(get_db),
+    idempotency_key: Annotated[uuid.UUID | None, Header()] = None,
 ) -> PrecedentOut:
     mh, ms, cat_uuid = _parse_precedent_scope_form(
         db,
@@ -361,20 +369,40 @@ def upload_precedent(
         category_id=category_id,
     )
 
+    operation_id = fingerprint = None
+    if idempotency_key:
+        operation_id = uuid.uuid5(uuid.NAMESPACE_URL, f"canary:precedent:{admin.id}:{idempotency_key}")
+        lock_receipt(db, operation_id)
+        fingerprint = fingerprint_upload(upload, {
+            "name": name.strip(), "reference": reference.strip(), "kind": kind.value,
+            "head": mh, "sub": ms, "category": cat_uuid,
+            "filename": upload.filename, "mime": upload.content_type,
+        })
+        receipt = db.get(UploadReceipt, operation_id)
+        if receipt is not None:
+            if receipt.fingerprint != fingerprint:
+                raise HTTPException(409, "This precedent retry differs from the original upload")
+            previous = db.get(Precedent, uuid.UUID(receipt.response["precedent_id"]))
+            if previous is None:
+                raise HTTPException(410, "The uploaded precedent was deleted; retry will not recreate it")
+            file_row = db.get(DbFile, previous.file_id)
+            if file_row is None:
+                raise HTTPException(409, "The precedent needs recovery before confirming this retry")
+            validate_replay_file(db, file_row)
+            return PrecedentOut.model_validate(receipt.response["result"])
+
+    # Reject invalid/duplicate references before allocating or writing a candidate.
+    ref_ok = _ensure_precedent_reference_allowed(db, reference, exclude_precedent_id=None)
     ensure_files_root()
     precedent_id = uuid.uuid4()
     file_id = uuid.uuid4()
     original = upload.filename or "precedent.bin"
     paths = precedent_file_paths(precedent_id=precedent_id, file_id=file_id, original_filename=original)
 
-    size = 0
-    with paths.abs_path.open("wb") as fh:
-        while True:
-            chunk = upload.file.read(1024 * 1024)
-            if not chunk:
-                break
-            size += len(chunk)
-            fh.write(chunk)
+    try:
+        size = stream_upload_to_path(paths.abs_path, upload.file, max_bytes=max_upload_bytes())
+    except ValueError as exc:
+        raise HTTPException(413, "Precedent exceeds upload size limit") from exc
 
     mime = upload.content_type or (mimetypes.guess_type(original)[0] or "application/octet-stream")
     if mime.split(";", 1)[0].strip().lower() == "application/octet-stream":
@@ -406,11 +434,10 @@ def upload_precedent(
         mime_type=mime,
         size_bytes=size,
         version=1,
-        checksum=None,
+        checksum=stored_file_checksum(paths.abs_path),
         created_at=now,
         updated_at=now,
     )
-    ref_ok = _ensure_precedent_reference_allowed(db, reference, exclude_precedent_id=None)
     prow = Precedent(
         id=precedent_id,
         name=name.strip(),
@@ -433,9 +460,13 @@ def upload_precedent(
         entity_id=str(prow.id),
         meta={"kind": kind.value, "name": prow.name},
     )
+    db.flush()
+    result = _precedent_out(db, prow, frow)
+    if operation_id:
+        db.add(UploadReceipt(id=operation_id, fingerprint=fingerprint,
+            response={"precedent_id": str(prow.id), "result": result.model_dump(mode="json")}))
     commit_keeping_stored_file(db, paths.abs_path)
-    db.refresh(prow)
-    return _precedent_out(db, prow, frow)
+    return result
 
 
 @router.patch("/{precedent_id}", response_model=PrecedentOut)

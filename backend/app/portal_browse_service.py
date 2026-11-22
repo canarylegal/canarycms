@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from app.file_storage import stored_file_checksum
+
 import mimetypes
 import os
 import tempfile
@@ -635,7 +637,7 @@ def upload_file(
             mime_type=mime,
             size_bytes=size,
             version=1,
-            checksum=None,
+            checksum=stored_file_checksum(paths.abs_path),
             parent_file_id=None,
             uploaded_via_portal=True,
             created_at=now,

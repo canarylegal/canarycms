@@ -125,10 +125,34 @@ rows. A failed commit acknowledgement never triggers deletion: the commit may
 already have succeeded. After an error, inspect the precedent reference before
 retrying. A definite rollback can leave an unreferenced candidate; retain it for
 review against committed database references rather than automatically deleting
-it. This change adds no cleanup job or retry receipt for precedent uploads.
+it. No cleanup job is added. Explicit precedent retry receipts are described in
+`IMPORT_RECOVERY.md`.
 
 The comment-edit endpoint accepts only matter documents with a `.txt` filename
 and `text/plain` MIME type (including charset parameters). It checks the current
 locked row before touching bytes. Other document types and system files cannot
 be converted to text through this endpoint; valid comments retain the existing
 version and recovery behaviour.
+
+## Firm assets and signatures
+
+Letterhead, quote-letterhead, portal branding and firm/user signature replacement
+stage the new file before retiring the current asset. Retirement locks and reloads
+the owning settings/user pointer, archives the current file through document
+recovery, and clears/deletes metadata within the caller's transaction. It never
+unlinks the current bytes. Rejected replacements, audit failures, rollback and
+lost commit acknowledgements therefore retain recoverable content. Recovery and
+unreferenced candidates require reviewed retention; no automatic pruning runs.
+
+For non-matter assets, export verified recovery bytes and restore through the
+appropriate settings/signature upload flow; recovery does not automatically
+relink firm/user settings. Deleting the last matter file in an implicit folder
+now creates its folder marker in the same transaction as deletion and audit.
+
+ONLYOFFICE callback, browser-export/persist and print downloads share bounded
+streaming with a 120-second total deadline. Redirects and environment proxies are
+not followed; existing approved URL/path checks still apply. Requests advertise
+identity encoding and reject compressed HTTP responses to prevent decompression
+before the byte budget can be enforced. Timeout/size failure closes the stream
+and does not publish a new document version. Persist defaults to 100 MiB; print
+staging defaults to 50 MiB, in addition to existing aggregate print-store budgets.

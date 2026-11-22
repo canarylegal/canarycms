@@ -41,26 +41,12 @@ async def test_persist_rejects_non_pdf_for_pdf_file(tmp_path, monkeypatch) -> No
     monkeypatch.setattr("app.routers.onlyoffice.FILES_ROOT", tmp_path)
     monkeypatch.setattr("app.routers.onlyoffice.ensure_files_root", lambda: None)
 
-    with patch(
-        "app.routers.onlyoffice._internal_fetch_url_from_browser",
-        return_value="http://onlyoffice/cache/files/x",
-    ):
-        with patch("httpx.AsyncClient") as client_cls:
-            client = AsyncMock()
-            client_cls.return_value.__aenter__.return_value = client
-            resp = MagicMock()
-            resp.content = b"not a pdf"
-            resp.raise_for_status = MagicMock()
-            client.get.return_value = resp
-
-            with pytest.raises(HTTPException) as exc:
-                await persist_onlyoffice_browser_url_to_file(
-                    db,
-                    row,
-                    browser_url="https://dev.example/office-ds/cache/files/x",
-                    case_id=uuid.uuid4(),
-                    precedent_id=None,
-                )
+    with patch("app.routers.onlyoffice._fetch_onlyoffice_download_bytes", new=AsyncMock(return_value=b"not a pdf")):
+        with pytest.raises(HTTPException) as exc:
+            await persist_onlyoffice_browser_url_to_file(
+                db, row, browser_url="https://dev.example/office-ds/cache/files/x",
+                case_id=uuid.uuid4(), precedent_id=None,
+            )
     assert exc.value.status_code == 400
 
 

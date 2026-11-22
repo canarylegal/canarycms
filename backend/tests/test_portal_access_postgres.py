@@ -446,8 +446,10 @@ def test_form_upload_racing_completion(data, monkeypatch):
     original = forms.write_bytes_atomic
 
     def pause(*a, **kw):
-        entered.set()
-        assert resume.wait(15)
+        # Completion also uses the durable writer; pause only the late attachment.
+        if str(a[0]).endswith("__late.txt"):
+            entered.set()
+            assert resume.wait(15)
         return original(*a, **kw)
 
     monkeypatch.setattr(forms, "write_bytes_atomic", pause)

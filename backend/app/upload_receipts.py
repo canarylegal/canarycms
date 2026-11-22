@@ -42,6 +42,22 @@ def replay_receipt(db, operation_id, fingerprint):
         return None
     if receipt.fingerprint != fingerprint:
         raise HTTPException(409, 'This upload retry contains different content or options. Start a new import.')
-    if db.get(File, uuid.UUID(receipt.response['id'])) is None:
+    row = db.get(File, uuid.UUID(receipt.response['id']))
+    if row is None:
         raise HTTPException(410, 'The previously uploaded document was deleted. It will not be recreated by retrying.')
+    validate_replay_file(db, row)
     return dict(receipt.response)
+
+
+def validate_replay_file(db, row):
+    """Confirm current bytes, allowing legitimate later versions, never silently repair."""
+    from app.document_durability import lock_document, safe_path
+    from app.file_storage import FILES_ROOT, stored_file_checksum
+    row = lock_document(db, row)
+    try:
+        path = safe_path(FILES_ROOT, row.storage_path)
+        if not row.checksum or not path.is_file() or stored_file_checksum(path) != row.checksum:
+            raise HTTPException(409, 'The uploaded document needs integrity verification or recovery before confirming this retry.')
+    except OSError:
+        raise HTTPException(409, 'The uploaded document needs recovery before confirming this retry.') from None
+    return row

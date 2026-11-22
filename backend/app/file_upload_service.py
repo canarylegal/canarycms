@@ -1,6 +1,8 @@
 """Case file upload and Office/quote compose helpers."""
 
 from __future__ import annotations
+
+from app.file_storage import stored_file_checksum
 from app.document_operations import document_operation
 from app.document_durability import create_document_bytes
 
@@ -205,7 +207,7 @@ def upload_case_file(
             mime_type=mime,
             size_bytes=size,
             version=1,
-            checksum=None,
+            checksum=stored_file_checksum(paths.abs_path),
             created_at=now,
             updated_at=now,
         )

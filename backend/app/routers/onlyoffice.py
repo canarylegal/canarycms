@@ -8,6 +8,8 @@ so Firefox does not hand off ``application/pdf`` to the global PDF handler.
 """
 
 from __future__ import annotations
+
+import asyncio
 from app.document_durability import create_document_bytes
 
 from app.document_durability import lock_document, stage_document_bytes
@@ -317,33 +319,35 @@ def _callback_fetch_url_or_reject(download_url: str) -> str | None:
     return fetch_url
 
 
-async def _download_oo_document_bytes(fetch_url: str, *, max_bytes: int) -> bytes | None:
-    """Stream Document Server bytes with a hard size cap."""
+_OO_DOWNLOAD_TIMEOUT = 120.0
+
+
+async def _fetch_oo_bytes(fetch_url: str, *, max_bytes: int) -> bytes:
+    """One bounded transfer, with a total deadline and deterministic stream closure."""
     try:
-        async with httpx.AsyncClient(timeout=120.0) as client:
-            async with client.stream("GET", fetch_url) as resp:
-                resp.raise_for_status()
-                buf = BytesIO()
-                size = 0
-                async for chunk in resp.aiter_bytes():
-                    if not chunk:
-                        continue
-                    size += len(chunk)
-                    if size > max_bytes:
-                        log.warning(
-                            "onlyoffice_callback: download exceeded max_bytes=%s url=%s",
-                            max_bytes,
-                            _safe_url_for_log(fetch_url),
-                        )
-                        return None
-                    buf.write(chunk)
-                return buf.getvalue()
-    except Exception as e:
-        log.exception(
-            "ONLYOFFICE save download failed (url=%s): %s",
-            _safe_url_for_log(fetch_url),
-            e,
-        )
+        async with asyncio.timeout(_OO_DOWNLOAD_TIMEOUT):
+            async with httpx.AsyncClient(timeout=_OO_DOWNLOAD_TIMEOUT, follow_redirects=False, trust_env=False) as client:
+                async with client.stream("GET", fetch_url, headers={"Accept-Encoding": "identity"}) as response:
+                    response.raise_for_status()
+                    if response.headers.get("content-encoding", "identity").lower() not in ("", "identity"):
+                        raise HTTPException(502, "Compressed Document Server responses are not supported")
+                    raw = bytearray()
+                    async for chunk in response.aiter_bytes(chunk_size=min(64 * 1024, max_bytes + 1)):
+                        if len(raw) + len(chunk) > max_bytes:
+                            raise HTTPException(413, "Document exceeds download size limit")
+                        raw.extend(chunk)
+                    return bytes(raw)
+    except HTTPException:
+        raise
+    except (httpx.HTTPError, TimeoutError):
+        raise HTTPException(502, "Could not fetch document from Document Server") from None
+
+
+async def _download_oo_document_bytes(fetch_url: str, *, max_bytes: int) -> bytes | None:
+    try:
+        return await _fetch_oo_bytes(fetch_url, max_bytes=max_bytes)
+    except HTTPException:
+        log.warning("onlyoffice_callback: bounded document download failed")
         return None
 
 
@@ -404,25 +408,7 @@ def _validate_persist_magic(data: bytes, *, filename: str) -> None:
 
 async def _fetch_onlyoffice_download_bytes(browser_url: str, *, log_label: str) -> bytes:
     fetch_url = _internal_fetch_url_from_browser(browser_url)
-    try:
-        async with httpx.AsyncClient(timeout=120.0) as client:
-            r = await client.get(fetch_url)
-            r.raise_for_status()
-            data = r.content
-    except HTTPException:
-        raise
-    except Exception as e:
-        log.exception("%s: fetch failed url=%s", log_label, _safe_url_for_log(fetch_url))
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="Could not fetch document from Document Server",
-        ) from e
-    if len(data) > _OO_PERSIST_MAX_BYTES:
-        raise HTTPException(
-            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            detail="Document exceeds persist size limit",
-        )
-    return data
+    return await _fetch_oo_bytes(fetch_url, max_bytes=_OO_PERSIST_MAX_BYTES)
 
 
 def allocate_pdf_export_filename(
@@ -721,25 +707,7 @@ async def onlyoffice_print_stage(
     user: User = Depends(get_current_user),
 ) -> dict[str, str]:
     fetch_url = _internal_fetch_url_from_browser(body.browser_url)
-    try:
-        async with httpx.AsyncClient(timeout=120.0) as client:
-            r = await client.get(fetch_url)
-            r.raise_for_status()
-            data = r.content
-    except HTTPException:
-        raise
-    except Exception as e:
-        log.exception("print-stage: fetch failed url=%s", _safe_url_for_log(fetch_url))
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="Could not fetch PDF from Document Server",
-        ) from e
-
-    if len(data) > _PRINT_STAGING_MAX_BYTES:
-        raise HTTPException(
-            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            detail="PDF exceeds staging size limit",
-        )
+    data = await _fetch_oo_bytes(fetch_url, max_bytes=_PRINT_STAGING_MAX_BYTES)
     if not data.startswith(b"%PDF"):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Response is not a PDF")
 

@@ -321,7 +321,7 @@ def delete_case_file(
 
     old_folder = deleted.folder_path or ""
     if old_folder:
-        _ensure_folder_marker_if_empty(db, case_id, user.id, old_folder)
+        _ensure_folder_marker_if_empty(db, case_id, user.id, old_folder, commit=False)
 
     log_event(
         db,

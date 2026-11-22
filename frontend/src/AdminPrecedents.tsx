@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from 'react'
+import { createPrecedentUploader } from './admin/precedentUpload'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { apiFetch } from './api'
 import type { ApiError } from './api'
 import { SingleSelectDropdown } from './SingleSelectDropdown'
@@ -25,6 +26,7 @@ export {
 } from './admin/precedentAdminHelpers'
 
 export function AdminPrecedents({ token }: { token: string }) {
+  const uploadPrecedent = useRef(createPrecedentUploader()).current
   const [items, setItems] = useState<PrecedentOut[]>([])
   const [matterHeads, setMatterHeads] = useState<MatterHeadTypeOut[]>([])
   const [uploadHeadTypeId, setUploadHeadTypeId] = useState('')
@@ -406,18 +408,11 @@ export function AdminPrecedents({ token }: { token: string }) {
                     mc = GLOBAL_PRECEDENT_SCOPE
                   }
                 }
-                const fd = new FormData()
-                fd.set('name', name.trim())
-                fd.set('reference', reference.trim())
-                fd.set('kind', kind)
-                fd.set('matter_head_type_id', mh)
-                fd.set('matter_sub_type_id', ms)
-                fd.set('category_id', mc)
-                fd.set('upload', file)
                 if (!String(token ?? '').trim()) {
                   throw new Error('You are not signed in or your session token is empty. Refresh the page and log in again.')
                 }
-                await apiFetch<PrecedentOut>('/precedents', { token, method: 'POST', body: fd })
+                await uploadPrecedent(token, file, { name: name.trim(), reference: reference.trim(), kind,
+                  matter_head_type_id: mh, matter_sub_type_id: ms, category_id: mc })
                 setName('')
                 setReference(suggestedPrecedentReferenceHex())
                 setFile(null)

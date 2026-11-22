@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from app.file_storage import stored_file_checksum
+
 import logging
 import os
 import uuid
@@ -15,7 +17,7 @@ import jwt
 from sqlalchemy.orm import Session
 
 from app.desktop_edit_session import acquire_file_edit_session
-from app.file_storage import FILES_ROOT, case_file_paths, ensure_files_root, path_is_under_files_root, unlink_stored_file
+from app.file_storage import write_bytes_atomic, FILES_ROOT, case_file_paths, ensure_files_root, path_is_under_files_root, unlink_stored_file
 from app.models import File, FileCategory, QuotePortalDelivery, User
 from app.onlyoffice_ssrf_url import default_internal_base_for_ds
 from app.routers.onlyoffice import _rewrite_oo_download_url
@@ -197,7 +199,7 @@ def create_portal_quote_pdf_snapshot(
         original_filename=pdf_name,
         folder_path=source.folder_path or "",
     )
-    paths.abs_path.write_bytes(pdf_bytes)
+    write_bytes_atomic(paths.abs_path, pdf_bytes)
 
     now = datetime.now(timezone.utc)
     row = File(
@@ -212,7 +214,7 @@ def create_portal_quote_pdf_snapshot(
         mime_type=_PDF_MIME,
         size_bytes=len(pdf_bytes),
         version=1,
-        checksum=None,
+        checksum=stored_file_checksum(paths.abs_path),
         is_portal_quote=False,
         created_at=now,
         updated_at=now,

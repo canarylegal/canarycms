@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from app.file_storage import stored_file_checksum
+
 import re
 import uuid
 from datetime import datetime, timezone
@@ -207,7 +209,7 @@ def _create_form_list_file(
     file_id = uuid.uuid4()
     filename = _form_list_filename(template=template, contact=contact)
     paths = case_file_paths(case_id=case.id, file_id=file_id, original_filename=filename, folder_path="")
-    paths.abs_path.write_bytes(body)
+    write_bytes_atomic(paths.abs_path, body)
     now = datetime.utcnow()
     row = File(
         id=file_id,
@@ -221,7 +223,7 @@ def _create_form_list_file(
         mime_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         size_bytes=len(body),
         version=1,
-        checksum=None,
+        checksum=stored_file_checksum(paths.abs_path),
         parent_file_id=None,
         uploaded_via_portal=False,
         created_at=now,
@@ -840,7 +842,7 @@ async def upload_submission_file(
             mime_type=mime,
             size_bytes=len(raw),
             version=1,
-            checksum=None,
+            checksum=stored_file_checksum(paths.abs_path),
             parent_file_id=parent_id,
             uploaded_via_portal=True,
             created_at=now,

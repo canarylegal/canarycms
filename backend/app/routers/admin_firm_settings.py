@@ -5,6 +5,12 @@ from __future__ import annotations
 from app.onlyoffice_force_save import oo_save_status as save_attempt_status
 
 import logging
+from app.file_storage import stored_file_checksum
+from app.asset_lifecycle import retire_asset
+from app.file_storage import write_bytes_atomic
+from app.docx_util import validate_docx_package_bytes
+from app.document_durability import sync_path
+from app.upload_limits import max_upload_bytes
 import mimetypes
 import uuid
 from datetime import datetime
@@ -171,37 +177,11 @@ def _validate_docx_upload(filename: str, content_type: str | None) -> None:
 
 
 def _delete_letterhead_file(db: Session, settings: FirmSettings) -> None:
-    fid = settings.letterhead_file_id
-    if not fid:
-        return
-    f = db.get(DbFile, fid)
-    settings.letterhead_file_id = None
-    if f:
-        abs_path = (FILES_ROOT / f.storage_path).resolve()
-        db.delete(f)
-        db.flush()
-        if path_is_under_files_root(abs_path) and abs_path.is_file():
-            try:
-                abs_path.unlink()
-            except OSError:
-                pass
+    retire_asset(db, settings, "letterhead_file_id", root=FILES_ROOT)
 
 
 def _delete_quote_letterhead_file(db: Session, settings: FirmSettings) -> None:
-    fid = settings.quote_letterhead_file_id
-    if not fid:
-        return
-    f = db.get(DbFile, fid)
-    settings.quote_letterhead_file_id = None
-    if f:
-        abs_path = (FILES_ROOT / f.storage_path).resolve()
-        db.delete(f)
-        db.flush()
-        if path_is_under_files_root(abs_path) and abs_path.is_file():
-            try:
-                abs_path.unlink()
-            except OSError:
-                pass
+    retire_asset(db, settings, "quote_letterhead_file_id", root=FILES_ROOT)
 
 
 def _validate_portal_logo_upload(filename: str, content_type: str | None) -> None:
@@ -229,20 +209,7 @@ def _validate_signature_upload(filename: str, content_type: str | None) -> None:
 
 
 def _delete_portal_logo_file(db: Session, settings: FirmSettings) -> None:
-    fid = settings.portal_logo_file_id
-    if not fid:
-        return
-    f = db.get(DbFile, fid)
-    settings.portal_logo_file_id = None
-    if f:
-        abs_path = (FILES_ROOT / f.storage_path).resolve()
-        db.delete(f)
-        db.flush()
-        if path_is_under_files_root(abs_path) and abs_path.is_file():
-            try:
-                abs_path.unlink()
-            except OSError:
-                pass
+    retire_asset(db, settings, "portal_logo_file_id", root=FILES_ROOT)
 
 
 def _validate_portal_background_upload(filename: str, content_type: str | None) -> None:
@@ -263,37 +230,11 @@ def _validate_portal_background_upload(filename: str, content_type: str | None) 
 
 
 def _delete_portal_background_file(db: Session, settings: FirmSettings) -> None:
-    fid = settings.portal_background_file_id
-    if not fid:
-        return
-    f = db.get(DbFile, fid)
-    settings.portal_background_file_id = None
-    if f:
-        abs_path = (FILES_ROOT / f.storage_path).resolve()
-        db.delete(f)
-        db.flush()
-        if path_is_under_files_root(abs_path) and abs_path.is_file():
-            try:
-                abs_path.unlink()
-            except OSError:
-                pass
+    retire_asset(db, settings, "portal_background_file_id", root=FILES_ROOT)
 
 
 def _delete_default_signature_file(db: Session, settings: FirmSettings) -> None:
-    fid = settings.default_signature_file_id
-    if not fid:
-        return
-    f = db.get(DbFile, fid)
-    settings.default_signature_file_id = None
-    if f:
-        abs_path = (FILES_ROOT / f.storage_path).resolve()
-        db.delete(f)
-        db.flush()
-        if path_is_under_files_root(abs_path) and abs_path.is_file():
-            try:
-                abs_path.unlink()
-            except OSError:
-                pass
+    retire_asset(db, settings, "default_signature_file_id", root=FILES_ROOT)
 
 
 @router.get("", response_model=FirmSettingsOut)
@@ -379,7 +320,6 @@ async def upload_letterhead(
 
     row = _settings_row(db)
     ensure_files_root()
-    _delete_letterhead_file(db, row)
 
     file_id = uuid.uuid4()
     paths = firm_letterhead_file_paths(file_id=file_id, original_filename=original)
@@ -391,6 +331,8 @@ async def upload_letterhead(
             if not chunk:
                 break
             size += len(chunk)
+            if size > max_upload_bytes():
+                raise HTTPException(413, "Letterhead exceeds upload size limit")
             fh.write(chunk)
 
     mime = upload.content_type or (
@@ -400,6 +342,12 @@ async def upload_letterhead(
     if mime.split(";", 1)[0].strip().lower() not in _ALLOWED_LETTERHEAD_MIME:
         mime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 
+    try:
+        validate_docx_package_bytes(paths.abs_path.read_bytes())
+    except ValueError as exc:
+        paths.abs_path.unlink(missing_ok=True)  # Definitely uncommitted candidate only.
+        raise HTTPException(400, "Invalid letterhead document") from exc
+    sync_path(paths.abs_path, FILES_ROOT)
     now = datetime.utcnow()
     frow = DbFile(
         id=file_id,
@@ -414,10 +362,11 @@ async def upload_letterhead(
         mime_type=mime,
         size_bytes=size,
         version=1,
-        checksum=None,
+        checksum=stored_file_checksum(paths.abs_path),
         created_at=now,
         updated_at=now,
     )
+    _delete_letterhead_file(db, row)
     row.letterhead_file_id = file_id
     row.letterhead_style = LetterheadStyle.digital
     row.updated_at = now
@@ -466,7 +415,6 @@ async def upload_quote_letterhead(
 
     row = _settings_row(db)
     ensure_files_root()
-    _delete_quote_letterhead_file(db, row)
 
     file_id = uuid.uuid4()
     paths = firm_quote_letterhead_file_paths(file_id=file_id, original_filename=original)
@@ -478,6 +426,8 @@ async def upload_quote_letterhead(
             if not chunk:
                 break
             size += len(chunk)
+            if size > max_upload_bytes():
+                raise HTTPException(413, "Letterhead exceeds upload size limit")
             fh.write(chunk)
 
     mime = upload.content_type or (
@@ -487,6 +437,12 @@ async def upload_quote_letterhead(
     if mime.split(";", 1)[0].strip().lower() not in _ALLOWED_LETTERHEAD_MIME:
         mime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 
+    try:
+        validate_docx_package_bytes(paths.abs_path.read_bytes())
+    except ValueError as exc:
+        paths.abs_path.unlink(missing_ok=True)  # Definitely uncommitted candidate only.
+        raise HTTPException(400, "Invalid letterhead document") from exc
+    sync_path(paths.abs_path, FILES_ROOT)
     now = datetime.utcnow()
     frow = DbFile(
         id=file_id,
@@ -501,10 +457,11 @@ async def upload_quote_letterhead(
         mime_type=mime,
         size_bytes=size,
         version=1,
-        checksum=None,
+        checksum=stored_file_checksum(paths.abs_path),
         created_at=now,
         updated_at=now,
     )
+    _delete_quote_letterhead_file(db, row)
     row.quote_letterhead_file_id = file_id
     row.quote_letterhead_style = LetterheadStyle.digital
     row.updated_at = now
@@ -553,7 +510,6 @@ async def upload_portal_logo(
 
     row = _settings_row(db)
     ensure_files_root()
-    _delete_portal_logo_file(db, row)
 
     file_id = uuid.uuid4()
     paths = firm_portal_logo_file_paths(file_id=file_id, original_filename=original)
@@ -580,6 +536,7 @@ async def upload_portal_logo(
     if mime not in _ALLOWED_PORTAL_LOGO_MIME:
         mime = "image/png"
 
+    sync_path(paths.abs_path, FILES_ROOT)
     now = datetime.utcnow()
     frow = DbFile(
         id=file_id,
@@ -594,10 +551,11 @@ async def upload_portal_logo(
         mime_type=mime,
         size_bytes=size,
         version=1,
-        checksum=None,
+        checksum=stored_file_checksum(paths.abs_path),
         created_at=now,
         updated_at=now,
     )
+    _delete_portal_logo_file(db, row)
     row.portal_logo_file_id = file_id
     row.updated_at = now
     db.add(frow)
@@ -645,7 +603,6 @@ async def upload_portal_background(
 
     row = _settings_row(db)
     ensure_files_root()
-    _delete_portal_background_file(db, row)
 
     file_id = uuid.uuid4()
     paths = firm_portal_background_file_paths(file_id=file_id, original_filename=original)
@@ -672,6 +629,7 @@ async def upload_portal_background(
     if mime not in _ALLOWED_PORTAL_BG_MIME:
         mime = "image/jpeg"
 
+    sync_path(paths.abs_path, FILES_ROOT)
     now = datetime.utcnow()
     frow = DbFile(
         id=file_id,
@@ -686,10 +644,11 @@ async def upload_portal_background(
         mime_type=mime,
         size_bytes=size,
         version=1,
-        checksum=None,
+        checksum=stored_file_checksum(paths.abs_path),
         created_at=now,
         updated_at=now,
     )
+    _delete_portal_background_file(db, row)
     row.portal_background_file_id = file_id
     row.updated_at = now
     db.add(frow)
@@ -756,14 +715,14 @@ async def upload_default_signature(
     except SignatureImageError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
-    _delete_default_signature_file(db, row)
 
     stored_name = signature_storage_filename(original)
     file_id = uuid.uuid4()
     paths = firm_default_signature_file_paths(file_id=file_id, original_filename=stored_name)
-    paths.abs_path.write_bytes(png_bytes)
+    write_bytes_atomic(paths.abs_path, png_bytes)
     size = len(png_bytes)
 
+    sync_path(paths.abs_path, FILES_ROOT)
     now = datetime.utcnow()
     frow = DbFile(
         id=file_id,
@@ -778,10 +737,11 @@ async def upload_default_signature(
         mime_type=mime,
         size_bytes=size,
         version=1,
-        checksum=None,
+        checksum=stored_file_checksum(paths.abs_path),
         created_at=now,
         updated_at=now,
     )
+    _delete_default_signature_file(db, row)
     row.default_signature_file_id = file_id
     row.updated_at = now
     db.add(frow)

@@ -27,3 +27,38 @@ Retry state is held in the open browser window, not persisted across reload/clos
 Backend unit tests inject storage, stream, lifecycle/outbox and commit failures, including a commit that succeeds before its acknowledgement is lost. They also cover deleted documents, user scopes, revoked access, changed options/content, size limits and attachment linkage. Frontend tests verify stable keys, acknowledged-file skipping, rejected-file reporting, session recovery and no automatic POST retries.
 
 The migration adds only `upload_receipt`; no existing database rows or file bytes are rewritten. Live deployments and scheduled jobs are not touched by these tests.
+
+## Durable publication and receipt integrity
+
+Staff and portal upload helpers flush file data and containing directories before
+publishing database records. New file records retain a SHA-256 of the final stored
+bytes, including converted mail. Temporary upload names are unique per attempt.
+A flush failure prevents database publication; an uncertain commit retains bytes.
+
+Matter-upload receipt replay checks the current locked File row, readable storage
+and its recorded checksum. Missing, corrupt or unverifiable content returns 409
+for recovery rather than confirming success. Legitimate subsequent document
+versions remain valid when their current bytes match their current checksum.
+Deleted documents still return 410. Historical rows without checksums are not
+silently trusted or backfilled; their retries require explicit integrity review.
+
+## Precedent uploads
+
+`POST /precedents` accepts an optional UUID `Idempotency-Key`. The receipt is scoped
+to the administrator and fingerprints the file bytes, filename, MIME, name,
+reference, kind and matter/category scope. The admin upload form retains its key
+while the same form/file is retried after an uncertain response; it resets after
+confirmation or changed input. Keep the form open and unchanged to retry. Keys
+are not retained across page reloads; after losing the form, check the library
+reference before starting another upload.
+
+The precedent, File, audit and receipt commit together. An identical retry returns
+the original result without another file; changed input returns 409, a concurrent
+attempt 429, a deleted precedent 410, and missing/corrupt bytes 409. Reference
+validation occurs before file allocation and reference claims serialize in
+PostgreSQL. Clients without a retry key remain supported; duplicate references
+are rejected before writing. The shared `CANARY_UPLOAD_MAX_BYTES` limit also
+applies to precedents, including DOCX validation input (default 25 MiB).
+
+These changes reuse the existing receipt/checksum schema. They do not backfill
+firm records, enable jobs or introduce automatic orphan cleanup.

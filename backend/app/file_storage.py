@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import hashlib
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -47,10 +48,13 @@ def path_is_under_files_root(abs_path: Path) -> bool:
 def write_bytes_atomic(abs_path: Path, data: bytes) -> None:
     """Write via a sibling ``.partial`` file then ``os.replace`` (crash-safe promote)."""
     abs_path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = abs_path.with_name(abs_path.name + ".partial")
+    tmp = abs_path.with_name(abs_path.name + ".partial." + uuid.uuid4().hex)
     try:
         tmp.write_bytes(data)
+        from app.document_durability import sync_path
+        sync_path(tmp, FILES_ROOT)
         os.replace(tmp, abs_path)
+        sync_path(abs_path, FILES_ROOT)
     except Exception:
         try:
             tmp.unlink(missing_ok=True)
@@ -62,7 +66,7 @@ def write_bytes_atomic(abs_path: Path, data: bytes) -> None:
 def stream_upload_to_path(abs_path: Path, fileobj, *, max_bytes: int) -> int:
     """Stream ``fileobj`` to ``abs_path`` atomically; raise ValueError if over ``max_bytes``."""
     abs_path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = abs_path.with_name(abs_path.name + ".partial")
+    tmp = abs_path.with_name(abs_path.name + ".partial." + uuid.uuid4().hex)
     size = 0
     try:
         with tmp.open("wb") as f:
@@ -74,7 +78,10 @@ def stream_upload_to_path(abs_path: Path, fileobj, *, max_bytes: int) -> int:
                 if size > max_bytes:
                     raise ValueError(f"Upload exceeds maximum size of {max_bytes} bytes")
                 f.write(chunk)
+        from app.document_durability import sync_path
+        sync_path(tmp, FILES_ROOT)
         os.replace(tmp, abs_path)
+        sync_path(abs_path, FILES_ROOT)
         return size
     except Exception:
         try:
@@ -267,3 +274,9 @@ def case_file_paths(*, case_id: uuid.UUID, file_id: uuid.UUID, original_filename
     abs_path.parent.mkdir(parents=True, exist_ok=True)
     return StoredFilePaths(abs_path=abs_path, rel_path=str(rel), folder_path=sanitized_folder)
 
+
+
+def stored_file_checksum(path: Path) -> str:
+    """Hash stored content without materializing another full upload in memory."""
+    with path.open('rb') as stream:
+        return hashlib.file_digest(stream, 'sha256').hexdigest()

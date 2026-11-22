@@ -366,19 +366,8 @@ _MAX_SIGNATURE_BYTES = MAX_SIGNATURE_BYTES
 
 
 def _delete_user_signature_file(db: Session, user: User) -> None:
-    fid = user.signature_file_id
-    if not fid:
-        return
-    row = db.get(DbFile, fid)
-    user.signature_file_id = None
-    if row:
-        abs_path = (FILES_ROOT / row.storage_path).resolve()
-        try:
-            if abs_path.is_file():
-                abs_path.unlink()
-        except OSError:
-            pass
-        db.delete(row)
+    from app.asset_lifecycle import retire_asset
+    retire_asset(db, user, "signature_file_id", root=FILES_ROOT)
 
 
 def _validate_signature_upload(filename: str, content_type: str | None) -> None:
@@ -414,12 +403,11 @@ async def upload_my_signature(
     except SignatureImageError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
-    _delete_user_signature_file(db, user)
-
     stored_name = signature_storage_filename(original)
     file_id = uuid.uuid4()
     paths = user_signature_file_paths(user_id=user.id, file_id=file_id, original_filename=stored_name)
-    paths.abs_path.write_bytes(png_bytes)
+    from app.file_storage import write_bytes_atomic, stored_file_checksum
+    write_bytes_atomic(paths.abs_path, png_bytes)
     size = len(png_bytes)
 
     row = DbFile(
@@ -434,11 +422,12 @@ async def upload_my_signature(
         mime_type=mime,
         size_bytes=size,
         version=1,
-        checksum=None,
+        checksum=stored_file_checksum(paths.abs_path),
         created_at=datetime.now(timezone.utc),
         updated_at=datetime.now(timezone.utc),
     )
     db.add(row)
+    _delete_user_signature_file(db, user)
     user.signature_file_id = file_id
     user.updated_at = datetime.now(timezone.utc)
     db.add(user)
