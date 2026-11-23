@@ -217,6 +217,7 @@ class MailPluginAuthCode(Base):
     redirect_uri: Mapped[str] = mapped_column(String(2048), nullable=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     auth_token_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    mfa_verified: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=text('false'))
     consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
 

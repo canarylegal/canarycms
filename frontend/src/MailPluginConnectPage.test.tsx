@@ -22,3 +22,11 @@ it.each(['outlook', 'thunderbird'])('verifies an existing password session befor
   expect(screen.queryByRole('button', { name: 'Verify with passkey' })).toBeNull()
   expect(apiFetch).not.toHaveBeenCalledWith('/auth/plugin/authorize', expect.anything())
 })
+it.each(['outlook', 'thunderbird'])('allows the policy-satisfied password session for %s without passkey setup', async (client) => {
+  window.history.replaceState(null, '', '/connect/mail-plugin?' + new URLSearchParams({ client, state: 's'.repeat(32), redirect_uri: 'https://canary.test/callback' }))
+  vi.mocked(apiFetch).mockResolvedValue({ email: 'staff@example.test', is_2fa_enabled: false, passkey_count: 0, session_second_factor_verified: true } as never)
+  render(<Page />)
+  expect(await screen.findByRole('button', { name: 'Authorise ' + (client === 'outlook' ? 'Outlook' : 'Thunderbird') })).toBeEnabled()
+  expect(screen.queryByRole('button', { name: 'Verify with passkey' })).toBeNull()
+  expect(startAuthentication).not.toHaveBeenCalled()
+})

@@ -84,6 +84,7 @@ def create_plugin_auth_code(
     client: str,
     state: str,
     redirect_uri: str,
+    mfa_verified: bool = False,
 ) -> str:
     _purge_expired_codes(db, user.id)
     client_norm = validate_plugin_client(client)
@@ -99,6 +100,7 @@ def create_plugin_auth_code(
         redirect_uri=redirect_norm,
         expires_at=utcnow() + PLUGIN_AUTH_TTL,
         auth_token_version=int(user.auth_token_version),
+        mfa_verified=mfa_verified,
         created_at=utcnow(),
     )
     db.add(row)
@@ -146,9 +148,13 @@ def exchange_plugin_auth_code(
             or row.auth_token_version is None
             or row.auth_token_version != int(user.auth_token_version)):
         raise HTTPException(401, "Invalid or expired authorization code.")
+    from app.org_security import firm_mandates_second_factor, user_meets_second_factor_policy
+    if firm_mandates_second_factor(db) and (not row.mfa_verified or not
+            user_meets_second_factor_policy(db, user.id, is_2fa_enabled=user.is_2fa_enabled)):
+        raise HTTPException(403, "Your organisation now requires second-factor verification. Sign in and reconnect the add-in.")
     row.consumed_at = now
     db.add(row)
-    token = login_access_token(db, user, mfa_verified=True)
+    token = login_access_token(db, user, mfa_verified=bool(row.mfa_verified))
     log_event(
         db,
         actor_user_id=user.id,

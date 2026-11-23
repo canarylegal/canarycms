@@ -20,7 +20,7 @@ router = APIRouter(prefix="/auth/plugin", tags=["auth"])
 _bearer = HTTPBearer(auto_error=False)
 
 
-def _require_verified_staff(user: User, request: Request, creds: HTTPAuthorizationCredentials | None) -> None:
+def _require_verified_staff(user: User, request: Request, creds: HTTPAuthorizationCredentials | None, db: Session) -> None:
     raw = _jwt_raw_from_request(request, creds)
     if raw is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing bearer token")
@@ -33,7 +33,8 @@ def _require_verified_staff(user: User, request: Request, creds: HTTPAuthorizati
             status_code=status.HTTP_403_FORBIDDEN,
             detail="The master recovery account cannot authorize mail add-ins.",
         )
-    if payload.mfa_verified is not True:
+    from app.org_security import firm_mandates_second_factor
+    if firm_mandates_second_factor(db) and payload.mfa_verified is not True:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=(
@@ -56,14 +57,15 @@ def authorize_plugin(
     db: Session = Depends(get_db),
 ) -> PluginAuthorizeOut:
     from app.session_security import lock_current_staff_session
-    user, _ = lock_current_staff_session(request, user, db)
-    _require_verified_staff(user, request, creds)
+    user, claims = lock_current_staff_session(request, user, db)
+    _require_verified_staff(user, request, creds, db)
     code = create_plugin_auth_code(
         db,
         user=user,
         client=payload.client,
         state=payload.state,
         redirect_uri=payload.redirect_uri,
+        mfa_verified=claims.mfa_verified is True,
     )
     db.commit()
     return PluginAuthorizeOut(code=code)
