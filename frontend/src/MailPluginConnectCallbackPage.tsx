@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import { AppLogo } from './AppLogo'
 
 const CLIENT_LABEL = {
@@ -29,7 +29,16 @@ function parseCallbackParams(): { client: MailPluginClient; state: string; code:
 
 export default function MailPluginConnectCallbackPage() {
   const params = useMemo(() => parseCallbackParams(), [])
-  useEffect(() => { window.history.replaceState(null, '', window.location.pathname) }, [])
+  const handoffLink = useRef<HTMLAnchorElement>(null)
+  const attemptedHandoff = useRef(false)
+  useEffect(() => {
+    // Remove the single-use code before asking the browser to launch Thunderbird.
+    window.history.replaceState(null, '', window.location.pathname)
+    if (handoffLink.current && !attemptedHandoff.current) {
+      attemptedHandoff.current = true
+      try { handoffLink.current.click() } catch { /* Manual fallback remains available. */ }
+    }
+  }, [])
 
   if ('error' in params) {
     return (
@@ -57,12 +66,12 @@ export default function MailPluginConnectCallbackPage() {
         <AppLogo />
       </div>
       <div className="card" style={{ maxWidth: 520, margin: '24px auto 0' }}>
-        <h2 style={{ margin: '0 0 8px', fontSize: 20 }}>{thunderbird ? 'Finish connecting Thunderbird' : `${clientLabel} connected`}</h2>
+        <h2 style={{ margin: '0 0 8px', fontSize: 20 }}>{thunderbird ? 'Returning to Thunderbird' : `${clientLabel} connected`}</h2>
         <p className="muted" style={{ marginTop: 0 }}>
-          {thunderbird ? 'Authorization succeeded. Open Thunderbird to finish connecting.' :
+          {thunderbird ? 'Authorization succeeded. Thunderbird should open automatically. Allow your browser to open it if prompted. If nothing happens, use the button below.' :
             `Authorization succeeded. Return to ${clientLabel} — the add-in should finish connecting automatically. You can close this browser tab.`}
         </p>
-        {thunderbird ? <a className="btn primary" href={handoff} rel="noreferrer">Open Thunderbird</a> : null}
+        {thunderbird ? <a ref={handoffLink} className="btn primary" href={handoff} rel="noreferrer">Open Thunderbird</a> : null}
       </div>
     </div>
   )
