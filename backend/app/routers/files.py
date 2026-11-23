@@ -445,6 +445,9 @@ def _file_list_items(db: Session, case_id: uuid.UUID, rows):
         item = {
             "id": str(f.id),
             "original_filename": f.original_filename,
+            "scan_state": f.scan_state or 'unscanned',
+            "scan_attempts": f.scan_attempts,
+            "scan_error": f.scan_error,
             "mime_type": f.mime_type,
             "size_bytes": f.size_bytes,
             "created_at": f.created_at,

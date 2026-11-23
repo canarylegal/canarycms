@@ -316,6 +316,8 @@ async def upload_letterhead(
     admin: User = Depends(require_firm_admin),
     db: Session = Depends(get_db),
 ) -> FirmSettingsOut:
+    from app.upload_scanning import scan_upload_async
+    await scan_upload_async(upload)
     original = upload.filename or "letterhead.bin"
     _validate_docx_upload(original, upload.content_type)
 
@@ -411,6 +413,8 @@ async def upload_quote_letterhead(
     admin: User = Depends(require_firm_admin),
     db: Session = Depends(get_db),
 ) -> FirmSettingsOut:
+    from app.upload_scanning import scan_upload_async
+    await scan_upload_async(upload)
     original = upload.filename or "quote_letterhead.bin"
     _validate_docx_upload(original, upload.content_type)
 
@@ -506,6 +510,8 @@ async def upload_portal_logo(
     admin: User = Depends(require_firm_admin),
     db: Session = Depends(get_db),
 ) -> FirmSettingsOut:
+    from app.upload_scanning import scan_upload_async
+    await scan_upload_async(upload)
     original = upload.filename or "portal-logo.bin"
     _validate_portal_logo_upload(original, upload.content_type)
 
@@ -599,6 +605,8 @@ async def upload_portal_background(
     admin: User = Depends(require_firm_admin),
     db: Session = Depends(get_db),
 ) -> FirmSettingsOut:
+    from app.upload_scanning import scan_upload_async
+    await scan_upload_async(upload)
     original = upload.filename or "portal-background.bin"
     _validate_portal_background_upload(original, upload.content_type)
 
@@ -694,6 +702,8 @@ async def upload_default_signature(
     admin: User = Depends(require_firm_admin),
     db: Session = Depends(get_db),
 ) -> FirmSettingsOut:
+    from app.upload_scanning import scan_upload_async
+    await scan_upload_async(upload)
     original = upload.filename or "signature.png"
     _validate_signature_upload(original, upload.content_type)
 

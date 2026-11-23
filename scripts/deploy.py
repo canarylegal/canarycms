@@ -117,7 +117,10 @@ def prepare(args, state):
             active[name] = inspect(ids[0])
     if any(name not in active for name in ('backend', 'frontend', 'db')):
         raise RuntimeError('Existing backend, frontend and db must be running before preparation.')
-    targets = dependents(services, ['backend', 'frontend'])
+    roots = ['backend', 'frontend']
+    if 'upload-scanner' in active:
+        roots.append('upload-scanner')
+    targets = dependents(services, roots)
     if any(name not in active for name in targets):
         raise RuntimeError('All frontend/backend network companions must already be running.')
     for name in ('db', 'backend'):
@@ -142,6 +145,9 @@ def prepare(args, state):
         target['services'][name]['build']['context'] = str(source / name)
         target['services'][name]['image'] = f"{current['name']}-{name}:release-{stamp.lower()}"
     target['services']['backend']['build'].setdefault('args', {})['GIT_COMMIT'] = sha
+    if 'upload-scanner' in active:
+        target['services']['upload-scanner']['image'] = target['services']['backend']['image']
+        target['services']['upload-scanner'].pop('build', None)
     # The deployed image, not a mounted checkout or stale environment override, owns build identity.
     target['services']['backend'].setdefault('environment', {}).update({
         'CANARY_BUILD_COMMIT_OVERRIDE': '', 'CANARY_RUNTIME_COMMIT_FROM_COMPOSE_REPO': '0',
@@ -217,8 +223,25 @@ def backup(release, manifest, stderr=None):
                 stream = archive.extractfile(member)
                 while stream.read(1024 * 1024):
                     pass
+    artifacts = ['database.dump', 'files.tar']
+    quarantine = previous['services']['backend'].get('environment', {}).get('CANARY_QUARANTINE_ROOT')
+    if quarantine:
+        if not any(m['Destination'] == quarantine for m in inspect(manifest['containers']['backend'])['Mounts']):
+            raise RuntimeError('Quarantine must have a persistent mount before deployment.')
+        with (release / 'quarantine.tar').open('wb') as dest:
+            subprocess.run(['docker', 'run', '--rm', '--network', 'none', '--volumes-from',
+                manifest['containers']['backend'] + ':ro', '--entrypoint', 'tar',
+                previous['services']['backend']['image'], '-C', quarantine, '-cf', '-', '.'],
+                stdout=dest, stderr=stderr, check=True)
+        with tarfile.open(release / 'quarantine.tar') as archive:
+            for member in archive:
+                if member.isfile():
+                    stream = archive.extractfile(member)
+                    while stream.read(1024 * 1024):
+                        pass
+        artifacts.append('quarantine.tar')
     checksums = {}
-    for name in ('database.dump', 'files.tar'):
+    for name in artifacts:
         with (release / name).open('rb') as file:
             checksums[name] = hashlib.file_digest(file, 'sha256').hexdigest()
     save(release / 'checksums.json', checksums)
@@ -253,6 +276,8 @@ def apply(release, manifest):
     for name in ('backend', 'frontend'):
         image = target['services'][name]['image']
         target['services'][name]['image'] = output(['docker', 'image', 'inspect', image, '--format', '{{.Id}}'])
+    if 'upload-scanner' in manifest['targets']:
+        target['services']['upload-scanner']['image'] = target['services']['backend']['image']
     save(config, target)
     for name, identifier in manifest['containers'].items():
         if output(compose(release / 'previous.json', 'ps', '-q', name)) != identifier:

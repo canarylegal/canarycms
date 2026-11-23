@@ -1,3 +1,4 @@
+import { uploadScanLabel, uploadIsUnavailable } from './uploadScanStatus'
 import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react'
 import { applyAuthHeaders, apiUrl, browserAbsoluteApiUrl, formatApiErrorDetail } from './api'
 import { DocMimeIcon } from './case/DocCells'
@@ -589,6 +590,13 @@ export default function PortalPage() {
       /* non-fatal */
     }
   }, [captureSession, sessionFetch])
+
+  useEffect(() => {
+    if (!activeGrantId || !sessionToken || !browse?.files.some((f) => f.scan_state === 'pending' || (f.scan_state === 'error' && (f.scan_attempts ?? 0) < 3))) return
+    const timer = window.setInterval(() => { void loadBrowse(activeGrantId, browseSubfolder, sessionToken).catch(() => {}) }, 3000)
+    return () => window.clearInterval(timer)
+  }, [activeGrantId, sessionToken, browseSubfolder, browse, loadBrowse])
+
 
   const loadPendingForms = useCallback(async (token: string) => {
     const isCurrent = captureSession(token)
@@ -1996,6 +2004,7 @@ export default function PortalPage() {
                   </div>
                   <div className="td portalFilesTableName">
                     {f.original_filename}
+                    {uploadScanLabel(f) ? <span role="status"> — {uploadScanLabel(f)}</span> : null}
                     {f.is_new ? (
                       <span className="portalNewBadge portalNewBadge--inline" title="New since last visit">
                         New
@@ -2006,10 +2015,10 @@ export default function PortalPage() {
                   <div className="td portalFilesTableActions">
                     {activeGrant?.can_download ? (
                       <>
-                        <button type="button" className="btn" onClick={() => void openFile(f)}>
+                        <button type="button" className="btn" disabled={uploadIsUnavailable(f)} onClick={() => void openFile(f)}>
                           Open
                         </button>
-                        <button type="button" className="btn" onClick={() => void downloadFile(f)}>
+                        <button type="button" className="btn" disabled={uploadIsUnavailable(f)} onClick={() => void downloadFile(f)}>
                           Download
                         </button>
                       </>

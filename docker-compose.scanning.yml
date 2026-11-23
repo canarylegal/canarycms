@@ -1,0 +1,42 @@
+# Optional: docker compose -f docker-compose.yml -f docker-compose.scanning.yml --profile prod --profile scanning up -d
+# No public scanner port. Keep general background jobs independently disabled.
+services:
+  clamav:
+    image: clamav/clamav:1.4@sha256:ac15046e610610347c459afabea6683a52cd041c7a10adf5f050ebb05525d62d
+    profiles: [scanning]
+    restart: unless-stopped
+    networks: [canary]
+    volumes:
+      - ./deploy/clamav/clamd.conf:/etc/clamav/clamd.conf:ro
+      - clamav-signatures:/var/lib/clamav
+    mem_limit: 4g
+    cpus: 2
+    healthcheck:
+      test: [CMD, clamdscan, --ping, '1']
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 180s
+    logging:
+      driver: json-file
+      options: {max-size: '10m', max-file: '3'}
+  upload-scanner:
+    extends:
+      file: docker-compose.yml
+      service: backend
+    profiles: [scanning]
+    container_name: canary-upload-scanner
+    ports: !reset []
+    command: [python, -m, app.upload_scanning]
+    healthcheck:
+      disable: true
+    environment:
+      CANARY_BACKGROUND_JOBS_ENABLED: '0'
+      CANARY_COMMERCIAL_SERVICE_ENABLED: '0'
+    depends_on:
+      backend:
+        condition: service_healthy
+      clamav:
+        condition: service_healthy
+volumes:
+  clamav-signatures:

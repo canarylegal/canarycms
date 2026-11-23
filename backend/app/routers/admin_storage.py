@@ -111,3 +111,75 @@ def patch_storage_settings(
         )
     db.commit()
     return read_storage(_admin=admin, db=db)
+
+
+@router.get('/upload-scanning')
+def upload_scan_status(_admin: User = Depends(require_admin), db: Session = Depends(get_db)):
+    from sqlalchemy import select, func
+    from app.models import File
+    from app.upload_scanning import mode, scanner_version, ScanFailure
+    import os
+    counts = dict(db.execute(select(File.scan_state, func.count()).group_by(File.scan_state)).all())
+    version = None; scanner = 'disabled'
+    if mode() == 'required':
+        try:
+            version = scanner_version(); scanner = 'ready'
+        except ScanFailure:
+            scanner = 'unavailable_or_stale'
+    return {'mode': mode(), 'scanner': scanner, 'version': version, 'worker_enabled': os.getenv('CANARY_UPLOAD_SCAN_WORKER_ENABLED', '0') == '1',
+            'counts': counts, 'configuration_source': '.env'}
+
+
+@router.get('/upload-scanning/quarantine')
+def list_quarantine(_admin: User = Depends(require_admin), db: Session = Depends(get_db)):
+    from sqlalchemy import select
+    from app.models import File
+    rows = db.scalars(select(File).where(File.scan_state.in_(['pending', 'error', 'blocked']))
+                      .order_by(File.created_at.desc()).limit(200)).all()
+    return [{'id': str(r.id), 'case_id': str(r.case_id), 'filename': r.original_filename,
+             'state': r.scan_state, 'reason': r.scan_error, 'attempts': r.scan_attempts,
+             'created_at': r.created_at} for r in rows]
+
+
+@router.post('/upload-scanning/{file_id}/retry')
+def retry_quarantine(file_id: str, admin: User = Depends(require_admin), db: Session = Depends(get_db)):
+    import uuid
+    from sqlalchemy import select, text
+    from app.models import File
+    from app.upload_scanning import required
+    if not required():
+        raise HTTPException(409, 'Enable scanning before retrying quarantined uploads')
+    try:
+        identifier = uuid.UUID(file_id)
+    except ValueError:
+        raise HTTPException(404, 'Upload not found') from None
+    row = db.scalar(select(File).where(File.id == identifier).with_for_update())
+    if row is None or row.scan_state not in ('error', 'blocked'):
+        raise HTTPException(409, 'Upload is not awaiting a retry')
+    row.scan_state = 'pending'; row.scan_attempts = 0; row.scan_retry_at = None; row.scan_error = None
+    log_event(db, actor_user_id=admin.id, action='file.scan.retry', entity_type='file', entity_id=str(row.id))
+    db.execute(text("SELECT pg_notify('canary_upload_scan', '')")); db.commit()
+    return {'scan_state': 'pending'}
+
+
+@router.delete('/upload-scanning/{file_id}', status_code=204)
+def discard_quarantined_upload(file_id: str, admin: User = Depends(require_admin), db: Session = Depends(get_db)):
+    import uuid
+    from sqlalchemy import select
+    from app.models import File
+    from app.upload_scanning import quarantine_root
+    try:
+        identifier = uuid.UUID(file_id)
+    except ValueError:
+        raise HTTPException(404, 'Upload not found') from None
+    row = db.scalar(select(File).where(File.id == identifier).with_for_update())
+    if row is None or row.scan_state not in ('pending', 'error', 'blocked'):
+        raise HTTPException(409, 'Only quarantined uploads can be discarded here')
+    if db.scalar(select(File.id).where(File.parent_file_id == row.id).limit(1)):
+        raise HTTPException(409, 'Remove the attached files before discarding their parent')
+    key = row.scan_quarantine_key
+    log_event(db, actor_user_id=admin.id, action='file.scan.discard', entity_type='file', entity_id=str(row.id))
+    db.delete(row); db.commit()
+    if key and len(key) == 32 and all(c in '0123456789abcdef' for c in key):
+        (quarantine_root()/key).unlink(missing_ok=True)
+        (quarantine_root()/key).with_suffix('.eml').unlink(missing_ok=True)

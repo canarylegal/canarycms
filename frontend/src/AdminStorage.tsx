@@ -1,3 +1,4 @@
+import { UploadScanningPanel } from './UploadScanningPanel'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { apiFetch } from './api'
 import type { ApiError } from './api'
@@ -151,6 +152,7 @@ export function AdminStorage({ token }: { token: string }) {
 
   return (
     <div className="card adminStorageCard">
+      <UploadScanningPanel token={token} />
       <h3 style={{ marginTop: 0 }}>Storage</h3>
       <p className="muted" style={{ lineHeight: 1.55 }}>
         Full on-disk footprint of this Canary deployment: bind-mounted project directory, all Compose Docker volumes,

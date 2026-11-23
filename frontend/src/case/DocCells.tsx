@@ -1,3 +1,4 @@
+import { uploadScanLabel } from '../uploadScanStatus'
 import type { FileSummary, QuotePortalDeliverySummary, DocusignSigningRequestOut, CanarySignSigningRequestOut } from '../types'
 import { portalFormStatusLabel } from '../portalFormFile'
 
@@ -203,7 +204,8 @@ export function DocsFileDescCell({ f, showPin }: { f: FileSummary; showPin: bool
   const docusignSub = f.docusign_signing ? docusignStatusLabel(f.docusign_signing) : null
   const canarySub = f.canary_signing ? canarySignStatusLabel(f.canary_signing) : null
   const caseraSub = f.casera_search?.status_label ?? null
-  const statusSub = quoteSub || formSub || canarySub || docusignSub || caseraSub
+  const scanSub = uploadScanLabel(f)
+  const statusSub = scanSub || quoteSub || formSub || canarySub || docusignSub || caseraSub
   const mailRoot = isCaseMailRootFile(f)
   const displayName = f.parent_file_id ? `↳ ${docsListDisplayFilename(f)}` : docsListDisplayFilename(f)
   return (
@@ -224,6 +226,7 @@ export function DocsFileDescCell({ f, showPin }: { f: FileSummary; showPin: bool
           </span>
           <div className="docsDescTextBlock">
             <span className="docsDescName">{displayName}</span>
+            {scanSub ? <div className="docsDescSub" role="status"><DocStatusChip label={scanSub} /></div> : null}
             {sub ? <div className="docsDescSub muted">{sub}</div> : null}
             {quoteSub ? (
               <div className="docsDescSub portalQuoteFileStatus">

@@ -124,6 +124,8 @@ async def import_bank_statement(
     db: Session = Depends(get_db),
 ) -> BankStatementImportOut:
     _require_accounts(user, db)
+    from app.upload_scanning import scan_upload_async
+    await scan_upload_async(file)
     content = await file.read()
     imp = recon.import_statement(
         db,

@@ -1,4 +1,5 @@
-import { useCallback, useRef, type Dispatch, type SetStateAction } from 'react'
+import { uploadScanLabel, uploadIsUnavailable } from '../uploadScanStatus'
+import { useCallback, useRef, useEffect, type Dispatch, type SetStateAction } from 'react'
 import { apiFetch } from '../api'
 import { openOnlyOfficeCaseEditor } from '../onlyofficeEditorWindow'
 import type {
@@ -90,6 +91,11 @@ export function useCaseDocFileHandlers({
   setEmlPreviewBusy,
   setDocMenu,
 }: UseCaseDocFileHandlersArgs) {
+  useEffect(() => {
+    if (!files.some((f) => f.scan_state === 'pending' || (f.scan_state === 'error' && (f.scan_attempts ?? 0) < 3))) return
+    const timer = window.setInterval(onRefresh, 3000)
+    return () => window.clearInterval(timer)
+  }, [files, onRefresh])
   const previewEmlFileRef = useRef<(f: FileSummary) => void>(() => {})
   const openCaseFileRef = useRef<(f: FileSummary) => void>(() => {})
 
@@ -194,6 +200,7 @@ export function useCaseDocFileHandlers({
 
   const openCommentForEdit = useCallback(
     async (f: FileSummary) => {
+      if (uploadIsUnavailable(f)) { setActionErr(uploadScanLabel(f)); return }
       if (!caseId) return
       setBusy(true)
       setActionErr(null)
@@ -225,6 +232,7 @@ export function useCaseDocFileHandlers({
 
   const previewEmlFile = useCallback(
     async (f: FileSummary) => {
+      if (uploadIsUnavailable(f)) { setActionErr(uploadScanLabel(f)); return }
       if (!caseId) return
       setEmlPreviewOpen(true)
       setEmlPreviewFile(f)
@@ -245,6 +253,7 @@ export function useCaseDocFileHandlers({
     },
     [
       caseId,
+      setActionErr,
       setEmlPreviewOpen,
       setEmlPreviewFile,
       setEmlPreviewData,
@@ -257,6 +266,7 @@ export function useCaseDocFileHandlers({
   const openEmlInFlightRef = useRef<string | null>(null)
   const openEmlWithMailApp = useCallback(
     async (f: FileSummary) => {
+      if (uploadIsUnavailable(f)) { setActionErr(uploadScanLabel(f)); return }
       if (!caseId) return
       if (openEmlInFlightRef.current === f.id) return
       openEmlInFlightRef.current = f.id
@@ -288,6 +298,7 @@ export function useCaseDocFileHandlers({
 
   const downloadEmlFile = useCallback(
     async (f: FileSummary) => {
+      if (uploadIsUnavailable(f)) { setActionErr(uploadScanLabel(f)); return }
       if (!caseId) return
       setBusy(true)
       setActionErr(null)
@@ -304,6 +315,7 @@ export function useCaseDocFileHandlers({
 
   const openCaseFile = useCallback(
     async (f: FileSummary) => {
+      if (uploadIsUnavailable(f)) { setActionErr(uploadScanLabel(f)); return }
       if (!caseId) return
       const file = files.find((x) => x.id === f.id) ?? f
       if (isCommentFile(file)) {

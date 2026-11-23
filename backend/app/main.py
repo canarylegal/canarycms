@@ -94,6 +94,8 @@ validate_master_admin_config_at_startup()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    from app.upload_scanning import validate_config
+    validate_config()
     import logging
 
     from app.db import SessionLocal

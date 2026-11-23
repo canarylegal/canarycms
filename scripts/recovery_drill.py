@@ -127,13 +127,14 @@ def validate_bundle(release, expected):
     targets = {m['target'] if isinstance(m, dict) else m.split(':')[1] for m in backend.get('volumes', [])}
     env = backend.get('environment', {})
     required_optional = set()
+    if env.get('CANARY_QUARANTINE_ROOT') in targets: required_optional.add('quarantine.tar')
     if '/radicale-data' in targets: required_optional.add('calendars.tar')
     if '/commercial' in targets or env.get('COMMERCIAL_MODULE_DIR') or env.get('COMMERCIAL_PACKAGE_DIR'):
         required_optional.add('commercial.tar')
     if not required_optional.issubset(expected):
         raise RuntimeError('Complete recovery bundle is missing mounted data.')
     # Validate data archives before importing executable images or starting services.
-    for name in ('files.tar', 'calendars.tar', 'commercial.tar'):
+    for name in ('files.tar', 'quarantine.tar', 'calendars.tar', 'commercial.tar'):
         if name in expected: archive_manifest(release / name)
     for role, image in images.items():
         if previous['services'][role]['image'] != image:
@@ -282,6 +283,12 @@ def main():
         archive_manifest(release / 'calendars.tar')
         config['volumes']['calendars'] = {'name': project + '-calendars'}
         config['services']['backend']['volumes'].append({'type': 'volume', 'source': 'calendars', 'target': '/radicale-data'})
+    if (release / 'quarantine.tar').exists():
+        archive_manifest(release / 'quarantine.tar')
+        config['volumes']['quarantine'] = {'name': project + '-quarantine'}
+        config['services']['backend']['volumes'].append({'type': 'volume', 'source': 'quarantine', 'target': '/data/quarantine'})
+        config['services']['backend']['environment'].update(CANARY_QUARANTINE_ROOT='/data/quarantine',
+            CANARY_UPLOAD_SCAN_MODE='disabled', CANARY_UPLOAD_SCAN_WORKER_ENABLED='0')
     assert_isolated(config, project)
     write_json(state / 'compose.json', config)
     write_json(state / 'files-manifest.json', files)
@@ -310,6 +317,13 @@ def main():
                 actual_calendars = json.loads(output(compose + ['run', '--rm', '--no-deps', '-T', '--entrypoint', 'python', 'backend', '-c', calendar_verify]))
                 if actual_calendars != archive_manifest(release / 'calendars.tar'):
                     raise RuntimeError('Restored calendars differ from backup.')
+            if (release / 'quarantine.tar').exists():
+                with (release / 'quarantine.tar').open('rb') as src:
+                    run(compose + ['run', '--rm', '--no-deps', '-T', '--entrypoint', 'tar', 'backend', '-xpf', '-', '-C', '/data/quarantine'], stdin=src)
+                quarantine_verify = verify.replace('/data/files', '/data/quarantine')
+                actual_quarantine = json.loads(output(compose + ['run', '--rm', '--no-deps', '-T', '--entrypoint', 'python', 'backend', '-c', quarantine_verify]))
+                if actual_quarantine != archive_manifest(release / 'quarantine.tar'):
+                    raise RuntimeError('Restored quarantine differs from backup.')
             inventory_script = Path(__file__).resolve().parents[1] / 'backend/scripts/recovery_inventory.py'
             inventory = json.loads(output(compose + ['run', '--rm', '--no-deps', '-T', '-e', 'PYTHONPATH=/app', '-v', f'{inventory_script}:/tmp/recovery_inventory.py:ro', 'backend', 'python', '/tmp/recovery_inventory.py']))
             if inventory['missing_file_ids'] or not inventory.get('integrity', {}).get('ok', True):

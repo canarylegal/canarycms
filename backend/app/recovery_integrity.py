@@ -44,7 +44,16 @@ def check_secret(value, *, totp=False):
 
 def audit(db, root):
     tables = set(inspect(db).get_table_names())
-    result = {'files': check_bytes(root, db.execute(text('SELECT storage_path, checksum FROM file')).mappings())}
+    has_scanning = 'scan_state' in {c['name'] for c in inspect(db).get_columns('file')}
+    query = "SELECT storage_path, checksum FROM file"
+    if has_scanning:
+        query += " WHERE scan_state IN ('clean','unscanned')"
+    result = {'files': check_bytes(root, db.execute(text(query)).mappings())}
+    if has_scanning:
+        import os
+        quarantine = os.getenv('CANARY_QUARANTINE_ROOT', str(root) + '.quarantine')
+        result['quarantine'] = check_bytes(quarantine, db.execute(text(
+            "SELECT COALESCE(scan_quarantine_key, '../invalid') AS storage_path, scan_checksum AS checksum FROM file WHERE scan_state NOT IN ('clean','unscanned')")).mappings())
     if 'document_recovery' in tables:
         result['recovery'] = check_bytes(root, db.execute(text('SELECT storage_path, checksum FROM document_recovery WHERE storage_path IS NOT NULL')).mappings())
         result['historically_unavailable_recovery'] = db.execute(text('SELECT count(*) FROM document_recovery WHERE storage_path IS NULL')).scalar_one()
@@ -65,6 +74,6 @@ def audit(db, root):
                     secrets['failed'] += 1
     result['secrets'] = secrets
     result['ok'] = not (secrets['failed'] or result['invalid_attachment_links'] or any(
-        values.get(key, 0) for name, values in result.items() if name in ('files', 'recovery')
+        values.get(key, 0) for name, values in result.items() if name in ('files', 'recovery', 'quarantine')
         for key in ('missing', 'invalid_path', 'mismatched')))
     return result

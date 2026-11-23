@@ -123,6 +123,24 @@ def upload_case_file(
     original = upload.filename or "upload.bin"
     paths = case_file_paths(case_id=case_id, file_id=file_id, original_filename=original, folder_path=folder)
 
+    from app.upload_scanning import required, enqueue_case_upload
+    if required():
+        try:
+            pending_response = enqueue_case_upload(db, upload=upload, file_id=file_id, case_id=case_id,
+                user=user, paths=paths, parent_file_id=parent_file_id,
+                operation_id=operation_id, fingerprint=fingerprint,
+                context=dict(notify_portal_contacts=notify_portal_contacts,
+                    source_imap_mbox=source_imap_mbox, source_imap_uid=source_imap_uid,
+                    outlook_item_id=outlook_item_id, outlook_conversation_id=outlook_conversation_id))
+            if notify_portal_contacts:
+                # Metadata-only upload notice; access still requires a clean verdict.
+                notify_portal_contacts_files_added_batch(db, case_id=case_id,
+                    folder_path=folder, filenames=[original], actor_user_id=user.id)
+            return pending_response
+        finally:
+            if session_folder_locked:
+                _unlock_case_folder_ops_session(db, case_id)
+
     disk_written = False
     commit_started = False
     try:

@@ -792,6 +792,8 @@ async def upload_submission_file(
     if field is None or field.field_type not in (PortalFormFieldType.file, PortalFormFieldType.files):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid file field")
 
+    from app.upload_scanning import scan_upload_async
+    await scan_upload_async(upload)
     raw = await _read_submission_upload(upload)
     if not raw:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Empty file")

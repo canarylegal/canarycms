@@ -104,6 +104,8 @@ export type PortalSessionOut = {
 }
 
 export type PortalFileOut = {
+  scan_state?: 'unscanned' | 'pending' | 'clean' | 'blocked' | 'error'
+  scan_attempts?: number
   id: string
   original_filename: string
   mime_type: string

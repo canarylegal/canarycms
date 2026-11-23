@@ -48,7 +48,7 @@ def filing_matches(payload, user, db):
     # None can independently establish an exact-message filing location.
     stmt = (select(File, Case).join(Case, File.case_id == Case.id)
             .where(File.source_internet_message_id.in_([identity, '<'+identity+'>']))
-            .where(File.parent_file_id.is_(None), File.oo_compose_pending.is_(False))
+            .where(File.parent_file_id.is_(None), File.oo_compose_pending.is_(False), File.scan_state.in_(["unscanned", "clean"]))
             .order_by(File.created_at.desc(), File.id.desc())
             .execution_options(yield_per=100))
     matches = []

@@ -20,11 +20,13 @@ with engine.connect() as db:
         FROM ledger_account a LEFT JOIN ledger_entry e ON e.account_id = a.id
         GROUP BY a.case_id, a.account_type ORDER BY a.case_id, a.account_type
     """)).mappings()]
-    files = [dict(row) for row in db.execute(text('SELECT id::text, storage_path, checksum FROM file ORDER BY id')).mappings()]
+    files = [dict(row) for row in db.execute(text("SELECT id::text, storage_path, checksum, to_jsonb(file)->>'scan_state' AS scan_state, to_jsonb(file)->>'scan_quarantine_key' AS scan_quarantine_key FROM file ORDER BY id")).mappings()]
     missing = []
     for file in files:
-        p = Path(file['storage_path'])
-        if not p.is_absolute(): p = Path('/data/files') / p
+        if file.get('scan_state') in ('pending', 'blocked', 'error'):
+            p = Path(os.getenv('CANARY_QUARANTINE_ROOT', os.getenv('FILES_ROOT', '/data/files') + '.quarantine')) / (file.get('scan_quarantine_key') or 'invalid')
+        else:
+            p = Path(os.getenv('FILES_ROOT', '/data/files')) / file['storage_path']
         if not p.is_file(): missing.append(file['id'])
     integrity = audit(db, os.getenv('FILES_ROOT', '/data/files'))
     revision = db.execute(text('SELECT version_num FROM alembic_version ORDER BY version_num')).scalars().all()

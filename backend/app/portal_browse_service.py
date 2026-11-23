@@ -201,6 +201,8 @@ def file_out(
     return PortalFileOut(
         id=row.id,
         original_filename=row.original_filename,
+        scan_state=row.scan_state or 'unscanned',
+        scan_attempts=row.scan_attempts or 0,
         mime_type=row.mime_type,
         size_bytes=row.size_bytes,
         folder_path=row.folder_path or "",
@@ -604,7 +606,9 @@ def upload_file(
         folder_path=target_folder,
     )
     try:
-        size = stream_upload_to_path(
+        from app.upload_scanning import required, stage_upload
+        quarantine = stage_upload(upload) if required() else None
+        size = quarantine[1] if quarantine else stream_upload_to_path(
             paths.abs_path, upload.file, max_bytes=max_upload_bytes()
         )
     except ValueError as e:
@@ -639,13 +643,18 @@ def upload_file(
             mime_type=mime,
             size_bytes=size,
             version=1,
-            checksum=stored_file_checksum(paths.abs_path),
+            checksum=quarantine[2] if quarantine else stored_file_checksum(paths.abs_path),
             parent_file_id=None,
             uploaded_via_portal=True,
             created_at=now,
             updated_at=now,
         )
         db.add(row)
+        if quarantine:
+            from app.upload_scanning import mark_pending
+            mark_pending(db, row, quarantine[0], quarantine[2],
+                         {'grant_id': str(grant.id), 'contact_id': str(contact.id),
+                          'portal_session': __import__('dataclasses').asdict(session)})
         log_event(
             db,
             actor_user_id=None,

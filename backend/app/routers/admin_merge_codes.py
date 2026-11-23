@@ -113,6 +113,8 @@ async def import_merge_codes_xlsx(
     admin: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ) -> MergeCodeCatalogImportResult:
+    from app.upload_scanning import scan_upload_async
+    await scan_upload_async(upload)
     raw = await upload.read()
     if not raw or len(raw) > 12 * 1024 * 1024:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Upload a spreadsheet under 12 MB.")

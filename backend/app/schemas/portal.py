@@ -67,6 +67,8 @@ class PortalSessionOut(BaseModel):
     focus_case_id: uuid.UUID | None = None
 
 class PortalFileOut(BaseModel):
+    scan_state: str = "unscanned"
+    scan_attempts: int = 0
     id: uuid.UUID
     original_filename: str
     mime_type: str

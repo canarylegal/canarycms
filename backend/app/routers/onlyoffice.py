@@ -466,6 +466,8 @@ async def create_case_file_from_onlyoffice_pdf_export(
 
     source_id = source.id
     data = await _fetch_onlyoffice_download_bytes(browser_url, log_label="oo-export-pdf")
+    from app.upload_scanning import scan_bytes_async
+    await scan_bytes_async(data)
     # The remote fetch can outlive permission changes or source deletion.
     db.expire_all()
     from app.deps import require_case_access
@@ -577,6 +579,8 @@ async def persist_onlyoffice_browser_url_to_file(
         expected_session_id = original_session.id if original_session is not None else None
     expected_version = row.version
     data = await _fetch_onlyoffice_download_bytes(browser_url, log_label=f"oo-persist file={row.id}")
+    from app.upload_scanning import scan_bytes_async
+    await scan_bytes_async(data)
     row = lock_document(db, row, expected_version=expected_version)
 
     # A revoked account/matter/session must win over a slow Document Server fetch.
@@ -619,7 +623,8 @@ async def persist_onlyoffice_browser_url_to_file(
     if not path_is_under_files_root(abs_path):
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Invalid storage path")
 
-    stage_document_bytes(db, row, data, root=FILES_ROOT)
+    from starlette.concurrency import run_in_threadpool
+    await run_in_threadpool(stage_document_bytes, db, row, data, root=FILES_ROOT)
 
     row.version = (row.version or 1) + 1
     row.size_bytes = len(data)
@@ -1128,6 +1133,8 @@ async def _onlyoffice_callback(
                 )
             return {"error": 0}
 
+        from app.upload_scanning import scan_bytes_async
+        await scan_bytes_async(data)
         data = finalize_stored_docx_bytes(
             data,
             filename=row.original_filename,
@@ -1136,7 +1143,8 @@ async def _onlyoffice_callback(
 
         try:
             _validate_persist_magic(data, filename=row.original_filename)
-            stage_document_bytes(db, row, data, root=FILES_ROOT)
+            from starlette.concurrency import run_in_threadpool
+            await run_in_threadpool(stage_document_bytes, db, row, data, root=FILES_ROOT)
         except Exception:
             db.rollback()
             log.exception("onlyoffice_callback: staging bytes failed for file %s", file_id)

@@ -8,6 +8,7 @@ from datetime import date, datetime, time
 
 from sqlalchemy import (
     BigInteger,
+    JSON,
     Boolean,
     Date,
     DateTime,
@@ -26,7 +27,7 @@ from sqlalchemy import (
     text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, mapped_column, relationship, synonym
 
 from app.db import Base
 
@@ -55,7 +56,25 @@ class File(Base):
     # "Pinned" controls whether the file is shown in the pinned section.
     is_pinned: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
-    storage_path: Mapped[str] = mapped_column(Text, nullable=False)
+    _storage_path: Mapped[str] = mapped_column('storage_path', Text, nullable=False)
+
+    def _read_storage_path(self):
+        from app.upload_scanning import require_available
+        require_available(self)
+        return self._storage_path
+
+    def _write_storage_path(self, value):
+        self._storage_path = value
+
+    storage_path = synonym('_storage_path', descriptor=property(_read_storage_path, _write_storage_path))
+    scan_state: Mapped[str] = mapped_column(String(20), nullable=False, default='unscanned', server_default='unscanned')
+    scan_quarantine_key: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    scan_checksum: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    scan_context: Mapped[dict | None] = mapped_column(JSON().with_variant(JSONB, "postgresql"), nullable=True)
+    scan_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default='0')
+    scan_retry_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    scan_finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    scan_error: Mapped[str | None] = mapped_column(String(80), nullable=True)
     original_filename: Mapped[str] = mapped_column(String(512), nullable=False)
     mime_type: Mapped[str] = mapped_column(String(200), nullable=False)
     size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)

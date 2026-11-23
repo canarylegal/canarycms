@@ -392,6 +392,9 @@ def upload_precedent(
             validate_replay_file(db, file_row)
             return PrecedentOut.model_validate(receipt.response["result"])
 
+    from app.upload_scanning import scan_upload_before_processing
+    scan_upload_before_processing(upload)
+
     # Reject invalid/duplicate references before allocating or writing a candidate.
     ref_ok = _ensure_precedent_reference_allowed(db, reference, exclude_precedent_id=None)
     ensure_files_root()

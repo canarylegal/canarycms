@@ -604,6 +604,8 @@ async def webdav_put_file(
     tmp = abs_path.with_name(f"{abs_path.name}.partial.{uuid.uuid4().hex}")
     try:
         await _stream_request_to_partial(request, tmp, max_bytes=max_bytes)
+        from app.upload_scanning import scan_bytes_async
+        await scan_bytes_async(tmp.read_bytes())
 
         is_docx = frow.original_filename.lower().endswith(".docx") or (
             (frow.mime_type or "").split(";", 1)[0].strip().lower()
@@ -633,7 +635,8 @@ async def webdav_put_file(
             except Exception as exc:
                 raise HTTPException(400, "Could not convert Outlook message; the original is unchanged.") from exc
             original_fn = f"{Path(prev_name).stem}.eml"
-        abs_path = stage_document_bytes(db, frow, data, root=FILES_ROOT)
+        from starlette.concurrency import run_in_threadpool
+        abs_path = await run_in_threadpool(stage_document_bytes, db, frow, data, root=FILES_ROOT)
         frow.original_filename = original_fn
         if prev_name.lower().endswith(".msg"):
             frow.mime_type = "message/rfc822"

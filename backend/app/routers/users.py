@@ -383,6 +383,8 @@ async def upload_my_signature(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> UserPublic:
+    from app.upload_scanning import scan_upload_async
+    await scan_upload_async(upload)
     original = upload.filename or "signature.png"
     _validate_signature_upload(original, upload.content_type)
     ensure_files_root()

@@ -65,6 +65,8 @@ def retain_document(db, row, *, root, kind, group_id=None):
 
 def stage_document_bytes(db, row, data, *, root, kind='version', allow_missing_current=False):
     """Caller holds File row lock and commits metadata/audit together. Never unlink on rollback."""
+    from app.upload_scanning import scan_bytes_before_processing, required
+    scan_bytes_before_processing(data)
     root = Path(root).resolve()
     if not allow_missing_current and not safe_path(root, row.storage_path).is_file():
         raise HTTPException(409, 'The current document bytes are missing. Restore the document before saving.')
@@ -80,6 +82,10 @@ def stage_document_bytes(db, row, data, *, root, kind='version', allow_missing_c
     row.storage_path = relative
     row.size_bytes = len(data)
     row.checksum = hashlib.sha256(data).hexdigest()
+    row.scan_state = "clean" if required() else "unscanned"
+    row.scan_checksum = row.checksum if required() else None
+    row.scan_finished_at = None
+    row.scan_error = None
     # Do not remove the old path or .oo_backup: rollback/ambiguous commit remains safe.
     return target
 

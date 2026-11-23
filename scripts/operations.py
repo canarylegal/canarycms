@@ -210,7 +210,7 @@ def backup_job(settings):
             validate_backup_destination(root, config, active)
             record_running_services(config, active)
             atomic_json(stage / 'previous.json', config)
-            targets = [name for name in deploy.dependents(config['services'], ['backend', 'frontend', 'radicale']) if name in active]
+            targets = [name for name in deploy.dependents(config['services'], ['backend', 'frontend', 'radicale'] + (['upload-scanner'] if 'upload-scanner' in active else [])) if name in active]
             manifest = {'containers': {name: info['Id'] for name, info in active.items()}}
             with (stage / 'backup.log').open('w') as log:
                 try:
@@ -245,7 +245,7 @@ def backup_job(settings):
                         execute(['docker', 'image', 'save', *sorted(set(images.values()))], stdout=stream, stderr=log, timeout=3600)
                     atomic_json(stage / 'recovery-bundle.json', {'version': 1, 'images': images})
                 checksums = {p.name: digest(p) for p in stage.iterdir() if p.name in (
-                    'database.dump', 'files.tar', 'previous.json', 'inventory.json', 'calendars.tar', 'commercial.tar', 'images.tar', 'recovery-bundle.json')}
+                    'database.dump', 'files.tar', 'previous.json', 'inventory.json', 'quarantine.tar', 'calendars.tar', 'commercial.tar', 'images.tar', 'recovery-bundle.json')}
                 atomic_json(stage / 'checksums.json', checksums)
                 record = {'status': 'verified', 'created_at': now(), 'project': config['name'],
                           'schema_fingerprint': manifest['schema_before'], 'files_included': True}
@@ -325,7 +325,7 @@ def recovery_input(backup, settings, state):
             for member in archive:
                 if Path(member.name).name != member.name or member.name not in (
                     'database.dump', 'files.tar', 'previous.json', 'inventory.json', 'checksums.json',
-                    'backup.json', 'calendars.tar', 'commercial.tar', 'images.tar', 'recovery-bundle.json'):
+                    'backup.json', 'quarantine.tar', 'calendars.tar', 'commercial.tar', 'images.tar', 'recovery-bundle.json'):
                     raise RuntimeError('Unexpected encrypted bundle member.')
             archive.extractall(restored, filter='data')
         bundle.unlink()
