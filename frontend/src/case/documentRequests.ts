@@ -17,6 +17,7 @@ export function documentErrorMessage(error: unknown, fallback: string): string {
   const status = (error as { status?: number } | null)?.status
   if (status === 401) return 'Your session has expired. Sign in again in another tab, then retry. Keep this window open.'
   if (status === 403) return 'You do not have permission to access this document. Ask your administrator to check your access.'
+  if (status === 423) return 'This document is quarantined or awaiting a security check. It cannot be opened until Canary marks it clean.'
   if (status === 404) return 'This document is no longer available. Refresh the document list.'
   if (error instanceof TypeError) return 'Could not reach the server. Check your connection and try again.'
   if ((error as { name?: string } | null)?.name === 'AbortError') return 'The document request timed out. Please try again.'

@@ -208,6 +208,8 @@ def outlook_plugin_put_pending_eml_open(
     frow = db.get(DbFile, payload.file_id)
     if not frow or frow.case_id != payload.case_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+    from app.upload_scanning import require_available
+    require_available(frow)
     if not _row_is_eml_like(frow):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -275,7 +277,8 @@ def outlook_plugin_get_pending_eml_open(
         db.commit()
         return OutlookPluginPendingEmlOpenOut(active=False)
     frow = db.get(DbFile, fid)
-    if not frow or frow.case_id != cid or not _row_is_eml_like(frow):
+    if (not frow or frow.case_id != cid or not _row_is_eml_like(frow)
+            or frow.scan_state not in ('clean', 'unscanned')):
         row.outlook_pending_eml_open_case_id = None
         row.outlook_pending_eml_open_file_id = None
         row.outlook_pending_eml_open_expires_at = None
@@ -320,7 +323,8 @@ def outlook_plugin_claim_pending_eml_open(
         db.commit()
         return OutlookPluginPendingEmlOpenOut(active=False)
     frow = db.get(DbFile, fid)
-    if not frow or frow.case_id != cid or not _row_is_eml_like(frow):
+    if (not frow or frow.case_id != cid or not _row_is_eml_like(frow)
+            or frow.scan_state not in ('clean', 'unscanned')):
         row.outlook_pending_eml_open_case_id = None
         row.outlook_pending_eml_open_file_id = None
         row.outlook_pending_eml_open_expires_at = None

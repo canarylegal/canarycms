@@ -89,3 +89,9 @@ describe('document request recovery', () => {
    expect(progress.uploaded).toEqual(['one.txt','three.txt'])
    expect(progress.failures).toEqual([{name:'large.txt',message:'This file is too large to upload.'}])
  })
+it('explains quarantine without inviting retries or leaking response details', async () => {
+  const fetch = vi.fn().mockResolvedValue(new Response('scanner private detail', { status: 423 }))
+  vi.stubGlobal('fetch', fetch)
+  await expect(documentRequest('/document', '', read)).rejects.toMatchObject({ status: 423, retryable: false, message: expect.stringContaining('quarantined') })
+  expect(fetch).toHaveBeenCalledTimes(1)
+})

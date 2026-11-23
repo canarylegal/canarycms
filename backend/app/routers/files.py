@@ -902,6 +902,8 @@ def issue_eml_open_token(
     row = db.get(DbFile, file_id)
     if not row or row.case_id != case_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+    from app.upload_scanning import require_available
+    require_available(row)
     if not _row_is_eml_like(row):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
